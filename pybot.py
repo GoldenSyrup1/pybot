@@ -16,7 +16,7 @@ import time
 
 __version__ = "0.1.0"
 
-# The commit of HuggingFaceSwarms/SwarmChat-v8 that `bot/` was copied from.
+# The commit that `bot/` was copied from.
 SOURCE_COMMIT = "3185a7a9bc50491205b19f64839f8c70962c4369"
 
 # The first lines of the interactive chat: the name in FIGlet's "slant" lettering, then one line
