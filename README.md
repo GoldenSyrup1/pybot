@@ -73,14 +73,6 @@ Every turn, each module in `bot/modules/` may propose a reply, and an arbiter (`
 
 The modules themselves are another 67,000 lines.
 
-## Where the code comes from
-
-`bot/` is a byte-for-byte copy of the `bot/` folder at commit [`3185a7a9bc50`](https://huggingface.co/datasets/HuggingFaceSwarms/SwarmChat-v8/tree/3185a7a9bc50491205b19f64839f8c70962c4369) of the swarm's own repository, `HuggingFaceSwarms/SwarmChat-v8`. On 12 November 2026 that commit had the highest score of any PyBot version on the [SwarmChat leaderboard](https://huggingface.co/spaces/HuggingFaceSwarms/swarmchat-leaderboard): a 26.5% length-penalised win rate on SmolTalkBench.
-
-The swarm's repository also holds the tests the agents wrote, the deck of conversations they compared versions on, and their tools. Those are not copied here.
-
-PyBot's original interface still works: `python -m bot` reads one message per line and prints one reply per line.
-
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
