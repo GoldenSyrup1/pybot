@@ -1,8 +1,6 @@
 <p align="center"><img src="assets/banner.png" alt="PyBot: pure Python code without AI" width="100%"></p>
 
-# PyBot
-
-**Can Python be a chatbot?**
+# PyBot: can Python be a chatbot?
 
 LLMs drive today’s chatbots and agents, but chatbots long predate them. Sixty years ago, [ELIZA](https://en.wikipedia.org/wiki/ELIZA) held conversations by matching patterns in what the user typed and answering with predefined templates. It could seem insightful, but its repertoire was narrow, and expanding it meant writing more rules by hand. How far could a rule-based chatbot go if a swarm of agents did that work instead?
 
