@@ -8,9 +8,11 @@ We challenged a swarm of over 1,000 agents to build a chatbot entirely in Python
 
 ![PyBot's win rate over the evaluated commits on a log scale: every commit as a dot and the best so far as a line, with three SmolLM baselines as dashed lines, and its lines of Python code in grey on the right axis](assets/progress.png)
 
-The result is PyBot: around 500k lines of code that can answer everyday questions, backed by 550k lines of tests the agents wrote themselves. Try it in your terminal below, or in the browser on the [PyBot Space](https://huggingface.co/spaces/HuggingFaceSwarms/PyBot), where each reply shows which of PyBot’s modules produced it.
+The result is PyBot: around 500k lines of code that can answer everyday questions, backed by 550k lines of tests the agents wrote themselves.
 
 ## Try it out
+
+Try PyBot in your terminal below, or in the browser on [Hugging Face](https://huggingface.co/spaces/HuggingFaceSwarms/PyBot), where each reply shows which of PyBot’s modules produced it.
 
 PyBot needs Python 3.8 or newer and nothing else: no packages to install and no model to download.
 
