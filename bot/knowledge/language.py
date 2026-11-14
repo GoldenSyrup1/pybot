@@ -943,9 +943,23 @@ ENTRIES = [
           "'very', it's too.",
           avoid=("tired", "late", "much", "many", "young", "old", "big", "small", "hot", "cold",
                  "fast", "slow", "early", "expensive", "busy", "hard", "long", "far", "loud",
-                 "noisy", "heavy", "sweet", "salty", "sharp", "tough", "soon", "often", "close"),
-          ask=("is it", "difference", "correct", "spell", "spelling", "grammar", "should it be",
-               "do i use", "to or", "or too", "too or")),
+                 "noisy", "heavy", "sweet", "salty", "sharp", "tough", "soon", "often", "close",
+                 # "is it too <weather word> to <go out>" is a question about the day, not about
+                 # spelling: "is it too windy to put the parasol up" was told the to/too rule
+                 # because the line holds both words. Any adjective after "too" is the answer to
+                 # some other question, so the weather words and the things people do outdoors
+                 # stay out of the spelling row.
+                 "windy", "wind", "rainy", "rain", "raining", "sunny", "snowy", "snow", "wet",
+                 "dry", "cloudy", "foggy", "misty", "stormy", "chilly", "warm", "cool",
+                 "freezing", "boiling", "dark", "bright", "mild", "humid", "muggy", "frosty",
+                 "parasol", "umbrella", "washing", "laundry", "washing line", "barbecue", "bbq",
+                 "picnic", "bike", "bicycle", "cycle", "ride", "walk", "hike", "garden",
+                 "outside", "outdoors", "dog", "run", "running", "plant", "plants", "paint"),
+          # "is it" on its own was the whole of this ask, and it is the opening of every weather
+          # question there is: the ask has to be about the words themselves.
+          ask=("difference", "correct", "spell", "spelling", "grammar", "should it be",
+               "do i use", "to or", "or too", "too or", "when do i use", "which is right",
+               "is it spelled", "is it spelt", "spelt", "spelled")),
     entry("quiet-quite", (("quiet",), ("quite",)),
           "Quiet means little noise - a quiet street. Quite means fairly or completely - quite "
           "good, quite sure. The e and the t swap places, so check which word you meant, not "
@@ -1465,6 +1479,14 @@ ENTRIES = [
                  # a letter to your mum, your dad or a friend is not a formal letter, and
                  # main leaves those to the hedge rather than tell them to write one
                  "to my mum", "to my dad", "to my mother", "to my father", "to my friend",
+                 # keeping old paper is the paper row's question, and it reaches the bare word
+                 # "letters" as well: the yellowing, the musty smell and the box it lives in are
+                 # asked as often as how to write one
+                 "yellow", "yellowing", "yellowed", "going yellow", "gone yellow", "musty",
+                 "fusty", "smell", "smells", "smelly", "fading", "faded", "foxing",
+                 "store", "storing", "preserve", "keep my", "keep old",
+                 "old letters", "old letter", "photos", "photographs", "postcards",
+                 "keepsakes",
                  # ...and a bare "letter" also reaches three questions that already have the
                  # better answer: how to open and close one, what to put on the envelope, and
                  # what to write to somebody you do not know. Each names its own job here.
@@ -1542,10 +1564,16 @@ ENTRIES = [
     # "love poem" is not here: a poem asked for by name is a verse, and the warm verse for a
     # person (`bot/knowledge/entertainment.py`) is the better answer to "write me a love poem for
     # my wife". The letter advice keeps the letter, the note and the valentine.
+    # "valentine" is an occasion as well as a card, so the second group is what makes the line a
+    # letter rather than a dinner, a present, an outing or a film: the ask alone ("what should i")
+    # was in the key, and it took every one of them - "what should i cook for valentines day",
+    # "what should i get my girlfriend for valentines", "what should we do for valentines day",
+    # "what should i watch on valentines" were all answered "Say the one thing you would say out
+    # loud if they were in front of you". A letter is words, so only the words stay in the key.
     entry("love-letter", (("love letter", "love note", "valentine", "valentine's",
                            "valentines", "secret admirer"),
-                          ("write", "writing", "say", "message", "note", "card", "send",
-                           "start", "draft", "what should i")),
+                          ("write", "writing", "written", "say", "saying", "message", "note",
+                           "card", "send", "draft", "put in", "words")),
           ("Say the one thing you would say out loud if they were in front of you, then the specific "
            "thing you noticed: \"I still think about the way you laughed at the wrong bit of that "
            "film.\" Three or four sentences is enough, no jokes at your own expense and nothing "
@@ -1583,6 +1611,12 @@ ENTRIES = [
           # late is the other way round - "my loan payment is overdue" was told to send a nudge
           # to a customer - and money's missed-payment row answers that one.
           avoid=("my card", "my credit card", "my debit card", "my loan", "my payment",
+                 # a payment the state owes the person is not an invoice to chase: "my uc
+                 # payment is late" and "my benefit payment is late" both got the nudge-to-a-
+                 # customer card, and lifeadmin's benefit-payment-not-arrived answers them
+                 "my benefit", "my benefits", "my uc", "my universal credit", "my pip",
+                 "my esa", "my child benefit", "my tax credits", "benefit payment",
+                 "benefits payment", "dwp", "jobcentre", "job centre", "hardship payment",
                  "my direct debit", "my mortgage", "my rent", "my bill", "my insurance",
                  "i missed", "i forgot", "i didnt pay", "i didn't pay", "i cant pay",
                  "i can't pay", "cant pay", "can't pay", "they charged me", "charged me",
@@ -2510,13 +2544,20 @@ _PLURAL_ASK = ("plural", "plurals", "pluralise", "pluralize", "pluralised", "plu
 # How the ask is framed around the word: "the plural of crisis", "plural for crisis", "how do i
 # make crisis plural", "whats crisis in the plural". Two words of the ask have to be in the line
 # for the matcher to read it at all, and these are the ones people put there.
-_PLURAL_ASK_FRAME = ("of", "for", "make", "say", "in", "to")
+# "work", "made", "spelt" and "formed" are how the ask about the rule itself is worded:
+# "how do plurals work", "how are plurals made", "how are plurals spelt". They are safe
+# here because the row needs one of the ask words as well, and only a plural question holds
+# those.
+_PLURAL_ASK_FRAME = ("of", "for", "make", "say", "in", "to", "work", "works", "made", "spelt",
+                     "spelled", "formed")
 # A line about plurals in general, naming no word of its own: "how do i say plurals of words
 # ending in y", "how do plurals work". There is no plural to give, and the rule itself is the
 # answer, so the row says the whole rule instead of passing.
 # "word" is here as well as "words": "whats the plural of a word ending in y" names the word
 # "word", and answering "Words is the plural of word" missed the question, which is the rule.
-_PLURAL_GENERAL = ("word", "words", "nouns", "names")
+# "plurals" is the ask said in its own plural: "how do plurals work" and "how are plurals
+# made" named no word and fell to the shrug, because the general case knew the singular only.
+_PLURAL_GENERAL = ("word", "words", "plurals", "nouns", "names")
 _PLURAL_RULE = ("Most plurals just add s (cat, cats). Words ending in s, x, z, ch or sh take -es "
                 "(bus, buses), a consonant then y becomes -ies (baby, babies), and -f or -fe "
                 "turns into -ves (knife, knives).")
@@ -2556,6 +2597,11 @@ _PLURAL_RULE_SENTENCE = {
     "ies": "A consonant then y becomes -ies: baby and babies, city and cities.",
     "oes": "A short list of -o words takes -es: potato and potatoes, hero and heroes.",
     "plain": "Most words just add s: cat and cats, house and houses.",
+    # A borrowed -o word is the case the plain sentence explains worst: "Burritos is the plural
+    # of burrito" followed by cat and house says nothing about why, and the -o split is the very
+    # thing being asked. So the -o words in no list get the rule for -o words.
+    "os": "A short -o word takes -es (potato and potatoes, echo and echoes); a -o word that "
+          "takes a plain s does too, so it is burritos, avocados and pianos.",
 }
 # The -us words that also have a Latin plural people still use, which the sentence names beside
 # the English one: "Cactuses is the plural of cactus, and cacti is the Latin form..."
@@ -2671,8 +2717,9 @@ def _the_plural_by_its_ending(word):
         rule = "es"
     elif word.endswith("y") and len(word) > 2 and word[-2] not in "aeiou":
         more, rule = word[:-1] + "ies", "ies"
-    elif word.endswith("o") and word in _PLURAL_OES:
-        more, rule = word + "es", "oes"
+    elif word.endswith("o"):
+        # the list is the fast path, and a -o word in no list still has a rule of its own
+        more, rule = (word + "es", "oes") if word in _PLURAL_OES else (word + "s", "os")
     else:
         more, rule = word + "s", "plain"
     return f"{more.capitalize()} is the plural of {word}. {_PLURAL_RULE_SENTENCE[rule]}"
@@ -2721,6 +2768,175 @@ def _plural_of(memory, understood):
 # it - "whats the plural of tooth" found the bleeding-gums card and "how do i make box plural" the
 # boxing one - and a row that named the thing score for score should not take a question about how
 # the thing is spelt. Only a line that says plural pays it.
+# "what is the past tense of swim" got the general tense card, which explains what a tense is and
+# never says the word that was asked for, and "what is the past participle of swim" was a search
+# hedge. The irregular verbs are a short closed list, so they are a table; a regular verb is the
+# -ed rule. A frame word on its own is not this row's ("i feel tense", "in the past i could run"),
+# which is why the key is the table and the ask, not the word tense.
+IRREGULAR_VERBS = {
+    "be": ("was", "been"), "become": ("became", "become"), "begin": ("began", "begun"),
+    "break": ("broke", "broken"), "bring": ("brought", "brought"), "build": ("built", "built"),
+    "buy": ("bought", "bought"), "catch": ("caught", "caught"), "choose": ("chose", "chosen"),
+    "come": ("came", "come"), "do": ("did", "done"), "drink": ("drank", "drunk"),
+    "drive": ("drove", "driven"), "eat": ("ate", "eaten"), "fall": ("fell", "fallen"),
+    "feel": ("felt", "felt"), "fight": ("fought", "fought"), "find": ("found", "found"),
+    "flee": ("fled", "fled"), "fly": ("flew", "flown"), "forget": ("forgot", "forgotten"),
+    "get": ("got", "got"),
+    "give": ("gave", "given"), "go": ("went", "gone"), "grow": ("grew", "grown"),
+    "have": ("had", "had"), "hear": ("heard", "heard"), "hide": ("hid", "hidden"),
+    "hold": ("held", "held"), "keep": ("kept", "kept"), "know": ("knew", "known"),
+    "leave": ("left", "left"), "lose": ("lost", "lost"), "make": ("made", "made"),
+    "meet": ("met", "met"), "pay": ("paid", "paid"), "put": ("put", "put"),
+    "read": ("read", "read"), "ride": ("rode", "ridden"), "ring": ("rang", "rung"),
+    "rise": ("rose", "risen"), "run": ("ran", "run"), "say": ("said", "said"),
+    "see": ("saw", "seen"), "sell": ("sold", "sold"), "send": ("sent", "sent"),
+    "sing": ("sang", "sung"), "sit": ("sat", "sat"), "sleep": ("slept", "slept"),
+    "speak": ("spoke", "spoken"), "spend": ("spent", "spent"), "stand": ("stood", "stood"),
+    "steal": ("stole", "stolen"), "swim": ("swam", "swum"), "take": ("took", "taken"),
+    "teach": ("taught", "taught"), "tell": ("told", "told"), "think": ("thought", "thought"),
+    "throw": ("threw", "thrown"), "understand": ("understood", "understood"),
+    "wake": ("woke", "woken"), "wear": ("wore", "worn"), "win": ("won", "won"),
+    "write": ("wrote", "written"),
+    # the ones that do not change at all: "what is the past tense of cut" got "Cut -> cutted"
+    "bet": ("bet", "bet"), "burst": ("burst", "burst"), "cast": ("cast", "cast"),
+    "cost": ("cost", "cost"), "cut": ("cut", "cut"), "hit": ("hit", "hit"),
+    "hurt": ("hurt", "hurt"), "let": ("let", "let"), "quit": ("quit", "quit"),
+    "set": ("set", "set"), "shut": ("shut", "shut"), "split": ("split", "split"),
+    "spread": ("spread", "spread"),
+}
+# The ask has to say past or participle: a bare "tense" reaches "i feel tense", and a bare "past"
+# reaches "in the past i could run". Both are somebody else's line.
+_PAST_ASK = ("past tense", "past simple", "past participle", "past form", "participle",
+             "past of", "what is the past", "what's the past", "whats the past",
+             "irregular verb", "irregular verbs")
+# "how do i say" is not in that list on purpose: it brings "do" and "have" with it, so
+# "how do i say no to my friend" would be a question about the verb do.
+_VOWELS = "aeiou"
+# British spelling doubles the l on these, and the vowel-group count cannot see why: travel and
+# cancel are stressed on the first syllable and still take travelled and cancelled here, where
+# American spelling has one l. A short list beats a stress rule nobody can compute from spelling.
+_DOUBLED_L = {"travel", "cancel", "label", "signal", "model", "level", "dial", "patrol",
+              "total", "tunnel", "fuel", "marshal", "worship", "kidnap", "handicap"}
+
+
+def _line_text(understood):
+    return ((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+
+
+def _regular_form(verb):
+    """The past tense a regular verb takes, by the spelling rules people are taught.
+
+    An e takes a d (hope, hoped); a consonant and a y becomes -ied (carry, carried); a one
+    syllable verb ending in one vowel and one consonant doubles that consonant (stop, stopped).
+    The vowel-group count is what keeps "visit" and "open" from becoming "visitted" and
+    "openned"."""
+    if not verb:
+        return verb + "ed"
+    if verb.endswith("e"):
+        return verb + "d"
+    if verb.endswith("y") and len(verb) > 1 and verb[-2] not in _VOWELS:
+        return verb[:-1] + "ied"
+    if verb in _DOUBLED_L:
+        return verb + verb[-1] + "ed"
+    if len(verb) > 2 and verb[-1] not in _VOWELS and verb[-1] not in "wxy":
+        if verb[-2] in _VOWELS and verb[-3] not in _VOWELS:
+            groups, previous = 0, False
+            for letter in verb:
+                vowel = letter in _VOWELS
+                if vowel and not previous:
+                    groups += 1
+                previous = vowel
+            if groups == 1:
+                return verb + verb[-1] + "ed"
+    return verb + "ed"
+
+
+def _irregular_past(memory, understood):
+    """The two forms of the verb the line names, in the words of a person asking.
+
+    The verb is the one after "past ... of", the same way the regular row reads it. Scanning the
+    line for the first table verb instead was a fault of its own: "can you tell me the past tense
+    of swim" is a question about swim, and tell and do are in the table and come first, so the
+    person got a confident answer about a verb they did not ask about."""
+    text = _line_text(understood)
+    match = _PAST_OF.search(text)
+    if not match or match.group(1) not in IRREGULAR_VERBS:
+        return None
+    verb = match.group(1)
+    past, participle = IRREGULAR_VERBS[verb]
+    if participle == past:
+        return ("The past tense of " + verb + " is " + past + ", and the past participle is the "
+                "same: 'I " + past + " it yesterday, I have " + past + " it before.' Most verbs "
+                "just add -ed (walk, walked), so the irregular ones are the ones worth learning.")
+    return ("The past tense of " + verb + " is " + past + " - 'I " + past + " yesterday' - and "
+            "the past participle is " + participle + ", the one that goes with have: 'I have "
+            + participle + "'. Most verbs just add -ed (walk, walked), so the irregular ones are "
+            "the ones worth learning.")
+
+
+# A regular verb is the other half of the same homework question, and "what is the past tense of
+# walk" got the general tense card too. This row reads the verb off the line and applies the rule;
+# it stands down whenever the verb is in the table, because then the answer is the two forms.
+_PAST_OF = re.compile(r"past (?:tense |form |participle |simple )?of (?:the verb )?([a-z]+)")
+
+
+def _names_a_past_table_verb(understood):
+    """The row's own question: a frame saying "past ... of", and a verb of the table after it.
+
+    Without it the table in the key means any mention of any table verb: "when do i use past
+    tense" is not the past tense of do, and "i have a question about past tense" is not the past
+    tense of have."""
+    match = _PAST_OF.search(_line_text(understood))
+    return bool(match) and match.group(1) in IRREGULAR_VERBS
+
+
+def _names_a_past_verb(understood):
+    match = _PAST_OF.search(_line_text(understood))
+    if not match or match.group(1) in IRREGULAR_VERBS:
+        return False
+    return True
+
+
+# One word, two verbs: "lie" is lay/lain when you recline and lied when you tell a lie, and the
+# -ed rule alone gives a learner the wrong one for the question they nearly always mean.
+_TWO_VERBS = {
+    "lie": ("Lie is two verbs. Lying down is lie, lay, lain: 'I lay on the bed', 'I have lain "
+            "there'. Telling a lie is lie, lied, lied: 'I lied to him'. The one people get wrong "
+            "is the reclining one - 'I laid on the bed' should be 'I lay on the bed', because "
+            "laid is the past of lay, meaning to put something down."),
+    "lay": ("Lay is laid, laid: 'I laid the table', 'I have laid it out'. The trap is that lay is "
+            "also the past of lie, the lying-down verb - so 'I lay on the bed' is correct for "
+            "reclining, and 'I laid the baby on the bed' is correct for putting her down. If you "
+            "can replace it with put, use laid."),
+}
+
+
+def _regular_past(memory, understood):
+    """The -ed rule, with the verb the line names."""
+    match = _PAST_OF.search(_line_text(understood))
+    if not match:
+        return None
+    verb = match.group(1)
+    if verb in IRREGULAR_VERBS:
+        return _irregular_past(memory, understood)
+    if verb in _TWO_VERBS:
+        return _TWO_VERBS[verb]
+    if len(verb) > 12:
+        # no English verb is this long, so the word is a name, a typo or a made-up one: say so
+        # rather than put "flibbertigibbeted" in front of somebody as if it were a word
+        return ("I don't know a verb '" + verb + "'. If it is a name or a made-up word the -ed "
+                "rule still gives " + verb + "ed, and if it is a typo the nearest real verb is "
+                "the one to take.")
+    return (verb.capitalize() + " -> " + _regular_form(verb) + ". Regular verbs add -ed; after "
+            "an e it is just -d (hope -> hoped), a consonant and a y becomes -ied (carry -> "
+            "carried), and a one-syllable verb doubles its last letter (stop -> stopped). If none "
+            "of that fits, it is irregular: swim -> swam, buy -> bought.")
+
+
+ENTRIES.append(entry("regular-past", (_PAST_ASK, _PAST_ASK), _regular_past, bias=3,
+                     guard=_names_a_past_verb))
+ENTRIES.append(entry("irregular-past", (tuple(IRREGULAR_VERBS), _PAST_ASK), _irregular_past,
+                     bias=4, guard=_names_a_past_table_verb))
 ENTRIES.append(entry("plural-word", (_PLURAL_ASK, _PLURAL_ASK_FRAME), _plural_of, bias=4,
                      guard=_names_a_word_to_change))
 
@@ -2832,12 +3048,31 @@ def _grammar_term(memory, understood):
             "tired the adjective, slept the verb, badly the adverb.")
 
 
+# A definition question is about the word. A line whose subject is a person who forgets, repeats
+# himself or is losing his words is a question about that person, and the grammar word is only
+# how the line says it: "my husband forgets what he is saying mid sentence" was answered with
+# what a sentence is, which is not the thing being asked. The card stands down for those lines
+# and `science.parent-memory` answers them.
+_SOMEBODY_FORGETTING = re.compile(
+    r"\b(?:keeps?\s+forgetting|forgets|forgetting|forgot|repeats?\s+(?:himself|herself|"
+    r"themselves|itself)|cant\s+remember|can't\s+remember|mid\s+sentence|"
+    r"cant\s+find\s+(?:his|her|their)\s+words|can't\s+find\s+(?:his|her|their)\s+words)\b")
+
+
+def _nobody_in_the_line_is_forgetting(understood):
+    """True unless the line is about a person losing their words, not about the words."""
+    if not isinstance(understood, dict):
+        return True
+    said = " ".join(str(understood.get("clean") or understood.get("text") or "").split()).lower()
+    return not _SOMEBODY_FORGETTING.search(said)
+
+
 ENTRIES.append(entry("grammar-term", (_GRAMMAR_WORDS, _GRAMMAR_ASK), _grammar_term,
                      # the word pairs have their own answers, and a spelling question is not a
                      # definition question
                      avoid=("spell", "spelling", "spelt", "difference between affect",
                             "affect", "effect", "apostrophe its", "its or it's"),
-                     ask=_GRAMMAR_ASK))
+                     ask=_GRAMMAR_ASK, guard=_nobody_in_the_line_is_forgetting))
 
 
 # The shapes a poem takes, one answer per form, in the same way as the figures of speech. "what is
@@ -2913,19 +3148,43 @@ ENTRIES.append(entry(
            "video game", "app", "product", "amazon", "perfume", "refund", "faulty", "broken",
            "return it", "one star", "bad review", "left a review")))
 
+def _write_an_email(memory, understood):
+    """The shape of an email, with the sample subject line in the world the line names.
+
+    The card's own example was "Invoice 2144 - payment due", so "how do i email my teacher" and
+    "how do i email my plumber" were answered about an invoice: right about the shape of a
+    message and wrong about the person's life, which reads as a different answer altogether.
+    Only the example moves; every sentence after it is the same advice.
+    """
+    from ..compose.draft import example_subject
+    return (
+        "Put the ask in the subject line and in the first sentence: \"%s\" tells them what it "
+        "is before they open it. Then three or four sentences - what you want, the one or two "
+        "facts they need, and by when - and a plain sign-off with your name. If you want an "
+        "answer, say what happens next: \"If I do not hear back by Friday I will call.\""
+        % example_subject(understood))
+
+
 ENTRIES.append(entry(
     "write-an-email",
     (("email", "emails", "e-mail", "e mail", "an email to my boss", "email to a company",
       "email a company", "chase by email"),
      ("how do i", "how", "write", "writing", "subject", "structure", "what should",
       "should i", "phrase")),
-    "Put the ask in the subject line and in the first sentence: \"Invoice 2144 - payment due\" "
-    "tells them what it is before they open it. Then three or four sentences - what you want, "
-    "the one or two facts they need, and by when - and a plain sign-off with your name. If you "
-    "want an answer, say what happens next: \"If I do not hear back by Friday I will call.\"",
+    _write_an_email,
     # work.py's email-tone row already answers a formal, polite or firm email well, so this row
     # stands down and leaves those lines to it
     avoid=("start an email", "start the email", "start my email", "how do i start",
+           # the question has a direction, and this row answers only one of them: an email the
+           # person is about to write. A line about an email somebody sent them, or about somebody
+           # not answering, is the other direction and its own card answers it - "my boss ignores
+           # my emails for weeks, what should i do" was told to put the ask in the subject line,
+           # and "my boss keeps sending sarky emails, how do i reply" with it.
+           "ignores my email", "ignores my emails", "ignoring my email", "ignoring my emails",
+           "wont reply", "won't reply", "wont answer", "won't answer", "doesnt reply",
+           "doesn't reply", "not replying", "hasnt replied", "hasn't replied", "never replies",
+           "no reply", "keeps sending", "keeps emailing", "sent me an email", "sent me a email",
+           "sending me", "sends me", "emailed me", "email from", "emails from", "message from",
            "formal", "polite", "professional", "rude", "angry", "tone", "friendly", "blunt",
            "firm", "sounds",
            # a farewell or a last-day message is the notice card's, and a leaving do has its own
@@ -3000,6 +3259,17 @@ ENTRIES.append(entry(
            "noticed", "got a text", "got a message", "received", "from my bank", "screenshot",
            "what does it mean", "mean", "means", "spam", "scam", "phishing", "wrong number",
            "not delivered", "wont send", "won't send", "blocked", "delete", "deleted",
+           # an apology that has arrived is answered, not drafted: "how do i reply to an
+           # apology" and "what do i say when someone apologises" were handed this three-line
+           # text, which is the message you write first, and `wording.accept-an-apology` is the
+           # row for the one you are answering. A text you write to say sorry yourself keeps
+           # this row.
+           "reply to an apology", "respond to an apology", "answer an apology",
+           "reply to a sorry", "accept an apology", "accepting an apology",
+           "someone said sorry", "someone says sorry", "someone apologises",
+           "someone apologized", "someone apologised", "said sorry to me", "says sorry to me",
+           "apologised to me", "apologized to me", "apologises to me", "apologizes to me",
+           "when someone apologises", "when someone apologized", "when someone says sorry",
            # deciding whether to send at all is the composer's question, not a drafting one
            "my ex", "an ex", "to my ex", "should i send",
            # a seller or a company that will not answer is a chargeback, and a message that will
@@ -3191,6 +3461,28 @@ ENTRIES.append(entry("book-summary",
 # in a card, and a "speech for school" was a wedding toast. A job that names its own thing gets a
 # card of its own, keyed on that thing, and the card it borrowed stands down for the words that
 # are not its own.
+# A question somebody has to ask is not a sentence somebody has to write. "whats a good opening
+# question" was answered with "start with a voice or a fact, not the weather": the interview row
+# keys the whole phrase "opening question" and lost on bias to this card, which keys the bare word
+# "opening" and needs one of "good"/"best"/"great" beside it - an ask word, not a writing one. The
+# shape is what tells them apart: an opening *question* is asked of somebody, an opening line,
+# sentence or chapter is written.
+_AN_OPENING_QUESTION = re.compile(
+    r"\b(?:opening|opener|starter|first|lead) questions?\b|\bquestion to open\b")
+_AN_OPENING_IS_WRITTEN = re.compile(
+    r"\b(?:book|books|story|stories|novel|chapter|essay|blog|post|article|draft|manuscript|"
+    r"scripts?|write|writing|written|author|reader|readers)\b")
+
+
+def _an_opening_is_written_not_asked(understood):
+    """True unless the line asks for a question to ask: an interview question is not a first line."""
+    reading = understood if isinstance(understood, dict) else {}
+    text = str(reading.get("clean") or reading.get("text") or "").lower()
+    if not _AN_OPENING_QUESTION.search(text):
+        return True
+    return bool(_AN_OPENING_IS_WRITTEN.search(text))
+
+
 ENTRIES.append(entry("story-first-line",
       (("opening line", "opening lines", "first line", "first lines", "first sentence",
         "opening sentence", "hook", "hooks", "opening"),
@@ -3203,6 +3495,9 @@ ENTRIES.append(entry("story-first-line",
       ask=("what", "whats", "what's", "how", "good", "best", "any", "suggest", "give", "need"),
       avoid=("poem", "poems", "song", "lyrics", "rap", "speech", "essay", "email", "cover letter",
              "cv", "letter", "journal", "diary") + PERSONAL_NEWS,
+      # The row keys the bare word "opening", so a question somebody has to ask reaches it as
+      # well: see `_an_opening_is_written_not_asked`.
+      guard=_an_opening_is_written_not_asked,
       bias=2))
 ENTRIES.append(entry("describe-a-character",
       (("describe", "describing", "description", "describe a character", "character description",
@@ -3315,18 +3610,226 @@ ENTRIES.append(entry("school-speech",
 # a caption" and "what should i caption my photo" were both a shrug, and "instagram" was reaching
 # the cancelled-subscription card. The job is small, so the card is short: the thing in the
 # picture, one detail the picture cannot show, then stop.
+#
+# The example used to be a sourdough loaf whatever the person had photographed, so "a caption
+# for a photo of my dog in the snow" was told "Third attempt at the sourdough - this one
+# actually rose". A caption is about the thing in the picture, so the subject is read out of
+# the line and the example is built round it; the rule is the same either way.
+_PET_PHOTO = ("dog", "dogs", "puppy", "pup", "cat", "cats", "kitten", "rabbit", "bunny",
+              "horse", "pony", "parrot", "hamster", "guinea pig", "tortoise", "pets", "pet")
+_FOOD_PHOTO = ("cake", "cakes", "bread", "loaf", "dinner", "lunch", "breakfast", "soup",
+               "pie", "biscuits", "cookies", "curry", "roast", "pancakes", "sourdough",
+               "pizza", "pasta", "barbecue", "bbq", "coffee", "chocolate")
+_PLACE_PHOTO = ("sea", "beach", "mountain", "mountains", "hill", "hills", "sunset",
+                "sunrise", "sky", "lake", "river", "city", "street", "forest", "snow",
+                "holiday", "view", "garden")
+# One detail per kind of picture, chosen so it fits any subject of that kind: what the picture
+# cannot show is the half of the caption that makes it worth reading.
+_PHOTO_DETAIL = ((
+    _PET_PHOTO, "and that look it gives you just before it decides not to listen"),
+    (_FOOD_PHOTO, "and it did not last the afternoon"),
+    (_PLACE_PHOTO, "and nobody else was awake yet"),
+)
+_PHOTO_DETAIL_PEOPLE = "and the hour before anybody started posing"
+_PHOTO_DETAIL_ANY = "and the part of the day nobody photographs"
+_PEOPLE_PHOTO = ("me", "us", "my mum", "my mom", "my dad", "my sister", "my brother",
+                 "my friend", "my friends", "family", "the kids", "my son", "my daughter",
+                 "my wife", "my husband", "my partner", "my nan", "my grandma", "my grandad")
+
+
+def _the_photo_of(clean):
+    """What is in the picture, when the line says: "a photo of my dog in the snow"."""
+    found = re.search(r"(?:photo|picture|pic|snap|shot|image)\s+(?:of|showing)\s+(.+)$", clean)
+    if not found:
+        return ""
+    words = re.findall(r"[a-z']+", found.group(1))
+    kept = []
+    for word in words:
+        if word in ("and", "but", "that", "which", "please", "for", "from", "on", "at"):
+            break
+        kept.append(word)
+    while kept and kept[-1] in ("i", "me", "my", "the", "a", "an", "just", "that"):
+        kept.pop()
+    if not kept or len(kept) > 6:
+        return ""
+    subject = " ".join(kept)
+    if all(word in ("my", "the", "a", "an", "our", "some") for word in kept):
+        return ""
+    return subject
+
+
+def _the_caption_detail(subject):
+    """The half of the caption the picture cannot show, chosen for the kind of picture."""
+    said = " " + subject + " "
+    if any(" " + word + " " in said for word in _PEOPLE_PHOTO) or re.search(
+            r"\b(?:me|us|we)\b", subject):
+        return _PHOTO_DETAIL_PEOPLE
+    for words, detail in _PHOTO_DETAIL:
+        if any(" " + word + " " in said for word in words):
+            return detail
+    return _PHOTO_DETAIL_ANY
+
+
+def _a_caption(memory, understood):
+    """The one-line caption rule, with an example built from the picture the person named."""
+    clean = str((understood or {}).get("clean") or "").lower()
+    subject = _the_photo_of(clean)
+    if not subject:
+        return ("Say what is in the picture and one thing the picture cannot show, then stop: "
+                "\"Third attempt at the sourdough - this one actually rose.\" One line beats "
+                "three, a joke only works if it is about the picture, and leave the hashtags to a "
+                "line of their own.")
+    said = subject[0].upper() + subject[1:]
+    # "the cake i made" reads as a typo in a caption, so the standalone i is written as I
+    typed = re.sub(r"\bi\b", "I", said)
+    example = "%s, %s" % (typed, _the_caption_detail(subject))
+    return ("Say what is in the picture and one thing the picture cannot show, then stop: \"%s.\" "
+            "One line beats three, a joke only works if it is about the picture, and leave the "
+            "hashtags to a line of their own." % example)
+
+
 ENTRIES.append(entry("write-a-caption",
       (("caption", "captions", "caption my", "write a caption", "insta caption",
         "instagram caption", "photo caption", "picture caption"),
        ("how do i", "how to", "write", "writing", "what", "whats", "should i", "help", "good",
         "photo", "picture", "post", "instagram", "insta", "for")),
-      "Say what is in the picture and one thing the picture cannot show, then stop: \"Third "
-      "attempt at the sourdough - this one actually rose.\" One line beats three, a joke only "
-      "works if it is about the picture, and leave the hashtags to a line of their own.",
+      _a_caption,
       # a subtitle and a closed caption are other jobs, and the app itself is a tech question
       avoid=("subtitle", "subtitles", "closed captions", "tv", "television", "film", "movie",
              "youtube", "netflix", "cancel", "subscription", "delete my account", "edit a photo",
              "photo editor", "how do i post", "instagram account", "hacked"),
+      bias=1))
+
+
+# --- a kind thing to say ---------------------------------------------------------------
+# "say something nice about my cat", "a compliment for my wife" and "a compliment i can pay a
+# stranger" were answered with "Thanks for telling me - I'm here if you want to dig into any of
+# that", which is not an answer to the question at all: nothing owned the word, so the
+# reflective fallback took the line. Praise has a subject, so the subject is read out of the
+# line and the answer changes with it: an animal, a person you know, a stranger.
+_KIND_ASKS = ("say something nice", "say something nice about", "nice about my",
+              "something nice about", "compliment about my", "compliment for my",
+              "something nice to say", "a nice thing to say",
+              "nice thing to say", "kind thing to say", "something kind to say",
+              "a compliment", "some compliments", "compliments for", "compliment for",
+              "compliment about", "compliment to", "pay a compliment", "give a compliment",
+              "nice things to say", "what should i say to", "something good to say")
+_KIND_SUBJECTS = ("about", "for", "to", "on")
+_ANIMAL_KIND = ("cat", "cats", "kitten", "dog", "dogs", "puppy", "pup", "rabbit", "bunny",
+                "hamster", "horse", "pony", "parrot", "bird", "tortoise", "pet", "pets",
+                "guinea pig", "ferret", "donkey", "goat", "snake", "lizard", "fish")
+_STRANGER_KIND = ("stranger", "strangers", "someone i don't know", "someone i dont know",
+                  "somebody i don't know", "a stranger", "people i don't know", "new person",
+                  "someone new", "somebody new", "a customer", "a colleague i just met")
+_BAKE_KIND = ("cake", "bake", "baking", "bread", "sourdough", "loaf", "pie", "biscuits",
+              "cookies", "dinner", "cooking", "meal", "roast", "jam", "curry", "casserole",
+              "barbecue", "bbq", "pizza", "brownies")
+_LOOKS_KIND = ("haircut", "hair", "beard", "outfit", "dress", "coat", "glasses", "quilt",
+               "jumper", "nails")
+_PLACE_KIND = ("garden", "kitchen", "room", "shed", "allotment", "flowers", "plant", "plants",
+               "house", "car", "flat", "bathroom", "painting", "drawing", "kitchen floor")
+_PEOPLE_KIND = ("wife", "husband", "partner", "girlfriend", "boyfriend", "mum", "mom",
+                "mother", "dad", "father", "son", "daughter", "child", "kid", "sister",
+                "brother", "friend", "mate", "colleague", "coworker", "boss", "neighbour",
+                "neighbor", "teacher", "grandma", "grandmother", "grandad", "grandfather",
+                "nan", "aunt", "uncle", "cousin", "person", "someone", "somebody", "man",
+                "woman", "carer", "nurse", "gp", "doctor")
+
+# The line for an animal is about the animal, for a person about what the person does, and for
+# a stranger about something they chose. One sentence each: the compliment, then why it lands.
+_A_KIND_WORD = {
+    "animal": ("Go on the animal and not the owner: \"He doesn't just ignore you, he audibly "
+               "ignores you.\" One true thing you have watched it do beats the word cute every "
+               "time, because it proves you were paying attention."),
+    "person": ("Name the thing they do that nobody remarks on and say it straight: \"You're the "
+               "one who keeps this group actually going.\" The specific thing is the compliment; "
+               "\"you're great\" is a placeholder and they can tell."),
+    "stranger": ("Pick something they chose rather than something they were born with - the "
+                 "coat, the dog, the way they handled the queue - and say it in five words as you "
+                 "go: \"That coat is a very good coat.\" No follow-up needed, so it does not turn "
+                 "into a conversation they did not ask for."),
+    "bake": ("Praise the thing they made rather than the person making it: \"That crust has a "
+             "proper crackle to it.\" They know how much work went into it, so the detail is what "
+             "lands; \"it's lovely\" is what people say when they did not look."),
+    "looks": ("Praise the detail you can see, not the thing itself: \"That cut makes your jaw "
+              "look sharp,\" not \"nice haircut.\" Say it once, plainly, and let it stand - the "
+              "detail is the proof you looked."),
+    "place": ("Praise the work you can see rather than the whole thing: \"That border is doing "
+              "a lot of quiet work.\" The one detail you noticed is the compliment; \"it looks "
+              "lovely\" is a placeholder and they can tell."),
+    "someone": ("Say the one thing you actually noticed and stop: \"You always remember how "
+                "everyone takes their tea.\" Praise that names a thing they did is a compliment; "
+                "praise with no subject in it is noise."),
+}
+
+
+def _who_the_kind_word_is_for(clean):
+    """Who the line is about, from the words after about/for/to, or the words anywhere in it."""
+    after = re.search(r"\b(?:about|for|to)\s+(.+)$", clean)
+    said = " " + (after.group(1) if after else clean) + " "
+    whole = " " + clean + " "
+    for place, words in (("stranger", _STRANGER_KIND), ("animal", _ANIMAL_KIND),
+                         ("person", _PEOPLE_KIND), ("bake", _BAKE_KIND),
+                         ("looks", _LOOKS_KIND), ("place", _PLACE_KIND)):
+        if any(" " + word + " " in said for word in words):
+            return place
+        if any(" " + word + " " in whole for word in words):
+            return place
+    return "someone"
+
+
+def _a_kind_word(memory, understood):
+    """A compliment the person can copy, chosen for what the line says it is about."""
+    clean = str((understood or {}).get("clean") or "").lower()
+    return _A_KIND_WORD[_who_the_kind_word_is_for(clean)]
+
+
+# "What should i say to my landlord about the rent rise" is a conversation to have, not praise,
+# and the same shape is praise only when the thing after "about" is something to be pleased
+# about: "what should i say to my wife about her new haircut" is a compliment, "about the noise",
+# "about the workload", "about the money" and "about his behaviour" are not. Those lines have
+# answers of their own (neighbour-noise, boss-too-much, money-and-partner, rent-rise), and this
+# row was the compliment script for all of them because its key holds "what should i say to".
+# The list is the things people raise with somebody - money, noise, workload, mess, behaviour,
+# a deadline - and not a list of things worth praising. It was the other way round first, and an
+# allow-list of praise loses every line nobody thought of: "say something nice about her new job"
+# is exactly what this row is for, and it fell to a short "Nice one" while the list had no "job"
+# in it. A complaint after "about" is the short, stable set, and the row stands down for it.
+_A_MATTER_TO_RAISE = (
+    "rent", "rents", "rent rise", "rent increase", "money", "pay", "wages", "overtime",
+    "hours", "shifts", "rota", "workload", "noise", "noisy", "mess", "messy", "rubbish",
+    "bins", "bin", "damp", "mould", "mold", "repairs", "repair", "deposit", "bill", "bills",
+    "arrears", "debt", "debts", "behaviour", "behavior", "attitude", "manners", "deadline",
+    "deadlines", "lateness", "chores", "boundaries", "smoking", "drinking")
+
+
+def _the_matter_is_worth_praise(understood):
+    """True unless the line names a thing to raise with somebody, rather than a thing to praise."""
+    clean = str((understood or {}).get("clean") or "").lower()
+    after = re.search(r"\babout\s+(.+)$", clean)
+    if not after:
+        return True
+    matter = " " + " ".join(after.group(1).split()) + " "
+    for word in _A_MATTER_TO_RAISE:
+        if " " + word + " " in matter:
+            return False
+    return True
+
+
+ENTRIES.append(entry("a-kind-word",
+      (_KIND_ASKS,
+       _KIND_SUBJECTS + ("say", "something", "nice", "kind", "compliment", "compliments",
+                        "what", "should", "give", "me", "can", "i", "you")),
+      _a_kind_word,
+      # a spelling question about complement/compliment, a complement on a paint card and praise
+      # for something somebody did well are all other answers
+      avoid=("complement", "complements", "complementary", "complimentary", "paint", "colour",
+             "color", "scheme", "spell", "spelling", "spelt", "mean", "means", "meaning",
+             "difference between", "well done", "appraisal", "performance review", "feedback",
+             "notice period", "resign", "vaccine", "insurance", "complimentary breakfast"),
+      # the thing after "about" decides: a quality is praised, a matter is raised with whoever
+      # it concerns, and those lines have their own answers
+      guard=_the_matter_is_worth_praise,
       bias=1))
 
 
@@ -3482,5 +3985,11 @@ ENTRIES.append(entry("mark-unnamed", (_MARK_WORDS, _MARK_ASK), _mark_unnamed,
                             # a mark on the body is the body's question, not a key to name
                             "arm", "arms", "leg", "legs", "back", "face", "bruise", "bruises",
                             "spot", "spots", "lump", "lumps", "mark on my", "marks on my",
-                            "birthmark", "freckle", "freckles", "scar", "scars"),
+                            "birthmark", "freckle", "freckles", "scar", "scars",
+                            # "is forgetting names a sign of dementia" is a question about the
+                            # illness: "sign" is this row's word for a mark to name, and it asked
+                            # which key the mark is on. A memory sign is the memory card's.
+                            "dementia", "alzheimers", "alzheimer's", "memory", "memories",
+                            "forget", "forgets", "forgetting", "forgetful", "forgot",
+                            "remember", "remembering"),
                      ask=_MARK_ASK))

@@ -72,6 +72,37 @@ SHORT = 14
 # The longest the next step is given: "pour on cold water and blot again" - a friend says the
 # next bit, not the rest of the sheet.
 STEP_WORDS = 22
+# A step cut to STEP_WORDS words can end in the middle of a sentence, and the word it ends on is
+# often the one holding the sentence together: the ants answer's step was handed back as "Next,
+# give the bait a week or two: the ants keep coming for the first few days and." A word that
+# cannot end a sentence is not where a step stops.
+DANGLING = frozenset("""a an the and or but nor so yet for with without to of in on at by from
+as if when while because which that than then also plus into onto over under about after before
+during up down out off back through it its their his her your my our this these those there
+here""".split())
+
+
+def _a_whole_step(said):
+    """The step, cut to STEP_WORDS words without cutting a sentence in the middle.
+
+    The cut lands on a clause boundary when the step has one (a colon, a semicolon or a comma in
+    the first STEP_WORDS words), which keeps a whole instruction; otherwise it walks back to the
+    last word that could end a sentence. The caller's frame supplies the full stop.
+    """
+    words = said.split()
+    if len(words) <= STEP_WORDS:
+        return said.strip(" ,;:")
+    words = words[:STEP_WORDS]
+    for at in range(len(words) - 1, 2, -1):
+        if words[at - 1].endswith((":", ";", ",")):
+            words = words[:at]
+            words[at - 1] = words[at - 1].rstrip(":;,")
+            break
+    else:
+        while len(words) > 2 and (words[-1].lower().strip(",;:") in DANGLING
+                                  or words[-1].endswith((",", ":", ";"))):
+            words = words[:-1]
+    return " ".join(words).strip(" ,;:")
 
 # The words that make a clause a warning rather than an instruction to follow. They only count at
 # the front: "coat the inside (not the elements)" is the instruction, with a warning inside it.
@@ -125,11 +156,25 @@ def _words(text):
 # A clause that says how to do the step, or that forbids a way of doing it, is part of the step
 # before it and never a step of its own: "blot it, don't rub, with kitchen paper, then pour on
 # cold water" is two instructions, not four.
+# Words that point at something already said rather than name a step: a clause made only of
+# these is a reference, and it cannot be handed back as an instruction.
+POINTS_BACK = frozenset("""above below under over that this these those it them there here
+same other one ones already again first last next then now""".split())
+
 QUALIFIER = re.compile(
     r"^(?:don'?t|do not|never|avoid|not|which|that|with|about|for|in|on|until|repeating|again|"
     r"and repeat|using|leave it|keep|or|nor|as|at|by)\b", re.I)
 
 VERB = re.compile(r"\b[a-z]{3,}(?:e|ed|ing|s)?\b")
+
+
+# The words the answer is cut on that belong to the cut rather than to the step before it: the
+# ant answer's "the ants keep coming for the first few days and then the stream thins out" splits
+# at "then", and the step came out as "give the bait a week or two: the ants keep coming for the
+# first few days and" - which was then handed back as "Next, ... first few days and."
+JOINING = frozenset("""
+    and or but nor so yet plus then also next
+""".split())
 
 
 def _steps(answer):
@@ -138,6 +183,12 @@ def _steps(answer):
     out = []
     for part in CLAUSE.split(str(answer or "")):
         part = part.strip(" .;,-")
+        # The joining word the cut was made on is not part of the step: "and then" and ", so"
+        # both leave it behind, and a step that ends on it reads as a sentence that stops short.
+        words = part.split()
+        while words and words[-1].lower().strip(" ,;:") in JOINING:
+            words.pop()
+        part = " ".join(words).strip(" ,;:")
         if not part:
             continue
         out.append(part)
@@ -258,8 +309,12 @@ def reply_for(text, memory):
     said = re.sub(r"^(?:and|then|but|so|also|plus|next)\s+", "", said, flags=re.I)
     if len(said.split()) < 2:
         return None
-    if len(said.split()) > STEP_WORDS:
-        said = " ".join(said.split()[:STEP_WORDS])
+    # A clause that only points at something said already ("above that", "below", "this one") is
+    # not a step: the split reads "if your income is above that" as the next instruction and the
+    # person is told "Next, above that.", which is not a thing anybody can do.
+    if all(w in POINTS_BACK for w in _words(said)):
+        return None
+    said = _a_whole_step(said)
     # The step is spliced after a comma ("Next, pour on cold water") so its first letter comes
     # down: "Next, A front-clip harness helps" is not a sentence. A capital that names something
     # stays - "Next, Baking soda works too" - and the way to tell the two apart is that a name is

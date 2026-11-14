@@ -8,8 +8,8 @@ import re
 from ..compose import pick
 from ..memory import newborn, people
 from ..understanding import topics as reading
-from .lookup import (PRESENT_ASK, PRICE_COMPARED, a_food_is_being_kept, about_them, asks_where,
-                     asks_where_a_shop_answers, entry)
+from .lookup import (PRESENT_ASK, PRICE_COMPARED, a_food_is_being_kept, a_price_not_a_loan,
+                     about_them, asks_where, asks_where_a_shop_answers, entry)
 
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
 ANSWERS = ("shopping", "money", "technology")
@@ -1049,9 +1049,9 @@ APPLIANCE_VALUE = (
     # this row wins the line that says both.
     (("fan heater", "fan heaters", "electric heater", "electric heaters", "oil filled radiator",
       "convector heater", "space heater", "halogen heater"),
-     "A fan heater is cheap to buy and dear to run: £20 to £40, but 2kW is about 60p an hour on "
-     "current electricity prices, so it is for heating one room for twenty minutes, not for a "
-     "whole evening or a whole house. For a room you sit in, an oil-filled radiator is silent and "
+     "A fan heater is worth it for one room for twenty minutes, not for a whole evening or a whole "
+     "house: cheap to buy at £20 to £40 and dear to run, since 2kW is about 60p an hour on current "
+     "electricity prices. For a room you sit in, an oil-filled radiator is silent and "
      "holds the heat after it clicks off, and heating the person beats heating the room: a throw, "
      "a hot water bottle and warm socks are free after the first winter."),
     (("fan", "fans", "electric fan", "tower fan", "pedestal fan", "desk fan", "floor fan",
@@ -1152,7 +1152,18 @@ APPLIANCE_VALUE = (
 # ticket pays off at a certain number of days a week, a car at a certain mileage. Keyed on the
 # thing, so "is a gym membership worth it" and "should i join a gym" reach the same answer.
 CHOICE_VALUE = (
-    (("gym membership", "gym memberships", "join a gym", "joining a gym", "gym worth"),
+    # The thing here is an action rather than a noun, so the phrase carries the ask: "should i
+    # go to the gym", "should i bother going to the gym" and "should i go back to the gym" were
+    # the you-decide punt while "should i join a gym" got the trade. A bare "go to the gym" would
+    # take "how often should i go to the gym" and "i went to the gym and my back hurts", which are
+    # other rows' lines, so the ask is part of the name.
+    (("gym membership", "gym memberships", "join a gym", "joining a gym", "gym worth",
+      "should i go to the gym", "should i go to gym", "shall i go to the gym",
+      "should i go back to the gym", "should i go to the gym again",
+      "should i bother going to the gym", "should i bother with the gym",
+      "should i bother with a gym", "should i start going to the gym",
+      "is it worth going to the gym", "worth going to the gym",
+      "any point going to the gym", "should i go to the gym or"),
      "A gym is worth it if the door is within ten minutes of you and you will go twice a week: the "
      "walk decides it, not the equipment. Skip it if the nearest one is a drive away, and pay "
      "monthly rather than a year up front. A £20 leisure-centre one you use beats a £60 "
@@ -1197,10 +1208,22 @@ CHOICE_VALUE = (
 # The question has to be about buying one, or the repair rule and the how-to entries answer it.
 APPLIANCE_ASK = ("worth", "worth it", "worth the money", "should i get", "should i buy",
                  "do i need", "need one", "shall i get", "good buy", "any good", "is it good",
+                 # "what is a good cheap dehumidifier" and "what is a good cheap slow cooker" ask
+                 # which to have, and the worth-it words were the only ones this gate knew. The
+                 # running-cost row stands down on the same words now, so without these two the
+                 # buying question fell to the meal-cost row and was a shrug.
+                 "a good", "good cheap", "good and cheap", "the best", "best one",
                  "buy", "buying", "getting", "get one",
                  # "should i use a weighted blanket" is the same choice as "is it worth it", and
                  # it was the decision module's shrug because the ask was "should i use"
                  "should i use", "should we use", "should i try", "is it ok", "is it safe",
+                 # Going somewhere is the ask for the gym, the one thing in this table named by an
+                 # action: "should i go to the gym" and "should i go back to the gym" carried no
+                 # word from this list, so the you-decide punt answered them while "should i
+                 # bother going to the gym" got the trade through the bare "bother". The thing
+                 # still has to come from the row's own key, so this kills no other line.
+                 "should i go", "shall i go", "should we go", "should i start", "should i bother",
+                 "is it worth going", "worth going",
                  "would you", "will it help", "does it help",
                  # The same question asked the way people ask about a buy: "would you recommend
                  # a heat pump", "do you recommend a dehumidifier". The verb is the ask, so the
@@ -1247,6 +1270,51 @@ def _smart_meter_how(memory, understood):
                 "only number that matters; a two-rate one shows day and night separately, so send "
                 "both.")
     return ""
+
+
+# An action named in a decision is not a thing with a price. "should i go to the gym" is the
+# gym's trade, but the moment the line names an occasion or a state - "with a fever", "when im
+# tired", "every day", "with a bad shoulder" - the question is that occasion's, and the card that
+# knows it is one line away in the same tree: the neck rule for a fever, the rest-day rule for
+# every day, the tiredness card. Those occasions are endless, so the test is not a list of them.
+# It is the words the line has left once its own name and the ask are taken out: grammar only, or
+# the action row steps aside and lets the card that names the occasion answer.
+_DECISION_WORDS = frozenset((
+    "a", "an", "the", "i", "me", "my", "we", "us", "our", "you", "your", "it", "its", "im",
+    "ive", "id", "is", "are", "was", "were", "am", "do", "does", "did", "doing", "done", "be",
+    "been", "being", "should", "shall", "would", "will", "can", "could", "may", "might", "must",
+    "worth", "any", "point", "in", "to", "of", "for", "at", "on", "with", "and", "or", "so",
+    "if", "that", "this", "these", "those", "then", "than", "now", "today", "tomorrow",
+    "tonight", "later", "still", "just", "really", "actually", "honestly", "though", "again",
+    "back", "go", "goes", "going", "went", "get", "gets", "getting", "got", "bother",
+    "bothering", "start", "starting", "started", "try", "trying", "buy", "buying", "join",
+    "joining", "one", "ones", "thing", "things", "time", "times", "not", "no", "yes", "ok",
+))
+# The names in these tables that are an action rather than a thing: "go to the gym", "start at
+# the gym". Only those are held to a bare line, because a thing with a price ("is a cleaner worth
+# it", "is a season ticket worth it") is asked about the thing however much else is going on.
+_ACTION_NAME = re.compile(r"\b(go|going|went|start|starting|bother|bothering|try|trying)\b")
+
+
+def _bare_decision(said, name, ask):
+    """Whether the line asks about `name` and names no occasion of its own."""
+    rest = said
+    for phrase in (name,) + tuple(ask):
+        phrase = phrase.strip()
+        if phrase:
+            rest = re.sub(r"\b" + re.escape(phrase) + r"\b", " ", rest)
+    return all(word in _DECISION_WORDS for word in re.findall(r"[a-z0-9']+", rest))
+
+
+def _longest_match_named(said, table):
+    """The longest name the line holds, and the reply it belongs to."""
+    best, longest, found = None, -1, ""
+    for names, reply in table:
+        for name in names:
+            name = name.strip()
+            if len(name) > longest and re.search(r"\b" + re.escape(name) + r"\b", said):
+                best, longest, found = reply, len(name), name
+    return best, found
 
 
 def _longest_match(said, table):
@@ -1306,7 +1374,11 @@ def _choice_value(memory, understood):
     reading = understood if isinstance(understood, dict) else {}
     said = " ".join(str(part) for part in (
         reading.get("clean"), reading.get("text"), " ".join(reading.get("words") or ()))).lower()
-    row = _longest_match(said, CHOICE_VALUE)
+    row, name = _longest_match_named(said, CHOICE_VALUE)
+    # The action rows only answer a bare line: see _DECISION_WORDS. A fever, a cold, every day and
+    # "when im tired" are their own cards, and this row was taking all four.
+    if row is not None and _ACTION_NAME.search(name) and not _bare_decision(said, name, APPLIANCE_ASK):
+        return None
     # "heat pump or condenser dryer which should i buy" is a question about a dryer, and the
     # longest name the line holds is "heat pump", which is the boiler's row: it was told the
     # grant covers a few thousand and the running cost is close to gas. A dryer word makes it
@@ -1468,6 +1540,47 @@ CHILD_PEOPLE = ("son", "daughter", "child", "children", "kid", "kids", "niece", 
                 "schoolboy", "schoolgirl")
 # "baby" is left out on purpose: a present for a new baby is its own question (gift-new-baby),
 # and a baby named by its age is read from the months in the line.
+
+
+def _a_child_is_the_one_they_buy_for(understood):
+    """True when the person the present is for is a child, with no age in the line.
+
+    The by-age row answers a line that says the age, and the person row answered every other
+    line with the grown-up list - so "what should i get my nephew", "a present for my grandson"
+    and "what should i get my child" were offered good coffee, a mug and woolly socks. The
+    person is enough to know that list is wrong; only the age can choose the right one, so this
+    decides which of the two answers the person row gives, not whether it answers.
+    """
+    words = _the_words(_said_line(understood))
+    if words & set(CHILD_PEOPLE):
+        return True
+    return bool(words & {"teenager", "teenagers", "teen", "teens", "teenage",
+                         "schoolkid", "schoolkids", "schoolboy", "schoolgirl"})
+
+
+def _the_person_row(adult, child):
+    """The person row, with the answer a child's present gets instead of the grown-up list.
+
+    Both answers keep everything else the row does - the hobby the chat has named, the age the
+    store already holds, the price and the cheap ask - because those are what make it a good
+    answer; only the last-resort list is swapped.
+    """
+    grown_up = _gift_row(adult)
+    young = _gift_row(child)
+
+    def reply(memory, understood):
+        chosen = young if _a_child_is_the_one_they_buy_for(understood) else grown_up
+        return chosen(memory, understood)
+    return reply
+
+
+# What a child's present can still be without an age. The bands are the ones the age pools use,
+# said plainly, so the person has something to act on and a reason to answer with the age.
+CHILD_PRESENT = ("For a child the age is most of the answer, so it is worth asking. Under three, "
+                 "something to push, stack or post. Four to seven, something to build, draw or "
+                 "dress up. Eight to eleven, a kit or a game with real pieces. Twelve and up, "
+                 "money towards one thing they have chosen. With no age to go on, a good book and "
+                 "a small craft set is the safe pair, and paper and ribbon do the rest.")
 
 
 # An age said any way a person says it: a figure, a figure with a year or a month, a word
@@ -1964,6 +2077,44 @@ def _the_bag_is_not_packaging(understood):
     """
     return not a_food_is_being_kept(understood)
 
+def _the_place_not_the_shop(understood):
+    """A line about going to a place is not a question about the shop of the same name.
+
+    "what should i pack for iceland", "packing for a trip to iceland" and "what should i pack for
+    iceland in october" were all answered "Iceland is cheap for frozen food ... one of the
+    cheapest places to do a full shop": the country, read as the shop. The row keys on the shop
+    names in the table and asks with "should i", so a country in the line was enough, and Iceland
+    is the one name in the table that is also a place people travel to. A line that says what is
+    being taken, or that asks about the trip itself, is the travel lanes' question and this row
+    stands down. One that names a price or a shop as well keeps the row, because "is iceland
+    cheaper than asda" and "is iceland as good as farmfoods" are about the shop.
+    """
+    said = " " + (understood.get("clean") or understood.get("text") or "").lower() + " "
+    going = (" pack", " packing", " trip", " travel", " travelling", " traveling", " flight",
+             " fly", " holiday", " holidays", " visit", " visiting", " hotel", " weather",
+             " things to do", " airport", " tourist", " sightseeing", " northern lights",
+             " what to wear", " what to take", " what to see", " in october", " in november",
+             " in december", " in january", " in february", " in march")
+    # A holiday line also carries the words a shop line uses - "is iceland good with kids" and
+    # "how many days should i spend in iceland" were both told where the shop sits on price,
+    # because "good" is a quality word and neither line has a trip word in it at all. So a
+    # handful of phrases that only make sense about a place stand the row down whatever else the
+    # line says; a price or a shop in the line is otherwise enough to keep it.
+    place = (" with kids", " with children", " with a family", " with the family", " with a baby",
+             " how many days", " how long", " best time to", " when to go", " worth visiting",
+             " things to do", " it worth going", " reykjavik", " blue lagoon", " golden circle",
+             " whale watching", " northern lights", " hire car", " car hire", " road trip",
+             " visa", " what to pack", " what to wear", " is it safe", " safe to")
+    price = (" cheap", " cheaper", " price", " prices", " quality", " fresh", " value",
+             " compare", " comparison", " expensive", " basket", " groceries", " supermarket",
+             " shop")
+    if any(word in said for word in place):
+        return False
+    if any(word in said for word in going) and not any(word in said for word in price):
+        return False
+    return True
+
+
 ENTRIES = [
     # Buying wine is a shopping question, not a cooking one: "whats a good cheap wine" was a
     # shrug, while the pairing, the sauce and the open-bottle lines belong to cooking.py. The row
@@ -2122,7 +2273,12 @@ ENTRIES = [
                  # money words alone used to bring every "cheap shoes" line here. The school is
                  # the subject, not the child: "my son needs running shoes" is still a running
                  # shoe, and a child word alone took that card away from every parent.
-                 "school", "schools", "nursery", "uniform", "plimsolls")),
+                 "school", "schools", "nursery", "uniform", "plimsolls",
+                 # a pair that is already wet asks how to dry it, not which pair to buy:
+                 # "how do i dry my running shoes" was this row, because "running" and "shoes"
+                 # are the key and "dry" is not in it
+                 "dry", "drying", "dried", "soaked", "soaking", "newspaper", "radiator",
+                 "washing machine", "smelly", "smell", "clean them", "clean my")),
     # "where can i buy cheap school shoes" was answered with the running-shoe card ("For running,
     # yes: ... £90 to £130"), because the only buying word a school-shoe line ever says - cheap,
     # afford, spend - was also a running-shoe word. A parent asking where to buy has a question
@@ -2281,6 +2437,11 @@ ENTRIES = [
                                         "best", "good", "replace", "cost", "much", "price",
                                         "decent", "spend", "which", "need", "look for",
                                         "look out for", "pick", "picking", "back",
+                                        # "what mattress should i get" is the commonest way
+                                        # the question is typed, and neither "get" nor
+                                        # "should" was in the ask, so it was a hedge beside a
+                                        # row that answers "do i need a new mattress"
+                                        "get", "getting", "should",
                                         # a budget is the commonest way to ask the question:
                                         # "is a cheap mattress ok" has no other buying word in it
                                         "cheap", "cheaper", "budget")),
@@ -2306,7 +2467,11 @@ ENTRIES = [
                  # i get a new mattress" is exactly the buying question, and a fence of "my back
                  # is" took it off this card.
                  "carried", "carrying", "lifted", "lifting", "hauled", "dragged", "shifted",
-                 "sack truck", "up the stairs", "up two flights"),
+                 "sack truck", "up the stairs", "up two flights",
+                 # a topper is its own row with its own answer, and "should i get a mattress
+                 # topper" now reaches this ask through "get" and "should"
+                 "topper", "toppers", "mattress topper", "mattress toppers", "protector",
+                 "mattress protector"),
           bias=2),
     entry("washing-machine", ("washing machine", ("buy", "choose", "choosing", "best", "good",
                                                  "need", "size", "look for", "look out for",
@@ -2333,8 +2498,14 @@ ENTRIES = [
           avoid=("washing", "laundry", "detergent", "powder", "washing powder", "soap", "bleach",
                  "cleaner", "cleaners", "nappies", "toilet roll", "loo roll", "kitchen roll",
                  "coffee", "tea bags", "cereal", "tins", "pet food", "food", "drink", "sauce")),
-    entry("is-the-deal-real", (("sale", "deal", "discount", "offer", "bargain"),
-                               ("real", "worth", "genuine", "good", "actually")),
+    entry("is-the-deal-real", (("sale", "deal", "deals", "discount", "offer", "offers",
+                               "bargain", "price drop", "price cuts", "reduced"),
+                               # "really", "legit" and "check" are the words people put round a
+                               # price they are suspicious of, and none of them is "real":
+                               # "how do i check if a deal is really a deal" reached nothing at
+                               # all, which is the one answer a shopper cannot use.
+                               ("real", "really", "worth", "genuine", "good", "actually",
+                                "check", "too good")),
           ("Check the price history before believing a sale: CamelCamelCamel does it for Amazon and "
            "Keepa for many shops, and a \"was £200\" tag that was £200 for one week tells you "
            "nothing. Compare the unit price (per kg or per wash) rather than the pack price."),
@@ -2571,7 +2742,10 @@ ENTRIES = [
                  # "can you haggle at a car boot sale", a line this row should answer
                  # (steward-free-daisy, #3394)
                  "new car", "new cars", "brand new car", "buy a car", "buying a car",
-                 "car finance")),
+                 "car finance"),
+          # "money off" is a discount on a thing; "money off my mum" is a loan from a person. The
+          # rule is `lookup.a_price_not_a_loan`, so every price row gets it from one place.
+          guard=a_price_not_a_loan),
     # "is aldi cheaper than tesco" and "which supermarket is cheapest" were a search hedge or a
     # shrug: the order of the shops is a fact, so it is a table of shops kept as data and one
     # entry reads the names out of the line. No live prices - the answer says where each sits and
@@ -2618,6 +2792,9 @@ ENTRIES = [
                "choosing", "pick", "help me"),
           # the weekly-shop money answer is a meal plan, and a complaint about a shop is the
           # refund row's: neither is a question about which shop is cheaper
+          # the shop name in the line may be the place people travel to, so the trip lines are
+          # not this row's: `_the_place_not_the_shop` reads them off
+          guard=_the_place_not_the_shop,
           avoid=("meal plan", "meal planning", "meal prep", "what should i cook", "recipes",
                  "food waste", "waste food", "refund", "refunds", "complaint", "complain",
                  "delivery", "deliveroo", "just eat", "substitute", "out of stock",
@@ -2725,6 +2902,39 @@ ENTRIES = [
                            "present for anyone", "gift for anyone", "get someone something",
                            "get somebody something"),
           _gift_anyone, avoid=LOSS + CRISIS),
+    # A present for someone who is leaving or retiring names a person no other gift row knows, so
+    # the line went to the row whose key happened to fit: "what is a good present for a teacher who
+    # retires" was answered with the pot to aim for at retirement, because "what is" is in that
+    # row's key and "retires" in its first part. The occasion is one question and the gift is
+    # another, so this row owns the pair, and the specific rows (a mum, a dad, someone ill) still
+    # win when the person in the line is theirs.
+    entry("gift-leaving-work",
+          (("retiring", "retires", "retired", "retirement", "leaving present", "leaving do",
+            "leaving work", "leaves work", "last day at work"),
+           ("present", "presents", "gift", "gifts", "gift ideas", "present ideas",
+            "what to get", "what to give", "what to buy", "what do i get", "what do i give",
+            "what do i buy", "what should i get", "what should i give", "what should i buy",
+            "what can i get", "what can i give", "what can i buy", "what is a good present",
+            "what is a good gift", "get them", "get her", "get him", "buy them", "give them")),
+          # A leaving present is about the change rather than the job, so this is not the general
+          # list: what they now have time for, one good thing from the team, and the card with a
+          # real line from everybody, which is the part people keep.
+          _present_answer(
+           "A leaving present is about what comes next rather than the job: something for the "
+           "thing they will now have time for - a book, a course, a voucher for the garden centre "
+           "or the cinema, a decent bottle for the first Friday. If the team is chipping in, "
+           "\u00a310 to \u00a315 each buys one good thing, which beats five fillers, and the card "
+           "everyone signs with one real memory each is the part people keep. Ask first whether "
+           "they want a fuss at all: some people would rather have a pint after work."),
+          avoid=LOSS + CRISIS + (
+              # a present for a mum, a dad or a partner is their own row's answer, and this one
+              # would only repeat the general list over the top of it
+              "mum", "mother", "dad", "father", "nan", "grandma", "grandad", "granny",
+              "sister", "brother", "aunt", "uncle", "wife", "husband", "partner",
+              "son", "daughter", "baby", "child",
+              "speech", "toast", "few words", "card", "cards", "message",
+              "what do i say", "what to write", "what do i write"),
+          bias=1),
     entry("gift-hospital", (("hospital", "ward", "in hospital", "hospital bed", "hospice",
                              "in a hospice", "hospice bed",
                              "having an operation", "operation", "surgery", "recovering",
@@ -2823,12 +3033,14 @@ ENTRIES = [
                            "neighbor", "teacher", "carer", "nurse", "stepmum", "stepdad", "them"),
                           ("gift", "present", "get", "got", "buy", "birthday", "christmas",
                            "30th", "40th", "50th", "idea", "ideas")),
-          _gift_row("Pick something they would use every week and would not buy themselves: good "
+          _the_person_row("Pick something they would use every week and would not buy "
+                          "themselves: good "
                     "coffee and a proper mug, woolly socks, a decent notebook, or a voucher for "
                     "the thing they always say they will do. If you know what they are into, buy "
                     "into it - a good knife for someone who cooks, a head torch for a runner, "
                     "secateurs for a gardener - and put a real message in the card, which does "
-                    "half the work."),
+                    "half the work.",
+                    CHILD_PRESENT),
           avoid=LOSS + CRISIS, bias=2, ask=PERSON_ASK),
     entry("gift-child-age", (("year old", "years old", "year-old", "yr old", "yrs old",
                               "month old", "months old", "aged", "toddler",
@@ -2908,7 +3120,12 @@ ENTRIES = [
           # and a care question is not a present
           avoid=("health visitor", "fever", "temperature", "feeding", "feed", "sleep", "jaundice",
                  "rash", "crying", "will not stop", "wont stop", "weaning", "milk", "nappy",
-                 "nappies", "cord", "weight", "is it normal", "how do i", "what if"),
+                 "nappies", "cord", "weight", "is it normal", "how do i", "what if",
+                 # a present is the answer for the shower; the FOOD for it is the kitchen's,
+                 # and "baby shower food ideas" was answered with the muslins list. Only the
+                 # food ask stands this row down, so "what do you get for a baby shower" keeps
+                 # the present it had
+                 "shower food", "food ideas", "food for a shower", "food for the shower"),
           bias=2),
     # A present for a pet is the one gift question nothing answered, and it is asked every
     # December: "what should i get my cat for christmas" was answered "Keep the new cat in one room
@@ -3007,7 +3224,19 @@ ENTRIES = [
                                  "thank you message", "thank you wording",
                                  # "wedding music ideas" is the music, not the present
                                  "music", "song", "songs", "playlist", "band", "dj",
-                                 "first dance", "aisle"),
+                                 "first dance", "aisle",
+                                 # and the rest of the wedding that is not a present, which is
+                                 # the same rule as the music above: the row keys "ideas" and
+                                 # "what should i get", and those are ways of asking about
+                                 # anything at a wedding - "wedding food ideas for 60 guests"
+                                 # was answered with how much to spend on a present. Food, the
+                                 # flowers, the photographs and the readings each have a card
+                                 # of their own to answer with.
+                                 "food", "menu", "menus", "catering", "caterer", "buffet",
+                                 "meal", "eat", "feed", "canapes", "hog roast", "supper",
+                                 "drinks", "food ideas", "flowers", "florist", "bouquet",
+                                 "buttonhole", "photographer", "photographs", "photos",
+                                 "readings", "vows", "order of the day", "what time"),
           bias=3, ask=GIFT_ASK),
     entry("gift-anniversary", ("anniversary", ("gift", "present", "ideas", "idea", "what to get",
                                                "what should i get", "what should we do")),
@@ -3415,6 +3644,11 @@ ENTRIES = [
                  "photosynthesis", "make food", "makes food", "their food", "own food", "food for",
                  "energy", "sunlight", "carbon dioxide", "chlorophyll", "feed", "feeds",
                  "feeding", "fertiliser", "fertilizer",
+                 # a mouldy pot is a plant that is unwell, not a present: "how do i get rid of
+                 # mould in a plant pot" was a bunch of flowers, because "plant" and "get" carry
+                 # this key on their own. The garden rows answer every one of these.
+                 "mould", "mold", "mouldy", "moldy", "mildew", "fungus", "fuzzy", "furry",
+                 "rot", "rotting", "repot", "repotting", "gnat", "gnats",
                  # "my houseplant is looking sorry for itself" is a plant that is unwell, not a
                  # present: "plant" and the "sorry" of a sorry-gift read as a bunch of flowers.
                  # What is left of the gift question - "flowers or a plant", "should i get her
@@ -3508,10 +3742,20 @@ ENTRIES = [
           guard=lambda understood: not asks_where_a_shop_answers(understood),
           bias=1),
     entry("choice-worth",
-          (("gym membership", "gym memberships", "join a gym", "joining a gym", "heat pump",
+          # The gym is the one thing here named by an action, so its keys are the action phrases:
+          # "should i go to the gym", "should i bother going to the gym" and "should i go back to
+          # the gym" were the you-decide punt while "should i join a gym" got the trade. The ask
+          # list is what keeps this safe - a line that reports going to the gym has no "should i"
+          # in it - and the frequency avoids keep the routine questions out of the trade.
+          (("gym membership", "gym memberships", "join a gym", "joining a gym",
+            "go to the gym", "go the gym", "going to the gym", "back to the gym",
+            "bother going to the gym", "bother with the gym", "bother with a gym",
+            "start going to the gym", "start at the gym",
+            "heat pump",
             "heat pumps", "electric car", "electric cars", "season ticket", "season tickets",
             "smart meter", "smart meters", "water meter", "water meters"),
-           ("worth", "worth it", "worth the money", "should i", "do i need", "buy", "buying",
+           ("worth", "worth it", "worth the money", "should i", "shall i", "shall we",
+            "should we", "do i need", "buy", "buying",
             "get", "join", "joining", "pay", "paying", "better", "off",
             "recommend", "recommended", "recommendation", "recommendations",
             # the doubt about spending, which is the same question: "any point in a heat pump",
@@ -3521,6 +3765,11 @@ ENTRIES = [
           ask=APPLIANCE_ASK,
           # a thing with its own answer is not this: insurance, a warranty, uni, a mortgage
           avoid=("insurance", "warranty", "uni", "university", "degree", "mattress", "inspection",
+                 # how often to go is the routine's question ("three sessions a week"), and how
+                 # busy a gym is or what to do there are other rows again: this one is only
+                 # whether it is worth it
+                 "how often", "how many times a week", "how many times a month", "how regular",
+                 "how busy", "what time", "what should i do", "what to do at",
                  "how do i", "how to", "tax", "lease", "hire purchase", "prices", "price",
                  "cost per", "how much",
                  # the meter you already have: reading it, or one that has stopped, is smart-meter-how
@@ -3891,7 +4140,14 @@ _CHOOSE_ASK = ("pick", "picking", "choose", "choosing", "choice", "buy", "buying
                "best", "good", "decent", "which", "what should i look for", "look for",
                "look out for", "worth", "spend", "budget", "recommend", "recommendation",
                "what to get", "which to get", "what should i get", "need a", "need some",
-               "want a", "size", "much", "price", "cost", "cheap", "expensive", "difference")
+               "want a", "size", "much", "price", "cost", "cheap", "expensive", "difference",
+               # A comparison of two of the same thing is the choosing question, not a
+               # difference question: "is a 1 litre kettle better" was a search hedge beside a
+               # row that answers "which kettle should i buy", and "is a down duvet better" /
+               # "is a cheap mattress worse" were the same gap for every other object here.
+               # The difference rows key two *different* things ("a duvet and a quilt"), so a
+               # bare "better" beside one object is not theirs.
+               "better", "worse", "bigger", "smaller", "cheaper", "dearer")
 
 ENTRIES.append(entry(
     "duvet-choose",
@@ -3934,6 +4190,9 @@ ENTRIES.append(entry(
 ENTRIES.append(entry(
     "kettle-choose",
     (("kettle", "kettles"),
+     # "is a 1 litre kettle better" is this row's question with the comparison in it: the
+     # comparison words are in _CHOOSE_ASK now, so every object with a choosing row answers
+     # "is a bigger one better" / "is a cheap one worse" the same way.
      _CHOOSE_ASK),
     "Get a 3kW one for speed and 1.7 litres for a family, or a 1 litre one if it is mostly you - "
     "a small kettle boiled often costs less than a big one boiled for two cups. A concealed "
@@ -3969,7 +4228,11 @@ ENTRIES.append(entry(
     avoid=("lost", "missing", "delayed", "damaged", "broken", "wheel broke", "zip", "zips",
            "lock stuck", "stolen", "claim", "compensation", "airline", "flight", "pack", "packing",
            "packed", "unpack", "unpacking", "what to take", "what to pack", "holiday packing",
-           "storage", "store", "handbag", "handbag", "briefcase", "laptop bag"),
+           "storage", "store", "handbag", "handbag", "briefcase", "laptop bag",
+           # a phone, a tablet and a pair of glasses are named "case" too, and the suitcase row
+           # answered "which phone case should i buy" with cabin sizes
+           "phone", "iphone", "mobile", "tablet", "ipad", "laptop", "glasses", "spectacles",
+           "hearing aid", "airpods", "earbuds", "camera", "console", "switch case"),
     bias=2))
 
 ENTRIES.append(entry(
@@ -4007,7 +4270,10 @@ ENTRIES.append(entry(
            "machine descale", "descale", "caffeine", "sleep", "anxiety", "good for you",
            "bad for you", "healthy", "pregnant", "pregnancy", "withdraw", "withdrawal", "stop",
            "give up", "quit", "cafe", "cafes", "barista", "shop", "starbucks", "costa",
-           "stain", "stains", "grinder", "frother"),
+           "stain", "stains", "grinder", "frother",
+           # "which milk is best for coffee" is a question about the milk, and this row
+           # answered it with the bag of beans to buy: the milk asked about is not the coffee.
+           "milk", "milks", "dairy"),
     bias=2))
 
 ENTRIES.append(entry(
@@ -4058,6 +4324,87 @@ ENTRIES.append(entry(
            "stuck", "wont pop", "won't pop", "pop up", "clean", "cleaning", "crumbs", "crumb tray",
            "repair", "fuse", "element", "sandwich", "toastie", "air fryer", "grill"),
     bias=2))
+
+
+
+# The kitchen machines the worth-it table above did not name, kept in their own table so the rows
+# and the cue list that reach them are one change in one place. Every one of these came back "I
+# don't know enough to answer that honestly", which is the worst answer to a buying question
+# because the person is asking for a decision. Two of them were worse than a shrug, because a
+# longer phrase carries a shorter name inside it: "is a soda stream worth it" reached the
+# streaming subscriptions ("cancel when the series ends") and "is a vacuum sealer worth it" the
+# vacuum cleaner and its three-uses-a-week rule of thumb.
+KITCHEN_MACHINE_VALUE = (
+    (("rice cooker", "rice cookers"),
+     "A rice cooker is worth it if rice is a daily thing: it times it, keeps it warm for an hour and "
+     "leaves the hob free, and a 40 pound one cooks as well as a 200 pound one. Skip it if you eat "
+     "rice twice a month, since a pan with a lid is the same rice in 12 minutes."),
+    (("soup maker", "soup makers"),
+     "A soup maker is worth it if you make soup most weeks and want one jug and no pan to watch: it "
+     "cooks and blends in about 20 minutes. Skip it if you like soup with chunks in it, or cook for "
+     "four, because most jugs hold 1.6 litres and the blade takes everything smooth."),
+    (("sous vide", "sous vide stick", "sous vide machine", "sous vide cooker"),
+     "Sous vide is worth it if you cook steak, chicken breast or eggs to a temperature and do not "
+     "mind waiting: a 60 pound stick in a lidded pan holds the water steady for an hour or more, and "
+     "nothing overcooks. Skip it if dinner has to be on the table in 20 minutes, where a thermometer "
+     "and a hot pan get most of the way."),
+    (("dehydrator", "dehydrators", "food dehydrator"),
+     "A dehydrator is worth it if you dry things often: herbs, apple rings, jerky or vegetables for "
+     "stock, in 4 to 12 hours at 40 to 60C with no oven on. Skip it if that is a twice-a-year job, "
+     "since an oven on its lowest setting with the door ajar dries a tray at a time."),
+    (("juicer", "juicers"),
+     "A juicer is worth it only if you drink juice most mornings: it separates the pulp in seconds, "
+     "and cleaning the mesh takes five minutes every time. Skip it if you would rather eat the "
+     "fruit, which keeps the fibre the juice leaves behind."),
+    (("yogurt maker", "yoghurt maker", "yogurt makers"),
+     "A yogurt maker is worth it if you get through a tub a week: a litre of milk makes a litre of "
+     "yogurt for about 60p, and it holds the warmth steady for 8 to 12 hours. Skip it if you eat "
+     "yogurt now and then, since a flask and a warm cupboard do the same job."),
+    (("ice cream maker", "ice cream makers"),
+     "An ice cream maker is worth it if you make it more than a few times a summer: the bowl has to "
+     "be frozen overnight, so it is never a last-minute thing, and a 40 pound one with a pre-frozen "
+     "bowl is fine. Skip it if you would use it twice, where a loaf tin and a fork every half hour "
+     "gets close."),
+    (("contact grill", "panini press", "sandwich press", "george foreman", "health grill"),
+     "A contact grill is worth it if you toast sandwiches or cook chops and vegetables for one or "
+     "two: it heats both sides at once and the fat runs off. Skip it if you cook for four, since the "
+     "plates take two sandwiches at a time, and skip it if you have a frying pan and a lid."),
+    (("electric steamer", "steam cooker", "food steamer"),
+     "An electric steamer is worth it if you steam vegetables, dumplings or fish often and like "
+     "setting a timer and walking away: the tiers hold a whole dinner over one ring. Skip it if a pan "
+     "with a colander and a lid already does it, which for most people it does."),
+    (("electric whisk", "hand whisk", "hand mixer", "electric hand whisk"),
+     "An electric hand whisk is worth it for anyone who creams butter or whips cream even a few times "
+     "a month: about 15 pounds, a minute instead of ten with a fork, and it lives in a drawer. Skip "
+     "it only if you bake twice a year."),
+    (("mandoline", "mandolines", "mandoline slicer"),
+     "A mandoline is worth it if you slice a lot of vegetables thin and even - gratins, slaw, pickles "
+     "- and you will use the hand guard every single time. Skip it if you cook for one: a sharp knife "
+     "is safer and nearly as quick."),
+    (("spiralizer", "spiralizers", "spiraliser"),
+     "A spiralizer is worth it only if you really eat courgette or carrot noodles: a 10 pound "
+     "hand-held one does it in a minute and the counter-top ones add nothing. Skip it if you would "
+     "use it once, where a julienne peeler does the same job and fits in a drawer."),
+    (("soda stream", "sodastream", "soda maker", "sparkling water maker"),
+     "A soda maker is worth it if you drink sparkling water every day: a gas cylinder makes about 60 "
+     "litres for 10 pounds to swap, so it pays for itself in a few months and saves carrying bottles. "
+     "Skip it if you drink it now and then, or would mostly use the flavour syrups, which cost more "
+     "than supermarket bottles."),
+    (("vacuum sealer", "vacuum sealers", "food sealer", "food sealers"),
+     "A vacuum sealer is worth it if you buy meat in bulk or freeze portions: it stops freezer burn "
+     "and the bags can be boiled, so a batch of chilli reheats in the bag. Skip it if you freeze "
+     "little, since a freezer bag with the air pressed out does most of it."),
+)
+
+# The worth-it entry above lacked two things for these machines - a row, and their names in its
+# cue list - and an entry that matches a line and then finds no row hands it on. Both are added
+# here, beside the rows, so a machine named in this block is a machine with an answer.
+APPLIANCE_VALUE = APPLIANCE_VALUE + KITCHEN_MACHINE_VALUE
+KITCHEN_MACHINE_NAMES = tuple(name for names, _trade in KITCHEN_MACHINE_VALUE for name in names)
+for _worth_it_entry in ENTRIES:
+    if _worth_it_entry.id == "appliance-worth":
+        _worth_it_entry.key = ((_worth_it_entry.key[0] + KITCHEN_MACHINE_NAMES,)
+                               + tuple(_worth_it_entry.key[1:]))
 
 ENTRIES.append(entry(
     "sleeping-bag-choose",

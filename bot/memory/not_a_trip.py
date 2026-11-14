@@ -25,6 +25,8 @@ code that happens to follow "to", and both of these are what a noun phrase canno
   here, and uni, college and the nursery are the same errand: going back to one of those is not a
   holiday and nobody wants their month asked about.
 """
+import re
+
 DETERMINER = frozenset("""
 a an the my your our their his her its this that these those some any another each every no
 """.split())
@@ -61,6 +63,7 @@ find finds found finding put puts putting buy buys bought buying eat eats ate ea
 drink drinks drank drinking work works worked working sleep sleeps slept sleeping
 pass passes passed passing faint faints fainted fainting collapse collapses collapsed collapsing
 throw throws threw thrown throwing die dies died dying move moves moved moving
+wean weans weaned weaning
 """.split())
 # Places of ordinary life, in the same family as the school, work and the gym the trip reader
 # already knows about: a person goes back to one of these, they do not go away to it.
@@ -73,6 +76,7 @@ uni university unis college colleges campus nursery nurseries creche childcare p
 # person was asked what month they were going. Only words that cannot name somewhere are here:
 # a place called Bath, Nice or Split is still a place, so its verb is not in the list.
 DOING = frozenset("""
+feel feels felt feeling
 cry cries cried crying sob sobs sobbing weep weeps weeping wail wails wailing
 laugh laughs laughed laughing giggle giggles giggling chuckle chuckles chuckling
 scream screams screamed screaming shout shouts shouted shouting yell yells yelled yelling
@@ -125,3 +129,88 @@ def a_place_of_ordinary_life(place):
 def not_a_destination(going_words, place):
     """True when a "going to ..." line names a doing or an everyday place, not a trip."""
     return a_doing_after_to(going_words) or a_place_of_ordinary_life(place)
+
+
+# A "going to" whose destination is a person: "im going to my sisters on saturday", "we are going
+# to my in laws". The words after "to" are family, not a place, so the trip card that says the
+# place back ("My Sisters, nice. When is it?") is nonsense, and no packing list or flight length is
+# what the person wants. It is a visit, and it is answered as one.
+A_PERSON = (r"(?:sister|brother|mother|father|son|daughter|mum|mom|dad)[\s-]in[\s-]laws?|"
+            r"sisters?|brothers?|mum|mom|mam|mother|father|dad|parents?|gran|granny|nan|nana|"
+            r"grandma|granddad|grandad|grandpa|grandparents?|aunts?|aunty|auntie|uncles?|cousins?|"
+            r"in[\s-]?laws?|sons?|daughters?|kids|children|family|friends?|mates?|pals?")
+VISIT_TO = re.compile(
+    # "going to my sisters", "off to my mums", and the same said as the purpose of the journey:
+    # "going to see my parents", "visiting my parents on sunday".
+    r"\b(?:(?:to|at)\s+|(?:to\s+)?(?:see|seeing|visit|visiting)\s+)"
+    r"(?P<own>my|our|his|her|their)\s+(?:the\s+)?(?:own\s+)?(?P<person>" + A_PERSON + r")"
+    r"(?:\u2019s|'s|s')?s?(?:\s+(?P<thing>house|place|flat|home))?"
+    r"\s*(?=$|[,.!?;]|\b(?:for|on|at|this|next|tonight|tomorrow|today|later|after)\b)",
+    re.IGNORECASE)
+
+
+# The same reading for a destination on its own ("my aunts"), as the trip reader stores it.
+THEIR_PERSON = re.compile(
+    r"^\s*(?P<own>my|our|his|her|their)\s+(?:own\s+)?(?P<person>" + A_PERSON + r")"
+    r"(?:\u2019s|'s|s')?s?(?:\s+(?P<thing>house|place|flat|home))?\s*$", re.IGNORECASE)
+
+
+def _the_person_in(found):
+    """Who a match names, said the way the trip reader stores a place: "my brothers", "my in laws",
+    "my parents house". The possessive in front is what makes it a person ("my kids school"), and
+    the answer says it back as theirs."""
+    who = " ".join(found.group("person").lower().split())
+    if who.startswith("in"):
+        # "my in laws" is one relation, written as a hyphen so the possessive lands on the end of
+        # it ("your in-laws'") rather than on a capital in the middle of the sentence.
+        who = "in-laws"
+    said = found.group("own").lower() + " " + who
+    thing = (found.groupdict().get("thing") or "").lower()
+    return said + " " + thing if thing else said
+
+
+def a_person(place):
+    """The person when a destination is only a person ("my aunts"), or "" when it is a place."""
+    found = THEIR_PERSON.match(str(place or ""))
+    return _the_person_in(found) if found else ""
+
+
+# The words that say a line is set off somewhere: the going has to be in front of the person, or
+# the person has to be what the line is about. "ive stopped seeing my mates" and "im not allowed
+# to see my kids" are not visits, and neither is "its at my mates house" said about a barbecue.
+GOING_BEFORE = re.compile(
+    r"\b(?:going|goes|went|off|away|over|down|up|round|around|out|back|heading|driving|flying|"
+    r"travelling|traveling|staying|stay)\b", re.I)
+FILLER_BEFORE = re.compile(r"^\s*(?:(?:so|and|but|oh|also|anyway|then|now|well|ok|okay|right|"
+                           r"im|i'm|i am|we're|we are|were|i|we)\s+){0,3}$", re.I)
+
+
+# Somebody in a hospital bed is not a nice outing, and the words that say so come after the person
+# ("going to see my friend at the hospital", "off to my dad in hospital"). The visit reading stops
+# at "at" and "in" so that an ordinary visit with a time on it still reads ("my sisters at the
+# weekend"), which left the care home behind; here it takes the whole line back, and the reading
+# that knows the hospital is a worrying place keeps its answer.
+IN_A_CARING_PLACE = re.compile(
+    r"\b(?:at|in|to)\s+(?:the\s+|a\s+)?(?:hospital|hospice|care home|nursing home|residential "
+    r"home|clinic|infirmary|surgery|ward|a&e|ae|icu|intensive care|high dependency|"
+    r"coronary care|children'?s ward)\b", re.I)
+
+
+def the_visit(line):
+    """The person a line is going to see, or "" when the words after "to" name a place.
+
+    "im going to my sisters on saturday" goes nowhere called My Sisters, and "we are going to my in
+    laws" is not a trip to Laws. Only a destination that ends at the person counts: "im going to my
+    sisters in spain" is a journey to Spain, and the trip reader keeps it. The line has to be one
+    about going, too, or the same words in another sentence are a different thing.
+    """
+    said = str(line or "")
+    if IN_A_CARING_PLACE.search(said):
+        return ""
+    found = VISIT_TO.search(said)
+    if not found:
+        return ""
+    before = said[:found.start()]
+    if not (GOING_BEFORE.search(before) or FILLER_BEFORE.match(before)):
+        return ""
+    return _the_person_in(found)

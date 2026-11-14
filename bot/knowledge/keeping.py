@@ -141,6 +141,55 @@ ROWS = (
      "Dried fruit keeps 6 months in a sealed jar and a year in the fridge, and past that it "
      "hardens rather than spoils. Bring it back in 10 minutes in a bowl of hot water, or leave a "
      "slice of bread in the jar overnight. White crystals on the outside are sugar, not mould."),
+    # The made things. The cooked-food table answers all of these with "cooked food keeps 3 to 4
+    # days", which is right for a stew and wrong for a mash, a batter, a meringue and a curd: each
+    # of these is one or two days, or a week on a shelf, and each goes wrong in its own way.
+    (("guacamole", "guac", "avocado dip", "mashed avocado"),
+     "Guacamole keeps 1 to 2 days in the fridge in a tub with cling film pressed right onto the "
+     "surface, and the lime in it is what slows the browning. Brown on top is oxygen, not rot: "
+     "stir it in and it is fine. After two days it tastes flat and watery, so eat it first."),
+    (("mashed potato", "mashed potatoes", "mash", "leftover mash"),
+     "Mashed potato keeps 2 days in the fridge, less than the potatoes it came from, because the "
+     "butter and milk in it turn first. Warm it in a pan with a splash of milk over a low heat "
+     "and stir, rather than in the microwave on high, which makes it gluey. It freezes for a "
+     "month and comes back a little looser, so beat a knob of butter through it."),
+    (("batter", "pancake batter", "crepe batter", "yorkshire pudding batter", "waffle batter"),
+     "Batter keeps 1 to 2 days in the fridge in a jug with a lid, and stir it before it goes in "
+     "the pan because the flour sinks. One with baking powder in it loses its lift after a day, "
+     "so use it the same day for pancakes. Crepe batter is better after half an hour's rest, and "
+     "a batter that smells sour or has grey on top goes down the sink."),
+    # The pastry-and-cured things. A quiche and a tray of sausage rolls were answered with the
+    # recipe (their own cooking question) and smoked salmon with the row for cooked salmon, which
+    # is a different food with a different number of days.
+    (("quiche", "quiches", "a quiche", "leftover quiche", "savoury tart"),
+     "Quiche keeps 3 days in the fridge, covered, and eat it cold or reheat it to piping hot all "
+     "the way through rather than warm. A quiche freezes for 2 months, cut in slices and wrapped: "
+     "thaw it in the fridge overnight and warm it through. Once the egg custard smells sour or "
+     "the top has a sheen of water, it is done."),
+    (("sausage rolls", "sausage roll", "leftover sausage rolls"),
+     "Sausage rolls keep 2 days in the fridge, in a tub or a paper bag rather than cling film, or "
+     "they go soft. Reheat them at 180C for 8 to 10 minutes to get the pastry crisp again, and "
+     "eat them hot rather than warm. They freeze well for 2 months unbaked or baked, and the "
+     "pastry is what goes first: a soggy bottom means it was wrapped while it was still warm."),
+    (("smoked salmon", "smoked salmon slices", "lox"),
+     "Smoked salmon keeps 3 days in the fridge once the pack is opened, wrapped tight, and it is "
+     "cured rather than cooked so the date on the pack matters more than the days. It freezes for "
+     "a month in portions, though the texture goes softer. Eat it within 24 hours once it is out "
+     "on a plate, and bin it if it smells sharp or feels tacky."),
+    # A pot of chilli already has its row in bot/knowledge/chilli.py (chilli-pot-keep), and the pot
+    # is what "how long does a pot of chilli last" was already answered with: no row here.
+    (("coconut milk", "tinned coconut milk", "tin of coconut milk", "coconut cream"),
+     "An opened tin of coconut milk keeps 4 to 5 days in the fridge in a tub or a jug, and the "
+     "thick cream separates to the top, so stir it back in. An unopened tin keeps a year in the "
+     "cupboard. Freeze what is left in an ice-cube tray and drop the cubes into a curry."),
+    # Meringue is left out on purpose: the meringue table already answers the keeping question
+    # ("they keep a week in an airtight tin, and go soft in the fridge"), and a row here also took
+    # "how long should i bake them", which is the oven's question after a line about soft meringues.
+    (("lemon curd", "curd", "homemade lemon curd"),
+     "Lemon curd keeps 2 weeks in a jar in the fridge once it is opened, and homemade curd the "
+     "same, though eat homemade within a week if you did not sterilise the jar. It freezes for 3 "
+     "months and thaws in the fridge. Curd that has separated, or smells of nail varnish, goes "
+     "in the bin - the egg in it is what spoils."),
 )
 
 # A keeping row answers a question. "I have half a cucumber going soft" names the food and the
@@ -299,6 +348,8 @@ DATING_DATE = ("first date", "second date", "third date", "blind date", "date ni
                "text them", "asking her out", "asking him out")
 
 ROW_STAND_DOWN = {
+    # A smoked salmon is cured and a salmon fillet is raw: the cooked-salmon row is not its row.
+    "smoked salmon": ("cooked", "bake", "baked", "roast", "roasted", "fillets"),
     # "fruit" is inside grapefruit, kiwi fruit and fruit cake, and "fruit fly", "fruit bowl" and
     # "fruit tree" are lines of their own: the row is for the drawer, not for a food made with
     # fruit or a plant growing it.
@@ -402,6 +453,27 @@ ROW_COOK_FORMS = {
              "how long should i cook", "cooking time", "cook for", "cook it", "boil", "boiling",
              "simmer", "simmering", "stirring", "microwave", "minute", "minutes", "take",
              "takes", "taking", "recipe", "recipes", "porridge oats to"),
+    # The made foods. "Mashed", "cooked" and "boiled" are cooking words, and a cooking word in a
+    # keeping row's avoid list is a row that cannot answer for the food it names: that is why the
+    # entry build lets a made food out of the cooked stand-down. Making the dish is not keeping it,
+    # so each of these lists the words of its own method, and the keeping key does the rest.
+    "guacamole": ("make", "making", "recipe", "recipes", "blend", "blitz", "mash it",
+                  "dance", "dancing", "dip for", "what to dip"),
+    # Reheating is the food-safety question and has its own answer - "piping hot all the way
+    # through" - so "can i reheat mashed potato" keeps it, and this row keeps the shelf life.
+    "mashed potato": ("make", "making", "recipe", "recipes", "how do i make", "how to make",
+                      "lumpy", "gluey", "butter", "cream in", "beat it",
+                      "reheat", "reheats", "reheating", "reheated"),
+    "batter": ("make", "making", "recipe", "recipes", "how do i make", "how to make",
+               "thin", "thick", "lumpy", "mix", "whisk", "rest"),
+    "lemon curd": ("make", "making", "recipe", "recipes", "how to make", "set", "setting",
+                   "runny", "split", "why is my", "why did my"),
+    "quiche": ("make", "making", "recipe", "recipes", "how do i make", "how to make", "bake",
+               "baking", "oven", "pastry", "line the tin", "blind bake", "custard"),
+    "sausage rolls": ("make", "making", "recipe", "recipes", "how do i make", "how to make",
+                      "bake", "baking", "oven", "pastry", "puff", "rough puff"),
+    "coconut milk": ("make", "making", "open", "opening", "shake", "separate", "separates",
+                     "curdle", "curdles", "thick", "thin"),
 }
 COOKED_IN_THE_ROW = tuple(ROW_COOK_FORMS)
 
@@ -472,6 +544,93 @@ _DAY_AFTER_AVOID = ("workout", "work out", "training", "gym", "run", "running", 
                     "jab", "drinking", "drink", "hangover", "night out", "wedding", "funeral",
                     "flight", "interview", "exam", "period", "pill", "morning after pill",
                     "birth", "death", "died", "died", "holiday", "moving", "exam", "results")
+
+# --- a sweet, a pint of milk, and what the freezer does to it -----------------------------------
+# "Can I freeze a cheesecake" was a punt, "can i freeze a birthday cake" was the cake recipe, and
+# "can i freeze milk" was the card about dairy in pregnancy. Two reasons for the same hole: the
+# freezer rows name a cooked *dish* - a stew, a curry, a soup, a lasagne - and a pudding is not
+# one of those, while every keeping row that does know the answer stands down on the word
+# "freeze" on purpose, because a freezing question is not a shelf life. So the sweets and the
+# dairy that people ask about had no row at all. Same shape as the store cupboard above: a food,
+# and what the freezer does to it, with the number and the one thing that goes wrong. The cake
+# figure is the one the two cake rows in cooking.py already give (2 to 3 months undecorated), so
+# the three do not drift apart.
+FREEZE_WORDS = ("freeze", "freezes", "freezing", "freezer", "freezers", "frozen",
+                "in the freezer", "in a freezer", "in my freezer", "put in the freezer",
+                "put it in the freezer", "goes in the freezer", "go in the freezer")
+
+FREEZE_SWEETS = (
+    (("cheesecake", "cheesecakes", "baked cheesecake", "new york cheesecake",
+      "no bake cheesecake"),
+     "Yes, and a cheesecake freezes better than almost any other pudding: slice it first and "
+     "wrap each slice, or double-wrap the whole tin, and it keeps 1 to 2 months. Thaw the slices "
+     "in the fridge overnight rather than on the side, because a warm thaw makes the cheese weep."),
+    (("birthday cake", "sponge cake", "sponge", "victoria sponge", "victoria sandwich",
+      "madeira cake", "layer cake", "cake", "cakes"),
+     "Yes: cool it completely, leave the icing off, wrap the sponge in two layers and it keeps "
+     "2 to 3 months. Thaw it still wrapped in the fridge overnight, then ice it, because a cake "
+     "iced before it goes in comes out with the icing stuck to the paper."),
+    (("trifle", "trifles"),
+     "No, and this is the pudding to eat fresh: jelly weeps, cream splits and the sponge goes "
+     "soggy as it thaws, so what comes out is watery at the bottom and grainy on top. Make it the "
+     "day before at most and keep it in the fridge."),
+    (("panna cotta", "panna cottas"),
+     "No: the gelatine weeps as it thaws and the cream sets grainy, so a frozen one never comes "
+     "back to that just-set wobble. Make it the day before and keep it in the fridge, where it "
+     "holds 2 to 3 days."),
+    (("tiramisu", "tiramisus"),
+     "It freezes, though it is better fresh: cover the dish and it keeps up to 2 months, then "
+     "thaw it in the fridge overnight. Expect the sponge to come back a little wetter and dust "
+     "the cocoa on after it thaws, not before."),
+    (("custard", "home made custard", "custard sauce"),
+     "Yes, in portions for up to 3 months, and cornflour in it is what makes it survive: a plain "
+     "egg custard can look watery or grainy once thawed. Thaw it in the fridge and then warm it "
+     "gently in a pan, whisking, rather than in the microwave, which splits it."),
+    (("chocolate mousse", "mousse", "mousses", "lemon mousse", "chocolate pot",
+      "chocolate pots"),
+     "Yes, up to 2 months: freeze it in the pots or in a tub with the surface pressed flat, and "
+     "thaw it in the fridge for a few hours. A mousse weeps a little as it thaws, so stir it "
+     "through before you serve it and nobody can tell."),
+    (("milk", "a pint of milk", "semi skimmed milk", "skimmed milk", "whole milk",
+      "breast milk", "formula", "goats milk"),
+     "Yes, and it keeps about a month in the freezer: pour off a little first, because milk "
+     "expands and splits the bottle. Thaw it in the fridge and shake it well, since the fat and "
+     "water separate; it is fine for cooking and on cereal, a bit thinner to drink."),
+)
+
+FREEZE_SWEET_NAMES = tuple(name for names, _ in FREEZE_SWEETS for name in names)
+
+# A recipe, a nutrition line, a pregnancy line or a shelf life is a different question, and the
+# keeping rows already answer the last of those. "Thaw" is the other half of the freezer and it
+# belongs to the thaw and refreeze rows, not here.
+FREEZE_SWEET_AVOID = ("recipe", "recipes", "how do i make", "how to make", "homemade",
+                      "from scratch", "how do i cook", "how long to bake", "cooking time",
+                      "healthy", "unhealthy", "fattening", "calories", "good for you",
+                      "pregnant", "pregnancy", "breastfeeding", "nursing", "weaning",
+                      "allergy", "allergic", "lactose", "how much milk", "ounces",
+                      "keep", "keeps", "keeping", "last", "lasts", "use by",
+                      "out of date", "past the date", "still ok", "still good",
+                      "defrost", "thaw", "thawed", "thawing", "refreeze",
+                      # ice cream already has a freezer row of its own, and it is not a question
+                      # about freezing something
+                      "ice cream", "ice lolly", "ice lollies",
+                      # a freezer that has stopped, or food left out of it, is the cold-chain rows'
+                      "power cut", "broken", "stopped working", "left out", "out of the freezer")
+
+
+def _freeze_a_sweet(memory, understood):
+    """The freezer answer for the sweet or the milk the line names."""
+    said = " " + str((understood or {}).get("clean")
+                      or (understood or {}).get("text") or "").lower() + " "
+    best = None
+    for names, reply in FREEZE_SWEETS:
+        for name in names:
+            if " %s " % name in said or said.startswith(name + " "):
+                if best is None or len(name) > best[0]:
+                    best = (len(name), reply)
+                break
+    return best[1] if best else None
+
 
 _DAY_AFTER_ENTRY = entry("keep-the-day-after", (_DAY_AFTER_FOODS, _DAY_AFTER),
           "Cooled within two hours and put straight in the fridge, cooked chicken, meat, fish and "
@@ -756,7 +915,13 @@ SC_KEEP_AVOID = _LAST_TIME + _CLEANING_WITH_IT + (
                  # a thing asks how long to do it, where "how long does it keep" asks the tin
                  "how long for", "how many minutes",
                  "cook", "cooking", "roast", "roasting", "boil", "boiling", "joint", "gammon",
-                 "take to cook", "how long to cook", "in the oven", "air fryer", "slow cooker")
+                 "take to cook", "how long to cook", "in the oven", "air fryer", "slow cooker",
+                 # a pet's tea is its dinner, and it is not going off like the tin: "my dog has
+                 # gone off his tea" was the shelf life of tea instead of a dog to ring the vet
+                 # about, and the same goes for any animal named in a keeping question.
+                 "dog", "dogs", "puppy", "pups", "cat", "cats", "kitten", "kittens",
+                 "rabbit", "rabbits", "hamster", "hamsters", "budgie", "budgies",
+                 "guinea pig", "guinea pigs", "pet", "pets", "vet")
 
 
 def _storecupboard_keep(memory, understood):
@@ -897,6 +1062,20 @@ CUT_WORDS = ("power cut", "power cuts", "power went off", "power goes off", "pow
              "power goes", "power go", "power went", "power came back", "power is back",
              "when the power goes", "if the power goes", "if the power cuts")
 
+# "cut out" names the supply and it also names the point: "im starting to think im not cut out for
+# teaching" was answered with the two freezer numbers, because the words "cut out" are in the ask
+# list. The point is the opinion held about a person and the supply is a thing that stopped, so the
+# words after "cut out" decide it - "for" and "to (be)" are the aptitude, and every other line keeps
+# the outage.
+CUT_OUT_FOR = re.compile(r"\bcut out (?:for|to)\b", re.I)
+
+
+def _cut_out_for_is_an_aptitude(understood):
+    """True when "cut out" is about being suited to a job, so the cold-chain row stands down."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("norm_text") or "")
+    return bool(CUT_OUT_FOR.search(said))
+
+
 # The supply going off is one question and what the freezer did about it is another: a door that
 # stayed shut means the food is fine, and the answer is the two numbers rather than the bin.
 WHEN_WORDS = ("last night", "yesterday", "overnight", "this morning", "today", "hours", "hour",
@@ -1011,6 +1190,8 @@ def _cheese_mould(memory, reading):
 ENTRIES += [
     # The bare line ("we had a power cut last night") asks for the two numbers, not for the bin.
     entry("cold-cut", (CUT_WORDS, WHEN_WORDS), COLD_REPLIES["cut"], bias=2, ask=CUT_WORDS,
+          # "not cut out for the job" is a person's doubt, not an outage
+          guard=lambda understood: not _cut_out_for_is_an_aptitude(understood),
           avoid=COLD_NOT),
     # What the freezer did is more specific than the cut, so these sit above the general row.
     entry("cold-thawed", (THAW_WORDS, WHEN_WORDS + ("meat", "chicken", "food", "freezer")),
@@ -1124,7 +1305,16 @@ ENTRIES += [
 # not a paragraph but three sentences - the test, the trick, and the keeping - and the line
 # chooses which one leads. The fogged-spectacles answer in cleaning.py is the same shape: the
 # cause first when the line asks why, the fix first when it asks what to do.
-RIPEN_WORDS = ("ripe", "riper", "ripen", "ripens", "ripening", "unripe", "underripe",
+# A fruit that is not ripe yet is said by the colour about as often as by the touch, and "green"
+# was in none of these lists: "my plums are still green" and "the pears are too green" were the
+# only ripeness complaints that had no row at all, while "still hard" had two. The words are
+# named once and read by all three lists below - the key side, the ask side and the stated side -
+# because they are one family and only the sentence around them changes.
+UNDER_RIPE = ("green", "still green", "too green", "very green", "so green", "green as",
+              "not ripened", "hasnt ripened", "hasn't ripened", "didnt ripen", "didn't ripen",
+              "wont ripen", "refusing to ripen")
+RIPEN_WORDS = UNDER_RIPE + (
+               "ripe", "riper", "ripen", "ripens", "ripening", "unripe", "underripe",
                "overripe", "hard", "firm", "still hard", "ready", "ready to eat",
                "soft enough", "tell if", "know if", "how do i tell", "how can i tell",
                "when is it ready", "sweet enough",
@@ -1296,7 +1486,8 @@ KEEP_ASKS = ("keep", "keeps", "store", "storing", "storage", "last", "lasts", "h
 # A line that says the fruit will not ripen yet has already done the test: "the melon i bought is
 # rock hard" wants the trick, not a paragraph on how to squeeze a melon, so the state of it leads
 # to the trick the same way the verb does.
-RIPEN_ASKS = ("ripen", "ripens", "ripening", "hurry", "faster", "speed it up",
+RIPEN_ASKS = UNDER_RIPE + (
+              "ripen", "ripens", "ripening", "hurry", "faster", "speed it up",
               "speed them up", "softer", "soften", "still hard", "rock hard", "hard as",
               "too hard", "not ripe", "unripe", "still firm", "sour", "tasteless", "no flavour",
               "no flavor", "get it ripe", "get them ripe", "make it ripe", "make them ripe",
@@ -1379,7 +1570,8 @@ ENTRIES += [
 # stone as a way of saying how hard they are, and the knife row answered it. So the hardness
 # stated is its own key, and a row built on it keeps its place in front of the knife even when the
 # line says "stones", "core" or "chop" - the fruit is not ripe, and that is the whole question.
-UNRIPE_STATED = ("hard", "hard as", "as hard as", "rock hard", "still hard", "so hard",
+UNRIPE_STATED = UNDER_RIPE + (
+                 "hard", "hard as", "as hard as", "rock hard", "still hard", "so hard",
                  "unripe", "not ripe", "nowhere near ripe", "too hard", "firm as", "as firm as",
                  "like a stone", "like stones", "as stones", "as a stone", "sour", "tasteless",
                  "no flavour", "no flavor", "won't ripen", "wont ripen", "will not ripen",
@@ -1451,6 +1643,25 @@ ENTRIES += [
     for names, test, trick, keep in RIPEN_TABLE
 ]
 
+# A vegetable softens in a pan, not on a windowsill, and this row reads "soften" and "how long"
+# with no fruit named: "how long do carrots take to soften" was answered "Most fruit ripens on the
+# counter in 2 to 4 days" and the carrot's own five-to-seven-minutes card never ran. A vegetable
+# named in the line is the pan's question, so the fruit row stands down on the vegetables people
+# actually ask the time for; a fruit in the same list ("soft fruit") is not in it.
+_NOT_A_FRUIT = ("carrot", "carrots", "potato", "potatoes", "new potato", "new potatoes",
+                "parsnip", "parsnips", "swede", "swedes", "turnip", "turnips", "beetroot",
+                "cabbage", "cabbages", "broccoli", "cauliflower", "sprout", "sprouts",
+                "onion", "onions", "leek", "leeks", "celery", "courgette", "courgettes",
+                "aubergine", "aubergines", "pumpkin", "squash", "butternut", "sweet potato",
+                "sweet potatoes", "green bean", "green beans", "runner bean", "runner beans",
+                "pea", "peas", "sweetcorn", "spinach", "kale", "chard", "fennel", "asparagus",
+                "artichoke", "artichokes", "mushroom", "mushrooms", "pepper", "peppers",
+                "shallot", "shallots", "spring onion", "spring onions", "chestnut", "chestnuts",
+                "lentil", "lentils", "chickpea", "chickpeas", "bean", "beans", "chickpeas",
+                "pasta", "rice", "noodle", "noodles", "couscous", "quinoa", "barley",
+                "stock", "stew", "soup", "curry", "casserole", "mince", "chicken", "beef",
+                "lamb", "pork", "sausage", "sausages", "egg", "eggs")
+
 ENTRIES.append(
     # "my peaches are hard as stones" then "will they ripen": the second line names no fruit at
     # all, and the table rows need one, so the fruit is read from the line it leans on and from
@@ -1463,7 +1674,8 @@ ENTRIES.append(
           _ripen_from_the_chat, bias=3,
           avoid=("bread", "cake", "cheese", "banana bread", "yoghurt", "yogurt", "milk",
                  "chicken", "meat", "fish", "wine", "beer", "sourdough", "dough", "starter",
-                 "breast", "bump", "pregnancy", "pregnant", "nappy", "nappies", "potty")))
+                 "breast", "bump", "pregnancy", "pregnant", "nappy", "nappies", "potty")
+          + _NOT_A_FRUIT))
 
 ENTRIES += [
     # The keeping table's cheese row names the cheeses but not the store question, so
@@ -1823,17 +2035,22 @@ def _produce_gone_off(memory, reading):
     """The mould verdict for the produce the line names, in the kitchen rather than the garden."""
     said = " %s " % (((reading or {}).get("clean") or "").lower())
 
-    def thing(group):
+    def thing(group, categories=False):
         """The one produce name in the line from this group, or None.
 
         The longest form wins so "salad leaves" is not read as "salad", and a category word
         ("berries", "punnet", "produce") gives None, which keeps the generic sentence.
+
+        A branch that never names the thing it is talking about can take a category word, so the
+        leaves branch does: "salad leaves gone slimy" was read as "salad", a category, and
+        answered with the fuzz sentence, while "lettuce gone slimy" got the slime sentence. Say
+        so with categories=True and the rule is the branch's own.
         """
         hit = None
         for name in sorted(group, key=len, reverse=True):
             if (" %s " % name) in said or said.strip().startswith(name + " "):
                 if name in _OFF_GROUP_WORDS:
-                    return None
+                    return name if categories else None
                 hit = name
                 break
         return hit
@@ -1846,7 +2063,7 @@ def _produce_gone_off(memory, reading):
         return "the " + name, one != name
 
     berries = phrase(thing(OFF_BERRIES))
-    leaves = phrase(thing(OFF_LEAVES))
+    leaves = phrase(thing(OFF_LEAVES, categories=True))
     citrus = phrase(thing(OFF_CITRUS))
     soft = phrase(thing(OFF_SOFT))
     firm = phrase(thing(OFF_FIRM))
@@ -1890,3 +2107,12 @@ ENTRIES.append(
           (OFF_BERRIES + OFF_LEAVES + OFF_CITRUS + OFF_SOFT + OFF_FIRM + OFF_ANY, OFF_WORDS),
           _produce_gone_off, bias=4, ask=OFF_WORDS, avoid=OFF_AVOID,
           guard=_produce_is_named))
+
+
+ENTRIES.append(
+    # The sweet that goes in the freezer, and the milk: one row, one table (see FREEZE_SWEETS).
+    # The ask is the sweet itself, so a line that says "freeze" about a stew or a curry is still
+    # the cooked-dish row's question, and the avoid list keeps the recipe, the nutrition line and
+    # the shelf life, which the keeping rows answer better.
+    entry("freeze-sweet", (FREEZE_SWEET_NAMES, FREEZE_WORDS), _freeze_a_sweet, bias=3,
+          ask=FREEZE_SWEET_NAMES, avoid=FREEZE_SWEET_AVOID))

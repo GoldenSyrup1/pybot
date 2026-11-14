@@ -90,6 +90,21 @@ def _a_strap_not_the_device(understood):
     return bool(_STRAP.search(text)) or not _SOAKING.search(text)
 
 
+# A machine that bangs is the machine's own business, and the laundry rows answer it. The words
+# for the plumbing have to be in the line as well for the bang to be the pipes.
+_THE_MACHINE = ("washing machine", "washer", "dishwasher", "tumble dryer")
+_THE_PLUMBING = ("pipe", "pipes", "tap", "taps", "shower", "toilet", "cistern", "stop tap",
+                 "valve", "valves", "water hammer", "mains", "plumbing", "radiator", "boiler")
+
+
+def _the_machine_its_own_bang(memory_or_understood, understood=None):
+    read = understood if understood is not None else memory_or_understood
+    words = " " + " ".join((read or {}).get("words") or ()) + " "
+    if not any(f" {machine} " in words for machine in _THE_MACHINE):
+        return False
+    return not any(f" {part} " in words for part in _THE_PLUMBING)
+
+
 ENTRIES = [
 # "do i need a loft ladder" was the live-leak card - catch the drip, cut the light circuit, get a
 # roofer out today - because the roof-leak row keys the loft and the ladder, for the "is it safe to
@@ -115,7 +130,10 @@ entry("loft-ladder",
              "tarpaulin", "roof", "roofs", "gutter", "gutters", "downpipe", "chimney",
              "solar", "window", "windows", "paint", "painting", "decorating", "wallpaper",
              "wall", "walls", "hedge", "hedges", "pool", "swimming", "bunk", "bunk bed",
-             "car", "van", "boat", "loft conversion")),
+             "car", "van", "boat", "loft conversion",
+             # and a ladder in a stocking is not a ladder up a wall: "how do i stop ladders in
+             # tights" was given the folding aluminium one bolted to the hatch frame
+             "tights", "stockings", "snag", "snagged", "snags")),
 # The day after the ladder goes in, the question is the floor: "how do i board my loft" was a
 # shrug on main. It is the same job as the ladder - the joists are the only thing that carries a
 # person - so the two rows sit together and stand down for each other.
@@ -311,6 +329,10 @@ entry("mud-on-a-kit",
           # a radiator that bangs when the heating comes on is air, which the radiator rows answer
           # - and a knee that clunks is a joint, not a pipe: "my knee makes a clunking noise" was
           # answered with the water hammer card
+          # "the washing machine bangs when it spins" is the machine, not the plumbing: the drum
+          # out of balance, a tangle, the transport bolts left in. A machine only belongs to this
+          # row when the line also names the pipe, tap, shower or toilet that bangs with it.
+          guard=lambda understood: not _the_machine_its_own_bang(understood),
           avoid=("radiator", "radiators", "boiler", "heating", "trv", "thermostatic",
                  "knee", "knees", "kneecap", "hip", "hips", "shoulder", "shoulders", "elbow",
                  "wrist", "ankle", "finger", "fingers", "thumb", "jaw", "joint", "joints",
@@ -434,5 +456,53 @@ entry("tiles-quantity",
              "cost", "costs", "price", "prices", "cheap", "cheapest", "expensive",
              "how much is", "how much does", "splashback", "splash back", "bathroom design"),
       bias=2),
-
+    # The parts of a house that have a name and no explanation: a person meets them on a survey, a
+    # builder's quote or a wiring job, and "what is a lintel" was the search hedge.
+    entry("lintel",
+          (("lintel", "lintels", "a lintel"),
+           ("what", "whats", "what is", "mean", "means", "explain", "do i need", "need one",
+            "how much", "cost", "above", "over", "window", "door", "crack", "replace")),
+          ("A lintel is the beam over a window or a door opening that carries the wall above it, so "
+           "the bricks do not sit on the frame. Older houses often have a timber one over a "
+           "doorway and a stone or steel one over a window; a new opening or a wider one needs a "
+           "steel beam, designed and signed off by a structural engineer. If there is a stepped "
+           "crack running up from the corner of a window, the lintel is the first thing to check, "
+           "and it is a builder's job, not a filler job."),
+          explain=True, bias=2),
+    entry("joist",
+          (("joist", "joists", "a joist", "floor joists", "ceiling joists", "joist hanger"),
+           ("what", "whats", "what is", "mean", "means", "explain", "how far", "span", "apart",
+            "spacing", "cut", "notch", "rotten", "rot", "replace", "size", "how much")),
+          ("A joist is one of the beams under a floor or above a ceiling that carries the boards "
+           "you walk on, usually timber, set about 400mm apart, with cables and pipes running "
+           "through the gaps. You may notch one at the top edge near a support, never in the "
+           "middle of the span, and never drill through the bottom edge where it is in tension. "
+           "A joist that is soft, stained or sagging is a surveyor's or builder's question, not a "
+           "DIY one, because the fix changes the structure."),
+          explain=True, bias=2),
+    entry("rcd",
+          (("rcd", "rcbo", "residual current device", "rcd switch", "earth leakage",
+            "fuse box", "consumer unit"),
+           # the fault words ("trip", "reset") are not here: a person whose switch keeps
+           # tripping is asking what to do, not what an RCD is, and the definition took
+           # "my rcd keeps tripping", "my rcd wont reset" and "my rcd trips when it rains" away
+           # from the rows on main that answer them.
+           ("what", "whats", "what is", "mean", "means", "explain", "do", "does",
+            "difference", "difference between", "test", "why")),
+          ("An RCD is the switch in the consumer unit that cuts the power when current leaks to "
+           "earth - through a damaged cable, a wet socket, or a person - and it works in about 30 "
+           "milliseconds, which is fast enough to save a life. It is different from the MCB, which "
+           "protects the cable from overload, so a tripping RCD means something is leaking "
+           "somewhere rather than using too much. Press the test button twice a year, and if it "
+           "keeps tripping, unplug everything on that circuit, reset it, and add things back until "
+           "it goes - a tripping RCD that will not reset is an electrician's visit."),
+          explain=True, bias=2,
+          # a fuse that has blown, a socket with nothing working and a shock are other answers
+          avoid=("blown", "blown fuse", "fuse keeps blowing", "electric shock", "shocked",
+                 "no power", "power cut", "socket not working", "light not working",
+                 # a fault has a fix of its own already on main, and it is more specific than
+                 # the paragraph above: these three lines lost their answers to the definition
+                 "keeps tripping", "keeps tripping out", "trips when", "trips whenever",
+                 "wont reset", "won't reset", "will not reset", "keeps cutting out",
+                 "trips again", "trips every", "tripped and wont", "tripped and won't")),
 ]

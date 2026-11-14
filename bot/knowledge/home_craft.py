@@ -12,10 +12,25 @@ inside the function for that reason: this module is imported by `home.py`, not t
 round, and it has no ENTRIES of its own, so the registry does not read it as a second domain.
 """
 
+import re
+
+
+_A_DEPOSIT_COMING_BACK = re.compile(
+    r"\b(?:tenancy|scheme|landlord|letting agent|deposit protection|moved out|end of tenancy|"
+    r"deposit back|deposit returned|deposit return|deposit paid|paid a deposit)\b")
+
+
+def _a_deposit_coming_back(understood):
+    """True when the deposit line is a tenancy one, not somebody saving towards a deposit."""
+    read = understood if isinstance(understood, dict) else {}
+    said = " ".join(str(read.get("clean") or read.get("text") or "").lower().split())
+    return bool(_A_DEPOSIT_COMING_BACK.search(said))
+
 
 import re
 
 from ..understanding.topics import the_bin_is_on_a_machine
+from .costs import A_AGE_OWNED
 
 # A food named with its own smell is the food's question, and the fridge is only where it is:
 # "the milk in my fridge smells off but the date is fine" was told to wash out the door seal and
@@ -41,6 +56,124 @@ def _not_the_food_in_the_fridge(understood):
 # its mind, because an entry whose reply is a function stops carrying the conversation a turn
 # later: after "my boiler needs its yearly service" the age in "its 8 years old" reached the
 # engineer's-price answer instead of the lifespan one.
+# A fixture that has stopped is not an appliance, and the plug-and-door-switch first aid is the
+# wrong first thing to try on a shower, a tap or a toilet - no appliance row names any of them.
+# Until they had a row of their own these lines were answered by whatever else their words touched:
+# "the hot tap stopped working" reached the bank's contactless card ("In the bank's own app there
+# is usually an 'Add to Apple Pay'"), "my toilet has stopped working" the fibre answer, "my shower
+# isnt working" the extractor fan (that row holds the word shower) and "the plug socket has stopped
+# working" the skirting-tape row, while "the shower has stopped working", "the shower broke" and
+# "the doorbell has stopped working" got only a listening line back. The fixture named in the line
+# says which first check to give, so one row answers them all and no fixture needs a row of its own.
+# The fault words are the ones that say the thing is not running at all: a named symptom (leaking,
+# blocked, wont drain, wont flush, cold) is the row that knows that symptom, and it keeps the line.
+STOPPED_ALTOGETHER = (
+    "stopped working", "stops working", "stopped work", "not working", "isnt working",
+    "isn't working", "doesnt work", "doesn't work", "wont work", "won't work", "no longer works",
+    "broken", "broke", "broken down", "broke down", "packed in", "packed up", "gave up",
+    "dead", "no power", "wont come on", "won't come on", "wont turn on", "won't turn on",
+    "wont switch on", "won't switch on", "faulty", "gone wrong", "went wrong")
+
+# Longest first, so "power shower" is the shower and not a power cut, and a fixture is found by the
+# words the person typed rather than by a list of subjects: "the hot tap stopped working" has the
+# subject "tap", and "my shower isnt working" the subject "shower", but a line can reach the reading
+# with no subject at all and the fixture is still the thing it names. A dead socket is not here: it
+# has its own row, and the paint rows that used to take it were the bug (see `decorating`).
+FIXTURE_FIRST_CHECKS = (
+    (("power shower", "electric shower", "shower", "showers"),
+     "Start at the switch that feeds it: the pull cord or the wall switch, then the fuse in the "
+     "unit, because a dead shower is usually that. If the unit lights up but no water runs, it is "
+     "the solenoid valve or scale in the head, and on a mixer run the other hot taps first."),
+    (("mixer tap", "monobloc", "tap", "taps", "faucet", "faucets"),
+     "Look for a small screw slot on the pipe under the sink or the bath, because a tap that will "
+     "not run at all is usually an isolator someone turned off or a valve that has seized. If the "
+     "water comes but only trickles, unscrew the spout end and soak the aerator in vinegar."),
+    (("toilet", "toilets", "loo", "cistern"),
+     "Turn the isolation screw off, lift the lid and watch the cistern fill: a float arm stuck or "
+     "an inlet valve furred up with scale is the usual reason the loo has stopped. A button with "
+     "no resistance is the flush valve or its link, which is a cheap part."),
+    # "door bell" and "door chime" are not here: a remembered key with "door" in it is handed to
+    # the door group of the trade table, so the follow-up after a dead doorbell sent the person to
+    # a joiner. "doorbell" alone is one word, and "chime", "chimes" and "bell push" carry the
+    # lines that say it the other way round.
+    (("doorbell", "doorbells", "chime", "chimes", "bell push", "bell"),
+     "Start with the power to it: a wired bell has a transformer near the consumer unit, and a "
+     "wireless one has a battery in the push and another in the chime. A push that is stuck, wet "
+     "or corroded is the next thing."),
+    (("garage door", "up and over door", "roller door", "sectional door"),
+     "Use the manual release first - usually a red cord or a handle on the mechanism - so the car "
+     "is not stuck in, then check the power, the remote's battery and the safety sensors at the "
+     "bottom of the tracks. A door that opens a foot and stops is the travel limits or a broken "
+     "spring, and a spring is not a DIY job."),
+    (("heated towel rail", "towel rail", "towel radiator", "ladder rail",
+      "radiator", "radiators", "rad", "rads"),
+     "Bleed it, then take the head off the thermostatic valve and press the pin: one cold radiator "
+     "is air or a pin stuck down. If every radiator is cold it is the boiler, the programmer or a "
+     "zone valve, and one that is cold at the bottom wants a flush."),
+)
+
+
+def _the_fixture_that_stopped(understood):
+    """The first check for the fixture a line says has stopped, or None.
+
+    The fault words say the thing is not running at all, and the fixture is read from the line's
+    own words with the longest phrase first, so "power shower" is not a power cut and "plug
+    socket" is not a plug-in appliance.
+    """
+    reading = understood if isinstance(understood, dict) else {}
+    said = " ".join(str(one) for one in (reading.get("words") or ())).lower()
+    if not said:
+        said = str(reading.get("clean") or reading.get("text") or "").lower()
+    if not said or not any(word in said for word in STOPPED_ALTOGETHER):
+        return None
+    for names, check in FIXTURE_FIRST_CHECKS:
+        if any(re.search(r"\b" + re.escape(name) + r"s?\b", said) for name in names):
+            return check
+    return None
+
+
+# Every row below answers a fixture that has stopped, so every one of them has to stay out of a
+# named symptom, a fixture being bought or rented, a decorating job and a shower enclosure
+# whose door or tray has gone. Shared so the rows cannot drift apart.
+A_FIXTURE_IS_NOT_A_DECORATING_JOB = ("leak", "leaks", "leaking", "drip", "dripping", "blocked", "blockage",
+                     "wont drain", "won't drain", "not draining", "wont flush", "won't flush",
+                     "smell", "smells", "smelly", "noise", "noisy", "banging", "rattling",
+                     "cold", "hot water", "pressure", "limescale", "scale", "mould", "mold",
+                     "buy", "buying", "worth", "cost", "price", "cheaper", "rent", "landlord",
+                     "install", "installing", "fit a new", "replace", "replacing", "replacement",
+                     "paint", "painting", "tile", "tiling", "decorate", "decorating",
+                     "how do i", "how to", "should i",
+                     # The door, the tray and the seal are parts of the enclosure, and a broken one
+                     # is a glazing or a seal question: "the shower door is broken" is not the supply
+                     # and the first check for the supply is the wrong thing to tell them.
+                     "shower door", "shower doors", "shower screen", "shower tray", "door seal",
+                     # Which radiators are cold is the system's question, and the row that reads
+                     # "cold upstairs and warm downstairs" answers it better than one radiator's
+                     # first check: "the downstairs radiator is not working" keeps that answer.
+                     "upstairs", "downstairs", "top floor", "first floor")
+
+def _a_fixture_that_stopped_was_the_question(understood):
+    """The first check for the fixture the line names, or None for a line that names none."""
+    return _the_fixture_that_stopped(understood) is not None
+
+
+def _the_stopped_fixture_entries(entry):
+    """One row per fixture, not one row for the family.
+
+    A family key is remembered as one list of words, and the next turn hands that list to the
+    trade table: a shower, a tap, a doorbell and a cistern all remembered "radiator", so "my
+    shower isnt working" was sent to a Gas Safe engineer. A row whose keys are its own fixture
+    is remembered as that fixture, and the trade that turns up is the right one.
+    """
+    for _names, _check in FIXTURE_FIRST_CHECKS:
+        yield entry("a-fixture-that-stopped-" + _names[0].replace(" ", "-"),
+                    (_names, STOPPED_ALTOGETHER),
+                    lambda memory, reading: _the_fixture_that_stopped(reading),
+                    avoid=A_FIXTURE_IS_NOT_A_DECORATING_JOB,
+                    # the row that names the fixture the line is about outranks a biased
+                    # neighbour, and the guard keeps it to a fixture that has stopped.
+                    guard=_a_fixture_that_stopped_was_the_question, bias=3)
+
 BOILER_DIY = ("myself", "own", "diy", "legal", "allowed")
 
 # The permission words are in every other boiler line there is: "my own boiler keeps switching
@@ -95,10 +228,260 @@ def _the_fly_is_not_a_verb(understood):
     return _A_FLY_THAT_TRAVELS.search(text) is None
 
 
+# A bar is a unit only when the line makes it one, the same rule the money rows use for a figure:
+# "drop bars", "my bars are too low" and "should i get drop bars" are the bar you hold on a
+# bicycle, and the boiler gauge was answering all three with "top the pressure up to between 1 and
+# 1.5 bar". A figure beside it ("half a bar", "1.5 bar", "two bars") or a word that says what is
+# being measured ("pressure", "psi", "gauge") is what makes it a reading.
+_A_BAR_WITH_A_FIGURE = re.compile(
+    r"\b(?:\d+(?:\.\d+)?|half|quarter|one|two|three)\s+(?:a\s+)?bars?\b")
+_PRESSURE_WORDS = frozenset(("pressure", "psi", "gauge", "boiler", "boilers", "combi",
+                             "radiator", "radiators", "heating", "central"))
+
+
+def _a_gauge_reading(understood):
+    """False for a bare "bar" that is not a measuring unit."""
+    reading = understood or {}
+    text = str(reading.get("clean") or reading.get("text") or "").lower()
+    words = set(str(one).lower() for one in (reading.get("words") or ()))
+    if words & _PRESSURE_WORDS:
+        return True
+    return _A_BAR_WITH_A_FIGURE.search(text) is not None
+
+
 # A block-paved drive is not the patio's bed: blocks go down on sharp sand alone, no
 # cement, with kiln-dried sand brushed into the joints afterwards - so the row answers
 # "how much mortar for 20 square metres of block paving" with sand and a wacker plate
 # rather than a 5:1 mix the job does not use. A reviewer caught this on the first head.
+# A machine that will not empty is a fault, and "water" or "empty" on its own is not: the
+# drain row keys both words, so a bias that lifted it over its neighbours took "how much water
+# does a washing machine use", "my washing machine isnt heating the water" and "my washing
+# machine smells when it drains" as well as the blocked filter it was written for. Naming the
+# words that are *not* the fault is a list with no end - the litres, the heat, the smell, the
+# cost, the car's screen wash - so the row asks instead for the fault itself, which is a short
+# closed set: a block, a clog, a jam, water that will not go, a drain that is slow.
+_WILL_NOT_EMPTY = re.compile(
+    r"\b(block|blocks|blocked|blockage|blocking|clog|clogs|clogged|clogging|jam|jams|jammed|"
+    r"stuff|stuffed|bunged|plugged)\b"
+    r"|\b(backed|backing)\s+up\b"
+    r"|\b(water\s+(is\s+)?(sitting|standing|left|stuck|pooling|pooled|trapped)|standing water|"
+    r"full of water|water in the drum|water in the bottom|water inside the drum|pool of water|"
+    r"water\s+(wont|won't|not)\s+(go|going|leave|leaving|drain|draining))\b"
+    # the fault said as a negative about the emptying itself: "it doesnt drain", "i cant get the
+    # washing machine to drain", "unable to get the water out", "stopped draining", "drains slowly"
+    r"|\b(no|not|n't|cant|can\s+t|cannot|can\s*['\u2019]?\s*t|couldnt|couldn't|could not|"
+    r"unable|wont|won't|wouldnt|wouldn't|doesnt|doesn't|didnt|didn't|isnt|isn't|wasnt|wasn't|"
+    r"never|stopped|fail|fails|failed|failing|struggling|struggles)\b[^.]{0,45}?"
+    r"\b(drain|drains|draining|drained|empty|empties|emptying|emptied|pump|pumps|pumping)\b"
+    r"|\b(drain\w*|pump\w*|emptying)\b[^.]{0,18}?\b(blocked|clogged|jammed|stuck|slow|slowly|"
+    r"sluggish|not working|broken)\b"
+    r"|\b(slow|slowly|sluggish)\b[^.]{0,18}?\b(drain|drains|draining|empty|emptying)\b"
+    r"|\b(empty|emptying|drain|draining)\s+(the|my|its|this)\s+(machine|washer|drum|water)\b"
+    r"|\b(get|getting|got)\s+(the|my|its|this)\s+(water|machine|washer|drum|washing|clothes)\b"
+    r"[^.]{0,22}?\b(out|to drain|to empty)\b"
+    r"|\b(to\s+(get\s+it\s+)?(drain|empty))\b")
+
+
+# The leak row keys the bare word "water", so "my washing machine isnt heating the water" was
+# stopped, unplugged and told to turn the water off - the same trap the drain row was in. What a
+# leak needs is water leaving: a leak, a puddle, a drip, a flood, or water somewhere it should
+# not be. Asking for that also gives "water is coming out of the washing machine" its leak, which
+# it never had: that line was the laundry-sorting card.
+_WATER_LEAVING = re.compile(
+    r"\b(leak|leaks|leaked|leaking|leaky|puddle|puddles|drip|drips|dripping|dribble|"
+    r"flood|floods|flooded|flooding|pour|pours|pouring|seep|seeps|seeping|seeped|"
+    r"spill|spills|spilling|spilt)\b"
+    r"|\b(coming out|came out|running out|spilling out|working its way out|"
+    r"water under|water on the|water in the bottom|water all over|underneath|"
+    r"under\s+(the\s+|my\s+)?(machine|washing machine|washer|drum)|under it|"
+    r"on the floor|all over the floor|wet floor|damp patch)\b")
+
+
+# What a line that is about a wash says: the machine, the cycle, the load. The temperature row
+# holds the bare figures "30" and "40" as key words, so any line with a figure beside a money
+# word could reach it - "my phone bill is 30 a month" was the cost of a 30C wash, and it only
+# showed once "month" stopped reading as a when question.
+A_WASH_NAMED = frozenset((
+    "wash", "washes", "washed", "washing", "laundry", "load", "loads", "cycle", "cycles",
+    "machine", "washer", "tumble", "drum", "eco"))
+
+
+# The figures said as a temperature, and the bare figures. "is 30 or 40 cheaper" is the row's own
+# comparison and names no wash at all, so two of its temperatures in one line is the row's subject
+# as much as the word wash is.
+A_TEMPERATURE_SAID = re.compile(
+    r"\b(?:20|30|40|60)\s*(?:c|degrees?|deg)\b"
+    r"|\b(?:twenty|thirty|forty|sixty)\s+degrees?\b")
+A_BARE_TEMPERATURE = re.compile(r"\b(?:20|30|40|60)\b")
+
+
+def _a_wash_is_named(understood):
+    """True when the line is about a wash, which is the subject this row is about.
+
+    A temperature is only the subject of a line that is already about washing: a bill, a battery
+    and a bus fare are all said with one figure, and each of them is another question. So the row
+    answers a line that names the wash, a line that says a figure as a temperature ("30c",
+    "thirty degrees"), or a line that compares two of its temperatures, which is the row's own
+    question however it is typed.
+    """
+    text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not text:
+        text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    words = text.replace(",", " ").split()
+    if any(word in A_WASH_NAMED for word in words):
+        return True
+    if A_TEMPERATURE_SAID.search(text):
+        return True
+    return len(set(A_BARE_TEMPERATURE.findall(text))) > 1
+
+
+def _it_is_water_leaving(understood):
+    """True when the line has water somewhere it should not be, which is what this row answers."""
+    text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not text:
+        text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    return bool(_WATER_LEAVING.search(text))
+
+
+# The word "washer" is the machine to nearly everyone, and it is also the little rubber ring in a
+# tap and the ring under a bolt. The rows that answer the machine read the bare word, which is
+# right: on the deck almost every line that says "washer" means the appliance. What they must not
+# do is answer a line that names the other one, so a plumbing or fixing word stands them down.
+# "what size washer do i need for a 15mm tap" was told how many kilos a drum holds.
+_A_WASHER = frozenset(("washer", "washers", "washing machine", "washer dryer"))
+_ANOTHER_KIND_OF_WASHER = frozenset((
+    "tap", "taps", "faucet", "faucets", "mixer", "monobloc", "ball valve", "ballcock",
+    "bolt", "bolts", "nut", "nuts", "screw", "screws", "rawlplug", "rawlplugs", "anchor",
+    "anchors", "rivet", "rivets", "dowel", "dowels", "valve", "valves",
+    "radiator", "radiators", "banjo"))
+_THE_MACHINE_ITSELF = frozenset(("washing machine", "washer dryer", "tumble dryer", "dryer",
+                                 "drum", "laundry", "clothes"))
+
+
+# A person who says they have already changed the washer is not asking how to change one: "my
+# kitchen tap was dripping so i changed the washer" was answered with the washing machine's leak
+# card, and the tap card would be nearly as wrong. What is left to do is the seat or the cartridge.
+_A_WASHER_ALREADY_CHANGED = re.compile(
+    r"\b(?:changed|change|replaced|replacing|swapped|swapping|new)\b[^.?!]{0,20}\bwasher\b"
+    r"|\bwasher\b[^.?!]{0,20}\b(?:changed|replaced|swapped|done)\b", re.I)
+_THE_NEXT_TAP_STEP = (
+    "Then it is the seat rather than the washer. Take the head off again and look at the brass "
+    "ring the washer presses on: if it is pitted or scored it can be re-ground with a seat tool, "
+    "and if the tap turns a quarter turn it has a ceramic cartridge instead, which is replaced "
+    "whole and matched by the maker's name stamped on the tap. A cartridge is a ten-minute swap "
+    "and stops it for good; until then, turn the water off at the isolating valve when you leave "
+    "the house.")
+_THE_DRIPPING_TAP = (
+    "A dripping tap is nearly always a worn washer or cartridge: turn the water off at the "
+    "isolating valve under the sink, take the handle off, and take the old part to a hardware "
+    "shop to match it. It's a 20-minute job and saves a lot of water.")
+
+
+def _a_dripping_tap(memory, understood):
+    """The washer is the answer, unless they have already changed it: then it is the seat."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
+    if _A_WASHER_ALREADY_CHANGED.search(said):
+        return _THE_NEXT_TAP_STEP
+    return _THE_DRIPPING_TAP
+
+
+def _not_a_washer_of_another_kind(understood):
+    """False for a washer that is a tap's or a bolt's, which no machine row can answer."""
+    words = set((understood or {}).get("words") or ())
+    if not (_A_WASHER & words):
+        return True
+    if _THE_MACHINE_ITSELF & words:
+        return True
+    return not (_ANOTHER_KIND_OF_WASHER & words)
+
+
+# A report that the washing has been done is a follow-up, not a question about which washer it is:
+# "ive changed the washer" is asking what to do next, and this card is the first thing it must not
+# get. The past forms are here as words because the key matches word forms, not words.
+_A_WASHER_DONE = re.compile(
+    r"\b(?:already|changed|changing|replaced|replacing|swapped|swapping|fitted|fitting|"
+    r"sorted|done|did|tried|trying)\b", re.I)
+
+
+def _a_washer_with_no_other_subject(understood):
+    """True when "washer" is the whole subject of the line, so the answer has to hold both senses."""
+    words = set((understood or {}).get("words") or ())
+    if not (_A_WASHER & words):
+        return False
+    if _THE_MACHINE_ITSELF & words or _ANOTHER_KIND_OF_WASHER & words:
+        return False
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
+    return not _A_WASHER_DONE.search(said)
+
+
+_WASHER_TWO_THINGS = (
+    "Two things in a house are called a washer. The ring inside a tap costs pennies: turn the "
+    "water off at the isolating valve, take the tap apart and take the old ring to a hardware "
+    "shop to match - half an inch fits most taps, three quarters the older big bath taps. If it "
+    "is the machine, the fix depends on what it is doing: water on the floor is usually the door "
+    "seal or a hose, clothes that come out wet is the spin, and no heat is the element. All three "
+    "are cheap parts, so a machine with a sound drum is worth repairing rather than replacing.")
+# The same word in a chat that has already been about a tap is not two things at all: the person
+# who says "i have a washer and a spanner" beside a dripping tap has the part in their hand and
+# wants the next step, and telling them about the machine would be answering nobody.
+_THE_TAP_WASHER = (
+    "Good - then you have what you need. Turn the water off at the isolating valve under the sink "
+    "or the small screw on the pipe, take the handle off and unscrew the head, then pick the old "
+    "washer out with a small screwdriver. Match it at a hardware shop: half an inch fits most "
+    "taps, three quarters the older big bath taps. A smear of silicone grease on the new one and "
+    "it goes back the same way, and the spanner is for the big nut under the handle.")
+_A_TAP_TALK = re.compile(r"\b(?:tap|taps|faucet|dripping|drip|drips|spout|cistern)\b", re.I)
+
+
+def _the_chat_is_about_a_tap(memory, understood):
+    """True when the last turn or two named a tap and nothing named the machine."""
+    turns = (memory or {}).get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list):
+        return False
+    said_now = str((understood or {}).get("text") or (understood or {}).get("clean") or "")
+    said_now = said_now.strip().lower()
+    seen = 0
+    for turn in reversed(turns):
+        if not isinstance(turn, dict):
+            continue
+        text = str(turn.get("user") or "").strip().lower()
+        if not text or text == said_now:
+            continue
+        if _THE_MACHINE_ITSELF & set(text.split()):
+            return False
+        if _A_TAP_TALK.search(text):
+            return True
+        seen += 1
+        if seen >= 2:
+            break
+    return False
+
+
+def _a_washer_two_things(memory, understood):
+    """The washer that a chat has already identified, or the two senses when it has not."""
+    if _the_chat_is_about_a_tap(memory, understood):
+        return _THE_TAP_WASHER
+    return _WASHER_TWO_THINGS
+
+
+def _the_leak_is_a_machines(understood):
+    """The leak row's guard, plus the other sense of "washer": a tap's, not the machine's."""
+    return _it_is_water_leaving(understood) and _not_a_washer_of_another_kind(understood)
+
+
+def _a_machine_that_will_not_empty(understood):
+    """True when the line names a machine that will not empty, which is what this row answers.
+
+    The appliance or the drum is in the key already; this is the fault half, so a question that
+    only mentions the water - how much it uses, how hot it gets, what it smells of - stands the
+    row aside and keeps its own answer.
+    """
+    text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not text:
+        text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    return bool(_WILL_NOT_EMPTY.search(text))
+
+
 def _the_bed_for_paving_or_blocks(memory, reading):
     line = (reading.get("clean") or reading.get("text") or "").lower()
     words = set(reading.get("words") or ())
@@ -119,6 +502,72 @@ def _the_bed_for_paving_or_blocks(memory, reading):
             "ten bags of cement and two bulk bags of sand. The mix should be crumbly-damp "
             "- squeeze a ball and no water runs - and the joints are pointed afterwards "
             "with a 4:1 mix, not the bed mix.")
+# A stool is a chair and a stool is what a person passes, and the reading does not always settle
+# which: "my stools are loose" came in with no body part, no own output and no health topic at
+# all, so the chair row answered a stomach complaint with the wood glue. When the reading says
+# nothing, the words still do: a line that says the looseness of what a body passes, and says
+# nothing about a piece of furniture, is the body's.
+# The plural is the gut's and the singular is the chair's: "my stool is loose" is the leg, and
+# the reading and `tests.test_loose_stools_are_the_stomach` already settle that, while "my stools
+# are loose" is one person and the part of them the plural names. "poo" and "bowels" are never
+# furniture, so they count in either number.
+_LOOSE_STOOL = re.compile(
+    r"\b(?:stools|poos?|faeces|feces|bowels?)\b[^.?!]{0,24}?"
+    # "bowels" is already plural, so "loose" is the whole of the shape here
+    r"\b(?:loose|runny|watery|soft|sloppy)\b"
+    r"|\b(?:loose|runny|watery|sloppy)\s+(?:stools|poos?|faeces|feces)\b", re.I)
+# Anything that says the line is about a chair or a table instead: the fixing words are in here,
+# so "the loose leg on my stool" stays with the glue even though it says loose and stool.
+_FURNITURE_WORDS = re.compile(
+    r"\b(?:chair|chairs|table|tables|bench|benches|desk|desks|leg|legs|glue|screw|screws|"
+    r"tighten|joint|joints|wood|wooden|seat|furniture|varnish|paint|repair|fix|wobbl\w*|"
+    r"rock\w*|rickety)\b", re.I)
+
+
+def _a_chair_and_not_a_body(understood):
+    """False when the line is the looseness of what a body passes, rather than a wobbly chair."""
+    from .body import the_stomach_is_what_it_is_about
+
+    understood = understood if isinstance(understood, dict) else {}
+    if the_stomach_is_what_it_is_about(understood):
+        return False
+    text = str(understood.get("clean") or understood.get("text") or "").lower()
+    if _LOOSE_STOOL.search(text) and not _FURNITURE_WORDS.search(text):
+        return False
+    return True
+
+
+def _the_fan_stopped(memory, understood):
+    """The answer for the fan that will not sit still, or for a plain appliance that rocks."""
+    text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if re.search(r"\b(?:fan|fans|blade|blades)\b", text):
+        return ("A fan that rocks is usually the base or a bent blade: tighten the nut under the "
+                "base, then take the blade off and sight along it, because one blade out of line "
+                "is the whole wobble and a new blade is a few pounds. Stand it on a hard, level "
+                "floor rather than a rug, and wind out the feet if it has them.")
+    return ("A wobble is a loose base or an uneven floor rather than a fault: wind the feet out "
+            "until it sits flat on all of them, tighten what holds the base to the body, and take "
+            "it off a rug or a soft board, which is what most of them are standing on. If it is "
+            "still rocking it wants shimming on one corner.")
+
+
+# "and the kitchen stuff" is what a person says when the packing is already the chat: the phrase
+# names the room with "stuff" and has no verb in it, so on its own it asks nothing. Asked first
+# thing in a chat it was a whole plan for the boxes ("Leave the kitchen to the second-to-last
+# day..."), answering a house move nobody had mentioned. "stuff" and "the rest" stay keys, but
+# only for a line that has a packing word of its own or that is taking up a chat already about
+# moving.
+_PACKING_VERB = frozenset((
+    "pack", "packs", "packing", "packed", "box", "boxes", "boxed", "boxing", "packup"))
+
+
+def _the_kitchen_stuff_is_a_take_up(understood):
+    """The bare "kitchen stuff" line answers only when it takes up a line before it."""
+    reading = understood or {}
+    said = str(reading.get("clean") or reading.get("text") or "").lower()
+    if set(re.findall(r"[a-z]+", said)) & _PACKING_VERB:
+        return True
+    return bool(reading.get("followup"))
 
 
 # The heat pump explainer is for the machine in the garden, and the words for the ones in the
@@ -170,27 +619,296 @@ def _hair_dryer(memory, reading):
             "a repair - do not open the case, the element is a live part.")
 
 
+def _to_a_figure(value):
+    """A figure a person would say out loud: 4.46 -> 4.5, 2.0 -> 2, 1 -> 1.
+
+    "a wall 6 ft long and 8 ft high" is 4.46 square metres, and a card whose own numbers are
+    "10 to 12" reads as a measurement taken in a laboratory rather than a wall. One decimal is
+    as fine as the sums behind it go, and the trailing zero goes.
+    """
+    return round(float(value), 1)
+
+
+def _counted(value, unit):
+    """The figure with its noun agreed with it: "1 litre", "About 2.5 litres", "1 square metre"."""
+    return "%g %s" % (value, unit if _to_a_figure(value) == 1 else unit + "s")
+
+
+PAINT_WITH_NO_SIZE = (
+    "One litre of emulsion covers about 10 to 12 square metres, and you need two coats, so "
+    "count the wall area and double it: add the walls up as perimeter times ceiling height "
+    "(a 4m by 4m room with 2.4m ceilings is about 38 square metres), take off roughly 1.7 "
+    "square metres for a door and 1.2 for a window, and that room wants about 7 litres - two "
+    "5 litre tins, or a 10 to leave some for touching up. Ceilings and a second colour are "
+    "extra, and a dark colour over a light wall often takes three coats.")
+
+
+def _paint_for_the_room(memory, understood):
+    """The litres for the wall or room in the line, or the method when the line has no size.
+
+    The size the person gave is the answer's raw material: a wall 6 metres long and 2.5 high is
+    15 square metres, and 15 square metres at two coats and 10 to 12 to the litre is about 3
+    litres. Handing back a worked example of a different room answers the method, not the
+    question. A room said as two sides is painted round its walls, so the perimeter times the
+    ceiling height is the area - the height the line names, or 2.4m. A line with no size in it
+    keeps the method, which is the only thing that can be said without one.
+    """
+    from .home import _wall_area
+    area, ceiling, what = _wall_area(understood, memory)
+    if not area:
+        return PAINT_WITH_NO_SIZE
+    # Rounded up to the next half litre, never down: a person who buys 2.5 litres for a wall
+    # that wants 2.7 is one coat short, and the tin sizes are 2.5, 5 and 10 anyway.
+    litres = max(1.0, int(area * 2 / 11.0 * 2 + 0.999) / 2.0)
+    area = _to_a_figure(area)
+    coats = "%g" % _to_a_figure(area * 2)
+    if what == "ceiling":
+        count = ("A ceiling that size is %s, two coats makes %s, and a litre of "
+                 "emulsion covers 10 to 12." % (_counted(area, "square metre"), coats))
+    elif ceiling is None:
+        count = ("That's %s, two coats makes %s, and a litre of emulsion "
+                 "covers 10 to 12." % (_counted(area, "square metre"), coats))
+    else:
+        count = ("A room that size is %s round and %s to the ceiling, so about %s of wall, and "
+                 "two coats makes %s."
+                 % (_counted(_to_a_figure(area / ceiling), "metre"), _counted(ceiling, "metre"),
+                    _counted(area, "square metre"), coats))
+    # A door and a window are a room's business: a single wall of 7 square metres has neither, and
+    # the subtraction only muddles the figure it was just given.
+    if what == "ceiling":
+        tail = ("Give the walls their own sum, and go a coat further when a white ceiling is "
+                "going over a colour rather than over white.")
+    elif ceiling is None:
+        tail = ("Allow a third coat when a dark colour goes over a light one, and give the ceiling "
+                "and any second colour their own sum.")
+    else:
+        tail = ("Take off roughly 1.7 square metres for a door and 1.2 for a window if they are in "
+                "it, allow a third coat when a dark colour goes over a light one, and give the "
+                "ceiling and any second colour their own sum.")
+    return "About %s: %s %s" % (_counted(litres, "litre"), count, tail)
+
+
+WALLPAPER_WITH_NO_SIZE = (
+    "Count drops, not floor: divide the room's perimeter by the 52cm width of a standard roll and "
+    "round up (a 4m by 4m room is 16m round, so 31 drops), then divide a roll's 10m by the ceiling "
+    "height plus the pattern repeat to see how many drops each gives - usually three - and 31 drops "
+    "is about 11 rolls. Buy one extra for a mistake and matching, and keep the batch number the "
+    "same on every roll.")
+
+
+def _wallpaper_for_the_room(memory, understood):
+    """The rolls for the room in the line, or the method when the line has no size.
+
+    A room said as two sides is papered round its walls, so the wall area already worked out for
+    paint is the starting point: the perimeter is that area divided by the ceiling height, a
+    standard roll is 52cm wide, and a 10m roll gives four drops of a plain paper at a 2.4m ceiling
+    and three of a paper with a big repeat. A single wall has no perimeter to read the drops from,
+    so it keeps the method, which is also what a line with no size gets.
+    """
+    from .home import _wall_area, _wall_width_and_height
+    area, ceiling, what = _wall_area(understood, memory)
+    if not area:
+        return WALLPAPER_WITH_NO_SIZE
+    if what == "wall":
+        # A wall with a size in the line is drops along its own width, not a room's perimeter
+        # read off an area: "how much wallpaper for a wall 1m by 1m" is one drop of a 52cm roll,
+        # and the card's own example is a room, which is what it keeps teaching.
+        width, height = _wall_width_and_height(understood, memory)
+        if not width or not height:
+            return WALLPAPER_WITH_NO_SIZE
+        across = int(-(-width / 0.52 // 1))
+        plain = max(1, int(10 // height))
+        patterned = max(1, int(10 // (height + 0.3)))
+        plain_rolls = int(-(-across / plain // 1))
+        patterned_rolls = int(-(-across / patterned // 1))
+        return ("About %s: a wall %s wide and %s high takes %s at the 52cm width of a standard "
+                "roll, and a 10m roll gives %s of a plain paper or %s of one with a big repeat - "
+                "so %s plain and %s patterned. Buy one extra for a mistake and matching, and keep "
+                "the same batch number on every roll."
+                % (_counted(plain_rolls, "roll"), _counted(_to_a_figure(width), "metre"),
+                   _counted(_to_a_figure(height), "metre"), _counted(across, "drop"),
+                   _counted(plain, "drop"), _counted(patterned, "drop"),
+                   _counted(plain_rolls, "roll"), _counted(patterned_rolls, "roll")))
+    if what != "room" or not ceiling:
+        return WALLPAPER_WITH_NO_SIZE
+    round_the_room = area / ceiling
+    drops = int(-(-round_the_room / 0.52 // 1))
+    plain = max(1, int(10 // ceiling))
+    patterned = max(1, int(10 // (ceiling + 0.3)))
+    rolls_plain = int(-(-drops / plain // 1))
+    rolls_patterned = int(-(-drops / patterned // 1))
+    return ("About %d rolls: a room that size is %g metres round and %g metres to the ceiling, so "
+            "%d drops at the 52cm width of a standard roll, and a 10m roll gives %d drops of a "
+            "plain paper or %d of one with a big repeat - so %d rolls plain and %d patterned. Buy "
+            "one extra for a mistake and matching, and keep the same batch number on every roll."
+            % (rolls_plain, round_the_room, ceiling, drops, plain, patterned,
+               rolls_plain, rolls_patterned))
+
+
+# A nail in a wall is two jobs: putting one in, and getting an old one out. The two lines share
+# every noun they use ("nail", "wall", "picture"), so the row below reads the verb and answers
+# the job that was asked for, the way the hair-dryer row reads the fault.
+_A_NAIL_COMES_OUT = ("remove", "removing", "removed", "out", "puller", "pincers", "pull",
+                     "pulling", "pulled", "old", "stuck", "left", "loose", "snapped", "broke",
+                     "broken", "half")
+
+
+def _a_nail_in_the_wall(memory, reading):
+    """How to get an old nail out of a wall, or how to put a new one in so it holds."""
+    words = set(str(one).lower() for one in (reading.get("words") or ()))
+    if words & set(_A_NAIL_COMES_OUT):
+        return ("Grip the head with pincers and slide a scrap of wood under them so the plaster "
+                "does not crush, then ease it out with a slight twist rather than levering "
+                "against the wall. A nail that turns but will not come has lost its grip: punch "
+                "it below the surface with another nail, fill the dent with filler, sand it flat "
+                "and touch up the paint.")
+    return ("Tap it in at a slight downward angle so the weight hangs on the wall instead of "
+            "pulling the head out, and put it into something solid - a stud, found by tapping, "
+            "or brick under the plaster. On plasterboard with nothing behind it a bare nail or "
+            "a picture hook pulls out: use a plasterboard plug or a self-drilling fixing, and "
+            "keep the load light.")
+
+
+# A nail into wood is two questions: how not to split the board, and what size to buy. The same
+# line shapes carry both ("what nail for ...", "how do i stop ... splitting"), so the row reads
+# which one was asked, the way the nail-in-a-wall row reads putting in from taking out.
+_A_SIZE_ASK = ("size", "sizes", "what size", "which size", "what length", "how long", "how big", "how thick", "which nail",
+               "what nail", "what nails", "how many mm", "mm", "gauge", "best nail", "should i use")
+_A_SPLIT_ASK = ("split", "splits", "splitting", "crack", "cracks", "cracking", "splinter",
+                "splinters", "splintering", "snapped")
+
+
+def _the_wood_and_the_nail(memory, reading):
+    """What size of nail to buy, or how to drive one without splitting the board."""
+    words = set(str(one).lower() for one in (reading.get("words") or ()))
+    said = " " + " ".join(str(one).lower() for one in (reading.get("words") or ())) + " "
+    # the asks are phrases ("what size", "how long"), and `words` holds one word each, so the
+    # joined line is what the phrase list is read against
+    if (any(ask in said for ask in _A_SIZE_ASK)) and not (words & set(_A_SPLIT_ASK)):
+        return ("Size the nail to the job, not to the room: 40mm to 50mm lost-head or oval nails "
+                "for skirting and architrave, 50mm to 65mm for a floorboard, 30mm for a 6mm "
+                "batten, and thin panel pins for beading and a back panel. As a rule the nail "
+                "wants to be about two and a half times as long as the piece it is holding, and "
+                "the top third of it has to bite into something solid behind.")
+    return ("Drill a pilot hole first, about three quarters as wide as the nail, and keep it at "
+            "least 25mm in from the end of the board, because that is where a split starts. "
+            "Blunt the point by tapping it once on a hard surface so it cuts the grain instead "
+            "of wedging it apart, and clamp a scrap of wood behind the far face when the board "
+            "is thin. A split that has already opened wants wood glue worked into it and a "
+            "clamp overnight, not another nail.")
+
+
+# The move-and-a-child card answers one question: how to tell a child about the move. Its key
+# carries the feeling words ("upset", "worried", "nervous", "sad", "cope") because a child's feeling
+# is often the whole line - "my son is upset about moving" - and with them the card answered the
+# person who had moved themselves: "im sad after moving house", "i feel sad about moving house",
+# "im worried about moving house" and "we are moving and i feel nervous" all got "Tell them as soon
+# as it is certain ... which room is theirs". A feeling in the speaker's own line is not a question
+# about telling a child, so the card is a guard rather than a longer avoid list: an avoid phrase only
+# covers the wordings someone thought of, and every new feeling word would need another one.
+_A_CHILD_IN_A_MOVE = re.compile(
+    r"\b(?:kid|kids|child|children|son|sons|daughter|daughters|teenager|teenagers|teen|teens|"
+    r"toddler|toddlers|baby|babies|boy|boys|girl|girls|schoolchild|schoolchildren|"
+    r"stepson|stepdaughter|stepchildren|little one|little ones|the youngest|the eldest)\b")
+
+# "how do i tell them we are moving" names no child and is still this card's question, so a line
+# that asks for the words to say passes too. It is the telling that makes the audience the children,
+# not the noun: "how do i tell my mum i'm moving out" is answered by family.py and never reaches
+# this row, because "move out" is in the avoid list below.
+_A_TELLING_THE_LINE_ASKS_FOR = re.compile(
+    r"\b(?:tell|tells|telling|told|explain|explains|explaining|explained|break the news|"
+    r"let them know|lets them know|prepare them|preparing them|reassure|reassuring)\b")
+
+
+def _a_child_or_a_telling(understood):
+    """True when the line names a child, or asks for the words to say about the move.
+
+    Used as the `guard` by the moving-with-kids row. Without it the row's feeling words answer the
+    person who moved: "im sad after moving house" was told how to tell a child, and so was
+    "i feel sad about moving house" and "im worried about moving house". A line with nobody to tell
+    in it is not that question.
+    """
+    said = understood if isinstance(understood, dict) else {}
+    text = " ".join(str(said.get("norm_text") or said.get("plain") or said.get("text") or "")
+                    .lower().split())
+    return bool(_A_CHILD_IN_A_MOVE.search(text) or _A_TELLING_THE_LINE_ASKS_FOR.search(text))
+# The outside-drying row answers the weather, and a line that says inside, a bathroom, a
+# radiator, a rack or a tumble dryer wants the drying-indoors answer instead. Those words cannot
+# be an avoid list: a line with a "without" clause is read twice, and on the reading with the
+# clause emptied the words are gone - "how do i dry clothes without a tumble dryer" reached the
+# outside row on "dry" and "clothes" alone, once the ironing card had turned the same line down.
+# The guard reads the line as it was typed, so the clause's words are still there.
+_DRY_IT_INDOORS = (
+    "inside", "indoors", "indoor", "in the house", "in the flat", "bathroom", "radiator",
+    "airer", "rack", "maiden", "tumble dryer", "tumble drier", "tumbledryer", "dryer",
+    "drier", "dehumidifier", "no garden", "no line", "nowhere to hang", "condensation",
+)
+_DRYING_WORD = re.compile(r"\bdry(?:ing|s|er|d)?\b|\bhang(?:ing)?\b|\bwashing\b|\blaundry\b",
+                          re.I)
+# A line that names the weather is the outside row's own question even when it says inside:
+# "should i bring the washing inside before the rain" is a forecast question, not a rack one.
+_THE_WEATHER = re.compile(
+    r"\b(?:rain|rains|raining|rainy|showers?|forecast|wind|winds|windy|sun|sunny|sunshine|"
+    r"weather|frost|frosty|drizzle|damp|fog|line|outside|out there|today|tomorrow|dry out)\b",
+    re.I)
+
+
+# A load of washing, named. A room being damp is not a load: "how do i dry out a damp room"
+# is the damp card's question, and naming a room only says where the washing is.
+_A_LOAD_NAMED = re.compile(
+    r"\b(?:washing|laundry|clothes|clothing|load|jeans|trousers|shirts|sheets|bedding|"
+    r"towels?|duvets?|jumpers?|coats?|jackets?|wool|knitwear|uniform|school uniform)\b", re.I)
+# The rooms a person dries a load in. A flat with one room and no garden is the whole reason
+# the line is asked: "how do i dry clothes in a damp flat" was told "a dry, breezy day dries a
+# normal load outside in two to four hours", which is no help to somebody with no outside.
+_A_ROOM = re.compile(
+    r"\b(?:room|rooms|bedroom|kitchen|bathroom|cellar|loft|hallway|hall|utility|"
+    r"flat|house|home|studio|caravan)\b", re.I)
+# "damp" is a room and a day at once, so a named room tells us which one it is here.
+_WEATHER_NOT_A_ROOM = re.compile(
+    r"\b(?:rain|rains|raining|rainy|showers?|forecast|wind|winds|windy|sun|sunny|sunshine|"
+    r"weather|frost|frosty|drizzle|fog|line|outside|out there|today|tomorrow)\b", re.I)
+
+
+def _not_a_drying_inside_question(understood):
+    """False when the line is about drying the washing indoors rather than in the weather."""
+    text = " " + str(understood.get("clean") or understood.get("text") or "").lower() + " "
+    if not _DRYING_WORD.search(text):
+        return True
+    if _A_LOAD_NAMED.search(text) and _A_ROOM.search(text):
+        # the load and the room are both named: the rack's answer, unless the weather is the
+        # question ("should i bring the washing inside before the rain")
+        return bool(_WEATHER_NOT_A_ROOM.search(text))
+    if not any(word in text for word in _DRY_IT_INDOORS):
+        return True
+    return bool(_THE_WEATHER.search(text))
+
+
 def entries():
     """The rows `home.py` builds its list from, in their original order."""
+    from .home import not_a_sound
     from .home import (
     APPLIANCE_DOOR_WORDS, BODY_WORDS, COST_WORDS, EXTRACTOR_GREASE_FILTER, FIRST_NIGHT_BOX,
     FITTING_SHARED_STANDDOWN, JOB_GUARD, LANDLORD_JOB_FITTINGS, LANDLORD_REPAIR_LETTER,
     LETTING, LIFE_ASK, LIFE_GUARD, LIFE_NAMES, MACHINE_BURNING, MACHINE_DEAD, MACHINE_LEAKING,
-    NOISE_WORDS, NORMAL_CUTOUT, NOT_A_FENCE_JOB, NOT_A_TRADE_WORDS, RUNNING_WORDS,
+    MACHINE_SOUNDS, NOISE_WORDS, NORMAL_CUTOUT, NOT_A_FENCE_JOB, NOT_A_TRADE_WORDS, RUNNING_WORDS,
     TAKES_THINGS, THING_PARTS, TUMBLE_DRYER_FILTER, WASHING_MACHINE_FILTER, _BATH_CITY,
     _DIY_AVOID, _SMOKING_THING, _TAKING_PAINT_OFF, _a_dryer_is_not_a_washer, _a_fence_is_named,
-    _not_a_size_of_a_home,
-    _a_mark_that_is_live, _a_safety_ask, _a_thing_owns_the_part, _alarm_nuisance,
+    _not_a_size_of_a_home, _a_machine_consumable,
+    _a_mark_that_is_live, _a_room_being_heated, _a_safety_ask, _a_thing_owns_the_part,
+    _alarm_nuisance,
     _appliance_cutting_out, _appliance_noise, _asks_the_ceiling_colour, _bath_length,
-    _boiler_noise, _the_boiler_is_not_the_fault, _broken_window, _chemical_safety, _colour_advice, _consumer_unit, _diy,
+    _boiler_noise, _the_boiler_is_not_the_fault, _a_visit_not_a_purchase, _broken_window, _chemical_safety, _colour_advice, _consumer_unit, _diy,
     _door_lock_stiff, _dryer_heat, _fitting_repair, _furniture_upstairs, _going_to_the_loo,
-    _heating_goes_cold, _a_person_not_a_hob, _hob_heat, _iron_fault, _kettle_will_not_stop,
+    _heating_goes_cold, _heat_pump_answer, _a_person_not_a_hob, _hob_heat, _iron_fault, _kettle_will_not_stop,
     _lifespan, _lost_keys, _machine_fault,
-    _machine_takes, _mould, _not_a_cook_ask, _paint_brush_care, _pipes, _place_smell,
+    _machine_takes, _mould, _not_a_cook_ask, _not_a_machine_that_has_gone, _paint_brush_care,
+    _pipes, _place_smell,
     _the_black_is_not_a_body,
     _pressure_weak, _radiator_not_hot, _repair_judgement, _roof_leak, _running,
     _small_appliance_not_heating, _smoking_appliance, _soft_smell, _the_paper_is_in_the_line,
-    _washer_price, _washer_sound_fault, _water_off, entry, the_fault, the_filter_of,
+    _washer_price, _washer_sound_fault, _water_off, _where_the_consumable_goes, entry,
+    the_fault, the_filter_of,
     the_stomach_is_what_it_is_about, the_trade_to_call,
     )
     # The temperature rows stand aside for the argument sense of "heated" (bot/knowledge/lookup.py).
@@ -198,7 +916,7 @@ def entries():
     # The guard on the night-tariff row below reads the ask (`lookup.asks_where`), and it is
     # imported here rather than re-exported through `home.py` so that this file stays a list of
     # rows with nothing of its own.
-    from .lookup import RING_AS_A_CALL, asks_where
+    from .lookup import RING_AS_A_CALL, a_sanding_job, asks_where
 
     # What the two room-temperature rows hold out of their keys, the heat-a-room row and the
     # keep-room-cool row. "why is my fridge not cold", "the oven isnt heating up" and "cheapest
@@ -546,7 +1264,17 @@ def entries():
                                 "ice on the inside", "ice on the windows", "ice inside the windows",
                                 "ice on my windows"),
                                ("window", "windows", "walls", "wall", "bedroom", "stop", "inside",
-                                "wet", "winter", "misty", "glass", "running down")),
+                                "wet", "winter", "misty", "glass", "running down",
+                                # the same water in a room that has no window named in the line:
+                                # "my loft has condensation" and "the cupboard smells damp" fell
+                                # to the listening reply, because the row wanted a pane or a wall
+                                # and got only the word for the water.
+                                # Only the places a pane or a wall is never named for: "room",
+                                # "flat" and "ceiling" are in the damp-proofing and leak rows'
+                                # lines ("how do i dry out a damp room" is the find-the-water
+                                # answer) and adding them here took those turns.
+                                "loft", "attic", "garage", "shed", "landing", "hall",
+                                "hallway", "basement")),
               "Condensation comes from warm wet air hitting cold surfaces, so ventilate and keep the "
               "place a bit warmer: use the extractor fan, open a window for 10 minutes a day, dry "
               "clothes outside or in a vented dryer, and leave the heating on low rather than off and "
@@ -852,6 +1580,14 @@ def entries():
               "trap underneath (bucket first) and pull the gunk out. A kettle of hot water with a "
               "spoonful of bicarbonate and vinegar clears the rest; chemical drain cleaner is the last "
               "resort, not the first.",
+              # Water that has arrived is a leak, and water that will not leave is a blockage: the
+              # same sink and the same word for water, opposite jobs. "theres water under the sink"
+              # and "water under the kitchen sink" were both told to reach for the plunger, which
+              # fixes nothing on a floor that is wet.
+              avoid=("under the sink", "under my sink", "behind the sink", "underneath",
+                     "under the unit", "under the cupboard",
+                     "wet patch", "damp patch", "puddle", "puddles", "leak", "leaks", "leaking",
+                     "dripping", "flood", "flooded", "soaked", "ceiling"),
               bias=1),
         # "loo" and "bog" are the same toilet, and "my loo is blocked" was only a warm
         # acknowledgement because "toilet" was the only name in the key.
@@ -961,16 +1697,31 @@ def entries():
         # "leaky" is the adjective people use and it is not a form of "leak", so "how do i fix a
         # leaky tap" scored 2 on the tap alone and went to the hedge.
         entry("tap-drip", (("tap", "faucet"), ("drip", "drips", "dripping", "leak", "leaks", "leaky",
-                                              "leaking", "washer")),          "A dripping tap is nearly always a worn washer or cartridge: turn the water off at the "
-              "isolating valve under the sink, take the handle off, and take the old part to a hardware "
-              "shop to match it. It's a 20-minute job and saves a lot of water."),
+                                              "leaking", "washer")),
+              _a_dripping_tap),
+        # A bare "do i need a new washer" has two subjects and no way to tell them apart, so the
+        # answer to both is short: the ring in a tap, or the machine. Every row that owns one of
+        # them reads its own words beside the washer, and this one only the washer alone.
+        entry("a-washer-two-things",
+              (("washer", "washers"),
+               ("new", "need", "needs", "replace", "replacing", "change", "changing", "fit",
+                "fits", "size", "what size", "which size", "right size",
+                # telling you they have one is the same question with half the answer given
+                "have", "has", "got", "ive", "i've", "bought", "buy", "buying", "should",
+                "which")),
+              _a_washer_two_things,
+              guard=_a_washer_with_no_other_subject,
+              bias=-1),
         # The cistern that never stops filling is the most common plumbing fault in a house, and
         # main answered it with "Got it. Is there anything you'd like a hand with?". The tell is
         # where the water goes, so the answer asks the person to take the lid off and look.
         entry("toilet-running",
               # "the flush button is stuck" names no toilet at all, and the cistern's own parts
               # are the subject when the part is what has gone wrong
-              (("toilet", "loo", "cistern", "pan", "flush button", "flush", "flushes",
+              # the words people use for it, in one place: "the lav keeps running" reached
+              # nothing, and a toilet is a loo, a lav and a wc before it is ever a cistern
+              (("toilet", "loo", "loos", "lav", "lavatory", "wc", "bog", "cistern", "pan",
+                "flush button", "flush", "flushes",
                 "ball valve", "ballcock", "fill valve", "flush valve", "float valve", "float"),
                ("running", "runs", "keeps running", "wont stop", "wont stop running", "stop running",
                 "keeps filling", "filling", "trickling", "trickle", "constantly", "all the time",
@@ -1001,7 +1752,7 @@ def entries():
         # water comes out, so this asks for that. It was reaching the constipation answer in health.py,
         # because "toilet" and "fix" were both in its key.
         entry("toilet-leak",
-              (("toilet", "loo", "cistern", "pan", "bog"),
+              (("toilet", "loo", "loos", "lav", "lavatory", "wc", "cistern", "pan", "bog"),
                ("leak", "leaks", "leaking", "leaky", "drip", "drips", "dripping", "pool", "puddle",
                 "puddles", "floor", "seal", "seals", "joint", "joints", "fix", "repair", "water",
                 "wet")),
@@ -1036,6 +1787,50 @@ def entries():
                      # and a watering can are other questions too.
                      "drink", "drinking", "drank", "thirsty", "hydrate", "hydrated", "dehydrated",
                      "bill", "bills", "water the", "cuppa", "brew")),
+        # A tap that gives no water had no row at all: "the tap is not working", "the kitchen
+        # tap doesnt work" and "the bathroom tap is not working" were the shrug, and before the
+        # fence on `card-on-a-phone` they were told to check the phone's screen and its case. The
+        # row is the tap itself, so a shower, a loo and a machine keep their own answers.
+        entry("tap-no-water",
+              # "water" belongs with the thing and not with the fault: the scorer wants two
+              # signals from two key groups, and with water on the fault side a line that says
+              # "the tap has no water" is one group twice - which is why it was a shrug.
+              (("tap", "taps", "faucet", "faucets", "mixer tap", "kitchen tap", "bathroom tap",
+                "hot tap", "cold tap", "the water", "water supply", "water"),
+               ("not working", "doesnt work", "doesn't work", "stopped working", "no water", "none coming", "nothing comes out", "nothing coming", "wont run",
+                "won't run", "wont come on", "wont turn on", "won't turn on", "cant turn on",
+                "no flow", "stopped", "stops", "spits", "sputters", "splutters", "airlock",
+                "dry", "dry tap", "barely", "suddenly")),
+              "If it is one tap and the rest of the house runs, it is that tap's own supply: the "
+              "isolation valve on the pipe under the sink is a slot-head screw, and a half turn the "
+              "other way is the usual answer. With the valve open, unscrew the spout aerator and "
+              "soak it in vinegar - a scaled-up aerator stops a tap dead. If every tap is dry, it is "
+              "the stopcock where the mains comes in, or the supply itself, so check the water "
+              "company's postcode status before you pay anyone. A tap that runs and then stops is an "
+              "airlock: hold your palm over the spout and open it fully for a few seconds, or "
+              "back-fill it with a jug from another tap. And if the pipe is in a cold wall in "
+              "freezing weather, warm it gently with a hairdryer - never a blowtorch - with the tap "
+              "left open.",
+              # the other tap rows answer their own complaint, and a shower, a loo, a machine and a
+              # boiler are separate faults with separate answers
+              avoid=("drip", "drips", "dripping", "leak", "leaks", "leaking", "washer",
+                     "pressure", "low pressure", "weak", "trickle", "limescale", "scale",
+                     "shower", "showers", "loo", "toilet", "cistern", "boiler", "radiator",
+                     "radiators", "washing machine", "dishwasher", "immersion", "cylinder",
+                     "hot water", "cold water", "drink", "drinking", "water bill", "meter",
+                     # "watering" is not here: the avoid list matches stems, so it also
+                     # matched "water" and a dry tap was a shrug all over again
+                     "outside tap", "garden tap", "hosepipe", "hose",
+                     # "the tap to pay doesnt work" is the phone, not the plumbing: the phrase
+                     # names the payment before it names the tap
+                     "tap to pay", "tap and pay", "to pay", "apple pay", "google pay",
+                     "contactless", "card machine", "phone", "wallet", "debit card",
+                     "credit card", "bank card",
+                     # a tap that is dry is this row; what the water in it is like is the water
+                     # rows' question, and every one of those says "tap water" - safe, cloudy,
+                     # hard, where it comes from, why it smells - so the phrase alone separates
+                     # them, and the tap has to name a fault to reach this row at all
+                     "tap water")),
         entry("limescale", (("kettle", "limescale", "scale", "tap", "shower head", "showerhead"),
                             ("descale", "clean", "white", "fur", "build", "rid", "remove",
                              "blocked", "blocking",
@@ -1266,6 +2061,13 @@ def entries():
               # "is the water safe abroad" stays with travel.
               avoid=("drink", "drinking", "safe to drink", "taste", "tastes", "brown", "smelly",
                      "boiler", "radiator", "heating", "filtr", "filter", "softener", "limescale",
+                     # "rinse the rice until the water runs clear" is a cooking instruction, and
+                     # the key's "water runs" phrase took it while the rice-rinse row in the
+                     # cooking table that answers it lost by one point. Whatever the line is
+                     # rinsing is the word that says which water it is, so the food and the verb
+                     # name their own rows.
+                     "rinse", "rinsing", "rinsed", "rice", "pasta", "lentils", "quinoa",
+                     "chickpeas", "beans", "noodles", "spinach", "greens",
                      # "our hot water runs out quickly" is the cylinder emptying, not the stopcock:
                      # the key's "water runs" phrase took it on bias, and the answer was where the
                      # mains tap is. The hot water rows below take it.
@@ -1391,7 +2193,14 @@ def entries():
               "Top the pressure up to between 1 and 1.5 bar using the filling loop, then bleed the "
               "radiators and check it again the next day. The pressure falls because water is escaping "
               "somewhere: a radiator valve, a joint, or the pressure relief pipe outside. If it keeps "
-              "dropping, stop topping it up and get a heating engineer out."),
+              "dropping, stop topping it up and get a heating engineer out.",
+              # "what happens now" after that answer is the engineer, and saying it as its own
+              # line adds the one thing the card leaves out: how often it has dropped is what
+              # tells the engineer where to look.
+              outcomes=(("next",
+                         "Get a heating engineer out and tell them how often it has dropped since "
+                         "you topped it up: a system that loses pressure twice is losing water at a "
+                         "valve, a joint or the relief pipe, and each top-up only hides it."),)),
         # The gauge is the sealed system's, and it is not always called a boiler: "the radiator is
         # down on pressure", "my heating pressure has dropped" and "the heating is down to half a
         # bar" are all the same gauge. The pressure word comes first here so a radiator word in
@@ -1400,7 +2209,16 @@ def entries():
         entry("heating-pressure", (("pressure", "bar", "psi", "gauge"),
                                    ("down", "low", "lowest", "dropped", "drop", "dropping", "half",
                                     "zero", "under", "below", "fallen", "falling", "topped",
-                                    "top up", "topping up", "filling loop", "what should")),
+                                    "top up", "topping up", "filling loop", "what should",
+                                    # "how do i sort the pressure out" is this card, not the bleed
+                                    # one: the bleed answer only lets air out. The bleed row names
+                                    # that phrasing in its own avoid list, so this row has to take
+                                    # it or the line punts.
+                                    "sort", "sorts", "sort it out", "sort out",
+                                    # the same repair ask written with "fix", which the bleed row
+                                    # gives up in its own avoid list ("does that fix" is its
+                                    # question, "how do i fix" is this one)
+                                    "fix", "fix it", "fixes it", "how do i fix")),
               "Top the pressure up to between 1 and 1.5 bar using the filling loop, then bleed the "
               "radiators and check it again the next day. The pressure falls because water is escaping "
               "somewhere: a radiator valve, a joint, or the pressure relief pipe outside. If it keeps "
@@ -1411,44 +2229,106 @@ def entries():
               # follow-up machinery knows: stealing "my boiler pressure keeps dropping" for a
               # card with the same words but a new id turned the next turn's "Same as before"
               # into an echo ("Got it - you have to top it up every week").
+              # A bare "bar" is the bar on a bicycle as often as it is a pressure: the guard above
+              # is the unit test, so "drop bars" and "my bars are too low" are not gauge lines.
+              guard=_a_gauge_reading,
               avoid=("under pressure", "feel the pressure", "feeling the pressure",
                      "peer pressure", "stressed", "stress", "anxious", "anxiety",
                      "pressure at work", "pressure at school",
+                     # a line that asks whether a bleed fixes the gauge is the bleed row's:
+                     # "Bleeding does not put pressure back in" is the half of the answer that
+                     # says why not. With "sort" in this row's key too, "will bleeding them sort
+                     # the pressure" came here and lost it. A report that the radiators were bled
+                     # and the gauge is still low is the topping-up question, so the fence is the
+                     # question and not the word.
+                     "will bleeding", "would bleeding", "does bleeding", "do i bleed",
+                     "will bleeding them", "bleeding fix", "bleeding sort", "bleeding help",
+                     "bleed them", "bleeding the radiators fix",
+                     # A gauge that is too high is the opposite job, and a topping-up answer to it
+                     # tells someone to put more water into a system that is already over pressure.
+                     # The words are the bleed row's list, so both rows of the pair agree on what
+                     # a high gauge is.
+                     "too high", "high", "higher", "over 2", "over 3", "above 2", "above 3",
+                     "rising", "climbing", "2 bar", "2.5 bar", "3 bar", "overpressure",
                      "boiler", "boilers", "combi")),
         entry("bleed-and-pressure", (("pressure", "bar", "gauge", "top up", "top it up"),
                                     ("fix", "fixes", "cure", "cures", "sort", "sorts",
                                      "does that", "will that", "would that", "that fix",
-                                     "same", "too", "also", "enough")),
+                                     # "does bleeding help the pressure" and "will bleeding do
+                                     # anything" ask the same yes/no as "does it fix it", and the
+                                     # row passed them, so both were a search hedge. They are
+                                     # written as phrases and not as bare "help"/"work", because
+                                     # a bare one takes every other sense of the word: "how do i
+                                     # help without pressure", from a parent asking about SATs,
+                                     # took this row on "help" and got the boiler paragraph.
+                                     "help the pressure", "helps the pressure",
+                                     "help the gauge", "helps the gauge", "worth it")),
               "Bleeding does not put pressure back in - it lets air out, and it can drop the "
               "gauge a little. Top it up at the filling loop to 1 to 1.5 bar with the system "
               "cold, then check it the next day; if it is low again there is a leak somewhere "
               "and that is an engineer's job.",
+              # The same unit test as `heating-pressure`: "my bars are too low" reached this row
+              # on "bar" alone and was told about bleeding a radiator.
+              guard=_a_gauge_reading,
               # A gauge that is too high is the opposite job and a topping-up answer is the
               # wrong move to hand someone: "the pressure is too high" took this row on "high"
               # being nowhere and "too" being here.
+              # What the repair costs is the money card's question, not this one. The row needs a
+              # cross-question word to fire at all ("would that", "that fix", "same"), and the
+              # boiler is still in memory from the turn before, so "what would that cost to fix"
+              # was read as a cross-question and the person asking the price was told how
+              # bleeding works and never got a figure. The price words stand the row down.
+              #
+              # They are the price words and not "how much": an avoid phrase is read loosely, so
+              # "how much" as one stood this row down for "how much would that be", which already
+              # reached the boiler figures on main, and the turn came back a hedge - a worse
+              # answer for a case this change is not about.
+              #
+              # The feelings sense of the word is the other stand-down, and it is the one a
+              # reviewer caught: "how do i help without pressure" is a parent asking about SATs
+              # (deck row qmis-year6-01) and it came here on a bare "help" that took every sense
+              # of the word. The bare word is gone from the key; these name the sense. "no
+              # pressure" and "pressure on" are deliberately not here - "there is no pressure in
+              # the boiler" and "the pressure on the gauge" are gauge lines.
               avoid=("too high", "high", "higher", "over 2", "over 3", "above 2", "above 3",
                      "rising", "climbing", "2 bar", "2.5 bar", "3 bar", "overpressure",
                      "under pressure", "peer pressure", "pressure at work", "pressure at school",
-                     "blood pressure", "tyre", "tyres", "tire", "tires")),
+                     # "how do i sort the pressure out" and "my boiler pressure is low, how do i
+                     # sort it" are repair asks, and the cue is the how-do-i frame, not the verb
+                     # "sort": the bleed row owns "does that sort the pressure". The frame is what
+                     # separates them, so the frame is the fence.
+                     "how do i sort", "how to sort", "how can i sort", "how do you sort",
+                     "how do i fix", "how to fix", "how do i top", "what do i do about the pressure",
+                     "without pressure", "putting pressure", "pressure myself", "pressure from",
+                     "pressure her", "pressure him", "pressure them", "sats", "exams", "revision",
+                     "blood pressure", "tyre", "tyres", "tire", "tires",
+                     "cost", "costs", "costing", "price", "prices", "priced", "quote", "quotes",
+                     "quoted", "charge", "charges", "£")),
         # The noise is in the heating as often as in the boiler: "my heating is making a clanking
         # noise" named no boiler at all and got a shrug, though the answer is the same one. The
         # row is still keyed on a sound, so "how much does heating cost" never reaches it. "hot
         # water" and "the heating" are deliberately not subjects: a two-word phrase also scores
         # its own words, so "only when the hot water comes on" cleared the minimum on the phrase
         # alone and pulled the follow-up into this row.
+        # The sounds come from the shared list in wording.py, because this row's own list named
+        # some forms of each sound and not others: the answer has a paragraph for a tick or a click
+        # ("pipes expanding as they heat"), and "my boiler clicks a lot" and "the boiler is
+        # clicking" reached nothing but the greeting, while "the boiler wont stop clicking" got in
+        # through "clicking" being spelled out on another row. One list for every row that answers
+        # a noise means the next appliance inherits the forms too.
         entry("boiler-noise", (("boiler", "heating", "central heating", "heat pump"),
-                               ("noise", "noisy", "banging", "rumbling", "loud",
-                                "clunk", "clanking", "clank", "clunking", "knocking", "knock",
-                                "rattling", "rattle", "whistling", "gurgling",
-                                "hum", "hums", "humming", "whining", "whine", "hissing",
-                                "hiss", "squealing", "squeal", "tapping")),
+                               MACHINE_SOUNDS + NOISE_WORDS),
               _boiler_noise),
         # A kettling boiler is a different fault with a different first move: limescale on the heat
         # exchanger, not air. Naming it is the whole question, so it gets its own answer rather than
         # the banging one with a postscript.
+        # "combi" is a boiler by another name, and a line that says it is a heating line: "our
+        # combi is kettling and the pressure is fine" reached nothing at all, because the row's
+        # other half wanted the word "boiler".
         entry("boiler-kettling", (("kettling", "kettle", "kettles", "limescale", "scale", "descale",
                                    "sludge"),
-                                  ("boiler", "heating", "hot water", "radiator", "radiators")),
+                                  ("boiler", "boilers", "combi", "heating", "central heating",
+                                   "hot water", "radiator", "radiators")),
               ("Kettling - a noise like a kettle boiling as it fires - is limescale on the heat "
                "exchanger, not air in the pipes, so bleeding the radiators will not stop it. Get a "
                "heating engineer to power-flush or descale the system and fit a scale reducer or a "
@@ -1845,13 +2725,7 @@ def entries():
                ("work", "works", "working", "how", "what", "explain", "worth", "idea", "good",
                 "cost", "costs", "running", "cheaper", "replace", "boiler", "install", "noise",
                 "loud", "cold", "any")),
-              ("A heat pump moves heat rather than making it, like a fridge in reverse: a refrigerant "
-               "picks up warmth from outside air even on a cold day, a compressor squeezes it to a "
-               "higher temperature, and that heat goes into your radiators or underfloor. One unit of "
-               "electricity gives you roughly three of heat, so it is cheapest to run with big "
-               "radiators, underfloor heating and good insulation, and dearer in a draughty house with "
-               "small radiators. Worth it if your radiators can be upsized and your home is insulated; "
-               "ask for a heat loss survey and a quote before deciding."),
+              _heat_pump_answer,
               # a heat pump dryer, a heat pump dehumidifier or a heat pump hot water tank is
               # that appliance's question, and "is a heat pump dryer any good" was answered here
               # with how the refrigerant works.
@@ -2246,9 +3120,86 @@ def entries():
                      # "a repair" after a fault is the fault row's, which is a separate question
                      "washing machine repair", "washer repair", "machine repair",
                      "repair man", "repairman", "engineer", "call out", "callout",
-                     "spare part", "spare parts"),
+                     "spare part", "spare parts",
+                     # how long the washing takes to DRY is the drying question, not the cycle:
+                     # "how long does washing take to dry indoors" was answered with the eco
+                     # cycle times, which is a different length of time
+                     "to dry", "dry indoors", "dry inside", "drying indoors", "drying inside",
+                     "to dry it", "hang out", "hanging out", "on the line", "air dry"),
               ask=("how long", "so long", "hours", "cycle", "take", "takes", "duration"),
+              # a machine that stopped part way through is a fault, and its own rows have the
+              # door latch and the drain: "my washing machine stopped mid cycle" was answered
+              # "most cycles are two to three hours ... and nothing is wrong", which reads like a
+              # diagnosis and is not one. The guard is home.py's, so every symptom added to the
+              # fault words there stands this row down too.
+              guard=_not_a_machine_that_has_gone,
               bias=4),
+        # "can i hang washing out today" was the length of a wash cycle, because "washing" and
+        # "today" are both in that row's reach and the machine was never mentioned. Hanging it out
+        # is a different question with a different answer, and it is the one a washday starts with.
+        entry("washing-outside",
+              # Not the bare word "bedding": `lookup._forms` un-doubles it to "bed" the way
+              # "running" gives "run", so a bed in the line satisfied it and "get out of bed" was
+              # answered with the drying weather. Saying it with an article or a possessive is the
+              # whole fix - "the bedding", "my bedding", "bedding dry" is the thing that hangs out
+              # and never the bed - and the bare word has to go with it or the row loses its own
+              # question: "i want to get the bedding dry outside today" then "what time should i
+              # put it out" was answered indoors, on a deck row (`intent-putting-out-when`) that
+              # main had right. Not "whites" either, for the same reason in the other direction:
+              # `_forms("whites")` holds "white", so "my hands go numb and white in the cold"
+              # matched on the colour and the weather words finished the row. "the whites" alone
+              # then lost the commonest way people say it - "my whites" was named in this comment
+              # and not in the key, so "can i put my whites on the line" got a punt - so the
+              # possessive forms and two-word ones ("whites dry", "whites out") are in the key
+              # beside it. None can be the colour: each carries a word the colour is never said
+              # with, and "my hands go numb and white" says none of them.
+              (("washing", "washing line", "laundry", "clothes", "wash", "the whites",
+                "my whites", "our whites", "whites dry", "whites out", "sheets",
+                "towels", "the bedding", "my bedding", "bedding dry"),
+               ("hang", "hanging", "out", "outside", "line", "dry", "drying", "dried", "today",
+                "tomorrow", "outside today", "put out", "airing", "airer", "weather", "rain",
+                "raining", "wind", "windy", "sun", "sunny", "frost", "cold", "winter", "summer",
+                "dryer", "tumble")),
+              "A dry, breezy day dries a normal load outside in two to four hours, and a cold sunny "
+              "day with wind is nearly as good as a warm one, so 8C and breezy beats 20C and still. "
+              "Rain, fog and damp evening air put the water back, so bring it in before dusk. In "
+              "winter, spin it an extra five minutes, then dry it indoors on an airer with a window "
+              "open a crack: the water has to go somewhere, and an open window is cheaper than the "
+              "heating.",
+              # A spot on one thing is not a load to dry: "how do i get a stain out of a white
+              # shirt", "how do i get blood out of a white shirt" and "how do i get red wine out
+              # of a white shirt" all reached this row, because "whites" folds to "white" and the
+              # line has an "out" in it, and were told the weather for a washday. The stain rows
+              # answer those, and the words below are the ones a spot is said with.
+              avoid=("stain", "stains", "stained", "staining", "spot", "spots", "marked",
+                     "blood", "grass", "red wine", "wine", "coffee", "tea", "ink", "mud",
+                     "vomit", "sick", "bleach", "bleached", "yellow", "yellowed", "sweat",
+                     "grease", "oil", "curry", "tomato", "chocolate", "pen", "marker",
+                     "out of a white", "out of my white", "out of the white", "out of whites",
+                     # a fault, a smell, a leak or a cycle length is the machine's question, and
+                     # the machine row answers it better than the weather
+                     "washing machine", "washer", "not spinning", "wont spin", "won't spin",
+                     "smell", "smells", "smelly", "musty", "mould", "mold", "leak", "leaking",
+                     "drain", "filter", "cycle", "programme", "program", "eco wash", "spin speed",
+                     "broken", "repair", "error code", "fault",
+                     # "out" is one of this row's key words, so a load that came out of the
+                     # machine wet was answered with the weather, and so was a stain asked as
+                     # "how do i get the oil out of clothes". A wet load is the machine's
+                     # question; a stain has its own card. The words that say so stand this
+                     # row down, and the guard reads a line like "dry clothes without a tumble
+                     # dryer" as it was typed.
+                     "come out", "comes out", "came out", "coming out", "get out", "got out",
+                     "getting out", "remove", "removing", "dirty", "smell out",
+                     # A stain is a spot-clean question about one thing, not a question about the
+                     # weather: "how do i get sweat stains out of a white shirt" was answered with
+                     # "a dry, breezy day dries a normal load outside in two to four hours", because
+                     # "whites" and "out" are both in this row's keys and the stain row's own words
+                     # scored lower. The stain rows in clothing.py own these lines.
+                     "stain", "stains", "stained", "sweat", "sweaty", "ink", "blood", "grass",
+                     "grease", "oil", "sauce", "coffee", "tea stain", "wine", "mud", "makeup",
+                     "deodorant", "bleach mark"),
+              guard=_not_a_drying_inside_question,
+              bias=3),
         entry("washing-machine-smell", ("washing machine", ("smell", "musty", "smelly", "clean",
                                                             "smells")),
               # The cause is its own short sentence after the fix, because "why" after this answer
@@ -2308,6 +3259,32 @@ def entries():
                      "empty the filter", "unblock the filter", "clear the filter"),
 
               bias=1),
+        # A washer that runs the wash stone cold is a real fault and it had no card at all: the
+        # line came back as a greeting once the leak row stopped taking the bare word "water",
+        # and before that the drain row took it and talked about the filter. The heating half of
+        # the machine is the element, the thermostat that reads the water and the relay on the
+        # board, in that order of likelihood.
+        entry("washing-machine-not-heating",
+              (("washing machine", "washer", "washer dryer", "washing mashine", "wash cycle",
+                "wash", "machine"),
+               ("not heating", "isnt heating", "isn't heating", "not heat", "doesnt heat",
+                "doesn't heat", "didnt heat", "didn't heat", "wont heat", "won't heat",
+                "not getting hot", "isnt getting hot", "isn't getting hot", "wont get hot",
+                "won't get hot", "cold wash", "stays cold", "water stays cold", "stone cold",
+                "no hot water", "heat", "heating")),
+              "Check the programme first: a 30C or a cold wash never heats much, and many machines "
+              "have a cold-only option that stops the element coming on. If it is a hot programme and "
+              "the door glass is still cold after twenty minutes, the element is the usual cause - a "
+              "cheap part that an engineer swaps in half an hour - and the thermostat that reads the "
+              "water or the relay on the board are the next two. A machine that heats on some "
+              "programmes but not others is a board fault, not the element.",
+              # a dryer that will not heat, a house with no hot water and a machine that will not
+              # empty or is full of water are all different questions with their own answers
+              avoid=("tumble dryer", "tumble drier", "dryer", "drier", "dishwasher", "dish washer",
+                     "radiator", "radiators", "boiler", "central heating", "house", "shower",
+                     "tap", "taps", "immersion", "hot tub", "not draining", "wont drain",
+                     "won't drain", "blocked", "clogged", "full of water", "smells", "smelly",
+                     "buy", "which", "best", "cheapest", "price", "worth it", "filter")),
         entry("washing-machine-leak",
               (("washing machine", "washer", "washer dryer", "washing mashine"),
                # "floor" alone was a leak key, so a machine that bangs and walks across the floor was
@@ -2322,6 +3299,11 @@ def entries():
               "engineer's job.",
               # a drum that will not empty, or one standing full of water, is the drain entry's line:
               # both of those hold the word "water" and this entry would otherwise take them
+              guard=_the_leak_is_a_machines,
+              # the laundry-sorting row keys "washing" and ranks level with this one, so water on
+              # the floor beside the machine was the sorting card: the guard above is what keeps
+              # this bias from reaching a line that only mentions the water
+              bias=2,
               avoid=("buy", "which", "best", "cheapest", "washing machine buy",
                      "wont drain", "won't drain", "not draining", "empty", "emptying",
                      "wont empty", "won't empty", "full of water", "water in the bottom",
@@ -2351,7 +3333,10 @@ def entries():
               avoid=("broken", "broke", "leak", "leaking", "pressure", "no hot water", "no heating",
                      "noise", "noisy", "kettling", "error", "fault", "reset", "not firing",
                      "wont fire", "service", "serviced", "servicing", "annual", "insurance", "cover",
-                     "radiator", "radiators", "thermostat", "timer", "smart") + JOB_GUARD,
+                     "radiator", "radiators", "thermostat", "timer", "smart",
+                     # a heat pump weighed against it is the choice between the two, which is the
+                     # heat-pump row's answer: this one is about how long a boiler lasts
+                     "heat pump", "heat pumps", "air source", "ground source") + JOB_GUARD,
               bias=1),
         # --- how long the job takes, not how long the machine lasts --------------------------------
         # "how long does a boiler repair take" was answered with a boiler's ten to fifteen years and
@@ -2559,6 +3544,7 @@ def entries():
                                  ("someone out", "someone in", "get someone", "call someone",
                                   "an engineer", "engineer", "callout", "call out", "tradesman",
                                   "worth getting", "worth paying", "worth a call")),
+
               "Yes for anything on the gas side, and the pressure gauge (1 to 1.5 bar) and the reset "
               "button are worth trying first. A Gas Safe engineer's callout is usually £60 to £120, "
               "and it is worth paying once a fault repeats rather than for a one-off reset. Note the "
@@ -2572,6 +3558,9 @@ def entries():
               # new boiler on score, and the person is asking whether to pay for a visit, not for a
               # boiler, so this one is the more specific of the two.
               bias=2,
+              # "worth getting" is this row's question when the line names somebody to come out or
+              # something wrong; "is it worth getting a heat pump" is a purchase, not a callout.
+              guard=_a_visit_not_a_purchase,
               ask=("boiler", "heating", "hot water", "radiator", "radiators", "combi")),
         entry("landlord-damp",
               (("landlord", "landlady", "letting agent", "housing association", "council", "my fault"),
@@ -3614,7 +4603,14 @@ def entries():
                      "boils over", "boiled over", "boiling over", "overflow", "too full", "too long",
                      "takes ages", "slow to boil", "boils slowly",
                      # a smell afterwards is the scale-and-standing-water answer, which helps more
-                     "smell", "smells", "smelt", "smelled", "smelly", "burnt", "burning", "scorch"),
+                     "smell", "smells", "smelt", "smelled", "smelly", "burnt", "burning", "scorch",
+                     # a kettle never holds a dinner: a soup, a stew, a sauce or a pan of pasta
+                     # that boiled dry was being told to bin its kettle, and the dish's own
+                     # rescue (dish-caught-on-the-bottom) is the answer it needs
+                     "soup", "soups", "stew", "stews", "casserole", "curry", "chilli", "chili",
+                     "bolognese", "sauce", "sauces", "gravy", "stock", "broth", "porridge",
+                     "pasta", "rice", "risotto", "lentils", "beans", "chickpeas", "milk",
+                     "hotpot", "tagine", "goulash", "daal", "dal", "dhal"),
               ),
         # "Where is my fuse box" and "how do i reset a trip switch" were the plumber shrug, and "how do
         # i turn off the electricity" was answered with the physics of electric charge. The plug-fuse
@@ -3733,12 +4729,7 @@ def entries():
                ("how much paint", "much paint", "how many litres", "litres of paint", "liters of paint",
                 "how many tins", "tins of paint",
                 "enough paint", "quantity of paint", "how much do i need")),
-              "One litre of emulsion covers about 10 to 12 square metres, and you need two coats, so "
-              "count the wall area and double it: add the walls up as perimeter times ceiling height "
-              "(a 4m by 4m room with 2.4m ceilings is about 38 square metres), take off roughly 1.7 "
-              "square metres for a door and 1.2 for a window, and that room wants about 7 litres - two "
-              "5 litre tins, or a 10 to leave some for touching up. Ceilings and a second colour are "
-              "extra, and a dark colour over a light wall often takes three coats.",
+              _paint_for_the_room,
               # a colour question, a mark on the wall and a how-to-prepare line are other answers, and
               # a painted surface that is peeling or bubbling is a repair question
               avoid=("what colour", "what color", "which colour", "which color", "colour scheme",
@@ -3764,11 +4755,7 @@ def entries():
               (("wallpaper", "wall paper", "wallcovering", "lining paper"),
                ("how much", "much wallpaper", "how many rolls", "many rolls", "rolls of wallpaper",
                 "need", "needs", "buy", "quantity", "enough")),
-              "Count drops, not floor: divide the room's perimeter by the 52cm width of a standard "
-              "roll and round up (a 4m by 4m room is 16m round, so 31 drops), then divide a roll's "
-              "10m by the ceiling height plus the pattern repeat to see how many drops each gives - "
-              "usually three - and 31 drops is about 11 rolls. Buy one extra for a mistake and "
-              "matching, and keep the batch number the same on every roll.",
+              _wallpaper_for_the_room,
               # stripping, painting over and a wall that is damp or cracked are other answers
               avoid=("strip", "stripping", "remove", "removing", "woodchip", "paint over", "paint",
                      "damp", "mould", "mold", "crack", "cracked", "peel", "peeling", "feature wall",
@@ -3846,7 +4833,63 @@ def entries():
                      # was this row's volume of gravel. The mortar rows answer the mix.
                      "mortar", "mortar mix", "sand and cement", "sharp sand and cement",
                      "building sand and cement", "cement mix", "how much cement", "bags of cement"),
-              bias=1),
+              bias=1,
+              # "do i need to sand the wall" is in the ask words ("do i need") and has the key word
+              # "sand", so standing the bag-of-sand row down was not enough: this row then worked
+              # out the volume of a drive, in gravel. The job that rubs a wall down is read off the
+              # line, and the sanding row answers it.
+              guard=lambda u: not a_sanding_job(u)),
+
+        # "do i need to sand before painting" was the bag of sand on main ("a 25kg bag of play
+        # sand covers about 0.6 square metres"), or the two-coats answer, or gravel by volume: the
+        # question is whether the job wants sanding at all, and then how coarse. The verdict opens
+        # the reply because that is what was asked, and the grit is in the same sentence.
+        entry("sanding-before-painting",
+              (("sand", "sanding", "sanded", "sandpaper", "sand paper", "sander",
+                "rub it down", "rub down", "rubbed down", "key the surface", "key it"),
+               ("before paint", "before painting", "before the paint", "before undercoat",
+                "before a primer", "before the primer", "before gloss", "before the gloss",
+                "do i need to sand", "should i sand", "need to sand", "have to sand",
+                "do i need to rub", "should i rub", "do i need to key", "should i key",
+                "sand it first", "sand first", "sand it down", "sanding before",
+                "is sanding needed", "is it sanded", "does it need sanding",
+                "sand the wall", "sand the walls", "sand the door", "sand the doors",
+                "sand the woodwork", "sand the ceiling", "sand the trim",
+                "do i have to sand", "should i sandpaper", "need sanding",
+                "does it need sanding first",
+                # the coat is named so a line asked inside a painting talk ("do i need to sand
+                # it first", after "how long between coats of gloss") is about the thing the
+                # conversation is on, and answers instead of standing down as another subject.
+                "before the next coat", "before the second coat", "before a second coat",
+                "before another coat", "before recoating", "between coats", "coats")),
+              "Yes, give it a sand first: 120 grit on a block for painted woodwork and 80 to 100 on a "
+              "filler patch, with the grain and light enough to take the shine off rather than the "
+              "paint, then dust it down and wipe it over with a damp cloth. Old gloss has to be "
+              "keyed or the new coat slides off it, and a filled patch has to be flatter than the "
+              "wall around it or it shows through. Bare wood wants 120 grit, then 180, and the dust "
+              "off before the first coat.",
+              # the quantity and the price are the material rows' own question, and a time is the
+              # filler and paint cards': this row is the yes and the grit. "between" keeps the
+              # gym "sets" reading away from "how long does filler take to set".
+              avoid=("how much", "how many", "cost", "costs", "price", "prices", "cheap",
+                     "expensive", "bags of", "tonnes", "tons", "cubic", "square metres",
+                     # new plaster has its own answer (a mist coat after two to four days) and
+                     # sanding it first is not the advice: "do i need to sand a new plastered wall
+                     # before painting" read as woodwork was worse than the plaster card.
+                     "coverage", "between", "how long", "leave filler", "leave it to",
+                     "filler take", "filler set", "drying", "wait",
+                     "plaster", "plastered", "plastering", "skim", "mist coat",
+                     # which of the two jobs comes first is an order, and the ordering card
+                     # answers it: "do i sand first or fill first" was this row's yes.
+                     "or fill", "fill first", "filler first", "before i fill", "before filling"),
+              # Two jobs joined by "or" and the word "first" is a question about which comes
+              # first - "varnish or sand first", "primer or sand first", "do i sand first or fill
+              # first" - and this row opens with "yes", which is the wrong shape for it. The
+              # ordering card in the fallback pool answers those.
+              guard=lambda u: not re.search(r"\bor\b[^.?]*\bfirst\b|\bfirst\b[^.?]*\bor\b",
+                                            str((u or {}).get("clean") or (u or {}).get("text") or ""),
+                                            re.I),
+              bias=3),
         # The commonest paint question is which paint to buy, and nothing answered it: "what paint
         # should i get", "which paint should i buy", "what kind of paint for woodwork", "do i need a
         # primer" and "what is eggshell paint for" were all hedges or a colour shrug. The paint rows
@@ -3998,6 +5041,31 @@ def entries():
                      # answers that, and this one answered it with filler times
                      "drying too fast", "drying too quickly", "dries too fast", "dry too fast",
                      "from drying", "keeps drying", "before it dries", "open time", "wet edge")),
+        # The same hours, asked from the filler's side: "how long do i need to leave filler before
+        # sanding" is the sanding question, and it was read as a bag of sand to buy and then as the
+        # paint's drying times, with the filler in the second sentence. The filler's own hour is the
+        # answer, so it leads here.
+        entry("filler-drying-time",
+              (("filler", "wood filler", "polyfilla", "filling", "filled", "skim", "skimming"),
+               ("how long", "leave", "wait", "dry", "dries", "drying", "set", "sets", "harden",
+                "hardens", "sand", "sanding", "sanded", "rub down", "rubbing down", "before")),
+              "A thin skim of filler is hard in about an hour and can be sanded the same day; a deep "
+              "fill wants overnight, because it shrinks back if the middle is still soft when you rub "
+              "it down. Rub it with 120 grit on a block rather than with your fingers, and stop when "
+              "the edge blends into the wall - two thin fills are quicker than one thick one that has "
+              "to be dug out. Give it a coat of watered-down emulsion before the paint, or the patch "
+              "drinks the first coat and shows as a dull spot.",
+              # how much filler or sand to buy is the quantities rows' question, and a pipe, a car
+              # or a cake has a filler of its own
+              avoid=("how much", "how many", "bags", "cost", "costs", "price", "prices",
+                     "quid", "pounds", "£", "fuel", "petrol", "diesel", "radiator",
+                     "car", "pipe", "sink", "bath", "cake", "sandwich", "sandpaper",
+                     "what is", "what are", "what's", "meaning", "recipe",
+                     # which of the two comes first is an order of work, not a drying time:
+                     # "do i sand first or fill first" keeps the row that says the step that
+                     # would spoil the other goes last
+                     "first", "which one first", "before that", "order", "order to"),
+              bias=2),
         # The other half of the drying question: not how long it takes but how to keep it workable.
         # "how do i keep my paint from drying too fast" was answered by the leftover-tin card ("stir
         # sand into it and take it to the tip"), which is a worse answer than none, because it sounds
@@ -4059,6 +5127,56 @@ def entries():
                      "wet edge", "peeling", "flaking", "bubbling", "strip", "wallpaper", "smell",
                      "smells", "fumes", "colour", "color", "which paint", "nail polish", "spray"),
               bias=1),
+        # A colour that came out darker than the tin promised is the same complaint people make about
+        # henna and about a foundation, and the bot had nothing for it here: "my emulsion looks too
+        # dark" and "my paint is too bright" got the shrug, "the paint came out darker than the
+        # sample" and "my gloss came out too dark" got the stain-removal card, "my wood stain is too
+        # dark" got the white-water-ring card, "the colour i painted the wall is too strong" got "are
+        # you pleased with it?", and "can i lighten paint that is too dark" got the search hedge. The
+        # answer is the same in all of them and it is not "repaint the wall in darker paint": a wet
+        # paint reads lighter than it dries, so the first thing to do is let it dry and look again in
+        # daylight, and a coat that has dried too dark is not lightened by anything that can be added
+        # to it - it is sanded and covered, or left and lived with.
+        entry("paint-too-dark",
+              (("paint", "painted", "painting", "emulsion", "gloss", "undercoat", "eggshell",
+                "satin", "satinwood", "varnish", "lacquer", "wood stain", "stain", "wood dye",
+                "fence stain", "decking stain", "paint tin", "tin of paint", "roller"),
+               ("too dark", "come out dark", "came out dark", "came up dark", "darker than",
+                "much darker", "so dark", "dried dark", "dries dark", "goes dark", "went dark",
+                "too strong", "too bright", "too intense", "too deep", "too orange", "too yellow",
+                "too red", "lighten", "lightening", "lighter", "pale it down", "palest",
+                "hate the colour", "wrong colour", "wrong color", "not the colour", "regret",
+                "darker sample", "the sample")),
+              "Give it a day before you judge it: paint reads about a shade lighter while it is wet, "
+              "so a wall that looks too strong tonight has usually settled by tomorrow, and the light "
+              "you look at it in changes it as much as the paint does. If it is still too dark once it "
+              "is hard, nothing can be added to a coat to lighten it - so the fix is either one coat "
+              "of the colour you wanted over the top (a pale colour covers a dark one in two or three "
+              "coats, and a test patch on a scrap of plasterboard or lining paper will tell you how "
+              "many before you buy another tin), or a glaze of white emulsion wiped over it while it "
+              "is tacky to lift it a shade. If the tin was a match to a sample, take a photo in "
+              "daylight and the tin back to the shop: most will retint or exchange one they mixed "
+              "wrong. A wood stain that went too dark sands back to bare wood and starts again with a "
+              "pale one, since stain sinks in rather than sitting on top.",
+              # a streak or a patch is an uneven coat, not the wrong colour; a mark on the wall, a
+              # carpet or a shirt is a stain to lift; how much to buy, how long it takes to dry, which
+              # paint to choose, stripping it off and what a tin costs are all answered elsewhere
+              avoid=("streak", "streaks", "streaky", "patchy", "patchy coverage", "blotchy",
+                     "uneven", "roller marks", "brush marks", "lap marks",
+                     "mark", "marks", "scuff", "scuffs", "smudge", "spill", "spilled", "drip",
+                     "drips", "carpet", "sofa", "shirt", "clothes", "fabric", "curtain", "hands",
+                     "skin", "nail", "nails", "hair",
+                     "how much", "how many litres", "litres", "tins of", "cost", "costs", "price",
+                     "prices", "cheap", "expensive", "how much is", "how much does",
+                     "how long", "drying time", "dry between", "second coat", "how many coats",
+                     "which paint", "what paint", "best paint", "what colour should",
+                     "which colour should", "what color should", "strip", "stripping", "remove",
+                     "removing", "peel", "peeling", "flaking", "bubbling", "blistering",
+                     "wallpaper", "woodchip", "fence up", "shed", "car", "bike", "model", "canvas",
+                     "picture", "art", "nails", "makeup", "printing", "printer", "photo"),
+              # a colour that came out wrong is a judgement on the finish, and a card that offers to
+              # lift a mark off a carpet must not win it
+              bias=2),
         # --- and the paper on the wall --------------------------------------------------------
         # Taking old paper off and painting over it are two different jobs, and the bot had neither:
         # "how do i strip wallpaper", "how do i remove woodchip", "can i paint over wallpaper" and
@@ -4431,8 +5549,13 @@ def entries():
               "gloss and varnish need a cloth damped with white spirit, dabbed from the edge of the "
               "mark inwards so it does not spread. Try white spirit on a corner you cannot see first, "
               "since on a wool carpet it can lift the dye.",
-              # a pot of paint on a wall, a door, a floor or a brush is somebody else's line
-              avoid=("wall", "walls", "ceiling", "door", "doors", "radiator", "skirting", "banister",
+              # a pot of paint on a wall, a door, a floor or a brush is somebody else's line, and so is
+              # a colour that came out wrong: "my gloss came out too dark" and "the paint came out
+              # darker than the sample" were sent here for the cold-water treatment because they say
+              # "came out", and no splashed carpet is the complaint
+              avoid=("too dark", "darker", "too strong", "too bright", "too pale", "too orange",
+                     "lighten", "lighter",
+                     "wall", "walls", "ceiling", "door", "doors", "radiator", "skirting", "banister",
                      "window", "frame", "floor", "floors", "floorboards", "wood", "wooden",
                      "wallpaper", "clothes", "shirt", "jeans", "jumper", "trousers", "fabric",
                      "hand", "hands", "skin", "hair", "brush", "brushes", "paintbrush",
@@ -5098,6 +6221,11 @@ def entries():
                      "washing machine", "dishwasher", "microwave", "oven", "lock", "locked",
                      "key", "child lock", "hinge", "hinges"),
               bias=1),
+        # The window of a chat is not a window of a house: "what do you do when i shut the chat
+        # window" and "when i close the browser tab" are questions about what becomes of the
+        # conversation, and once the creaking-door key held "window"+"shut" they were told to oil
+        # the hinges. Only the words that make the window the chat's own are here, so "why does
+        # this window creak" is still the hinge answer.
         entry("door-creak",
               (("squeak", "squeaks", "squeaky", "squeaking", "creak", "creaks", "creaking",
                 "sticking", "sticks", "stiff", "rubbing", "rubs", "drags", "dragging", "jammed",
@@ -5120,7 +6248,9 @@ def entries():
               # a creaking floorboard, a creaking bed and a squeaking shoe are other answers
               # "stop" is in the key, so "how do i stop a door banging in the wind" scored here and
               # got hinge oil for a door that bangs. Banging is the latch answer's, not this one's.
-              avoid=("floorboard", "floorboards", "floor", "bed", "beds", "shoe", "shoes", "brake",
+              avoid=("chat window", "chat box", "chat pane", "browser", "browser window",
+                     "browser tab", "this chat", "the chat", "the app window",
+                     "floorboard", "floorboards", "floor", "bed", "beds", "shoe", "shoes", "brake",
                      "brakes", "kettle", "bang", "bangs", "banging", "slam", "slams", "slamming",
                      "rattle", "rattles", "rattling", "wind", "windy", "draught", "trainer",
                      "trainers", "boot", "boots", "sandal", "flip flop", "chair", "chairs", "stairs",
@@ -5267,18 +6397,60 @@ def entries():
               avoid=("car", "cars", "van", "bumper", "wing", "bonnet", "door", "panel", "phone",
                      "screen", "fridge", "freezer", "washing machine", "drum")),
         entry("chair-wobble",
-              (("chair", "chairs", "table", "stool", "bench", "furniture", "leg"),
+              # a desk is a table with drawers and it had no word here, so "my desk wobbles"
+              # was an acknowledgement while the same line about a table got the repair
+              (("chair", "chairs", "table", "tables", "desk", "desks", "stool", "bench",
+                "furniture", "leg"),
                ("wobble", "wobbly", "wobbles", "loose", "rock", "rocks", "rocking", "rickety", "fix")),
               "Turn it over and find the loose joint: usually one leg has worked free of the seat. "
               "Squeeze wood glue into the joint, push it home and clamp it - a strap or a rope round "
               "all four legs works - and leave it overnight. Tighten any screws and add a bracket if "
               "the same joint keeps going.",
-              ask=("wobble", "wobbly", "wobbles", "loose", "rock", "rocks", "rocking", "rickety"),
+              ask=("wobble", "wobbly", "wobbles", "wobbling", "loose", "rock", "rocks",
+                   "rocking", "rickety"),
               avoid=("chair for", "garden chair", "high chair", "wheelchair", "office chair"),
               # "loose stools for 3 days" is the same two words as a wobbly chair, and the reading
-              # already knows which it is: when it reads the stomach, the chair stands aside (see
-              # `the_stomach_is_what_it_is_about`)
-              guard=lambda understood: not the_stomach_is_what_it_is_about(understood)),
+              # already knows which it is: when it reads the stomach, the chair stands aside. When
+              # it reads nothing at all - "my stools are loose" - the words settle it instead, and
+              # `_a_chair_and_not_a_body` holds the chair back for that one shape.
+              guard=_a_chair_and_not_a_body),
+        # A thing that will not sit still is its own job, and the fan had nobody to ask:
+        # "my tower fan is wobbly" was an acknowledgement, "the fan wobbles when it runs" was
+        # the laptop's cooling answer and "can you stop a fan from wobbling" was told that most
+        # shaking is caffeine. A washer and a dryer that shake have their own cards (the transport
+        # bolts and the load), so this one is the fan and the appliance with no card of its own.
+        entry("a-fan-that-rocks",
+              (("fan", "fans", "ceiling fan", "desk fan", "pedestal fan", "floor fan", "tower fan",
+                "standing fan", "extractor fan", "heater", "fan heater", "fridge", "freezer",
+                "appliance", "appliances"),
+               ("wobble", "wobbles", "wobbling", "wobbly", "shakes", "shaking", "shaky", "rocks",
+                "rocking", "walks", "walking", "jumps", "jumping", "vibrates", "vibrating",
+                "moves about", "not level", "off balance", "uneven", "unsteady", "wonky",
+                "tilts", "leaning")),
+              _the_fan_stopped,
+              ask=("wobble", "wobbles", "wobbling", "wobbly", "shakes", "shaking", "rocks",
+                   "rocking", "walking", "jumps", "vibrates", "unsteady", "wonky", "tilts",
+                   "stop it", "stop the", "why does", "fix"),
+              # a person who is shaking is the shake answer's, a chair is the chair repair's, and
+              # the machine with its own card (a washer, a dryer, a fridge that is not cold, a fan
+              # that is noisy or grinding) keeps it
+              avoid=("hands", "hand", "fingers", "arms", "voice", "feel shaky", "shaky hands",
+                     # "desk" is not fenced: a desk fan is one, and the chair row wins a desk
+                     # that wobbles on its own words anyway
+                     "chair", "chairs", "table", "tables", "stool", "stools", "bench",
+                     "sofa", "wardrobe", "door", "gate", "shelf", "shelves", "washing machine",
+                     "washer", "dryer", "laptop", "computer", "pc", "phone", "car", "bike",
+                     "steering", "baby", "dog", "cat", "puppy", "noise", "noisy", "rattle",
+                     "rattles", "rattling", "grind", "grinding", "hum", "humming", "buzz",
+                     # a fan that wobbles AND clicks is a noise question, and the noise card
+                     # names the guard and the blade nut: "the fan wobbles and clicks" was
+                     # answered by it before this row existed
+                     "click", "clicks", "clicking", "squeak", "squeaks", "squeaking", "whine",
+                     "whirr", "knock", "knocks", "knocking", "bang", "bangs", "banging",
+                     "thump", "thumping", "scrape", "scraping",
+                     "leak", "leaking", "smell", "smells", "not cold", "no power",
+                     "how much", "cost", "electricity", "petrol"),
+              bias=1),
         # A chair or a table does not only come loose; it snaps. "the table leg is broken" used to
         # reach the broken-bone answer on the word "leg", and a chair that was simply broken got an
         # echo, so a break in furniture gets the repair it needs and leaves the body table alone.
@@ -5408,7 +6580,13 @@ def entries():
                      "washer-dryer", "condenser",
                      "move house", "moving house", "moving flat", "move flat", "new flat",
                      "new house", "new home", "upstairs", "downstairs", "van", "removals",
-                     "take it with me", "moving it", "moving the machine", "moving my")),
+                     "take it with me", "moving it", "moving the machine", "moving my",
+                     # "isnt spinning" is not a wobble: the drum is not turning at all, and
+                     # levelling a machine that will not spin does not touch the cause. Levelling
+                     # advice is for a machine that shakes, walks or bangs while it spins, which
+                     # is what "wobbles", "shaking" and "walks" in the key say.
+                     "isnt spinning", "isn t spinning", "not spinning", "no spin", "wont spin",
+                     "won t spin", "wont turn", "won t turn", "drum isnt", "drum not")),
         entry("curtain-measure",
               (("curtain", "curtains", "blind", "blinds", "drapes"),
                ("measure", "measuring", "how wide", "how long", "buy", "size", "sized", "fit",
@@ -5429,7 +6607,14 @@ def entries():
                                 # well so that a telly that will not switch on is not one
                                 "tv on the wall", "tv on a wall", "wall mounted tv", "wall-mount tv",
                                 "mount a tv", "mount the tv", "tv bracket", "television on the wall",
-                                "wall bracket"),
+                                "wall bracket",
+                                # the fixing asked for by the thing that holds it: "i need a nail
+                                # in the wall" and "what nail for plasterboard" were a chat
+                                # module question ("What kind of nail do you usually go for?")
+                                # and a fingernail-ridges card
+                                "nail", "nails", "rawlplug", "rawlplugs", "rawl plug", "rawl plugs",
+                                "rawplug", "rawplugs", "wall plug", "wall plugs", "anchor",
+                                "anchors", "fixing", "fixings"),
                                ("hang", "hanging", "wall", "drill", "heavy",
                                 "plaster wall", "plaster walls", "plasterboard wall", "brick wall",
                                 "brick", "chimney breast", "lath and plaster", "no studs",
@@ -5444,7 +6629,11 @@ def entries():
                                 # bracket that is a mark in a sentence is the writing row's own
                                 # question, so every way of saying that is fenced out below.
                                 "need", "needs", "needed", "buy", "buying", "should i get",
-                                "what size", "which one")),
+                                "what size", "which one",
+                                # the fixing asked for by what it holds up: "what nails for a
+                                # shelf" has the nail in the subject group and nothing else this
+                                # row knows, so the for-tail is what says it is a fixing job
+                                "for", "into", "in a wall")),
               "It is the fixing that matters, not the drill: find the studs with a stud finder or by "
               "tapping, and screw into one where you can. On plasterboard use proper hollow-wall "
               "fixings, not a bare rawl plug, for anything over a couple of kilos, and a shelf wants a "
@@ -5458,7 +6647,14 @@ def entries():
                      "spelling", "english", "algebra", "algebraic", "maths", "math", "equation",
                      "equations", "expand", "expanding", "simplify", "multiply", "x", "xy",
                      "tax", "taxed", "income", "salary", "wage", "wages", "band", "bands",
-                     "percentage", "percent", "40k", "20k", "50k")),
+                     "percentage", "percent", "40k", "20k", "50k",
+                     # the nail on a person, not the one in the wall: the filing, the polish, the
+                     # biting and the clippers are the health and routines rows' lines
+                     "file", "files", "clippers", "clipper", "polish", "varnish", "manicure",
+                     "pedicure", "gel", "acrylic", "bitten", "biting", "cut my", "trim my",
+                     "grow", "growing", "grew", "peeling", "ridges", "ridged", "fungus", "fungal",
+                     "toenail", "toenails", "fingernail", "fingernails", "thumbnail", "toe", "toes",
+                     "finger", "fingers", "nail fold", "ingrown")),
         # A bill question is about the cost, not about the boiler or the gas supply: a gas leak is
         # #safety's line, and "cut the gas to my boiler myself" is a plumbing job.
         entry("energy-bill", (("energy", "electric", "electricity", "gas", "heating", "utility",
@@ -5484,6 +6680,11 @@ def entries():
                                # answers it with the meter and the estimated read.
                                "massive", "huge", "enormous", "sky high", "through the roof",
                                "so big", "big", "bigger", "high",
+                               # the same question as a verb: "how do i stop wasting
+                               # electricity" was the physics definition of electricity, and
+                               # "i am wasting so much gas" was the bin's answer. What is being
+                               # wasted is the fuel this row is about, so the verb belongs here.
+                               "waste", "wasting", "wasted", "stop wasting",
                                # the same question in the words of the dial rather than the bill
                                "turn down", "turn it down", "turn up", "turn it up", "how low",
                                # "what temperature", "set" and "setting" used to be here, and they
@@ -5549,6 +6750,13 @@ def entries():
                      "leaving it on", "leaving the heating on", "leaving the boiler on",
                      "left on all day", "on all the time", "on all day", "does it save",
                      "point of leaving",
+                     # the other direction of the same fence: a bill at a table is not the fuel
+                     # bill, and "the bill at the restaurant was too high" got the boiler flow
+                     # temperature because "bill" and "high" are both in this row's key. The
+                     # table's bill is `meal-bill-wrong`, which already names the fuels.
+                     "restaurant", "restaurants", "waiter", "waitress", "split the bill",
+                     "split bill", "the bill at the", "meal out", "card slip", "takeaway",
+                     "cafe", "pub", "bistro", "pizzeria",
                      "mobile", "broadband", "tv licence", "licence", "rent", "insurance",
                      # Which deal to be on is a different question from what to turn down: the
                      # tariff and standing-charge answers live with the bills, and this one used to
@@ -5722,7 +6930,17 @@ def entries():
               # can i get a cheap dishwasher" said "get" rather than "buy", so the avoid list
               # below did not catch it and the night tariff answered a question about a shop.
               guard=lambda understood: not asks_where(understood),
-              avoid=("car", "vehicle", "blanket", "shower", "bike", "bicycle", "buy", "buying",
+              # A tired body also says "energy" and a time of day: "im always low on energy in
+              # the afternoons" was told which hours a two-rate tariff is cheap in, because
+              # "energy" is in the first arm and "afternoon" in the second. The body words are
+              # what say the question is the person's own energy and not the meter's.
+              avoid=("tired", "tiredness", "tiring", "exhausted", "drained", "knackered",
+                     "sluggish", "flagging", "sleepy", "no energy", "low on energy",
+                     "low in energy", "energy levels", "my energy", "afternoon slump",
+                     "cant keep my eyes open", "keep falling asleep", "always tired", "so tired",
+                     "feel flat", "feeling flat", "run down", "worn out", "burned out",
+                     "burnt out",
+                     "car", "vehicle", "blanket", "shower", "bike", "bicycle", "buy", "buying",
                      # not the bare "best": "when is the best time to run the dishwasher" is this
                      # row's own question, and the word only says which-machine when it is one with
                      # the noun. The comparison shapes are named instead.
@@ -5770,6 +6988,68 @@ def entries():
               bias=1),
         # The room question, not the bill one: "cheapest way to heat a room" and "my house is cold"
         # are about what to do tonight. A cold house that is also a sad one stays with the person.
+        # "why is my flat so cold even with the heating on" is not the keep-warm answer: the
+        # person already has the heating on and wants to know why it is not working. The keep-warm
+        # row answered it with a 1kW electric radiator for one room, which is the answer to a
+        # different question, and once the mood row and the body-cold row stood aside for a home
+        # it was the only card left. Four causes cover nearly every one of these, cheapest
+        # first, so the row names them in the order a person can check them.
+        entry("cold-house-even-with-the-heating-on",
+              (("cold", "colder", "freezing", "chilly", "perishing", "never gets warm",
+                "never warms up", "wont get warm", "won't get warm", "not getting warm",
+                "not warming up", "wont warm up", "won't warm up", "doesnt get warm",
+                "doesn't get warm", "lukewarm"),
+               ("house", "home", "flat", "room", "rooms", "bedroom", "living room", "sitting room",
+                "kitchen", "heating on", "heating is on", "heatings on", "radiators are on",
+                "radiator is on", "the heating", "central heating", "upstairs", "downstairs",
+                # an outbuilding is the same four causes, and a cold shed, cellar or basement was
+                # answered with the season instead: "why is my shed so cold" got the Earth's tilt.
+                "shed", "sheds", "cellar", "cellars", "basement", "basements", "workshop",
+                "workshops", "garage", "garages", "conservatory", "loft", "attic", "outbuilding",
+                "outbuildings", "hallway", "porch", "caravan", "bungalow", "cottage")),
+              ("Usually one of four things, and the cheap checks come first. Feel the radiator in "
+               "the cold room: cold at the top is air, so bleed it; hot at the top and cold at the "
+               "bottom is sludge; and a thermostatic valve turned right down or stuck shut does the "
+               "same. Then look at where the thermostat sits - in a cold hall, or near a radiator "
+               "or a window, it reads the wrong room and stops the heating before the bedrooms get "
+               "warm. Then the boiler's flow temperature: 55 to 60C suits a condensing boiler, and "
+               "set much lower than that the radiators never get hot enough on a cold day. If all "
+               "that is right the heat is leaving - draughts under the doors, an open chimney, the "
+               "loft hatch, and loft insulation under 270mm - and that is what to spend on next."),
+              bias=1,
+              # said with the fault already named, these are the fault rows, not the why row
+              ask=("even with", "with the heating", "heating is on", "heating on", "heatings on",
+                   "heating is running", "heating is going", "radiators are on", "radiator is on",
+                   "turned up", "turn it up", "on full", "full blast", "all day", "all the time",
+                   "never gets warm", "never warms up", "not getting warm", "why is", "why are",
+                   "why does", "why do", "why wont", "why won't", "why am i"),
+              # Whether to put the heating on, and what to set it to, is the heating advice
+              # row's: "my house is cold should i put the heating on" was answered with the four
+              # causes, while "18C is the usual living-room setting" is the answer it can act on.
+              avoid=("should i put the heating on", "should i turn the heating on",
+                     "shall i put the heating on", "shall i turn the heating on",
+                     "do i need to put the heating on", "do i need the heating on",
+                     "is it worth putting the heating on", "worth putting the heating on",
+                     "what temperature", "what should i set", "how warm should",
+                     "no heating", "heating is off", "heating off", "heating not working",
+                     "heating isnt working", "heating isn't working", "heating has stopped",
+                     "heating stopped", "heating wont come on", "heating won't come on",
+                     "heating broken", "heating is broken", "broken boiler", "boiler is broken",
+                     "pressure", "gauge", "fault code", "locks out", "wont fire", "won't fire",
+                     "cold at the top", "cold at the bottom", "at the top", "at the bottom",
+                     "bleed", "bleeding", "radiator key", "thermostatic valve",
+                     "insulation", "loft insulation", "cavity wall", "double glazing",
+                     "draught", "draughts", "draft", "drafts",
+                     # a person, a plate, a pet or a car is not a house
+                     "i am", "im ", "i feel", "always cold", "my feet", "my foot", "my hands",
+                     "my hand", "fingers", "toes", "baby", "babies", "newborn", "toddler",
+                     "disabled", "elderly", "pensioner", "old", "sick", "ill",
+                     "car", "cars", "van", "engine", "washing machine", "oven", "microwave",
+                     "food", "reheat", "leftovers", "tea", "coffee", "bath", "shower",
+                     "pool", "greenhouse", "shed", "caravan", "hot tub",
+                     # money and bills are their own rows
+                     "bill", "bills", "cost", "cheap", "cheaper", "cheapest", "afford",
+                     "price", "quote", "tariff", "energy")),
         entry("heat-a-room", (("heat", "heating", "warm", "warmer", "warmth", "cold", "freezing",
                                "chilly", "perishing",
                                # Cold said as a picture, which is how most people say it that
@@ -5792,6 +7072,11 @@ def entries():
                                # bathroom, the garage and the conservatory had their own rows.
                                "kitchen", "bathroom", "garage", "conservatory", "shed",
                                "hall", "hallway", "spare room", "loft", "attic", "office",
+                               # the rooms nobody sits in still get asked about: "why is my
+                               # cellar so cold" and "the workshop is freezing" had no answer
+                               # of their own and reached the body card's thyroid test
+                               "cellar", "basement", "outbuilding", "outbuildings", "workshop",
+                               "porch", "caravan",
                                # The room they are in, said without naming it: "its freezing in
                                # here" is the same question about the same room, and it got
                                # "Got it. Is there anything you'd like a hand with?"
@@ -5882,10 +7167,13 @@ def entries():
                      "bedroom", "bedrooms", "bed room", "for sleep", "sleeping", "sleep in",
                      # the appliance being asked about, and not the picture of a cold room
                      ) + THE_APPLIANCE_ITSELF,
-              # a row or a discussion that got heated is an argument, and warming the room is
-              # no answer to it: "things got heated in the kitchen" was told to buy a 1kW
-              # electric radiator.
-              guard=not_the_heat_of_an_argument),
+              # Two stand-downs hold here and both are wanted. A body part being warmed is the
+              # compress card's question, not a room's ("heat my back or ice it" was told to buy a
+              # 1kW electric radiator for the room it was sitting in). And a row or a discussion
+              # that got heated is an argument, not a cold room ("things got heated in the
+              # kitchen" was told to buy the same radiator).
+              guard=lambda u: _a_room_being_heated(u)
+              and not_the_heat_of_an_argument(u)),
         # A squeak or a rub is the hinge, the latch or a door that has dropped: the two fixes are the
         # ---------------------------------------------------------------- doors, locks, hinges
         # People describe these six by the symptom and the part, never by the fix: "the door
@@ -5981,19 +7269,68 @@ def entries():
                      # enough to send "next door's dog wont shut up" to the swollen-door card
                      "dog", "dogs", "puppy", "barking", "bark", "barks", "cat", "cats", "meowing",
                      "neighbour", "neighbours", "neighbor", "neighbors", "next door", "upstairs",
-                     "downstairs", "shut up")),
+                     "downstairs", "shut up",
+                     # a door that will not shut is not a door that swings hard: a stiff key is
+                     # the barrel card's, and "oil the hinges" is the wrong answer to it
+                     "key", "keys", "lock", "locks", "keyhole", "barrel", "handle", "latch")),
         entry("door-lock-stiff", (("lock", "locks", "door lock", "barrel", "deadlock", "yale",
-                                   "latch", "key", "keys", "front door"),
+                                   "latch", "key", "keys", "front door",
+                                   # a key that will not go into the keyhole is a dirty or worn
+                                   # keyway, and "i cant get my key in the lock" fell through to
+                                   # the locked-out card about spares and a locksmith
+                                   "key in the lock", "key into the lock", "key in my lock",
+                                   "key wont go in", "key won't go in", "key does not go in",
+                                   "get my key in", "get the key in"),
                                   ("stiff", "sticky", "stuck", "sticking", "sticks", "jammed",
                                    "hard", "wont turn",
                                    "won't turn", "grinding", "tight", "difficult", "gritty",
-                                   "wont go in", "won't go in", "turning")),
+                                   "wont go in", "won't go in", "turning",
+                                   # "my front door key sticks" is the same barrel as "my lock is
+                                   # stiff", and "how do i stop a door key sticking in the lock"
+                                   # was reaching `change-a-lock` on "how" and "lock"
+                                   "stiffen", "stiffens", "stiffened",
+                                   "seizing", "seized", "grates", "grating", "rough",
+                                   # a key that will not go into the keyhole is this card, not
+                                   # the press-the-door card and not the composer's locked-out
+                                   # line: "i cant get my key in the lock" got both
+                                   "in the lock", "into the lock", "in my lock", "into my lock",
+                                   "get my key in", "get the key in")),
               _door_lock_stiff,
               bias=2,
               avoid=("car", "cars", "van", "bike", "bicycle", "suitcase", "case", "padlock", "safe",
                      "lost", "lost my keys", "locked out", "locked in", "keys locked", "cut a key",
                      "laptop", "keyboard", "password", "account", "windows", "drawer", "lockbox",
                      "post box", "postbox")),
+        # A key that has snapped off in the barrel is not a lock to buy and not a lock that is
+        # stiff: the piece is still in there and every further turn pushes it deeper. This row
+        # owns the line, and `change-a-lock` and `door-lock-stiff` pass on it.
+        entry("key-broken-in-lock",
+              (("key", "keys", "door key", "front door key", "spare key", "piece of key",
+                "half a key", "broken key", "key blade"),
+               ("snapped", "snap", "snapped off", "snapped in", "broke off", "broken off",
+                "broke in", "broken in", "sheared", "twisted off", "bent", "stuck", "jammed",
+                "stuck in the lock", "stuck in my lock", "jammed in", "half in", "get it out",
+                "get out", "remove", "removing",
+                # "how do i get a broken key out of a lock" scored 3 on the phrase and reached the
+                # laptop keyboard card on "keyboard"-like "key" + "broken", so the pulling out is
+                # said in the words people use for it
+                "out of the lock", "out of my lock", "out of the door", "out of the barrel",
+                "pull out", "pull it out", "dig out", "extract", "extracting", "out of")),
+              "Stop turning it: the piece in the barrel is what the pins are holding, and every "
+              "extra turn pushes it further in. Put a drop of WD-40 or graphite at the keyway, then "
+              "grip whatever is proud with needle-nose pliers or thin side cutters, pull straight "
+              "out rather than sideways, and jiggling the door handle while you pull helps. A short "
+              "piece just inside can be walked out with the thin blade of a jigsaw or a coping saw "
+              "slid alongside it. If it is in past the face of the barrel, it is a locksmith: about "
+              "\u00a360 to \u00a3120 to drill and replace the cylinder, and keep the door on the "
+              "latch until they come. Do not glue anything to it and do not push a second key in.",
+              # a key that belongs to a car or a padlock is not this row, and a lost key is the
+              # lost-keys card's
+              avoid=("car", "cars", "van", "bike", "bicycle", "motorbike", "suitcase", "padlock",
+                     "safe", "laptop", "keyboard", "password", "account", "phone", "lost",
+                     "lost my keys", "mislaid", "locked out", "locked in", "cut a key", "spare key",
+                     "cut a spare", "piano", "map", "answer", "code"),
+              bias=3),
         # The keys are lost and there is nothing to open yet, so the way back in comes before any
         # searching. "lost" plus a key word is the key, and every way of being stiff stays with
         # `door-lock-stiff`, which passes on "lost" itself.
@@ -6001,7 +7338,14 @@ def entries():
               (("keys", "key", "keyring", "key ring", "house keys", "door key", "front door key",
                 "keys to the house", "set of keys"),
                ("lost", "lose", "losing", "mislaid", "misplaced", "missing", "gone",
-                "cant find", "cannot find", "can't find", "no idea where", "nowhere")),
+                "cant find", "cannot find", "can't find", "no idea where", "nowhere",
+                # A key nobody has is the same evening as a key that is lost, however it is put:
+                # "how do i start my car without the key" and "how do i get in without my keys"
+                # are the searching-and-locksmith question, and the line says it without ever
+                # using the word lost.
+                "without the key", "without a key", "without my keys", "without keys",
+                "without the keys", "no key", "dont have the key", "don't have the key",
+                "not got the key", "havent got the key", "haven't got the key")),
               _lost_keys,
               # keys lost *inside* the house are a searching question, and the composer already has
               # the retrace-your-steps answer for those
@@ -6057,7 +7401,18 @@ def entries():
                      # and the who-to-call row is the answer, with the locksmith it names.
                      "who do i call", "who should i call", "who can i call", "who could i call",
                      "who do i ring", "who should i ring", "who to call", "who to ring",
-                     "who do i get", "someone to call", "someone to ring", "locksmith")),
+                     "who do i get", "someone to call", "someone to ring", "locksmith",
+                     # a key that will not turn, and above all a key that has broken off inside,
+                     # is not a lock to buy: "how do i get a broken key out of a lock" was told to
+                     # measure the old cylinder, and the stuck-key card below is the answer
+                     "sticking", "sticks", "stuck in the lock", "stuck in my lock",
+                     # "i cant get my key in the lock" was told to measure the old cylinder; a key
+                     # that will not go in is the stiff keyway below, not a lock to buy
+                     "get my key in", "get the key in", "cant get my key", "can't get my key",
+                     "key wont go in", "key won't go in", "key does not go in", "key in",
+                     "key stuck", "key snapped", "key broke", "key broke off", "broken key",
+                     "snapped off", "snapped in", "broke off in", "broke in the lock",
+                     "half a key", "piece of key", "jammed in the lock", "key jammed")),
         # "How do i stop locking myself out" is a habit question, not a lock to change and not a
         # phone setting: the screen-timeout row keys "stop" and "locking" and was taking it.
         entry("stop-locking-yourself-out",
@@ -6173,7 +7528,12 @@ def entries():
                                   "locked in the house", "locked in my room", "trapped in my flat",
                                   "shut in my room", "swollen", "swelled", "warped",
                                   "cant get out", "can't get out", "wont turn", "won't turn",
-                                  "wont close", "won't close"),
+                                  "wont close", "won't close",
+                                  # "i cant get in my front door" is the same shut door as "my
+                                  # door wont open", and it fell through to the composer's
+                                  # locked-out line about spares and a locksmith
+                                  "cant get in", "can't get in", "cannot get in", "wont let me in",
+                                  "won't let me in", "key wont work", "key won't work"),
                                  # No bare place word here: "i cant get out of the house" is the
                                  # going-out line, and this answer must not take it. A flat or a
                                  # room only reaches this entry with a door or a lock in the line.
@@ -6189,6 +7549,11 @@ def entries():
               "If it is rented, ring the landlord or a locksmith who quotes on the phone - and if a "
               "child or anyone is shut in, ring 999 rather than fight the door.",
               avoid=("squeak", "squeaks", "squeaky", "squeaking", "creak", "creaks", "creaking",
+                     # a key that will not go into the keyhole is the stiff keyway card's, not a
+                     # door that will not open: "i cant get my key in the lock" was answered with
+                     # the press-the-door-and-lift-the-handle card
+                     "key in the", "key into the", "get my key", "getting my key", "keyway",
+                     "key wont go", "key won't go", "wont go in", "won't go in",
                      "oil", "oiling", "hinge oil", "draught", "draughts", "draft", "paint",
                      "painting", "painted", "decorate", "decorating", "letterbox", "letter box",
                      "childproof", "child proof", "cat flap", "pet flap", "car door", "van door",
@@ -6369,7 +7734,13 @@ def entries():
                      "blew out", "blown out", "came off", "fell down", "repair", "fix", "replace",
                      "treat", "treating", "stain", "staining", "paint", "painting", "preserver",
                      "creosote", "rotten", "rotted", "wobbly", "loose", "boundary fence is",
-                     "who owns", "whose", "who pays", "who has to pay", "deeds")),
+                     "who owns", "whose", "who pays", "who has to pay", "deeds",
+                     # A count is the quantity rows' question, whatever height came with it:
+                     # "how many blocks for a garden wall 6 metres long and 1 metre high" was
+                     # answered with the 2 metre planning limit.
+                     "how many blocks", "how many bricks", "how many slabs", "how many tiles",
+                     "how many panels", "how many posts", "how many boards", "how many sheets",
+                     "how many bags", "how many rolls", "how many metres of")),
         # "what is a gravel board for" was a shrug: the board is the part of a fence that keeps the
         # panel out of the wet, and nobody knows what it is until they have had to replace one.
         entry("fence-gravel-board",
@@ -6631,8 +8002,9 @@ def entries():
               avoid=BODY_WORDS),
 
         entry("moving-cheap", (("move", "moving", "moved", "removals", "man with a van"),
-                               ("cheap", "cheaper", "cheapest", "cheaply", "cost", "price",
-                                "budget", "hire", "van", "money", "save", "afford")),
+                               ("cheap", "cheaper", "cheapest", "cheaply", "cost", "costly",
+                                "price", "prices", "pricey", "expensive", "budget", "hire", "van",
+                                "money", "save", "afford")),
               ("For one sofa and a bed, hire a man with a van for a couple of hours or borrow a van and "
                "two friends; book the van for the whole morning rather than by the hour. Measure the "
                "doorways and the stairwell first, because a sofa that doesn't fit costs you the day."),
@@ -6659,6 +8031,10 @@ def entries():
               # "what do i need to buy first" is the first-night box, not the paper trail
               avoid=("buy", "first night", "sofa", "van", "cheap", "cost", "price", "hire", "removal",
                      "phone", "laptop",
+                     # telling the landlord is the notice letter, not the paper trail: "when
+                     # should i tell my landlord im moving out" got the GP-and-meters list
+                     "tell my landlord", "tell the landlord", "my landlord", "the landlord",
+                     "landlord", "landlady", "letting agent", "notice period", "give notice",
                      "who do i tell about my new address", "who do i tell about my address",
                      "who do i tell about my new adress", "who do i tell about my new place",
                      # "change the name on my council tax bill after my husband moved out" is the bill,
@@ -6808,6 +8184,7 @@ def entries():
                "you are not hunting for the bin bags."),
               # a kitchen being cleaned, planned, fitted or painted is another row's line, and so
               # is shopping for one: only the packing words reach this one.
+              guard=_the_kitchen_stuff_is_a_take_up,
               avoid=("unpack", "unpacking", "unpacked",
                      "clean", "cleaning", "cleaned", "grease", "greasy", "smell", "smells",
                      "oven", "fridge", "freezer", "hob", "cooker", "microwave", "bin", "dishwasher",
@@ -6820,6 +8197,9 @@ def entries():
         entry("moving-with-kids",
               (("move", "moving", "moved", "moving house", "house move", "new house", "new home"),
                ("kids", "kid", "children", "child", "son", "daughter", "teenager", "toddler",
+                # a baby is a child, and "moving house with a baby" reached nothing at all
+                # because the word for the smallest one was not in the group
+                "baby", "babies",
                 "tell", "explain", "upset", "worried", "nervous", "sad", "cope", "settle")),
               ("Tell them as soon as it is certain, and keep it concrete: which room is theirs, where "
                "the school or nursery is, and what stays the same. Let them pack a box of their own "
@@ -6829,6 +8209,9 @@ def entries():
               # A child who is leaving home is not a household packing up: "my daughter wants to
               # move out" was told "tell them as soon as it is certain... which room is theirs",
               # and "my son has moved out and i am bereft" the same. family.py answers the leaving.
+              # A feeling in the speaker's own line is not a question about telling a child, and
+              # that is a guard rather than more avoid words: see `_a_child_or_a_telling`.
+              guard=_a_child_or_a_telling,
               avoid=("council", "council tax", "gp", "doctor", "dentist", "register", "piano",
                      "van", "cheap", "cost", "price", "abroad", "country", "care home",
                      "move out", "left home", "has left", "wants to move",
@@ -7130,7 +8513,11 @@ def entries():
               # A pan cooling before the washing-up is not a pan at the end of its life: "how long
               # should i cool a pan before washing" matched "frying pan" and "how long" here as well
               # as on the wash cycle.
-              avoid=LIFE_GUARD + JOB_GUARD + ("broken", "quote", "worth", "cool", "cooling",
+              # "worth" on its own is the buying question ("is it worth it"), but it is also half
+              # of "is it worth replacing", which is this row's own question: the bare word vetoed
+              # the most common way people ask it, so only the buying sense is fenced now.
+              avoid=LIFE_GUARD + JOB_GUARD + ("broken", "quote", "worth it", "worth buying",
+                                              "worth the money", "worth paying", "cool", "cooling",
                                               "cool it", "cool the pan", "before washing",
                                               "washing it", "wash the pan", "before i wash"), bias=4),
         # "When should I replace my mattress" belongs to the years table above - it has the age
@@ -7149,7 +8536,13 @@ def entries():
                      "protector", "clean", "cleaning", "wash", "washing", "stain", "stains",
                      "smell", "smells", "turn", "turning", "flip", "flipping", "rotate",
                      "rotating", "cover", "covers", "sheet", "sheets", "pillow", "pillows",
-                     "duvet", "duvets"),
+                     "duvet", "duvets",
+                     # "i need a new mattress, how do i choose" was this row's lifespan answer,
+                     # because "need a new" is its own ask and the pick was left in the words.
+                     # Chosen is shopping's question (mattress-buy), and it reads the line for
+                     # which one, so this row stands down for the choosing words.
+                     "choose", "choosing", "chose", "pick", "picking", "which one",
+                     "what should i look for", "how do i choose", "help me choose"),
               ask=("replace", "replacing", "replacement", "replaced", "when to", "new")),
         entry("running-cost", (RUNNING_WORDS, COST_WORDS), _running,
               avoid=("broken", "break", "repair", "install", "frost", "iced", "ice", "defrost",
@@ -7162,7 +8555,21 @@ def entries():
                      "playstation", "xbox", "extractor", "buy", "buying", "getting",
                      # a service or a repair is a price, not a bill
                      "service", "servicing", "serviced", "repair",
+                     # a thing swapped for another thing is priced fitted, not by the unit of
+                     # electricity: "is replacing a bath with a shower expensive" got the pence
+                     # for five minutes of hot water. The same holds for any swap - a boiler, a
+                     # window, a shower - so it is one rule here rather than a word in each row.
+                     "replace", "replaces", "replacing", "replaced", "replacement",
+                     "swap", "swaps", "swap out", "swapping", "swapped", "rip out",
+                     "ripping out", "fit a", "fitting a", "fitted a",
                      "get one", "worth getting", "cups", "water for", "fill", "best", "new",
+                     # which one to buy is a shopping question: "what is a good cheap slow cooker"
+                     # took "cheap" as the cost word and was told the pence per hour, when the
+                     # buying row has the £30-against-£100 answer. "cost" and "cheaper" keep their
+                     # own lines ("how much does it cost to run a slow cooker").
+                     "good", "a good", "good cheap", "good and cheap", "recommend", "recommended",
+                     "worth", "worth it", "which one", "which one to", "should i buy",
+                     "should i get", "what to buy", "to buy",
                      # a fan against air con is a cooling question, and that entry has the tips
                      "air con", "aircon", "air conditioning", "air conditioner",
                      # the hour is the tariff row's question, not pence per cycle: "what is the
@@ -7327,6 +8734,11 @@ def entries():
               # names a fridge, and the "what can i do" in the key above took it: a line that asks
               # what to make with a food it names belongs to the kitchen, not to this row.
               guard=_not_a_cook_ask),
+        # The fixtures that are not appliances, and the first check for each: see
+        # `_the_fixture_that_stopped` for the lines this took off the bank card, the fibre answer
+        # and the extractor fan. The guard is the row's own reading, so a named symptom keeps its
+        # own answer and a fixture the table does not know is passed over to the rows that do.
+        *list(_the_stopped_fixture_entries(entry)),
         # A broken appliance is a decision, not a shopping question and not a how-to: "is it worth
         # repairing" needs the money rule, and it is the same rule for a washing machine, a dishwasher
         # and an oven, so it is one entry and the appliance words are the first key.
@@ -7350,7 +8762,11 @@ def entries():
                 # shares with the machine: "can i service my lawnmower myself" is a machine and a
                 # skill and nothing else.
                 "myself", "my self", "diy", "my own", "on my own", "have a go", "give it a go",
-                "can i fix", "can i repair", "can i replace", "can i change", "could i fix")),
+                "can i fix", "can i repair", "can i replace", "can i change", "could i fix",
+                # "do i need a new washer" is the plainest way the decision is put, and the line
+                # names the machine and nothing else: the phrase is the second position the key
+                # needs, and nobody asks whether they need a new one of something they do not own.
+                "need a new", "need new", "needs a new")),
               _repair_judgement,
               # A how-to is not a decision: "how do i fix a leaking washing machine" keeps its own answer.
               ask=("worth", "replace", "replacing", "repair or", "or repair", "new one", "buying new",
@@ -7380,7 +8796,12 @@ def entries():
                    # The rule answers it with the parts list rather than the quote.
                    "can i fix", "could i fix", "can i repair", "could i repair", "can i replace",
                    "can i change", "myself", "my self", "diy", "diy job", "have a go",
-                   "give it a go"),
+                   "give it a go",
+                   # "do i need a new washer" is the plainest way the decision is put, and it was
+                   # answered with a drill bit (a washer is a fixing as well as a machine) or with
+                   # drum sizes. Nobody asks whether they need a new one of something they do not
+                   # own, so the phrase carries both the ask and the owning.
+                   "need a new", "need new", "needs a new"),
               # "broken" and "repair" are in every line about a machine, and they are also the two
               # words of the landlord letter and of the shopping entry: the decision has to outrank
               # both, which the bias does, and the ask gate keeps it off every other repair line
@@ -7638,9 +9059,16 @@ def entries():
               # "stuck" used to be in the key above, and "the door is stuck" is the door question:
               # the drain entry now passes on a door, a lock or a shut drum. Water *coming out* is the
               # leak entry's line, not a blocked filter, so it passes on that too.
+              # the fault has to be named, not just the water: the guard above is what keeps the
+              # litres, the heat and the smell out, and this row's bias only wins a tie it reaches
+              guard=_a_machine_that_will_not_empty,
               avoid=("buy", "which", "best", "door", "doors", "locked", "lock", "shut", "open",
                      "leak", "leaks", "leaked", "leaking", "coming out", "pouring out", "pouring",
-                     "flooded", "flooding", "underneath")),
+                     "flooded", "flooding", "underneath",
+                     # a car's screen wash is a washer too: "my washer jets are blocked" is the
+                     # car, so the car's own words go with the guard that asks for a fault
+                     "jet", "jets", "nozzle", "nozzles", "windscreen", "windshield",
+                     "screen wash", "washer fluid", "washer jet", "washer jets")),
         # The filter is the job people ask about on its own, and the smell entry was taking it. It is
         # a small hatch and a bowl, not a service wash, so it gets its own answer.
         entry("washing-machine-filter",
@@ -7681,6 +9109,11 @@ def entries():
               avoid=("door seal", "rubber", "seal", "mould in the seal", "black around the door",
                      "kitchen", "bedside", "desk", "chest of drawers", "cutlery", "sock", "socks",
                      "fridge", "freezer", "wardrobe", "bathroom cabinet",
+                     # "where do i put the detergent" is the compartment question, not this job:
+                     # taking the drawer out and scrubbing it answers a different ask, and the
+                     # consumables row has the three compartments
+                     "where do i put", "where do the", "where does", "where should i put",
+                     "which compartment", "what compartment", "where do the tablets",
                      # a dishwasher has a detergent drawer too, and its own clean is another job
                      "dishwasher", "dish washer", "tumble dryer", "tumble drier"),
               # the mould row keys "detergent drawer" and "drawer" too and sits earlier in the file,
@@ -7765,6 +9198,56 @@ def entries():
                      # "emptying" has to stay in the key for "the dishwasher isnt emptying", and
                      # that one word also reaches the unloading question
                      "empty the dishwasher", "emptied", "unload", "unloading", "quickly")),
+        # A dishwasher that has water where water should not be is a fault, not the drain
+        # question: the row above keeps "leak" out of its own key on purpose, and nothing else
+        # held the line, so "water is coming out of the bottom of my dishwasher" fell to "I'm
+        # listening - say more". The mirror of the washing-machine leak row, because the two
+        # machines leak in the same places: the door seal and the filter at the front, the inlet
+        # and drain hoses underneath.
+        entry("dishwasher-leak",
+              (("dishwasher", "dish washer", "dishdrawer", "dish drawer"),
+               ("leak", "leaking", "leaks", "leaked", "puddle", "puddles", "dripping", "flooding",
+                "water coming out", "water coming from", "water coming", "water under",
+                "water underneath", "water all over", "water on the floor", "on the floor",
+                "all over the floor", "coming out of the bottom", "underneath it", "under it",
+                "wont stop leaking", "won't stop leaking")),
+              "Turn it off at the wall and shut the water off at the little isolator tap under the "
+              "sink, then get the water up - a shallow tray and a towel is enough for a slow one. "
+              "Water at the front of the door is usually the door seal or the filter, so twist the "
+              "filter out and check the seal for food or a split; water underneath is the inlet or "
+              "drain hose where it joins the machine or the waste, so check those joints first. "
+              "Leave it off until that seal or joint is fixed: a leak from inside the machine "
+              "itself is a repairer's job.",
+              # a machine that will not drain, a load that comes out wet, a smell and a box of
+              # salt all have their own rows, and a new one to buy is the shopping answer
+              avoid=("buy", "which", "best", "cheapest", "price", "cost",
+                     "wont drain", "won't drain", "not draining", "not emptying", "wont empty",
+                     "won't empty", "full of water", "water in the bottom", "standing water",
+                     "left in the bottom", "filter", "pump", "empty", "emptying",
+                     "smell", "smells", "smelly", "cloudy", "streaks", "salt", "tablet",
+                     "rinse aid", "still wet", "wont dry", "won't dry", "how much water",
+                     "uses", "use a lot", "install", "installing", "fit a", "fitting"),
+              bias=1),
+        entry("machine-consumables",
+              (("salt", "tablet", "tablets", "powder", "detergent", "liquid", "pod", "pods",
+                "capsule", "capsules", "rinse aid", "rinse-aid", "softener", "conditioner",
+                "dishwasher cleaner"),
+               ("where do i put", "where do the", "where do i add", "where do i fill",
+                "where does", "where should i put", "where to put", "where in the",
+                "which compartment", "what compartment", "top up", "topup", "how much",
+                "which bit", "run out", "ran out", "refill", "where", "put", "fill", "go",
+                "goes",
+                # a follow-up that names only the next consumable is the same question about the
+                # same machine: "where does the salt go in my dishwasher" then "and the rinse aid?"
+                "and the", "what about the", "and what about the", "how about the")),
+              _where_the_consumable_goes,
+              # a cloudy load, a wet load and a machine that will not drain all have their own rows,
+              # and a box of salt to buy is the shopping answer
+              avoid=("cloudy", "streaks", "white marks", "film", "smell", "smells", "smelly",
+                     "wont dry", "won't dry", "still wet", "wet dishes", "drain", "draining",
+                     "leak", "leaking", "buy", "which", "best", "price", "cost", "how often",
+                     "repair", "broken", "not working", "error"),
+              guard=_a_machine_consumable, bias=1),
         entry("dishwasher-wet",
               (("dishwasher", "dish washer", "dishdrawer", "dish drawer"),
                ("dishes are wet", "dishes still wet", "dishes come out wet", "leaves the dishes wet",
@@ -7868,7 +9351,10 @@ def entries():
                      "too hot", "very hot", "overheat", "overheating", "scald", "scalding",
                      "noise", "noisy", "smell", "fumes", "carbon monoxide", "pilot light",
                      "service", "serviced", "servicing", "engineer", "install", "replace",
-                     "how much", "price", "bill", "tariff", "cost")),
+                     "how much", "price", "bill", "tariff", "cost"),
+              # a named sound is the noise row's question: "the boiler buzzes when the hot water
+              # runs" holds "boiler" and "hot" and was answered with the flow-temperature dial.
+              guard=not_a_sound),
         # Where the plate with the model and serial number is. "where is the model number on my
         # boiler" was the flow-temperature card, because the dial row keys "number" and "boiler",
         # and the same question about a washing machine, a fridge and an oven was a search hedge:
@@ -8084,7 +9570,18 @@ def entries():
                      "no heating")),
         entry("leak-under-sink",
               (("sink", "under the sink", "waste", "trap", "u-bend", "ubend", "pipe"),
-               ("leak", "leaking", "drip", "dripping", "water", "puddle", "fix")),
+               # "wet patch" and "puddle" are how a person describes water they found rather
+               # than saw fall: "wet patch under the sink" reached the child-wets-bed card, and
+               # "the wet patch under the sink is spreading" reached a card about going away.
+               # The row that answers a puddle answers a wet patch too.
+               # The second key is what the water is doing, never where it is: "sink",
+               # "under the sink" and "underneath" are in the first key, so putting the place in
+               # both halves made any line that names the place a match with no water word in it
+               # at all - "mould under the sink" and "mould in the cupboard under the sink" left the
+               # mould card for this one. A line that names where the water is already matches on
+               # the first key, so the second key only has to say it is water.
+               ("leak", "leaking", "drip", "dripping", "water", "puddle", "fix", "wet patch",
+                "wet", "soaked", "pool", "pooling", "spreading", "damp patch", "damp")),
               "Dry everything, put a bowl under the trap and run the tap to see where the water appears. "
               "A drip at a plastic joint is nearly always a hand-tight nut: give it another quarter turn, "
               "no more, because overtightened plastic splits. If it's the trap, unscrew it, clean out the "
@@ -8097,6 +9594,62 @@ def entries():
                      # "waste" is in this row's key, so the saving words have to stand it down
                      "less water", "save water", "saving water", "wasting water", "waste less",
                      "water use", "water usage", "water bill", "use so much water")),
+        # A room under water had no card at all: "i flooded the bathroom" and "water everywhere in
+        # the kitchen" reached the intake form - "Got it. Is there anything you'd like a hand
+        # with?" - because every water row here keys the thing that is leaking (a tap, a trap, a
+        # radiator) and the flood has no thing, only a place. The place is what this one keys,
+        # with a flood word beside it, so the leak rows keep their own lines.
+        entry("flooded-room",
+              (("flood", "flooded", "flooding", "under water", "water everywhere",
+                "ankle deep", "inches of water", "deep in water", "swimming in water"),
+               ("bathroom", "kitchen", "flat", "house", "room", "rooms", "floor", "floors",
+                "carpet", "carpets", "hall", "hallway", "cellar", "basement", "bedroom",
+                "utility", "downstairs", "upstairs", "everywhere", "lino", "floorboards")),
+              "Turn the water off first: the stopcock is usually under the kitchen sink, and if "
+              "water is near a socket or a light, switch that circuit off at the consumer unit. "
+              "Then stop whatever is running, bail and mop, and get air moving with a fan and an "
+              "open window - a floor or skirting that stays wet a day warps and grows mould. "
+              "Photograph it before you clear up, and ring the insurer and whoever owns the "
+              "building today if it came through the ceiling.",
+              # the garden, the road and the car have their own flood rows, and a washing
+              # machine or a toilet that has done this is a machine with a fault, not a room
+              avoid=("garden", "lawn", "greenhouse", "shed", "car", "van", "road", "street",
+                     "village", "river", "field", "fields", "warning", "risk",
+                     # a cellar that fills when it rains is water coming in from outside: the
+                     # stopcock is no use there, and it is not the same repair. It has a row of
+                     # its own now, so the whole of the outside is fenced off here rather than
+                     # one word of it.
+                     "rain", "rains", "raining", "rainwater", "storm", "storms", "winter",
+                     "groundwater", "water table", "cellar", "basement", "outside", "drain",
+                     "drains", "back door", "under the door", "doorway",
+                     "insurance quote", "washing machine", "dishwasher", "toilet",
+                     "loo", "radiator", "boiler", "tap", "taps", "sink")),
+        # Water coming in from outside is the other half of the same night: "my cellar is
+        # flooding" and "it is raining and the cellar is flooding" were a shrug, and the burst-pipe
+        # card above is wrong for them, because the stopcock stops nothing in a storm. The drain,
+        # the doorway and the insurer are what a person needs, and not standing in it.
+        entry("water-coming-in",
+              (("flood", "flooded", "flooding", "floods", "water", "wet", "seeping", "seeps",
+                "rising", "inches deep", "ankle deep", "filling", "coming in", "coming under",
+                "coming through", "getting in"),
+               ("cellar", "basement", "rain", "rains", "raining", "rainwater", "storm", "storms",
+                "outside", "groundwater", "water table", "drain", "drains", "back door",
+                "under the door", "doorway", "up through the floor")),
+              "Water coming in from outside is not a stopcock: it stops taps, not rain or a "
+              "rising water table. Stay out of a cellar with sockets in it, or switch the whole "
+              "supply off at the consumer unit first, and pump or wet-vac the water out rather "
+              "than mopping it about. Sandbags or a flood door across the doorway help tonight, "
+              "photographs help the insurer, and a drain that backs up in a storm is the water "
+              "company's to clear.",
+              # the indoor flood, the garden, the road and the car keep their own rows
+              avoid=("stopcock", "washing machine", "dishwasher", "toilet", "loo", "radiator",
+                     "boiler", "tap", "taps", "sink", "pipe", "pipes", "burst", "car", "van",
+                     "road", "street", "village", "river", "lawn", "greenhouse", "shed",
+                     "garden", "yard", "insurance quote", "warning", "risk", "sandbag"),
+              # a line that has the outside in it and a flood with it is this card whatever else
+              # it also mentions: "my basement fills with water when it storms" and "rain water is
+              # coming into my cellar" were a science lecture and a plumbing musing on the score
+              bias=2),
         # The fly and smell-nice answers used to exist twice, once here and once in cleaning.py,
         # worded differently; home.py keeps them because it also owns the house facts around them.
         entry("fruit-flies",
@@ -8128,6 +9681,9 @@ def entries():
                      # "get over" fenced off, "how do i get over a fear of flying" fell to this
                      # card and got cider vinegar, so the phrase is named here.
                      "fear of flying", "scared of flying", "afraid of flying",
+                     # a zip fly is not an insect: "how do i put a zip fly in" got cider vinegar
+                     # in a glass, because a fly is exactly what this row is about.
+                     "zip", "zips", "zipper", "zippers", "zip fly",
                      # A plane, not a gnat, and the matcher reads "flying" as "fly": "im flying
                      # at 6am" got the cider vinegar, and the bare word cannot fence it off
                      # because "there is a fly in my kitchen" would lose its card with it. The
@@ -8457,7 +10013,16 @@ def entries():
                      "collected", "council", "where do i take", "tip",
                      "dump", "neighbour", "neighbor", "next door", "compost", "garden", "food caddy",
                      "seagull", "fox", "rat", "mouse", "mice", "broke", "broken", "lid", "lock",
-                     "when is", "what day")),
+                     "when is", "what day",
+                     # "waste" is this row's noun for rubbish, but it is also a verb, and the
+                     # thing it is done to decides who answers: "i waste so much money every
+                     # month" and "i am wasting so much gas" were both the flatten-the-cartons
+                     # answer, because the key holds "waste" and the other half holds "so much".
+                     # The object of the verb stands this row down: money is money.py's
+                     # question, the fuels are the energy bill's, and food is the food-waste row's.
+                     "money", "wages", "cash", "salary", "payday", "food", "groceries",
+                     "time", "water", "electricity", "energy", "gas", "fuel", "petrol",
+                     "paint", "wood", "ink", "data", "battery", "heat")),
         # "the bin needs emptying" was answered "right-click the Recycle Bin on the desktop": the
         # word `bin` was the whole reading, and the bin in that sentence is the one under the sink.
         # The technology table reads the machine words out of a line before either row answers, and
@@ -8490,18 +10055,39 @@ def entries():
         # year, £60 to £120", which is the right topic and the wrong shape.
         entry("boiler-service-duration",
               (("boiler", "boilers", "combi", "gas boiler"),
-               ("how long does a boiler service take", "how long does a boiler service usually take",
-                "how long does the boiler service take", "how long does a boiler service last",
-                "how long will the boiler service take", "how long do boiler services take",
-                "how long is a boiler service", "length of a boiler service")),
+               # The clock asks, not a list of sentences: "how long does it take to service a
+               # boiler", "how long to get the boiler serviced" and "how long will the service
+               # take" were all reading past the sentence list above to the yearly-interval
+               # row, which is the right topic and the wrong shape. The service words have to
+               # be in the line too, so a boiler's life and a boiler's price are not this row.
+               ("how long", "how many hours", "how much time", "long does", "long will",
+                "how long to", "length of")),
               "About an hour for a straightforward boiler, and up to ninety minutes if it is the "
               "first service in a while or the engineer has to check the flue and the safety "
               "devices. It is a set of checks rather than a strip-down: they run the boiler, test "
               "the flue and the gas pressure, clean what they can reach, and leave you the service "
               "record. Book it for late summer if you can, because the wait is longer once the cold "
               "weather starts.",
+              # A boiler's life, its price, its yearly interval and a new one going in are all
+              # other rows: this one is the length of the visit.
               avoid=("cost", "price", "much", "worth", "worthwhile", "often", "annual", "yearly",
-                     "new", "install", "installation", "replace"),
+                     "new", "install", "installation", "replace", "fit", "fits", "fitted",
+                     "fitting", "life", "lifespan", "good for",
+                     "how many years", "years", "bleed", "pressure", "broken", "fault",
+                     # a repair has its own row, with the engineer's visit length in it
+                     "repair", "repairs", "repairing", "fix", "fixes", "fixing",
+                     # a boiler that is doing something is a fault the talk is on, not a visit
+                     # to book: "my boiler is making a noise" then "how long will it take" was
+                     # told the length of a service
+                     "noise", "noisy", "banging", "rumbling", "knocking", "whistling", "hissing",
+                     "leak", "leaks", "leaking", "hot water", "not heating")
+              # "how long have i had the boiler now" is the age of the boiler, not the length of
+              # the visit, so the possession shape stands this row down too.
+              + A_AGE_OWNED,
+              # "how long does a boiler service last" is the visit and "how long does a boiler
+              # last" is its life, so the row asks for the service word as well as the clock:
+              # without it, dropping "last" from the avoid list would take the lifespan line.
+              ask=("service", "services", "serviced", "servicing"),
               bias=3),
 
         entry("boiler-service",
@@ -8548,14 +10134,28 @@ def entries():
                "agent, and keep the photos from the day you moved in."),
               bias=1),
 
-        entry("deposit-back", (("deposit",),
+        entry("deposit-back", (("deposit", "deposits", "deposit scheme", "tenancy deposit",
+                                "holding deposit", "security deposit", "damage deposit",
+                                "deposit protection", "deposit protection scheme"),
                                ("back", "returned", "return", "not", "unfair", "withheld", "landlord",
-                                "claim", "getting")),
+                                "landlords", "claim", "getting", "move out", "moved out",
+                                "moving out", "end of tenancy", "tenancy", "renting", "rented",
+                                "letting agent", "deductions", "deducted", "deducting",
+                                # "can i get my money back from a deposit scheme" asks for the
+                                # money without the word back, so the money is the second half
+                                "money", "money back", "get it", "how do i get")),
               ("Ask in writing for an itemised list of what was taken and why, and say which of the "
                "deductions you disagree with. If your deposit was in a protection scheme, use its free "
                "dispute service rather than arguing with the landlord; you can also raise it with the "
                "council. Photos from the day you moved in are the evidence that wins this."),
-              avoid=("flat", "house", "saving", "save", "rent", "buy", "first home")),
+              # the scheme's own letter is rent-deposit's question ("a deposit protection
+              # scheme says i owe money" was the itemised list), so the things that letter says
+              # keep this row off it
+              avoid=("flat", "house", "saving", "save", "rent", "buy", "first home",
+                     "says i owe", "they say i owe", "say i owe", "owe money", "i owe"),
+              # a scheme, a tenancy and a landlord are all this row's words, so when they are
+              # there the row answers over the booking deposit and the chargeback
+              bias=3),
 
         # How much laundry a drum takes: a size question, which the fault rows below cannot answer.
         entry("washing-machine-size",
@@ -8587,7 +10187,37 @@ def entries():
                      # "is a 2kg joint enough for six" is the roast, and a bag of compost is a bag
                      "turkey", "chicken", "lamb", "beef", "pork", "joint", "roast", "compost",
                      "potatoes", "spuds", "dumbbell", "dumbbells", "barbell", "weights",
-                     "suitcase", "luggage", "package", "parcel", "barbecue", "bbq")),
+                     "suitcase", "luggage", "package", "parcel", "barbecue", "bbq"),
+              # The other thing a washer is: a tap washer, a bolt's washer. "what size washer do i
+              # need for a 15mm tap" is a size question, so it matched "size" and "washer" and
+              # was told how many kilos a drum holds. Plumbing and fixing words stand this row
+              # down unless the line also names the machine.
+              guard=_not_a_washer_of_another_kind),
+        # "how long does a tenancy deposit scheme take to return" was answered with the card about
+        # arguing with deductions, which is the other deposit question: this one wants the number
+        # of days, and where that number comes from.
+        entry("deposit-return-days",
+              (("deposit", "tenancy deposit", "deposit scheme", "protection scheme",
+                "deposit protection"),
+               ("how long", "how many days", "how many weeks", "how soon", "take", "takes",
+                "wait", "waiting", "when")),
+              ("Ten days is the rule: the deposit has to come back within ten days of the day you "
+               "and the landlord agree the amount, and interest can come with it. If you have not "
+               "agreed, the landlord has to return the undisputed part within those ten days and "
+               "put in a claim for the rest, and a disputed amount goes to the protection scheme, "
+               "whose free dispute service usually decides within 28 days. So ask the scheme which "
+               "one holds your money, and chase the agent in writing, because the deadline is "
+               "counted from the agreement and not from the day you moved out."),
+              bias=2,
+              # "back to the deposit, how long will it take" is a saver asking how long the
+              # saving takes, not a tenant waiting for money back, so the line has to name the
+              # tenancy, the scheme or the landlord: see _a_deposit_coming_back.
+              guard=_a_deposit_coming_back,
+              avoid=("save", "saving", "savings", "put away", "towards", "a month",
+                     "each month", "per month", "afford", "first home", "first time",
+                     "house", "flat", "moving", "move", "mortgage", "buy", "rent",
+                     "renting", "damage", "damaged", "unfair", "withheld", "deduct",
+                     "deductions", "cleaning", "checkout", "inspection")),
 
         # --- a machine that will not spin, a hoover with no pull, a pilot light ---
         entry("washing-machine-spin",
@@ -8597,6 +10227,11 @@ def entries():
                 # only this question when the outcome words beside them say "out of a wash".
                 "clothes", "washing", "wash load", "laundry"),
                ("wont spin", "won't spin", "not spinning", "no spin", "wont turn", "won't turn",
+                # the same fault in the present tense people actually type: "the washing machine
+                # isnt spinning" reached the listening turn, and "the drum isnt turning" too,
+                # because only the "not"/"won't" forms were keyed here.
+                "isnt spinning", "isn t spinning", "aint spinning", "isnt turning",
+                "isn t turning", "isnt going round", "drum isnt turning", "drum not turning",
                 "drum", "spin cycle", "spin only", "to spin", "get it to spin",
                 "clothes are wet", "clothes come out wet", "soaking", "soaking wet",
                 # the outcome said a dozen other ways: still wet, wrung out by hand instead, dripping
@@ -8673,6 +10308,31 @@ def entries():
         # question had no row: "how much is a new hob ring" fell to the composer's live-prices
         # hedge ("I can't look up live prices"), and a solid plate is a tenner. The row is the
         # price of the part only; cleaning one and fitting a gas one stay where they were.
+        entry("hob-scratch",
+              (("hob", "hobs", "ceramic hob", "induction hob", "cooker top", "cooker plate",
+                "hotplate", "electric hob", "gas hob"),
+               # "marks" is the burnt-on cleaning question ("my hob has burnt on marks"), so
+               # only the words that name damage are here.
+               ("scratch", "scratches", "scratched", "scuff", "scuffs", "scuffed", "gouge",
+                "gouged", "chipped", "chip")),
+              ("Nine times in ten the mark that looks like a scratch is metal, sugar or limescale "
+               "burnt onto the glass: scrape the cold hob with a hob scraper held almost flat, then "
+               "rub ceramic hob cleaner over it with a cloth, and it comes away. A real scratch - "
+               "you feel it catch a fingernail - cannot be polished out of a glass top, so a fine "
+               "one is something to live with and a deep one means a new top, which on a built-in "
+               "hob is often most of the price of a new one. Never use an abrasive powder or a "
+               "scouring pad; they make more of them."),
+              # the surfaces that are sanded or repaired rather than scraped: a wooden floor, a
+              # worktop, a car, a phone screen, a bath and a pair of glasses all have their own
+              # answer, and each of them would otherwise land here on the word "scratched".
+              avoid=("floor", "floors", "wood", "laminate", "worktop", "worktops", "table",
+                     "tables", "furniture", "desk", "door", "doors", "car", "cars", "van",
+                     "windscreen", "screen", "phone", "mobile", "glasses", "spectacles", "watch",
+                     "bath", "bathroom", "sink", "shower", "wall", "walls", "paint", "painted",
+                     "leather", "sofa", "shoe", "shoes", "boot", "boots", "cd", "dvd", "vinyl",
+                     "record", "records", "lens", "camera", "clean", "cleaning", "grease",
+                     "burnt on", "burnt", "burned", "burning", "baked on", "limescale",
+                     "buy", "best", "which", "worth", "cost", "price", "cheap", "cheapest")),
         entry("hob-ring-price",
               (("hob ring", "hob rings", "ring", "rings", "burner", "burners", "burner cap",
                 "solid plate", "hotplate", "element", "cooker ring", "gas ring"),
@@ -8764,6 +10424,12 @@ def entries():
               # a dirty hob is a cleaning job, a pan that will not heat on induction is the pan's own
               # question when the line names the pan, and buying or choosing one is a shopping answer
               avoid=("clean", "cleaning", "grease", "greasy", "burnt on", "stain", "stains", "scrub",
+                     # A gym, a job and a hospital all have an induction, and only the kitchen one
+                     # is a hob: "what should i take to a gym induction" was the ceramic element
+                     # ("check the pan before the hob"). None of these words is in this row's key,
+                     # and the fitness row answers the gym line.
+                     "gym", "gyms", "new job", "first day", "at work", "the office", "staff",
+                     "orientation", "hospital", "ward", "antenatal", "new starter", "volunteer",
                      "shiny", "oven", "grill", "microwave", "kettle", "wood burner", "log burner",
                      "buy", "best", "which", "worth", "cost", "price", "cheap", "cheapest",
                      "how do i use", "setting", "simmer", "boil", "wok", "season", "seasoning",
@@ -8816,7 +10482,13 @@ def entries():
               avoid=("crease", "creases", "ironing board",
                      "scorch", "scorched", "burn", "burnt", "buy", "best", "which", "worth",
                      "cost", "price", "cheap", "travel iron", "hair", "hair straighteners",
-                     "curling", "fabric", "shiny", "clothes are", "wont heat", "won't heat",
+                     "curling", "fabric", "shiny", "clothes are",
+                     # "wont heat" and "won't heat" were in this row's own key group and in
+                     # this avoid list at the same time, so the row stood itself down for the
+                     # half of its question about a soleplate that stays cold: "the iron wont
+                     # heat up" was a shrug while "my iron isnt heating up" was answered. An
+                     # avoid word is read through its forms and stands the whole row down, so a
+                     # key word of the same row can never be one.
                      "cord", "plug", "fuse", "water tank", "limescale in the kettle"),
               bias=1),
 
@@ -9280,7 +10952,14 @@ def entries():
                      # is the other question, so those words stand this row down - the same shape
                      # as "car" and "dishwasher" above, not a new mechanism.
                      "mins", "minute", "minutes", "miles", "further", "journey", "commute",
-                     "commuting", "travel", "travelling")),
+                     "commuting", "travel", "travelling"),
+              # The key holds the bare figures "30" and "40", and a figure on its own is what a
+              # bill, a battery or a bus fare is said with: with "month" no longer read as a when,
+              # "my phone bill is 30 a month" and "button battery 30 a month" were both answered
+              # with what a wash costs to run. A temperature is only the subject of a line that is
+              # already about washing, so the row asks for the wash first. The same shape as the
+              # "car" and "dishwasher" words above: a row standing aside for the other question.
+              guard=_a_wash_is_named),
         entry("cats-garden", (("cat", "cats", "kitten", "kittens", "neighbours cat", "neighbour's cat"),
                               # The garden words and the ask words are two parts, not one. With the
                               # ask in with the nouns, a cat and "stop" were enough: "how do i stop my
@@ -9682,12 +11361,27 @@ def entries():
                 "flea bomb", "flea bombs", "fogger", "bug bomb", "oven cleaner", "drain cleaner",
                 "bleach", "paint thinner", "turps", "turpentine", "antifreeze", "air freshener",
                 "air fresheners", "diffuser", "reed diffuser", "plug in air freshener", "chemical",
-                "chemicals"),
+                "chemicals",
+                # A spray is in the room rather than in a cupboard, so the question about it is the
+                # air and the person breathing it: "is the spray safe with a cat" was the cat's
+                # cystitis card and "is fly spray safe with a baby" was the flying-with-a-baby one.
+                "spray", "sprays", "aerosol", "fly spray", "insect spray", "ant spray",
+                "wasp spray", "flea spray", "bug spray", "mosquito spray", "room spray",
+                "fly killer", "insect killer"),
                ("toddler", "toddlers", "baby", "babies", "newborn", "child", "children", "kid",
                 "kids", "grandchild", "grandchildren", "pregnant", "pregnancy", "expecting",
                 "cat", "cats", "kitten", "kittens", "dog", "dogs", "puppy", "puppies", "pet",
                 "pets", "hamster", "rabbit", "bird", "birds", "parrot", "fish", "safe", "unsafe",
-                "dangerous", "harmful", "poisonous", "risky", "ok around", "get at")),
+                "dangerous", "harmful", "poisonous", "risky", "ok around", "get at",
+                "breathe", "breathing", "breathe in", "breathing in", "fumes", "inhale",
+                "in the room", "same room", "the room", "ventilate",
+                # "is the spray safe with a cat" was the cat's cystitis card and now ties with
+                # the rain-driving row at four, which takes it on order. The way it is asked is
+                # "safe with"/"safe around"/"safe for", and a two-word match outweighs the one
+                # word that row and this one share.
+                "safe with", "safe around", "safe for", "safe to use", "is it safe",
+                "ok with", "ok around", "harmful to", "harmful for", "dangerous to",
+                "dangerous for", "bad for")),
               _chemical_safety,
               # somebody else's food is a vet question with its own answers (chocolate, onions,
               # grapes, lilies); and bleach on white cotton is the laundry answer, not this one.
@@ -9701,7 +11395,26 @@ def entries():
                      # there: "which plants are poisonous to cats" is the houseplants answer.
                      "plant", "plants", "houseplant", "houseplants", "bulb", "bulbs", "flowers",
                      "shrub", "shrubs", "tree", "trees", "mushroom", "mushrooms", "berries",
-                     "cat grass", "ivy", "holly", "oak", "acorn", "acorns")),
+                     "cat grass", "ivy", "holly", "oak", "acorn", "acorns",
+                     # a spray is asked about the room it was used in, and the room's smell and
+                     # its stains are other answers. Not "flea": the bomb that is the point of this
+                     # row is a flea bomb, and as a bare avoid word it stood the row down on the
+                     # one product people ask about most - "are flea bombs safe with a fish tank"
+                     # and "can i use a flea bomb with a dog in the house" were the fleas card.
+                     # "flea collar" stays: a collar on the animal is the fleas answer.
+                     "stain", "stains", "carpet", "carpets", "mattress", "sofa", "odour",
+                     "smell", "smells", "stinks", "flea collar", "bite", "bites",
+                     "bitten", "itch", "itching", "marking", "litter",
+                     # not "spraying": that is the form of "spray" the key wants, and as an avoid
+                     # word it stood the whole row down for every line that said spray at all.
+                     # A pet that has eaten the spray is a dose question rather than a fumes one,
+                     # and the poisoning card asks the three things that matter: "my dog ate some
+                     # fly spray" was this card once the spray was keyed here. Only the words that
+                     # reach that card are fenced - "licked" and "drank" were tried too, and they
+                     # stood the row down with nothing behind it, which lost the weedkiller card
+                     # for "my cat licked weedkiller".
+                     "ate", "eaten", "eating", "swallowed", "swallowing", "poisoned",
+                     "keeps spraying", "is spraying", "spraying indoors", "cat spraying")),
 
         # A damp bathroom used to reach the fan-cleaning answer, which is the wrong diagnosis: the
         # water is on the walls because the air carries it there, and the fan is only part of the cure.
@@ -9916,8 +11629,12 @@ def entries():
               (("bathroom", "shower", "loo", "toilet", "wet room", "ensuite"),
                # a damp or steamy bathroom is ventilation and a mould treatment, not a dirty fan:
                # "steam", "steamy", "damp" and "mould" were in this key and took `my bathroom is damp`
+               # "not working" is not here: this row answers a fan that is noisy, humming or
+               # weak, and with the phrase in the key "the shower is not working" and "the toilet
+               # is not working" were both told to wipe the blades of an extractor fan. A fan that
+               # is dead is the appliance or the isolator, and both have their own rows.
                ("fan", "extractor", "ventilation", "vent", "humming", "rattling", "buzzing", "whirring",
-                "noisy", "loud", "noise", "weak", "not working")),
+                "noisy", "loud", "noise", "weak")),
               "Clean the cover and the blades first: a dust-clogged fan in a steamy room is both weak "
               "and loud, and the grille usually comes off with a push and the blades wipe with a damp "
               "cloth once the isolator is off. A rattle is normally the cover or the backdraught flap in "
@@ -10049,4 +11766,81 @@ def entries():
         "wooden floor is the other problem: a rubber or felt underlay pad, or a strip of double-"
         "sided carpet tape, stops it without marking the boards.",
         bias=1),
+
+        # A workshop edge is not a kitchen knife, a garden shear or a pair of scissors: each of
+        # those has its own row and its own angle. A chisel, a plane iron and a masonry bit had
+        # nothing at all - "how do i sharpen a chisel" got "that's beyond what I know well, sorry"
+        # and "my drill bit is blunt" the shrug.
+        entry("workshop-edge",
+              (("chisel", "chisels", "wood chisel", "bevel edge chisel", "mortise chisel",
+                "plane iron", "plane blade", "hand plane", "block plane",
+                "drill bit", "drill bits", "masonry bit", "masonry bits", "hss bit", "spade bit",
+                "auger bit", "forstner bit", "hole saw", "utility knife", "stanley knife",
+                "craft knife"),
+               ("sharpen", "sharpening", "sharpened", "sharper", "blunt", "dulled", "dull",
+                "hone", "honing", "whetstone", "oilstone", "grind", "grinding", "file", "filing",
+                "wont cut", "won't cut", "doesnt cut", "doesn't cut", "not cutting", "burr",
+                "rounded", "chipped", "nicks", "nicked")),
+              "Chisel and plane iron: the bevel is 25 degrees off the flat back, so a honing guide "
+              "set to 25 and a strip of wet-and-dry on a flat tile does it - 240 grit if the edge "
+              "is nicked, then 600 and 1200, ten strokes on the bevel, then lay the back flat on "
+              "the finest paper and pull it back a few times to take the burr off. A blunt chisel "
+              "crushes the wood and takes more force to steer, so it is the sharp one that is "
+              "safer. A masonry bit is blunt when the tip is rounded: a few strokes of a diamond "
+              "file on the wings either side of the point, at the angle they already have, brings "
+              "it back. An HSS bit filed by hand is slow going and a new one costs a few pounds, so "
+              "buy a bit rather than an afternoon; a Drill Doctor type jig, about \u00a330, earns "
+              "its place only if you go through a lot of them. In a utility knife, swap the blade: "
+              "a snap-off blade is sharper than anything you can dress at home.",
+              # the other edges in the house have their own rows, and a sharp word about a picture
+              # or a pain is not an edge at all
+              avoid=("knife", "knives", "kitchen", "cooking", "chef", "scissors", "shears",
+                     "secateurs", "hedge", "hedges", "axe", "chainsaw", "mower", "lawn", "pencil",
+                     "pencil sharpener", "image", "photo", "picture quality", "sound", "pain",
+                     "eyes", "vision", "glasses", "tooth", "teeth", "sharply"),
+              bias=2),
+        # A nail is a piece of metal before it is a fingernail. body.py stands its nail rows down
+        # when the line has a workshop noun in it, which is why "how do i stop wood splitting when
+        # i nail it" no longer gets "Nails grow about 3mm a month"; these two rows are what the
+        # line falls to instead.
+        entry("wood-splits-when-nailed",
+              (("wood", "wooden", "plank", "planks", "timber", "batten", "battens", "board",
+                "boards", "mdf", "hardwood", "softwood", "decking", "board end",
+                "floorboard", "floorboards", "skirting", "skirting board", "skirting boards",
+                "architrave", "beading", "joist", "joists", "stud", "studs", "door frame",
+                "doorframe", "fence", "fencing", "shed"),
+               ("split", "splits", "splitting", "crack", "cracks", "cracking", "splinter",
+                "splinters", "splintering", "nail", "nails", "nailed", "nailing", "hammer",
+                "pilot hole", "screw")),
+              _the_wood_and_the_nail,
+              # the joinery row answers how to fix two pieces together, and the sanding row is a
+              # different job on the same board
+              avoid=("glue two", "join", "joining", "dowel", "sanding", "sand it", "sandpaper",
+                     "firewood", "fire wood", "log", "logs", "log burner", "stove", "season",
+                     "seasoned", "kiln",
+                     # a fence panel that came down is a post that has moved, and that row says
+                     # so: "how do i nail a fence panel back up" is not a pilot hole
+                     "fence panel", "fence panels", "panel", "panels", "post", "posts",
+                     "gate", "back up"),
+              # the firewood row holds "wood" and "when", which is half this line's words
+              bias=2),
+        entry("a-nail-in-a-wall",
+              (("nail", "nails", "nailing", "nailed", "picture hook", "picture hooks",
+                "rawlplug", "rawlplugs", "rawl plug", "rawl plugs", "wall plug", "wall plugs"),
+               ("wall", "walls", "brick", "plasterboard", "stud", "studs", "picture",
+                "pictures", "put up", "putting up", "hang", "hanging", "remove", "removing",
+                "out", "pull", "old", "stuck", "left in")),
+              _a_nail_in_the_wall,
+              avoid=("fingernail", "fingernails", "toenail", "toenails", "my nail", "my nails",
+                     "cut my nails", "bite", "biting", "polish", "varnish", "manicure",
+                     "tyre", "tyres", "tire", "tires", "puncture", "wood", "plank", "timber",
+                     "door", "doors", "decking", "fence", "fencing",
+                     # a plasterboard wall already has a fixing card of its own, and it names the
+                     # stud finder and the hollow-wall fixing, which is more than this row can
+                     "plasterboard", "plaster board", "hollow wall", "hollow walls",
+                     "stud finder", "plasterboard fixing", "plasterboard fixings"),
+              # the wall-wipe and wall-mark rows hold "wall" and "remove" as well, and each of
+              # them answers a mark or a grease film
+              bias=2),
     ]
+

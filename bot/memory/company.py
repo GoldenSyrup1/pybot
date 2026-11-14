@@ -78,6 +78,17 @@ IS_COMING_TOO = re.compile(
     r"\bis\s+(?P<who>(?:my|our)\s+[a-z][a-z'\u2019 -]{1,20}?)\s+"
     r"(?:coming|going|travelling|traveling|flying|driving)\b", re.I)
 
+# An ask for when, where or why is not an ask for whether. "when is my mum coming" holds the
+# same "is my mum coming" the yes/no reading looks for, and answering it with the yes/no line
+# drops the day the chat was just put right to ("she moved it to saturday") and answers a
+# question nobody asked. The ask for a detail is left to whoever reads that detail; this module
+# only ever answers whether the person is coming.
+ASKS_FOR_A_DETAIL = re.compile(
+    r"^\W*(?:and |so |but |oh |right |also |ok(?:ay)?[ ,]+)*"
+    r"(?:when(?:'?s| is| are| was| am| do| does| did| will| would)?\b"
+    r"|where\b|why\b|which (?:day|date)\b|what (?:day|date|time)\b"
+    r"|how (?:long|soon|many days)\b)", re.I)
+
 # An ask that names somebody else is about them, not about the chat's companion.
 _ABOUT_SOMEONE_ELSE = re.compile(r"\bwith\s+(?:my|our|your)\s+\w+", re.I)
 # The companion put right: "actually its my sister not my wife". The store keeps the correction
@@ -191,6 +202,38 @@ _ASKS = re.compile(r"^\W*(?:is|are|was|were|will|would|can|could|should|shall|do
                    r"who|what|when|where|why|how)\b", re.I)
 
 
+# The verb that takes them to the place. A frame gets a phrase ("Cornwall in july"), and the
+# plan the store keeps is sometimes the whole line they said it in - "me and the kids are going
+# to spain in july" - so everything up to the place is cut away before the frame says it.
+_THE_MONTHS = re.compile(
+    r"\b(?:january|february|march|april|may|june|july|august|september|october|november|"
+    r"december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\b", re.I)
+_TO_THE_TRIP = re.compile(
+    r"\b(?:going|off|flying|driving|travelling|traveling|heading|moving|off to|away to)\s+"
+    r"(?:to|into|for|off to|down to|back to)\s+(?P<rest>.+)$", re.I)
+
+
+def _the_phrase_a_frame_can_say(plan):
+    """The trip as a phrase, from a plan that may be the whole line it was said in.
+
+    "me and the kids are going to spain in july" is how a person says the plan, and it is not
+    what a frame can put in a sentence: the two frames here read it back as "the kids along for
+    me and the kids are going to Spain in july, then" and "the kids coming too. the kids and i
+    are off to Spain in july goes better shared", which is the person's own line pasted into the
+    reply. Cut at the travel verb and the phrase is theirs: "Spain in july".
+    """
+    plan = " ".join(str(plan or "").split()).strip(" .")
+    found = _TO_THE_TRIP.search(plan)
+    if found and found.group("rest").strip(" ."):
+        plan = found.group("rest").strip(" .")
+    if not plan:
+        return ""
+    # A month is a name in the middle of the phrase too ("spain in july" is "Spain in July"):
+    # the plan is typed the way people type, and a frame is a sentence someone reads.
+    plan = _THE_MONTHS.sub(lambda m: m.group(0).capitalize(), plan)
+    return plan[:1].upper() + plan[1:]
+
+
 def _the_trip_on_the_table(memory):
     """The trip the chat is on, in as few words as the plan was said: "Cornwall in july".
 
@@ -206,7 +249,7 @@ def _the_trip_on_the_table(memory):
     plan = str((user or {}).get("plan") or "").strip(" .")
     if not place or (plan and place.lower() not in plan.lower()):
         return ""
-    return plan or place
+    return _the_phrase_a_frame_can_say(plan) or place
 
 
 def _new_to_the_chat(who, memory):
@@ -235,6 +278,8 @@ def _the_one_person_asked_about(text, memory):
     """
     low = " ".join(str(text or "").lower().split())
     if not low or _NOT_COMING_ALONG.search(low):
+        return None
+    if ASKS_FOR_A_DETAIL.search(low):
         return None
     found = IS_COMING_TOO.search(low)
     if not found:
@@ -283,12 +328,34 @@ def _the_companion_joins(text, memory):
     if not who or not _new_to_the_chat(who, memory):
         return None
     said = _as_you_would_say_it(who)
+    if _the_plan_is_this_line(text, memory):
+        # The person named the people and the trip in one breath ("me and the kids are going to
+        # spain in july"), so nobody is joining a plan that was already there: the news is the
+        # trip with them on it. The joining frames read that line back as "Nice, the kids coming
+        # too. Spain in july goes better shared", which answers a line nobody said.
+        return pick([
+            "Nice - " + place + " with " + said + ".",
+            "Lovely - " + place + " with " + said + ".",
+            place + " with " + said + " - good.",
+        ], memory, seed_text=low) or None
     options = [
         said.capitalize() + " as well - good. " + place + " is better with company.",
         "Nice, " + said + " coming too. " + place + " goes better shared.",
         "Good - " + said + " along for " + place + ", then.",
     ]
     return pick(options, memory, seed_text=low) or None
+
+
+def _the_plan_is_this_line(text, memory):
+    """Whether the plan the chat holds is the line being answered, said in one breath.
+
+    "me and the kids are going to spain in july" makes the plan and names who is going: the
+    companion is not joining anything, and the reply is the trip with them on it.
+    """
+    line = " ".join(str(text or "").lower().split()).strip(" .")
+    plan = " ".join(str(((memory or {}).get("user") or {}).get("plan") or "")
+                    .lower().split()).strip(" .")
+    return bool(line) and bool(plan) and (plan == line or line in plan or plan in line)
 
 
 def observe(text, memory):

@@ -14,6 +14,19 @@ BITE_DONE = (
     r"\b(?:me|my|his|her|their|the\s+(?:child|kid|baby)|a\s+(?:child|kid|baby))\b",
     r"\b(?:bitten|nipped|bit\s+(?:me|my|him|her|them))\b.{0,25}\b(?:by\s+a\s+dog|dog|puppy)\b",
     r"\b(?:bitten|bit\s+(?:me|my|him|her|them))\b.{0,20}\b(?:face|cheek|lip|hand|finger|arm|leg|ankle)\b",
+    # ...and the bite that broke the skin, with no body part named: "my son bit me and it bled",
+    # "my daughter bit me and left marks". The wound is the question there and the answer for it is
+    # the first aid. A small child's teeth break a parent's skin all the time, and without this arm
+    # those lines reached no bite card at all, so the only thing left to answer them was the abuse
+    # card's 999 - while "my toddler bit my arm and it bled" got the first aid, because "my arm" is
+    # in the arm above. It is not only a child who does it, so this arm reads the teeth and the
+    # wound and leaves whose they are to the words around them.
+    r"\b(?:bit|bites?|bitten|nipped)\s+"
+    r"(?:me|my\s+(?:hand|hands|finger|fingers|thumb|wrist|arm|arms|leg|legs|foot|feet|toe|toes|"
+    r"face|cheek|nose|ear|lip|shoulder|chest|belly|back|head|neck|skin))\b[^.?!]{0,30}"
+    r"\b(?:bled|bleeds?|bleeding|blood|bloody|broke\s+(?:the|my)\s+skin|broke\s+skin|"
+    r"marks?|drew\s+blood|draw\s+blood|drawn\s+blood|infected|needs?\s+stitches|"
+    r"wont\s+stop\s+bleeding|won't\s+stop\s+bleeding)\b",
     # The passive turn of the same bite: "i was bitten by my cat", "my hand was bitten by a cat".
     # A cat bite on a hand is one of the few everyday lines that wants a same-day answer, and the
     # arms above are all written from the dog's side of the sentence. The subject has to be the
@@ -56,6 +69,249 @@ BITE_DONE = (
     r"\b(?:dog|cat|puppy|kitten)\s?bites?\b",
     # A tetanus question is about the wound whatever order it comes in.
     r"\btetanus\b[^.?!]{0,30}\b(?:bite|bitten|bit|dog|cat|puppy|kitten|scratch)\b",
+)
+
+
+# The near-miss, bite and reaction cards that came with the a-near-thing and small-hurt work.
+
+ALLERGY_NOW = (
+    r"\b(?:i|im|i'?m|we|we'?re|he|she|they|my\s+\w+)\b[^.?!]{0,14}"
+    r"\b(?:having|getting|developing|going\s+into)\b[^.?!]{0,20}"
+    r"\b(?:allergic\s+reaction|reaction|anaphyla\w*)\b",
+    r"\b(?:allergic\s+reaction|reaction)\b[^.?!]{0,14}"
+    r"\b(?:right\s+now|now|starting|coming\s+on|just\s+happened)\b",
+)
+
+
+ALLERGY_SIGN_NAMED = (
+    r"\b(?:swell\w*|swollen|puff(?:ed|y)?|bloat\w*|lips?|tongue|throat|mouth|face)\b",
+    r"\b(?:breath\w*|wheez\w*|stridor|hoarse|croak\w*|voice)\b",
+    r"\b(?:dizzy|faint\w*|light\s?headed|collapse\w*|passing\s+out|vomit\w*|throwing\s+up|sick)\b",
+    r"\b(?:sting|stung|epipen|injector)\b",
+    r"\b(?:hives?|rash\w*|itch\w*|blotch\w*|red\s+spots?|nettle\s+rash)\b",
+    # The reaction that has already been and gone is a note, not a call.
+    r"\b(?:fine\s+now|was\s+fine|settled|went\s+away|calmed\s+down|last\s+(?:year|week|month)|"
+    r"years\s+ago|as\s+a\s+kid|used\s+to|once|back\s+then)\b",
+)
+
+
+# A grater takes a knuckle as often as a knife takes a finger. Main had no verb for it, so "i
+# grated my knuckle on the cheese grater" got the listening line.
+GRATER_CUT = (
+    r"\bgrat(?:e|es|ed|ing)\b[^.?!]{0,24}\b(?:my|his|her|their|the)\s+"
+    r"(?:finger|thumb|hand|knuckle|nail|fingertip|palm)",
+)
+
+
+# The near thing that is never said with "killed myself": a bike, a road and a vehicle that did not
+# quite hit you. "i nearly got run over on my bike" reached "Sounds alright. Anything good in it?"
+# and "i almost went under a bus" reached the drowning card, so the scare needs reading as a scare.
+# Only the side being struck is here - "i nearly hit him with my car" is the driver's line - and the
+# verb has to be one that says what the vehicle did.
+STRUCK_BY_A_VEHICLE = (
+    # "nearly got hit by a car", "was almost struck by a van", "nearly run over by a taxi".
+    r"\b(?:nearly|almost|close\s+to|came\s+close\s+to|just\s+about)\b[^.?!]{0,20}"
+    r"\b(?:(?:got|get|gets|getting|been|be|being|was|were|had)\s+)?"
+    r"(?:run\s+over|hit|struck|clipped|swiped|knocked\s+(?:off|down|over))\b[^.?!]{0,16}\b(?:by|"
+    r"by\s+a|by\s+the)\b",
+    # The verbs that are only ever the vehicle's: nobody is "nearly run over" by a door.
+    r"\b(?:nearly|almost|close\s+to|came\s+close\s+to|just\s+about)\b[^.?!]{0,20}"
+    r"\b(?:got|get|gets|getting|been|be|being|was|were|had)?\s*"
+    r"(?:run\s+over|knocked\s+off|knocked\s+down|knocked\s+over|clipped|swiped|"
+    r"rammed|mow(?:ed|n)\b[^.?!]{0,10}\bdown)\b",
+    # The vehicle as the subject, with a person on the receiving end: "the bus nearly hit me" is
+    # the same scare from the other side, and "the car nearly hit the tree" has nobody on the end
+    # of it, so it keeps whatever answer it had.
+    r"\b(?:bus|car|lorry|truck|van|tram|train|taxi|cab|motorbike|motorcycle|moped|scooter|bike|"
+    r"bicycle|cyclist|driver)\b[^.?!]{0,12}\b(?:nearly|almost)\s+"
+    r"(?:hit|missed|struck|clipped|knocked)\s+(?:me|us|him|her|them|my\s+\w+)\b",
+    # "almost went under a bus" - under a vehicle, not under water.
+    r"\b(?:nearly|almost)\b[^.?!]{0,16}\b(?:went|go|going|gone|fell|ended\s+up)\b[^.?!]{0,14}"
+    r"\bunder\s+(?:a|the|an)\s+(?:bus|car|lorry|truck|van|tram|train)\b",
+    # The vehicle first and the person as the verb's object - "a lorry almost ran me over",
+    # "someone nearly ran me over", "the bus nearly ran us down" - which is how a road scare is
+    # usually told, and the one order the patterns above miss ("a bus nearly hit me" was read and
+    # "a lorry almost ran me over" was not). Only me and us, so the driver's own line - "i nearly
+    # ran him over" - is not read as a scare for the person typing.
+    r"\b(?:nearly|almost|close\s+to|just\s+about)\b[^.?!]{0,10}\b(?:ran|run|runs)\s+"
+    r"(?:me|us)\s+(?:over|down)\b",
+)
+
+
+# A bike struck by a vehicle is the rider's accident, not a bike to carry: "a car hit my bike this
+# morning" and "my bike got clipped by a van" both reached the answer about strapping a bike to
+# roof bars, and "a van clipped my bike on the way home" reached "How was it, overall?". The bike
+# is the object of the verb in both orders, so the row is the bike and the vehicle. The rider may
+# not have been touched, which is why the reply asks that before it says anything else; a person
+# struck as well keeps the struck-by-a-vehicle card, which is read before this one.
+STRUCK_MY_BIKE = (
+    r"\b(?:my|our|his|her|their|the)\s+(?:bike|bicycle|motorbike|motorcycle|scooter|moped)\b"
+    r"[^.?!]{0,24}\b(?:got|get|gets|was|were|is|are|been|had\s+been)\s*"
+    r"(?:clipped|hit|struck|swiped|knocked|nudged|shunted|rammed|sideswiped)\b"
+    r"[^.?!]{0,18}\b(?:van|car|lorry|truck|bus|coach|taxi|cab|tractor|driver)\b",
+    r"\b(?:a|an|the|some|one|another)\s+(?:van|car|lorry|truck|bus|coach|taxi|cab|tractor|"
+    r"driver)\b[^.?!]{0,16}\b(?:clipped|hit|struck|swiped|knocked|nudged|shunted|rammed|"
+    r"sideswiped)\b[^.?!]{0,12}\b(?:my|our|his|her|their|the)\s+(?:bike|bicycle|motorbike|"
+    r"motorcycle|scooter|moped)\b",
+)
+
+
+# A road scare is not a shove. "someone nearly hit me at the crossing" and "a man nearly hit me at
+# the crossing" came back with the abuse card, which tells the person to get a real person
+# involved and ring 999 - for a blow that never landed, on a crossing. The near word and the
+# person are not enough on their own, because "he nearly hit me" IS the abuse card's; the road
+# place or the vehicle is what makes it the road's, and a person the speaker lives with keeps it
+# the abuse card's.
+NEAR_HIT_ON_A_ROAD = (
+    r"\b(?:nearly|almost|close\s+to|just\s+about)\b[^.?!]{0,12}\b(?:hit|hits|struck|"
+    r"ran\s+over|run\s+over|knocked|clipped|caught)\s+(?:me|us)\b",
+)
+NEAR_HIT_ON_A_ROAD_PLACE = (
+    r"\b(?:crossing|zebra|pelican|crossroads|pavement|kerb|curb|road|street|junction|"
+    r"roundabout|bollard|cycle\s*lane|bike\s*lane|lay-?by|motorway|dual\s+carriageway|"
+    r"bus\s+stop|car\s+park|driveway|level\s+crossing|lights)\b",
+)
+
+
+# Putting yourself in the road is not an accident: "i nearly stepped in front of a train" is a
+# person telling you about a wish, and it keeps the answer that line already gets.
+STRUCK_BY_A_VEHICLE_NOT = (
+    r"\b(?:step(?:ped|ping)?|walk(?:ed|ing)?|jump(?:ed|ing)?|stand(?:ing)?|stood|lay|laid|sat|"
+    r"sitting|straddl\w*|leant|leaned)\b",
+)
+
+
+INSECT_BITE_BODY = (
+    r"(?:arms?|hands?|fingers?|thumb|legs?|feet|foot|ankles?|wrists?|neck|face|cheek|head|back|"
+    r"shoulders?|knees?|elbow|shin|toes?|hip|stomach|belly|ears?|eyes?|chest|forehead|scalp)"
+)
+
+
+# A bite on a hand, a face or over a joint is the wide bite card's: it says to get it seen today,
+# and the itch card is a downgrade where a mosquito on the ankle is not ("the spider bit my hand").
+INSECT_BITE_NEEDS_A_LOOK = (
+    r"\b(?:hands?|wrists?|fingers?|thumb|face|cheek|eyes?|knees?|elbows?|joints?)\b",
+)
+
+
+INSECT_BITE = (
+    r"\b(?:mosquito(?:es)?|midges?|gnats?|fleas?|horse\s?fly|horseflies|cleg|spiders?|bed\s?bugs?|"
+    r"sand\s?fly|ants?)\b[^.?!]{0,24}\b(?:bit|bitten|bite|nipped|stung?)\b[^.?!]{0,10}"
+    r"\b(?:me|him|her|them|us)\b[^.?!]{0,8}\b(?:on|in|under|between)\b[^.?!]{0,8}"
+    r"\b(?:the|my|his|her|their|both)\b\s*" + INSECT_BITE_BODY + r"\b",
+    r"\b(?:mosquito(?:es)?|midges?|gnats?|fleas?|horse\s?fly|horseflies|cleg|spiders?|bed\s?bugs?|"
+    r"ants?)\b[^.?!]{0,24}\b(?:bit|bitten|bite|nipped|stung?)\b\s+"
+    r"(?:my|his|her|their)\s+" + INSECT_BITE_BODY + r"\b",
+    r"\b(?:i|we)\b[^.?!]{0,15}\b(?:was|were|got|have\s+been|has\s+been|had\s+been)\b[^.?!]{0,10}"
+    r"\b(?:bit|bitten|stung)\s+by\s+(?:a|an|the)?\s*(?:mosquito|midge|gnat|flea|ant|spider|"
+    r"horse\s?fly)\b[^.?!]{0,10}\b(?:on|in)\b",
+)
+
+
+TICK_BITE = (
+    r"\bticks?\b[^.?!]{0,24}\b(?:bit|bitten|bite|on\s+me|on\s+my|attached|dug\s+in|"
+    r"burrow\w*|stuck\s+in|in\s+my)\b",
+    # The fetching-and-removing lines ("i found a tick on my arm", "i pulled one off the dog")
+    # already have an answer that says the same thing, so they are left alone - see TICK_ALREADY.
+
+    r"\b(?:a\s+|the\s+)?tick\s+(?:bite|bites)\b",
+    # "i got bitten by a tick", "i was bitten by a tick on saturday" - the shape most people use,
+    # and it was reaching the animal-bite card ("Rinse it under the tap for a good five minutes"),
+    # which is the wrong advice for a tick: the tweezers and the flat rash are what matter.
+    r"\b(?:i|we)\b[^.?!]{0,15}\b(?:was|were|got|have\s+been|has\s+been|had\s+been|might\s+have\s+been)\s+"
+    r"(?:bit|bitten)\s+by\s+(?:a|an|the|some)?\s*tick\b",
+)
+
+
+TICK_ALREADY = (r"\b(?:found|pulled|removed|took|got\s+(?:it|one))\b",)
+
+
+BAT_BITE = (
+    r"\b(?:bat|bats)\b[^.?!]{0,24}\b(?:bit|bitten|bite|scratch(?:ed|es)?|claw(?:ed)?|nipped)\b"
+    r"[^.?!]{0,24}\b(?:me|him|her|them|us|my|his|her|their)\b",
+    r"\b(?:i|we)\b[^.?!]{0,15}\b(?:was|were|got|have\s+been|has\s+been|had\s+been|might\s+have\s+been)\s+"
+    r"(?:bit|bitten|nipped|scratched|clawed)\s+by\s+(?:a|an|the)?\s*bat\b",
+    # The noun needs a determiner in front, or "i saw a bat bite a man on telly" is a sentence
+    # about the bat doing the biting.
+    r"\b(?:a|an|the|that|this|my|his|her|their)\s+bat\s+(?:bite|bites|scratch|scratches)\b"
+    r"(?!\s+(?:a|an|the|it)\b)",
+    # "a bat was in the bedroom and i woke up with marks" is the same question to the helpline.
+    r"\bbat\b[^.?!]{0,40}\b(?:woke\s+up\s+with|marks?|a\s+mark|scratch\w*)\b",
+)
+
+
+WILD_BITE = (
+    r"\b(?:fox|foxes|badger|badgers|squirrel|squirrels|rat|rats|hedgehog|hedgehogs|mouse|mice|"
+    r"deer|otter|weasel|stoat|mole|vole|seagull|gull|swan|goose|geese|crow|magpie|pigeon|"
+    r"kestrel|buzzard|owl|tick|ticks|wild\s+animal)\b[^.?!]{0,24}"
+    r"\b(?:bit|bitten|bite|nipped|scratched|clawed|went\s+for|attacked)\b[^.?!]{0,20}"
+    r"\b(?:me|him|her|them|us|my|his|her|their)\b",
+    r"\b(?:i|we)\b[^.?!]{0,15}\b(?:was|were|got|have\s+been|has\s+been|had\s+been)\s+"
+    r"(?:bit|bitten|nipped|scratched|clawed)\s+by\s+(?:a|an|the|some)?\s*"
+    r"(?:fox|badger|squirrel|rat|hedgehog|mouse|deer|otter|seagull|gull|swan|goose|"
+    r"wild\s+animal)\b",
+    # The noun, with a determiner in front: "a fox bite", "that rat bite". Without one, "i saw a
+    # rat bite a man on telly" is a sentence about the rat doing the biting, not a wound to treat.
+    r"\b(?:a|an|the|that|this|my|his|her|their)\s+(?:fox|badger|squirrel|rat|hedgehog)\s+"
+    r"(?:bite|bites|scratch)\b(?!\s+(?:a|an|the|it)\b)",
+)
+
+
+COUNTERFACTUAL_WISH = (
+    r"\bwis?h\b[^.?!]{0,24}\b(?:i|he|she|they|it|the\s+\w+|that\s+\w+)\b[^.?!]{0,16}"
+    r"\b(?:had|have|would\s+have|'d)\b[^.?!]{0,12}"
+    r"\b(?:died|been\s+killed|killed\s+me|not\s+survived|never\s+woke\s+up|ended\s+it|"
+    r"gone\s+ahead|done\s+it|finished\s+it|not\s+woken\s+up)\b",
+    r"\bwis?h\b[^.?!]{0,16}\b(?:i|he|she|they)\b[^.?!]{0,10}"
+    r"\b(?:hadn'?t|had\s+not|never)\b[^.?!]{0,10}"
+    r"\b(?:survived|woken\s+up|made\s+it|come\s+round|pulled\s+through)\b",
+    # ...and the same wish said about the accident rather than about dying: "i nearly died off my
+    # bike and i wish it had worked" is somebody saying they wanted the fall to kill them.
+    r"\b(?:nearly|almost)\b[^.?!]{0,30}\b(?:died|killed\s+(?:my|him|her)self|got\s+hit|"
+    r"been\s+hit|run\s+over|knocked\s+(?:me\s+)?(?:off|down|over)|gone\s+under)\b"
+    r"[^.?!]{0,40}\bwis?h\b[^.?!]{0,30}\b(?:it|that|i|they)\b[^.?!]{0,12}"
+    r"\b(?:had|would\s+have|'d)\b[^.?!]{0,16}"
+    r"\b(?:worked|happened|gone\s+through|succeeded|done\s+it|killed\s+me|finished\s+(?:it|"
+    r"the\s+job|me\s+off)|taken\s+me|done\s+for\s+me)\b",
+)
+
+
+EFFORT_BEFORE = (
+    r"\b(?:came|come|fell|fallen|slipped|tripped|tumbled|crashed|went\s+over|got\s+knocked)\b"
+    r"[^.?!]{0,24}\b(?:nearly|almost)\b[^.?!]{0,20}\b(?:killed|kill)\s+my\s*self\b"
+)
+
+
+EFFORT_DIED = (
+    r"\b(?:nearly|almost|came\s+close\s+to|so\s+close\s+to)\b[^.?!]{0,20}"
+    r"\b(?:died|killed\s+(?:my|him|her|them)self)\b"
+)
+
+
+COME_OFF_IT = (
+    r"\b(?:off|on|from)\s+(?:(?:my|his|her|their|our|a|the)\s+)?"
+    r"(?:bike|bicycle|motorbike|motorcycle|scooter|moped|horse|pony|quad|skateboard|"
+    r"ladder|roof|scaffold|balcony|wall|fence|trampoline|stairs|steps|staircase|"
+    r"road|motorway|kerb|car|van|truck|lorry|tractor|boat)\b"
+)
+
+
+EFFORT_DOING = (
+    r"\b(?:nearly|almost)\b[^.?!]{0,24}\b(?:killed|kill)\s+(?:my|him|her|them)self\s+"
+    r"(?P<doing>[a-z']+ing)\b"
+)
+
+
+EFFORT_NOT_AN_ACCIDENT = (
+    r"\b(?:on\s+purpose|deliberately|by\s+choice|meant\s+to|tried\s+to|wanted\s+to)\b",
+    r"\b(?:wish|wished|hope|hoped)\b",
+    r"\b(?:so\s+i\s+(?:would|could)\s+die|to\s+die)\b",
+)
+
+
+COUNTERFACTUAL_IDIOM = (
+    r"\b(?:died|killed\s+(?:my|him|her)self|killed\s+me)\s+"
+    r"(?:laughing|of\s+(?:embarrassment|boredom|shame|thirst|curiosity))\b",
 )
 
 # Someone has been found hanging or strangled: the weight comes off the neck first, then CPR.
@@ -626,14 +882,33 @@ _A_LOW_FIGURE = r"(?:0\.[1-9]|[1-3](?:\.\d)?)(?:\s*mmol)?\b"
 # line is put: "my blood sugar is 1.9", "sugar level was 3", "glucose reading of 0.9",
 # "blood sugar: 2.4". Anything at 4 or above is a different question - the target range - and a
 # number on its own with no verb ("sugar 3 tbsp") is a recipe, so the verb stays required.
+# Glucose is the same reading as blood sugar, in the same units, and it is the word half the
+# people with a meter use. A noun the patterns below share, so a fix to one is a fix to all:
+# "my glucose is 2.9" was answered "Thanks for telling me - I'm here if you want to dig into any
+# of that" while "my blood sugar is 2.9" got the sugar-now card, and "blood glucose is 2.9" got
+# the target range - the noun, not the question, was the difference.
+_A_READING_NOUN = r"(?:(?:blood\s+)?sugars?|(?:blood\s+)?glucose)"
+
 SUGAR_READING_LOW = (
-    # the figure with its verb: "my blood sugar is 1.9", "sugar level was 3", "sugars are 3.8"
-    r"\b(?:blood\s+)?sugars?\s+(?:levels?\s+|readings?\s+)?"
+    # the figure with its verb: "my blood sugar is 1.9", "sugar level was 3", "sugars are 3.8",
+    # "my glucose is 2.9", "blood glucose was 3.1"
+    r"\b" + _A_READING_NOUN + r"\s+(?:levels?\s+|readings?\s+)?"
     r"(?:is|was|are|at|reads?|reading|of|:)\s*" + _A_LOW_FIGURE,
     # the figure alone, which is how a reading is usually sent: "blood sugar 1.9". The word
     # "blood" is what makes it safe to read without a verb, so a recipe's "sugar 3 tbsp" is out.
     r"\bblood\s+sugars?\s+(?:levels?\s+|readings?\s+)?(?:of\s+|:\s*)?" + _A_LOW_FIGURE,
-    # and the same for glucose, which needs its own noun: "glucose reading 2.4"
+    # and the same for glucose, which a meter is read off by whoever owns it: "glucose reading
+    # 2.4", "blood glucose 2.9", "my glucose 2.9". The possessive or "blood" keeps a recipe's
+    # "glucose 3 tbsp" out, and the figure itself still has to be under 4.
+    # the possessive or "blood" is required here: a verb-free "glucose 3 tbsp" is a recipe, and
+    # the first cut of this line read it as a hypo.
+    r"\b(?:blood|my|his|her|their|the)\s+glucose\s+(?:levels?\s+|readings?\s+)?"
+    r"(?:of\s+|:\s*)?" + _A_LOW_FIGURE,
+    # and the measurement noun on its own, with no possessive in front of it: "glucose level
+    # 3.2", "glucose reading 2.4". The word "level" or "reading" is the fence that keeps a
+    # recipe's "glucose 3 tbsp" out, so this arm may read the figure without a verb or a
+    # determiner - it was the third pattern's own shape, and folding it into the arm above
+    # dropped "glucose level 3.2" to "I'm listening". Found in review by @zippy-kangaroo.
     r"\bglucose\s+(?:levels?|readings?)\s+(?:is\s+|was\s+|of\s+|:\s*)?" + _A_LOW_FIGURE,
 )
 
@@ -666,9 +941,10 @@ HYPO_SIGN = (
     # shape rather than by the digits people usually send, and the verb is still required so a
     # recipe's "sugar 3 tbsp" is not a hypo.
     *SUGAR_READING_LOW,
-    r"\b(?:blood\s+)?sugar\s+(?:is\s+|was\s+|levels?\s+(?:is\s+|are\s+)?)?"
+    r"\b(?:blood\s+)?(?:sugars?|glucose)\s+(?:is\s+|was\s+|has\s+|have\s+|had\s+|levels?\s+(?:is\s+|are\s+)?)?"
     r"(?:low|dropped|dropping|dipped|crashing|too\s+low)\b",
-    r"\b(?:blood\s+)?sugar\s+level\w*\s+(?:is\s+|are\s+)?(?:low|dropping|dropped)\b",
+    r"\b(?:blood\s+)?(?:sugars?|glucose)\s+level\w*\s+(?:is\s+|are\s+)?(?:low|dropping|dropped)\b",
+    r"\b(?:blood\s+)?glucose\s+(?:is\s+|was\s+)?(?:falling|fallen|plummet\w*)\b",
 )
 
 SELF_HARM_REPEAT_CAUSE = (
@@ -1054,7 +1330,12 @@ BLEEDING_SMALL = (
     r"\b(?:cut|sliced|nicked|gashed|slashed)\b.{0,25}"
     r"\b(?:won'?t|wont|doesn'?t|didn'?t|keeps?)\s+stop\s+bleeding\b",
     # A pet that has bitten or scratched a person is the person's cut, not the vet's night.
-    r"\b(?:dogs?|cats?|pupp(?:y|ies)|kittens?|pets?)\b.{0,25}"
+    # An animal that is bleeding itself is the vet's, and it is not this arm: "my dog is bleeding a
+    # bit from his paw" has the "bit" of "a bit" where the verb goes and "his paw" where the person
+    # goes, so it read as a dog that had bitten somebody and a cut on a paw got the person's
+    # press-the-cloth-and-999 card.
+    r"\b(?:dogs?|cats?|pupp(?:y|ies)|kittens?|pets?)\b"
+    r".{0,25}"
     r"\b(?:bit|bitten|scratched|clawed|claw|nicked)\b.{0,20}"
     # What the teeth or claws landed on decides it, the way the hot thing's landing place decides a
     # scald. "my cat scratched my sofa", "her armchair" and "my son's sofa" are damage to a thing,
@@ -1068,28 +1349,52 @@ BLEEDING_SMALL = (
     r"(?!(?:\w+['’]s\s+)?(?:[a-z]+\s+){0,2}(?:" + _PET_DAMAGE_THING + r")\b)\w)",
 )
 
+# Who the tooth belongs to: a possessive, or the "a"/"an" a hypothetical is asked with ("what do
+# i do if i knock a tooth out").
+A_TOOTH_OWNER = (r"(?:my|his|her|their|the|your|our|a|an|son'?s|daughter'?s|kid'?s|child'?s|"
+                 r"husband'?s|wife'?s|partner'?s|friend'?s|mum'?s|dad'?s)")
+
 # A tooth that comes out is the dentist's, not the ambulance's. "my tooth got knocked out" matched
 # the knock-out arm and got the head-injury 999 reply, which is the wrong number for the one dental
 # emergency where the hour matters: a tooth put back inside the hour has the best chance of taking.
+# The verbs are written with their endings for the same reason the chipped row is: a person asks
+# this as a hypothetical ("what do i do if i knock a tooth out") far more often than in the past
+# tense, and the row only knew "knocked", so the bare form was not read at all.
 TOOTH_OUT = (
-    r"\b(?:my|his|her|their|the|your|our|son'?s|daughter'?s|kid'?s|child'?s|husband'?s|wife'?s|"
-    r"partner'?s|friend'?s|mum'?s|dad'?s)\s+(?:front\s+|back\s+|adult\s+|baby\s+|milk\s+)?"
+    r"\b" + A_TOOTH_OWNER + r"\s+(?:front\s+|back\s+|adult\s+|baby\s+|milk\s+)?"
     r"(?:tooth|teeth)\b[^.?!]{0,20}"
-    r"\b(?:knocked\s+out|came\s+out|fell\s+out|is\s+hanging)\b",
-    r"\bknocked\s+(?:my|his|her|their|out\s+)\s*(?:front\s+|back\s+)?tooth\b",
+    r"\b(?:knock(?:ed|s|ing)?\s+out|came\s+out|comes?\s+out|fell\s+out|falls?\s+out|"
+    r"is\s+hanging)\b",
+    # A tooth that is broken is the chipped row's, not this one: "broke" is deliberately absent
+    # from this list, so "he broke a tooth" is never told to put it back in the socket.
+    r"\b(?:knock|knocks|knocked|knocking|kick|kicks|kicked|kicking|punch|punches|punched|"
+    r"punching|smash|smashes|smashed|smashing)\s+"
+    r"(?:my|his|her|their|our|your|a|an|out\s+)\s*(?:front\s+|back\s+)?tooth\b",
     # The verb first and the teeth plural, which is how a parent or an adult child says it:
     # "my son knocked his teeth out on his bike", "i knocked three of my teeth out".
-    r"\b(?:knocked|kicked|punched|smashed|broke)\s+(?:my|his|her|their|the|out\s+)\b"
-    r"[^.?!]{0,18}\bteeth\b",
+    r"\b(?:knock|knocks|knocked|knocking|kicking|kicked|punch|punched|punching|smash|smashed|"
+    r"smashing)\s+(?:my|his|her|their|the|our|your|out\s+)\b[^.?!]{0,18}\bteeth\b",
     r"\b(?:knocked|came|fell)\s+(?:out\s+)?(?:\w+\s+){0,4}(?:teeth|tooth)\b",
     r"\b(?:teeth|tooth)\s+(?:got\s+|were\s+|was\s+|both\s+)?(?:knocked|came|fell)\s+out\b",
 )
 
 # A chipped or cracked tooth is not one to put back: it wants a dentist soon, not an ambulance.
+#
+# Every tense of the four verbs, and the article as well as the possessive. The pattern used to
+# list only the past forms ("chipped", "cracked", "broke", "busted", "snapped") and only "my/his/
+# her/their", so "what do i do if i break a tooth" - the way most people ask it, in the bare form
+# with "a" - reached no card at all and got a shrug, while "i broke my tooth" was answered. The
+# bone row was taught the same lesson ("i cracked a rib" was a nod while "i broke a rib" was
+# answered) and lists its verbs twice over, cracked|crack|snapped|snap|broke|broken; this is that
+# rule for the teeth, so every way of saying one broken tooth meets the same card.
+A_TOOTH_DAMAGED = (r"(?:chips?|chipped|chipping|cracks?|cracked|cracking|breaks?|breaking|broke|"
+                   r"broken|busts?|busted|busting|snaps?|snapped|snapping)")
+
 TOOTH_CHIPPED = (
-    r"\b(?:my|his|her|their|the|your|our|son'?s|daughter'?s)\s+(?:front\s+|back\s+)?"
-    r"(?:tooth|teeth)\b[^.?!]{0,20}\b(?:chipped|cracked|broke|busted|snapped)\b(?!\s*out)",
-    r"\b(?:chipped|cracked|broke|busted)\s+(?:my|his|her|their)\s+(?:front\s+|back\s+)?tooth\b",
+    r"\b" + A_TOOTH_OWNER + r"\s+(?:front\s+|back\s+|baby\s+|adult\s+)?"
+    r"(?:tooth|teeth)\b[^.?!]{0,20}\b" + A_TOOTH_DAMAGED + r"\b(?!\s*out)",
+    r"\b" + A_TOOTH_DAMAGED + r"\s+" + A_TOOTH_OWNER +
+    r"\s+(?:front\s+|back\s+|baby\s+|adult\s+)?tooth\b(?!\s*out)",
 )
 
 # The joint itself: the ankle, the knee, the foot, the wrist. Not the hip - that one is the femur.
@@ -1221,9 +1526,59 @@ RING_STUCK = (r"\bring\b", r"\bwedding\s+ring\b", r"\bengagement\s+ring\b")
 # stand-down into whatever answers the pet shape elsewhere sent "my dog has a gash on his leg" to a
 # listening line. The animal has to own the wound, so "i have a cut on my ear from the dog" is still
 # the person's.
+# Blood an animal passes is not a wound on it: "my cat is weeing blood" is cystitis and the vet
+# tomorrow, and neither a wash-and-don't-lick card nor a vet-tonight card is the right first aid for
+# it. Named once here, read by both the wound row and the fence that stands the person's rows down.
+PET_PASSES_BLOOD = (r"[^.?!]*\b(?:wee\w*|urine|urinating|pee\w*|piss\w*|stool|poo\w*|vomit\w*|"
+                    r"sick|diarrh\w*|tummy|gut)\b")
+
 PET_WOUND = (
-    r"\A(?=.*" + PET_OWNS_THE_WOUND + r").*?\b(?:cut|gash|graze|scrape|scratch|nick|wound|sore|"
-    r"blister)\b",
+    # A pet that is bleeding is a pet wound in the words people actually use: "my dog is bleeding a
+    # bit from his paw", "my cat is bleeding a bit" and "my dog's paw is bleeding" were all read as
+    # the person's own cut, because "bleeding" was not in this list.
+    # Blood the animal passes is not a wound on it: "my cat is weeing blood" is cystitis and the vet
+    # tomorrow, and a wash-and-don't-lick card is the wrong first aid for it.
+    r"\A(?=.*" + PET_OWNS_THE_WOUND + r")(?!" + PET_PASSES_BLOOD + r")"
+    r".*?\b(?:cut|gash|graze|scrape|scratch|nick|wound|sore|blister|bleed\w*|bled|blood)\b",
+)
+
+# An animal that owns an injury is the vet's, whatever the injury is: the animal, or something of its
+# own ("my dog's paw"), is the subject of the injury word. "my dog burnt his paw" was getting the
+# person's burn card, "my cat has a splinter in her paw" warm water and tweezers for a hand, and
+# "my dog grazed his knee" a card that ends "a nurse or A&E". A person's own injury keeps its card:
+# "my dog knocked me over and my wrist is sprained" names the person's wrist, not the dog's.
+PET_ANIMAL_HURT = (
+    r"\b(?:my|our|the|his|her|their)\s+(?:dogs?|cats?|pupp(?:y|ies)|kittens?|pup|pets?|parrot|"
+    r"budgie|hamster|rabbit|bunny|horse|pony|guinea\s+pig|tortoise|ferret|gerbil|rats?|lizard|"
+    r"snake|hen|chicken)\b[^.?!]{0,32}?\b(?:burnt|burned|scalded|grazed|cut|nicked|"
+    r"splinter|blister\w*|broke|broken|bleed\w*|bled|blood|wound|gash\w*|scraped|scrapes)\b",
+)
+# An animal does not break its own flap or its lead, and a nail trimmed too short is the nail's own
+# row rather than a break: "the cat flap is broken", "my dog's lead is broken what should i buy" and
+# "my dog broke a nail" are answered better where they already were.
+PET_OWNS_A_THING = (
+    r"\b(?:dogs?|cats?|pupp(?:y|ies)|kittens?|pup|pets?|parrot|budgie|hamster|rabbit|bunny|horse|"
+    r"pony|guinea\s+pig|tortoise|ferret|gerbil|rats?|lizard|snake|hen|chicken)(?:'s)?\s+"
+    r"(?:flap|lead|leash|harness|collar|tag|bowl|bed|basket|blanket|toy|toys|coat|jacket|gate|"
+    r"door|hutch|kennel|cage|tank|claw|claws|nail|nails)\b",
+    # ...and a nail torn or trimmed is the nail row's, wherever the verb sits in the sentence.
+    r"\b(?:broke|broken|split|torn|lost|caught|trimmed|clipped)\s+(?:a|his|her|its|the)\s+"
+    r"(?:nail|nails|claw|claws)\b",
+)
+# The person's own part taking the injury in the same line, which is the person's card.
+HUMAN_OWN_INJURY = (
+    # The person's part taking the injury, either way round: "my wrist is sprained" and
+    # "my dog nicked my finger" are both the person's card.
+    r"\b(?:my|our|his|her|their)\s+(?:hand|hands|finger|fingers|thumb|thumbs|wrist|wrists|arm|"
+    r"arms|elbow|shoulder|knee|shin|calf|ankle|foot|feet|toe|toes|face|cheek|lip|nose|head|back|"
+    r"chest|stomach|leg|legs)\b[^.?!]{0,25}?\b(?:burnt|burned|scalded|sprained|grazed|cut|nicked|"
+    r"blister\w*|broke|broken|bleed\w*|bled|blood)\b",
+    # "his" and "her" are left out of this one on purpose: in "my dog burnt his nose" the nose is the
+    # dog's, and a person named with his or her is already caught by HUMAN_TOO above.
+    r"\b(?:burnt|burned|scalded|sprained|grazed|cut|nicked|scratched|bit|bitten|nipped|broke|broken)"
+    r"\b[^.?!]{0,20}?\b(?:my|our|their)\s+(?:hand|hands|finger|fingers|thumb|thumbs|wrist|"
+    r"wrists|arm|arms|elbow|shoulder|knee|shin|calf|ankle|foot|feet|toe|toes|face|cheek|lip|nose|"
+    r"head|back|chest|stomach|leg|legs)\b",
 )
 
 PET_NAIL = (
@@ -1468,6 +1823,17 @@ MINOR = (
               r"(?:my|his|her|their|the)\s+(?:finger|thumb|hand|"
               r"arm|leg|foot|toe|knee|head|face|lip|eye|ear|tongue|palm|heel|knuckle|shin|"
               r"elbow|fingertip)s?\b",
+              # Scratch is the one cut verb people use about themselves most often - "i scratched
+              # my hand on a thorn", "i scratched my arms until they bled", "i scratched my arms
+              # in my sleep" - and the cut row did not read it at all, so the skin was open while
+              # the reply was a pleasantry or a cat's claw. It gets its own arm rather than joining
+              # the verbs above, because the eye is on that list and a scratched eye is not a cut
+              # that wants a cloth: it has its own first aid (do not rub, rinse for ten to fifteen
+              # minutes, eye casualty if it does not settle), and the deck's `i scratched my eye`
+              # answered with the cloth the moment scratch was read by the shared arm.
+              r"\b(?:scratched|scratches)\s+(?:my|his|her|their|the)\s+(?:finger|thumb|hand|"
+              r"arm|leg|foot|toe|knee|head|face|lip|ear|tongue|palm|heel|knuckle|shin|"
+              r"elbow|fingertip|forearm|forehead|chin)s?\b",
               # The noun, which the verb arms above miss: "i have a cut on my hand", "i have a
               # cut finger", "a gash on my arm", "i have a scratch on my arm" were all a listening
               # line (soft-ocelot, #safety 40287). The body part has to be in the pattern, so
@@ -2074,14 +2440,49 @@ FOOD_WORDS = (
 # machine" got nothing (free-carpet, #safety 97225). "came down on my neighbour" and "the shed fell
 # on my dad" were already the ambulance, so this is the same event written with the person under it
 # instead of after "on".
+# What a thing came down on decides whether it is an ambulance: "the fence fell on my shed", "a
+# tree fell on my car" and "the ceiling came down on my bed" are property, while "the shed fell on
+# my dad" and "the branch came down on my leg" are not. The first draft of this table read `my \w+`
+# after "on", so every "X fell on my <anything>" rang 999 (@sound-wolf, #safety 140296). So the
+# word after the possessive has to be a person or a part of one, and a bare thing stands down.
+CRUSH_ON_A_PERSON = (
+    r"\b(?:someone|somebody|a\s+(?:man|woman|child|kid|bloke|lady|person)|him|her|them|people|"
+    r"anyone|everyone)\b",
+    r"\b(?:my|his|her|their|our|your)\s+(?:husband|wife|partner|fianc|boyfriend|girlfriend|son|"
+    r"daughter|child|kid|kids|baby|boy|girl|mum|mom|mother|dad|father|brother|sister|friend|"
+    r"mate|neighbour|neighbor|gran|granny|grandma|grandad|grandpa|uncle|aunt|cousin|nan|nana|"
+    r"colleague|boss|carer|lodger|housemate|flatmate|dog|cat|puppy|kitten|pet|"
+    r"hands?|fingers?|thumbs?|arms?|wrists?|elbows?|legs?|feet|foot|toes?|knees?|ankles?|shins?|"
+    r"chest|back|head|neck|face|shoulders?|hips?|ribs|pelvis|thighs?|calf|calves|torso|spine|"
+    r"belly|stomach|lap)\b",
+)
+# The same rule read the other way round: "the ceiling came down on me", "a tree fell on us" and
+# "the wall collapsed on top of me" name the person with a pronoun instead of a possessive, and on
+# main every one of them was a shrug ("That's a rotten one. How bad is it?") while a roof that came
+# down on a shed rang 999. The pronoun is only a person if something heavy is what came down, so
+# the thing comes first in the pattern: a book that fell on a person in bed, rain that came down on
+# a walk and a cat that fell on a lap all stay out of it.
+CRUSH_HEAVY_ON_A_PRONOUN = (
+    r"\b(?:roof|roofs|roofing|chimney|ceiling|ceilings|wall|walls|beam|beams|joist|joists|"
+    r"scaffold\w*|slab|slabs|brick|bricks|masonry|rubble|debris|wardrobe|cupboard|shelves|shelf|"
+    r"bookcase|cabinet|fridge|freezer|door|ladder|television|tv|mirror|glass|window|tiles?|"
+    r"slates?|gutter\w*|fence|fencing|panel|panels|gate|garage\s+door|car|van|lorry|truck|"
+    r"container|pallet|machinery|machine|tree|trees|branch|branches|trunk|limb)\b"
+    r"[^.!?]{0,30}"
+    r"\b(?:fallen|fell|come\s+down|came\s+down|collapsed|toppled|tumbled|gave\s+way)\b"
+    r"[^.!?]{0,20}\b(?:on|onto)\b[^.!?]{0,15}"
+    r"\b(?:me|us|myself|yourself|himself|herself|themselves|everybody|everyone|someone|"
+    r"somebody|anyone|anybody)\b"
+)
 CRUSH = (
+    CRUSH_HEAVY_ON_A_PRONOUN,
     r"\b(?:collapsed|fallen|fell|come\s+down|came\s+down|tumbled|toppled|gave\s+way|give\s+way)\b"
     r"[^.!?]{0,30}\b(?:and|,|with)\b[^.!?]{0,25}"
-    r"\b(?:someone|somebody|a\s+(?:man|woman|child|kid|bloke|lady|person)|my\s+\w+|him|her|"
-    r"them|people)\b[^.!?]{0,25}\b(?:under|underneath|trapped|stuck|pinned|buried)\b",
+    r"(?:" + "|".join(CRUSH_ON_A_PERSON) + r")"
+    r"[^.!?]{0,25}\b(?:under|underneath|trapped|stuck|pinned|buried)\b",
     r"\b(?:fallen|fell|came\s+down|come\s+down|collapsed|toppled|toppled\s+over)\b[^.!?]{0,20}"
     r"\b(?:on|onto)\b[^.!?]{0,15}"
-    r"\b(?:someone|somebody|a\s+(?:man|woman|child|kid|person)|my\s+\w+|him|her|them)\b",
+    r"(?:" + "|".join(CRUSH_ON_A_PERSON) + r")",
     # A person crushed or pinned by something heavy, whoever writes it.
     r"\b(?:someone|somebody|a\s+(?:man|woman|child|kid|person)|my\s+\w+|he|she|they|i)\b"
     r"[^.!?]{0,25}\b(?:crushed|pinned|buried|trapped)\b[^.!?]{0,15}\b(?:by|under|underneath)\b",

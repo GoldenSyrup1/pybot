@@ -302,6 +302,15 @@ FULL_LENGTH = (r"(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|t
                r"|twelve|a few|a couple of|a|an)\s+(?:full|whole|entire)\s+(?:days?"
                r"|nights?|weeks?|months?|years?|hours?|minutes?)\b")
 
+# The units a figure is written with, symbol and word both. A dose comes written either way -
+# "10mg" and "10 micrograms a day" are the same figure - so both patterns below read from this
+# one list, and a unit added for a new row is added once.
+AMOUNT_UNIT = (r"microgrammes?|micrograms?|milligrammes?|milligrams?|millilitres?|milliliters?"
+               r"|centilitres?|decilitres?|grammes?|grams?|mg|mcg|\u00b5g|g|kg|ml|l|litres?|liters?"
+               r"|tbsp|tsp|tablespoons?|teaspoons?|cups?|parts?|people|slices?|tins?"
+               r"|oz|lbs?|pounds?|tablets?|capsules?|drops?|puffs?|sprays?|units?|iu"
+               r"|kcal|calories|pouches?|sachets?|scoops?")
+
 SIGNALS = {
     "money": re.compile(r"£\s?\d|\b\d[\d,.]*\s*(?:pounds?|quid|euros?|dollars?)\b", re.I),
     "distance": re.compile(r"\b\d+(?:\.\d+)?\s*(?:m|km|metres?|meters?|miles?|mi)\b", re.I),
@@ -348,10 +357,13 @@ SIGNALS = {
                        r"|\b\d+\s*hours?\s*\d+\b" + NOT_RELATIVE +
                        r"|\b" + FULL_LENGTH + NOT_RELATIVE, re.I),
     "heat": re.compile(r"\b\d{2,3}\s*(?:°\s*)?c\b|\b\d{2,3}\s*degrees?\b|\bgas mark \d\b", re.I),
-    "amount": re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|\u00b5g|g|kg|ml|l|litres?|liters?"
-                         r"|tbsp|tsp|tablespoons?|teaspoons?|cups?|parts?|people|slices?|tins?"
-                         r"|oz|lbs?|pounds?|tablets?|capsules?|drops?|puffs?|sprays?|units?|iu"
-                         r"|kcal|calories|pouches?|sachets?|scoops?)\b", re.I),
+    # A dose is written with a symbol as often as with the word: "10mg" and "10 micrograms a
+    # day" are the same figure, and only the symbols were listed here. An answer whose whole
+    # amount was written out ("10 micrograms a day") read as an answer with no figure in it at
+    # all, so the follow-up asking for that figure was told "I can't put a figure on that one,
+    # sorry" over a sentence that had it. The units live in one place so the two patterns
+    # cannot drift (AMOUNT_UNIT, above).
+    "amount": re.compile(r"\b\d+(?:\.\d+)?\s*(?:" + AMOUNT_UNIT + r")\b", re.I),
     "order": re.compile(r"\b(?:before|after|first|last|ahead|in advance)\b", re.I),
     # A year: written with its era ("410 AD") or as four digits on its own ("1066").
     # A history answer often writes the year on its own ("the legions left in 410"), and the
@@ -434,10 +446,7 @@ SPANS = {
                        r"|\b" + FULL_LENGTH + NOT_RELATIVE, re.I),
     "heat": re.compile(r"\b\d{2,3}\s*(?:°\s*)?c\b(?:\s*\(\s*\d{2,3}\s*°?\s*c\s*fan\s*\))?"
                        r"|\bgas mark \d\b", re.I),
-    "amount": re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|\u00b5g|g|kg|ml|l|litres?|liters?"
-                         r"|tbsp|tsp|tablespoons?|teaspoons?|cups?|parts?|people|slices?|tins?"
-                         r"|oz|lbs?|pounds?|tablets?|capsules?|drops?|puffs?|sprays?|units?|iu"
-                         r"|kcal|calories|pouches?|sachets?|scoops?)\b", re.I),
+    "amount": re.compile(r"\b\d+(?:\.\d+)?\s*(?:" + AMOUNT_UNIT + r")\b", re.I),
     "cause": CAUSE,
     # A history answer often writes the year on its own ("the legions left in 410") and the
     # question after it is still a when, so a bare three or four digit number counts. So does a
@@ -460,6 +469,12 @@ FREQUENCY_AFTER = re.compile(
     r"(?:day|week|month|year|session|evening|morning|night|go|class|lesson|walk|run|"
     r"fortnight|hour)\b", re.I)
 FREQUENCY_AFTER_TIMES = re.compile(r"^\s*times\b", re.I)
+# The same rate said the other way round: the interval comes first and the figure after it. "Treat
+# bare fence timber every two or three years" is how often to treat the fence, not how long
+# treating it takes, and asked "how long will it take" to paint a shed the bot answered "Two or
+# three years." A count in front of the unit is part of the figure itself ("every two or three
+# years" reads as the figure "two or three years"), so the "every" is all there is to see before.
+FREQUENCY_BEFORE = re.compile(r"\b(?:every|each|once\s+every|once\s+in)\s*$", re.I)
 # "Twenty minutes at a time beats an afternoon" is how much to do in one go, not how long the
 # whole job takes: handed back for "how long does it take" it was "Twenty minutes." - a rate
 # for a length, the same shape as a per-day figure.
@@ -628,6 +643,11 @@ to up with about after before again any can could should would will shall may mi
 no yes ok okay please thanks thank there here what which who whom whose when where why how
 much many long need needs needed want wants like get gets got make makes made use uses used
 good best better still only even more most less few all some same other own now
+# "around" and its family say a figure is approximate, not what a clause is about. Left in,
+# "and how do i get around" was one content word, and the sentence it named in the answer before
+# it was the one that happens to write "around twelve to fifteen euros" - so a question about
+# the trams was answered with the cheap-meal card.
+around roughly approximately
 take takes took taken
 """.split())
 
@@ -676,6 +696,7 @@ use using used instead recipe version way time times take takes taking need need
 put putting cook cooking make making do doing think reckon okay ok actually really
 also still there then already right again another one ones bit lot kind sort thing things
 worth good best better worse fine matter matters any much should shall must
+safe saf unsafe unsaf dangerous dangerou alright normal risky sensible sensibl
 """.split())
 BARE_RANGE = re.compile(r"\d(?:[\d.,]*\d)?\s*(?:-|to|and|–)\s*\d(?:[\d.,]*\d)?\s*$")
 # A question about a thing the answer names, however it is turned round: "is it worth cleaning
@@ -852,6 +873,56 @@ def _states_a_length(part):
     return any(True for _ in _COUNTED_UNIT.finditer(str(part or "")))
 
 
+# A follow-up that asks how a thing turns out is about the subject the last answer was about:
+# "will it be alright" after "i dropped my phone in the sink" wants whether the phone survives,
+# "is that bad" after a sore back wants how serious it is, and "what happens now" after the
+# boiler keeps losing pressure wants the next move. The line names no subject of its own, so the
+# row that answered the line before is the row that owes the answer - and every sentence of its
+# card is already on the screen, which is why reading the card out again is not an answer and the
+# turn used to give up and point at a search instead. A row that has an answer of its own for the
+# ask declares it (`entry(..., outcomes=(("survives", "..."),))`) and this table says which shape
+# a line is making, so the same reading decides it for every domain.
+OUTCOME_ASKS = (
+    # Whether the thing will be all right. Not "is that bad" - that one asks how serious it is.
+    ("survives", re.compile(
+        r"\bwill (?:it|that|this|they) (?:be )?(?:alright|all right|ok|okay|fine|safe)\b"
+        r"|\bis (?:it|that|this) (?:going to be )?(?:alright|all right|ok|okay|fine|safe)\b"
+        r"|\bwill (?:it|that|this) (?:survive|recover|work again|be ruined|be knackered)\b"
+        r"|\bis (?:it|that|this) (?:ruined|knackered|a write[- ]off|done for)\b"
+        r"|\bcan (?:it|that|this) be (?:saved|fixed|repaired|salvaged)\b"
+        r"|\bis (?:it|that|this) worth (?:fixing|repairing)\b", re.I)),
+    # How serious it is, and whether it needs anything doing. "is that normal" is the same ask
+    # about a symptom or a child.
+    ("serious", re.compile(
+        r"\bis (?:that|this|it) (?:bad|serious|dangerous|normal|common)\b"
+        r"|\bhow (?:bad|serious) is (?:it|that|this)\b"
+        r"|\bshould i (?:be )?worr(?:y|ied)\b"
+        r"|\bis (?:that|this) (?:something|anything) to worry about\b"
+        r"|\bis that (?:a|normal)\b", re.I)),
+    # What happens next, as in what follows from it. Not "what do i do now": that is the same
+    # question the card has just answered, and the first sentence of the card is its answer -
+    # reading it as an outcome sent "my boiler pressure is low" then "what do i do now" to the
+    # engineer, where topping the pressure up is the move.
+    ("next", re.compile(
+        r"\bwhat happens (?:now|next)\b"
+        r"|\bwhat next\b|\bwhat(?:'s| is| was) (?:the )?next\b|\bso what now\b"
+        r"|\bwhat now\b", re.I)),
+    # What the thing said actually means.
+    ("explain", re.compile(
+        r"\bwhat does (?:that|this|it) mean\b|\bwhat do you mean\b"
+        r"|\bwhat(?:'s| is) that (?:mean|mean then)\b|\bmeaning what\b", re.I)),
+)
+
+
+def the_outcome_asked(question):
+    """Which of the outcome asks the line makes, or "" when it makes none."""
+    said = flat(question)
+    for which, pattern in OUTCOME_ASKS:
+        if pattern.search(said):
+            return which
+    return ""
+
+
 def the_part_asked(reply, question, about=""):
     """The part of the answer the line asks for, with the unit it names respected.
 
@@ -980,6 +1051,63 @@ def _a_length_of_a_doing(sentence, part, question):
     # the first two days"), and a figure of the thing itself opens its own clause with the thing
     # ("most coughs after a cold last two to three weeks").
     return bool(_A_DOING.search(_a_clause_before(said, at)))
+
+
+# The figure of an advice card is often a cut-off, not a length: "For a baby over six months, a
+# consistent wind-down..." was answered to "how long will this last" with "Six months." - the age
+# the advice starts at, said as the length of the trouble. "At around six months", "never under 3
+# months", "adults over 65" and "aged 6 to 12" are the same figure, and none of them says how long
+# anything lasts. What tells a cut-off from a real length in the same words is the verb: "most back
+# pain lasts over two weeks" writes the figure as the length of the thing, while a cut-off has a
+# noun in front of it and no verb of duration between.
+_A_CUT_OFF_BEFORE = re.compile(
+    r"\b(?:over|under|above|below|past|aged|beyond|around|about|from|at|by|until|till|"
+    r"after|before|of)\s*$", re.I)
+_A_CUT_OFF_AFTER = re.compile(
+    r"^\s*(?:or\s+(?:over|older|under|younger|more|less)|and\s+(?:over|under)|of\s+age)\b", re.I)
+_A_DURATION_VERB = re.compile(
+    r"\b(?:last|lasts|lasted|lasting|take|takes|took|taking|settle|settles|go|goes|went|gone|"
+    r"going|run|runs|ran|keeping|kept|stay|stays|stayed|heal|heals|healed|clear|clears|"
+    r"cleared|recover|recovers|recovered|recede|recedes|ease|eases|expires?|expiring|"
+    r"is|are|was|were|be|been|being)\b", re.I)
+# A cut-off on a thing's own trouble is written in weeks and days ("a cough over three weeks needs
+# a look"), and that figure is how long the trouble has gone on, not an age. The figures that
+# stand for an age are the ones in months and years, or said with no unit at all ("children under
+# five").
+_IN_MONTHS_OR_YEARS = re.compile(r"\b(?:month|months|year|years)\b", re.I)
+_A_RANGE = re.compile(r"\b(?:to|or|-|and)\b", re.I)
+_A_BARE_FIGURE = re.compile(
+    r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
+    r"fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|\d{1,3}|a|an|"
+    r"half)", re.I)
+
+
+def _a_cut_off_not_a_length(sentence, part):
+    """True when the figure `part` is the cut-off a rule starts at, not a length of anything.
+
+    Only the words around the figure decide it. A figure with over/under/aged/around in front of
+    it, whose own clause has no verb of duration, is a condition on the person or thing it
+    describes ("a baby over six months", "children under five"), so cutting it out answers "how
+    long will this last" with an age nobody said was a length. The same words with a duration verb
+    in front of them ("most back pain lasts over two weeks") are the thing's own length and stand.
+    """
+    said = flat(sentence)
+    cut = flat(part).rstrip(". ")
+    if not cut:
+        return False
+    at = said.find(cut)
+    if at < 0:
+        return False
+    before = said[:at]
+    after = said[at + len(cut):]
+    if not (_A_CUT_OFF_BEFORE.search(before) or _A_CUT_OFF_AFTER.match(after)):
+        return False
+    if not (_IN_MONTHS_OR_YEARS.search(cut) or _A_BARE_FIGURE.fullmatch(cut)):
+        return False
+    if _A_RANGE.search(cut):
+        return False  # "four to six months" is a span someone can ask the length of
+    clause = _a_clause_before(said, at)
+    return not _A_DURATION_VERB.search(clause)
 
 
 def _a_clause_before(said, at):
@@ -1231,6 +1359,7 @@ def _narrow(reply, question):
         return None
         return None
     wait = bool(WAIT.search(question))
+    skipped_a_cut_off = False
     for sentence in sentences:
         if not SIGNALS[kind].search(sentence):
             continue
@@ -1255,6 +1384,9 @@ def _narrow(reply, question):
             continue  # another place's figure: this place's is in the sentence after it
         if part and part is not NO_LENGTH and _a_length_of_a_doing(sentence, part, question):
             continue  # how long to keep doing it, not how long the thing lasts
+        if part and part is not NO_LENGTH and _a_cut_off_not_a_length(sentence, part):
+            skipped_a_cut_off = True
+            continue  # the age a rule starts at, not how long anything goes on for
         if part:
             part = tidy(_as_a_length(part))
             if part and flat(part) != whole:
@@ -1269,8 +1401,13 @@ def _narrow(reply, question):
             # What this chat knows about it is the answer they were just given, so its opening
             # is said again rather than nothing.
             return _the_answer_said_again(sentences, whole)
+        if skipped_a_cut_off:
+            # The only figure this answer gave was the age the advice starts at, so this sentence
+            # has no length to cut out. The next one may say how long the thing goes on for.
+            continue
         return None
-    if kind == "time" and LENGTH_OF_THE_JOB.search(flat(question)):
+    if kind == "time" and (LENGTH_OF_THE_JOB.search(flat(question))
+                           or _STATE_LENGTH_ASKS.search(flat(question))):
         # A "how long" whose answer states no length at all - a skill, a habit, a job - has no
         # figure to cut out. What it does say is how the time is spent, and that is the answer
         # to give instead of a figure about something else in the sentence.
@@ -1286,10 +1423,35 @@ def _narrow(reply, question):
 # minutes." (the warm-up), and handing back nothing repeated the whole paragraph behind "Same as
 # before:". Neither is an answer to "how long does it take".
 NO_SET_TIME = "No set time on that one - "
+# The answer's only figure is the age the advice starts at, so there is no length in it anywhere:
+# the solids card gives "three signs, all at once, and around six months" and nothing about how
+# long the stage lasts. Cutting that figure out said "Six months." as though it were a length, and
+# handing the whole card back answered a different question - `should i start him on solids` /
+# `how long will that go on for` got the card again, with no length in it at all. What is left is
+# the honest one: there is no set stretch, and the figure is where the thing starts.
+A_STAGE = ("It's a stage rather than a set stretch: {when} is where it starts.",)
+# The leads that read as a start age: "around six months", "from six months". "Under" and "below"
+# are the other way round - "under 3 months is too early" is a warning and not a start.
+A_START_LEAD = re.compile(r"\b(?:around|about|at|by|from|after|past)\s+$", re.I)
+
+
+def _the_start_age(sentence, figure, at):
+    """The figure as a start age ("around six months"), or None if it is not read as one."""
+    flat_sentence = flat(sentence) if hasattr(sentence, "split") else str(sentence)
+    try:
+        before = flat_sentence[max(0, at - 24):at]
+    except Exception:  # noqa: BLE001 - a sentence that cannot be cut gives no start age
+        return None
+    lead = A_START_LEAD.search(before)
+    if lead:
+        return " ".join((lead.group(0).strip() + " " + figure).split())
+    return " ".join(figure.split())
+
 
 
 def _the_time_it_does_keep(sentences, whole):
     """The sentence of the answer that talks about time, said as the help it is."""
+    start_age = None
     for sentence in sentences:
         if not SIGNALS["time"].search(sentence):
             continue
@@ -1300,7 +1462,8 @@ def _the_time_it_does_keep(sentences, whole):
             last_end = match.end()
             if IN_A_RELATIVE.search(sentence[:match.start()]):
                 continue  # a figure about something else: "who can balance for five seconds"
-            if FREQUENCY_AFTER.match(match.group(0)):
+            if FREQUENCY_AFTER.match(match.group(0)) \
+                    and not _a_period_of_extent(sentence, match.start()):
                 continue  # a period word on its own is the "a day" of a rate, not a figure
             if FREQUENCY_AFTER.match(sentence[match.end():]):
                 continue  # the period word of a rate ("a day" of "30 minutes a day")
@@ -1309,13 +1472,75 @@ def _the_time_it_does_keep(sentences, whole):
             continue
         if LENGTH_OF_THE_JOB.search(sentence) or re.search(r"\bdepends\b", sentence, re.I):
             continue
-        clause = re.split(r"\s*(?:;|,\s*(?:and|but|so)\b)", sentence.strip())[0].strip(" .,")
+        if start_age is None and all(_a_cut_off_not_a_length(sentence, match.group(0))
+                                     for match in timed):
+            # Every figure in this sentence is the age the advice starts at. It is not the length,
+            # but it is the only thing the answer says about when, so it is kept in case the
+            # answer turns out to have no length at all.
+            one = timed[0]
+            start_age = _the_start_age(flat(sentence), one.group(0), one.start())
+        clause = None
+        for one in re.split(r"\s*(?:;|,\s*(?:and|but|so)\b)", sentence.strip()):
+            # The clause that says how the time is spent is not always the first one: "For a baby
+            # over six months, a consistent wind-down helps; feedings at night are normal for much
+            # longer" opens on the age the advice starts at, and the half after the semicolon is
+            # the one about the time. A clause whose only figure is that age is passed over.
+            one = one.strip(" .,")
+            if _only_a_cut_off(one) or not _says_a_time(one):
+                continue
+            clause = one
+            break
+        if clause is None:
+            continue
         if len(clause.split()) < 3 or len(clause.split()) > 24:
             continue
         if flat(clause) == whole:
             continue
         return NO_SET_TIME + clause[0].lower() + clause[1:] + "."
+    if start_age:
+        # The answer has no length in it at all, and the ask was how long it goes on for. The
+        # stage line says what the answer does say: this much is where it starts.
+        return A_STAGE[0].format(when=start_age)
     return None
+
+
+# A bare period word is usually the "a day" of a rate ("20 minutes a day", "twice a year"), which
+# is why the fallback above passes it over. Introduced by a word of extent it is a length: "milk is
+# still the main meal until about a year" says how long the phase goes on, and a length ask about
+# it has an answer in the answer already given.
+_A_PERIOD_OF_EXTENT = re.compile(
+    r"\b(?:until|till|til|from|after|by|for|about|around|up to|past|through|over|under|beyond)\s+"
+    r"(?:about\s+|around\s+|roughly\s+|nearly\s+|almost\s+|just\s+)?$", re.I)
+
+
+def _a_period_of_extent(sentence, at):
+    """Whether the time ending at `at` is introduced by a word of extent ("for a month")."""
+    return bool(_A_PERIOD_OF_EXTENT.search(flat(sentence)[:at]))
+
+
+def _says_a_time(clause):
+    """Whether this clause says anything about time at all.
+
+    The fallback hands the person the half of the sentence about the time, so a half that only
+    lists signs ("three signs, all at once") is not it - that answered "how long will that go on
+    for" with a list of what to look for.
+    """
+    return bool(SIGNALS["time"].search(clause)
+                or re.search(r"\b(?:long|longer|slow|quick|soon|never|until|till|months?|weeks?|"
+                             r"years?|days?|hours?|minutes?)\b", clause, re.I))
+
+
+def _only_a_cut_off(clause):
+    """Whether every figure in this clause is the age a rule starts at, and none is a length.
+
+    "For a baby over six months" is a clause about when the advice begins; "feedings at night are
+    normal for much longer" is a clause about the time. Only the second answers "how long will
+    this last", so the first is passed over rather than said as if it gave the length.
+    """
+    figures = [match.group(0) for match in SIGNALS["time"].finditer(clause)]
+    if not figures:
+        return False
+    return all(_a_cut_off_not_a_length(clause, figure) for figure in figures)
 
 
 def _the_answer_said_again(sentences, whole):
@@ -1490,9 +1715,18 @@ NO_INTERVAL_SAID = ("The steps don't say how often, and I'd rather not make a nu
 # "how often should i run it": the ask is about a doing, and the object is a pronoun, so nothing
 # of its own is named. Only the end of the line is read, so "how often should i clean the filter"
 # is not this shape.
+# The particle after the pronoun is part of the doing, not a thing of its own: "how often should i
+# top it up" and "how often should i clean it out" name nothing the answer has to be read for, and
+# the pronoun is not the last word. Without this the line was left to the caller, which handed back
+# the first step of the answer in hand - "how often should i top it up" after the boiler was
+# answered "Top the pressure up to between 1 and 1.5 bar using the filling loop", a how-much for a
+# how-often. Only a short particle is allowed, so a line that names a thing after the pronoun
+# ("how often should i clean it with vinegar") is still left to the caller.
 A_HOW_OFTEN_THE_DOING = re.compile(
     r"\b(?:how often|how many times|how regularly|how frequently)\b"
-    r".*\b(?:it|that|this|them|those)\s*[?.!]*\s*$", re.IGNORECASE)
+    r".*\b(?:it|that|this|them|those)"
+    r"(?:\s+(?:up|out|down|off|in|on|round|around|over|through|away|back|again|properly|too))?"
+    r"\s*[?.!]*\s*$", re.IGNORECASE)
 
 
 def _how_often(sentences, question, whole):
@@ -2215,6 +2449,12 @@ def _the_half_they_named(halves, question):
 # seconds." - a confident figure about something else. The same shape gave "Ten minutes." for
 # getting fit (the warm-up) and the session length for a guitar practice ask.
 IN_A_RELATIVE = re.compile(r"\b(?:who|which|whose)\b", re.I)
+# "on a dry day with no rain forecast for 24 hours" is how long the weather has to hold, not how
+# long the job takes: that figure is a window the forecast has to stay inside. With the treatment
+# interval passed over, the 24 hours became the answer to "how long will it take" to paint a shed.
+A_WEATHER_WINDOW = re.compile(
+    r"\b(?:forecast|rain|showers?|dry|damp|frost|wind|sunshine?|weather|mild|warm|cold)\b"
+    r"[^.;:,]{0,25}\bfor\s+$", re.I)
 AT_A_TIME = re.compile(r"^\s*(?:at a time|to warm up|to cool|of it)\b", re.I)
 # A bounded figure inside an "if" or "when" clause is a threshold, not how long the job takes:
 # "getting out of bed if you're awake for more than 20 minutes" is a rule, and handed back for
@@ -2246,6 +2486,8 @@ def _a_condition(sentence, match):
         return True
     if A_STATE_FOR.search(before):
         return True
+    if A_WEATHER_WINDOW.search(before):
+        return True
     return bool(IN_A_RELATIVE.search(before))
 
 
@@ -2267,7 +2509,7 @@ def _part(sentence, kind, question):
     spans = [_figure(match, sentence) for match in figure.finditer(sentence)] if figure else []
     if kind == "time" and spans and LENGTH_OF_THE_JOB.search(flat(question)):
         lengths = [_figure(match, sentence) for match in figure.finditer(sentence)
-                   if not _a_frequency(sentence, match.end())
+                   if not _a_frequency(sentence, match.end(), match.start())
                    and not (A_MOMENT.fullmatch(match.group(0).strip())
                             and not A_COUNTDOWN.search(flat(question)))
                    and not _a_condition(sentence, match)]
@@ -2288,7 +2530,7 @@ def _part(sentence, kind, question):
             if cut and figure.search(cut):
                 sentence = cut
                 lengths = [_figure(match, sentence) for match in figure.finditer(sentence)
-                           if not _a_frequency(sentence, match.end())]
+                           if not _a_frequency(sentence, match.end(), match.start())]
         spans = lengths
     if kind == "time" and spans and not LENGTH_OF_THE_JOB.search(flat(question)):
         # A rate ask ("how long should i practise") wants the rate, and now that a spelled-out
@@ -2298,9 +2540,9 @@ def _part(sentence, kind, question):
         # ("Walk 30 minutes a day, 5 days a week") is left as it was, because the clause reads
         # better than the bare figure.
         rates = [_figure(match, sentence) for match in figure.finditer(sentence)
-                 if _a_frequency(sentence, match.end())]
+                 if _a_frequency(sentence, match.end(), match.start())]
         lengths = [_figure(match, sentence) for match in figure.finditer(sentence)
-                   if not _a_frequency(sentence, match.end())]
+                   if not _a_frequency(sentence, match.end(), match.start())]
         if rates and lengths:
             return rates[0]
     if not spans:
@@ -2391,13 +2633,18 @@ def _canonical(word):
     return "oven" if word in OVEN else word
 
 
-def _a_frequency(sentence, end):
+def _a_frequency(sentence, end, start=None):
     """Whether the time that ends at `end` is how often to do something, not how long it takes.
     "Twenty minutes a day", "5 days a week" and "three times a week" are all rates: asked how
     long the job takes, the figure to hand back is the length in the sentence ("two or three
     months"), and a rate handed back is a wrong answer a person plans around.
     """
     after = sentence[end:]
+    if start is not None and FREQUENCY_BEFORE.search(sentence[:start]):
+        # "every two or three years" is the interval the thing is done at, said with the interval
+        # in front: only the words after the figure were read before, so a treatment's recurrence
+        # was handed back as the length of the job.
+        return True
     return bool(FREQUENCY_AFTER.match(after) or FREQUENCY_AFTER_TIMES.match(after)
                 or FREQUENCY_AFTER_AT_A_TIME.match(after))
 

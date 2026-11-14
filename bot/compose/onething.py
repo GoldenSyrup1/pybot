@@ -10,8 +10,8 @@ What a friend does with a line like that is say the one thing they know about it
 where it should not be is a today job and the stopcock comes first, that a short payslip is
 usually one of three things, that a half-five start is decided the night before. So the family
 of thing the line names decides the reply - water in the house, pay, an early shift, a body, a
-child under a year - and each pool says the part that is true whatever the details are, with no
-number of theirs invented and no promise about how it ends.
+child under a year, a visit that is booked - and each pool says the part that is true whatever
+the details are, with no number of theirs invented and no promise about how it ends.
 
 Only ever a reply where nothing answered. The caller runs this last, before the intake form,
 so a pool with something of its own has already had its turn.
@@ -151,6 +151,136 @@ A_FEED_FIGHT_REPLY = (
 )
 
 
+# A visit that is booked. "the boiler man is coming tuesday", "the plumber comes thursday",
+# "the midwife is due on friday", "somebody is coming to look at the damp tomorrow": the person
+# is telling you when somebody is turning up, and none of the families above names it. On main the
+# first of those reached the intake form ("I'm listening - say more if it helps"), and the others
+# went to a who-to-ask line ("A plumber or electrician will spot it in minutes") - which is a
+# reply to somebody who has not rung one yet. The reading is narrow on purpose: a trade or a
+# professional, a coming verb in the present or future, and a day. "did the plumber come" is a
+# question with its own reader (bot/compose/their_day.py), "the plumber came tuesday" is a past
+# visit, and "we got the keys on friday" names nobody who is coming.
+VISITORS = frozenset("""
+somebody someone man bloke bloke lady guy fella chap
+boiler man boiler bloke plumber electrician gas man gas engineer engineer heating engineer
+builder joiner carpenter decorator painer painter plasterer tiler roofer glazier locksmith
+chimney sweep pest control drain man drain bloke surveyor cleaner window cleaner gardener
+meter reader delivery man delivery driver courier van man removal man removals man fitter
+technician repair man washing machine man dishwasher man oven man tv man sky man
+broadband man bt man openreach man virgin man internet man
+nurse district nurse community nurse health visitor midwife physio physiotherapist occupational
+therapist carer support worker social worker housing officer housing association landlord
+letting agent agent estate agent vet vet nurse groom farrier
+council the council council inspector environmental health housing housing officer
+scaffolder scaffolder scaffolder mechanic mot man aa man rac man
+""".split())
+A_COMING_VISIT = re.compile(
+    r"\b(?:is|are|am|will be|going to be|should be|due|booked|scheduled|expected)\b"
+    r"[^.!?]{0,24}?\b(?:coming|come|due|arriving|booked|booked in|scheduled|expected|turning up|"
+    r"coming round|coming over|coming out|coming to|visiting|seeing)\b"
+    r"|\b(?:comes|come|arrives|visits)\b", re.I)
+# The day the visit is on, which is the part the reply takes. A day is what makes the line a
+# booking; "the plumber is coming" alone is not this family.
+A_VISIT_DAY = re.compile(
+    r"\b(today|tonight|tomorrow|this morning|this afternoon|this evening|"
+    r"(?:mon|tues|wednes|thurs|fri|satur|sun)day|monday|tuesday|wednesday|thursday|friday|"
+    r"saturday|sunday|next week|in the morning|in the afternoon|in the evening|first thing)\b",
+    re.I)
+# Who is coming decides what is worth asking, and the first version had one pool for all of
+# them: "the district nurse is due thursday" was asked "Are they coming to look at it, or to do
+# the job?" - a question about a washing machine. Three families, because there are three things
+# a visit can be about: the person's own care, a thing in the house to be seen to, and the place
+# itself (its council, its landlord, its meter).
+A_CARE_VISITOR = frozenset("""
+nurse nurses district community health visitor midwife midwives physio physiotherapist
+occupational therapist ot carer carers care worker support worker social worker gp doctor
+consultant specialist matron paramedic phlebotomist chiropodist podiatrist dentist hygienist
+audiologist optician speech therapist slt
+""".split())
+A_TRADE_VISITOR = frozenset("""
+boiler plumber plumbing electrician gas engineer heating engineer engineer builder joiner
+carpenter decorator painter plasterer tiler roofer glazier locksmith sweep pest control drain
+cleaner gardener fitter technician repair man washing machine dishwasher oven tv sky man
+broadband bt openreach virgin internet man chimney scaffolder mechanic mot man aa man rac man
+van man removal man removals surveyor vet farrier groom
+""".split())
+A_VISIT_CARE = (
+    "{Day} then. Is it the usual check, or has something changed since the last one?",
+    "Right - {Day}. Do you know what they are coming for, or is it a general check?",
+    "Good to have it in the diary. Is somebody going to be with you for it?",
+    "{Day} it is. Worth writing down the two or three things you want to ask while you think "
+    "of them.",
+)
+A_VISIT_TRADE = (
+    "Right - {day} then. Are they coming to look at it, or to do the job?",
+    "{Day} it is. Is it the same one as last time, or somebody new?",
+    "Good, that's in the diary. Do you have to be in for them, or can they get in?",
+    "So {day} is the visit. Have they said how long they will be, or is it a wait in all "
+    "morning?",
+    "{Day} then. Is there anything you need to have ready for them before they get there?",
+)
+A_VISIT_PLACE = (
+    "{Day} then. Do you need to be in for them, or can they get in?",
+    "Right - {Day}. Have they said what they want to see, or is it just a look round?",
+    "{Day} it is. Worth having whatever paperwork they asked about to hand.",
+    "Good. Is it the first time they have been out, or do you know who you are getting?",
+)
+
+
+# "the plumber came tuesday" and "they came round last week" are a visit that has happened, which
+# is a story to hear rather than a plan to help with.
+A_PAST_VISIT = re.compile(
+    r"\b(?:came|came round|came over|turned up|showed up|been round|was here|were here|"
+    r"visited|did come)\b", re.I)
+
+
+# Who is coming has to be somebody who does house calls. `VISITORS` is written as phrases -
+# "boiler man", "meter reader", "tv man" - so reading it as a bag of single words let the thing
+# in the phrase stand for the visitor: "the tv is coming back from repair monday" and "the new
+# series is coming out friday" were both read as a visit. A word from this list is the person in
+# the phrase, and a line with none of them is a thing coming, not somebody calling.
+A_PERSON_IN_THE_VISIT = frozenset("""
+somebody someone man bloke lady guy fella chap woman girl boy
+plumber electrician engineer builder joiner carpenter decorator painter plasterer tiler roofer
+glazier locksmith sweep cleaner gardener surveyor fitter technician mechanic
+visitor therapist assessor inspector
+nurse midwife physio physiotherapist carer worker officer landlord agent vet groom farrier
+council mechanic dentist hygienist optician consultant specialist matron paramedic
+phlebotomist chiropodist podiatrist driver reader
+""".split())
+# Coming back, out or up is a thing returning or being released, not somebody turning up: "the
+# results are coming back friday", "the new series is coming out friday", "the kids are coming
+# back sunday". A contractor finishing a job next week says "coming back" too, but the person
+# guard above already keeps that one, and a line this reader drops keeps the answer it had.
+A_COMING_THAT_IS_NOT_A_VISIT = re.compile(
+    r"\b(?:coming|come|comes|coming\s+round|coming\s+over)\s+(?:back|out|up|off|through)\b"
+    r"|\b(?:back|out|up)\s+from\b", re.I)
+
+
+def _a_visit(text):
+    """True when the line says somebody is turning up on a day."""
+    if not _has(text, VISITORS):
+        return False
+    if not _has(text, A_PERSON_IN_THE_VISIT):
+        return False
+    if not A_VISIT_DAY.search(text):
+        return False
+    if A_PAST_VISIT.search(text):
+        return False
+    if A_COMING_THAT_IS_NOT_A_VISIT.search(text):
+        return False
+    return bool(A_COMING_VISIT.search(text))
+
+
+def _the_visit_family(text):
+    """The pool for who is coming: a person's care, a thing in the house, or the place itself."""
+    if _has(text, A_CARE_VISITOR):
+        return A_VISIT_CARE
+    if _has(text, A_TRADE_VISITOR):
+        return A_VISIT_TRADE
+    return A_VISIT_PLACE
+
+
 def _has(text, words):
     return bool(set(re.findall(r"[a-z']+", text)) & set(words))
 
@@ -172,20 +302,32 @@ A_MEDS_CHANGE = re.compile(
     r"\b(?:changed|change|changes|changing|new|started|starting|start|switched|switch|moved"
     r"|put me on|now on|instead of|upped|increased|lowered|reduced|stopped|come off|came off"
     r"|different|put on|been put|gone up|gone down|went up|went down"
-    r"|twice a day|once a day|three times a day)\b", re.I)
+    r"|twice a day|once a day|three times a day"
+    # The change said as a swap or a step rather than an edit: "the chemist swapped my tablets",
+    # "my dose was halved" and "im on a higher dose now" all reached the intake form, and the
+    # medicine still has to be the person's own for any of them to count.
+    r"|swapped|swap|halved|halve|doubled|higher|lower|stronger|weaker)\b", re.I)
 # The medicine has to be the person's own. Somebody else's tablets are a question about them
 # ("my mum keeps forgetting hers"), and a dose that has already gone wrong is the dose cards' -
 # "too many", "double dose", "took 6" and an overdose are read before this and are left alone.
 A_MEDS_MINE = re.compile(
     r"^(?:so |and |but |ok |okay |well |anyway |yeah |yeh |also )*"
-    r"(?:my\s+(?:\w+\s+)?(?:meds|medication|medicine|tablets?|pills?|dose|dosage|prescription"
+    r"(?:my\s+(?:\w+\s+)?(?:meds|medications?|medicines?|tablets?|pills?|dose|dosage|prescription"
     r"|inhaler|insulin|antidepressants?|antibiotics?|painkillers?|statins?|steroids?|hormones?"
     r"|patch|patches|injections?)"
     r"|i(?:'?m| am)\s+(?:now\s+)?(?:on|taking)|ive|i(?:'?ve)?\s+been\s+(?:put\s+)?on"
     r"|i\s+(?:started|start|switched|changed|stopped|come off|came off)"
-    r"|i\s+take\b|(?:the|my)\s+(?:doctor|gp|consultant|nurse|psychiatrist)\s+(?:has\s+)?"
+    r"|i\s+take\b|i(?:'?ve|\s+have|\s+got)\s+(?:some\s+)?(?:new\s+|different\s+|another\s+)?(?:meds"
+    r"|medication|medicines?|tablets?|pills?|capsules?|inhaler|insulin)(?:\s+to\s+take)?"
+    r"|(?:the|my)\s+(?:doctor|gp|consultant|nurse|psychiatrist)\s+(?:has\s+)?"
     r"(?:changed|put me on|switched|started me|gave me)"
-    r"|i(?:'?m| am)\s+\w+\s+and\s+my\s+\w+\s+(?:have|has|was|were|is)\s+\w+ed)", re.I)
+    r"|i(?:'?m| am)\s+\w+\s+and\s+my\s+\w+\s+(?:have|has|was|were|is)\s+\w+ed"
+    # The change said without naming who did it: "they switched my blood pressure tablets" was
+    # filed back as a shrug, and nobody means a stranger - it is the surgery, the hospital or the
+    # chemist, and the medicine still has to be named as theirs for the line to be this reading.
+    r"|(?:they|he|she|the\s+(?:doctor|gp|consultant|nurse|psychiatrist|chemist|pharmacist"
+    r"|hospital|surgery))\s+(?:have\s+|has\s+)?(?:changed|switched|swapped|put me on|started me on"
+    r"|given me|gave me|moved me))", re.I)
 # A symptom in the same line is a body question whatever else is in it - "my inhaler isnt working
 # as well and im wheezing" is the breathing card's - so those lines keep their own turn.
 A_MEDS_SYMPTOM = re.compile(
@@ -459,4 +601,9 @@ def pool(clean, understood=None, memory=None):
     if (A_MEDS.search(text) and A_MEDS_CHANGE.search(text) and A_MEDS_MINE.match(text)
             and not A_MEDS_SYMPTOM.search(text)):
         return A_MEDS_CHANGE_REPLY
+    if _a_visit(text):
+        day = A_VISIT_DAY.search(text)
+        word = day.group(1).lower()
+        return tuple(line.format(day=word, Day=word[:1].upper() + word[1:])
+                     for line in _the_visit_family(text))
     return None

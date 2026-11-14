@@ -22,6 +22,7 @@ with the plain illness pool, which is what those lines want.
 import re
 
 from . import kinds, lexicon
+from .normalize import LEXICON as COMMON_WORDS
 
 # A fever goes both ways: cold one minute and hot the next. The connector joins two words, and
 # only a cold word on one side of it and a hot word on the other is that going both ways. Two
@@ -50,6 +51,25 @@ GOING_BOTH_WAYS = re.compile(_ALTERNATING, re.I)
 # name, the words a person uses for it, and the nouns that can follow "my" for it. Longest
 # phrase first, so "chest infection" is never read as a cold and "hay fever" never as a fever.
 # A new part is a row here and a pool of its own in the composer.
+# "Chucking up" is two verbs: the sickness ("i keep chucking up", "ive been chucking up since
+# last night", "chucking up my lunch") and the hanging one ("chucking up some shelves", "im
+# chucking up my job", "chucking up my evening class"). The list of things people hang got every
+# phrasing it was written for and none of the others, so quitting an evening class got the
+# stomach card. What follows "up" is the signal: the sickness is read when nothing follows it,
+# when what follows is how often or how long - and a time word counts, because "i was chucking
+# up yesterday" is the sickness and it was being read as a thing being chucked - or when the
+# thing coming up is food, drink or blood. A determiner in front of anything else is the
+# other verb.
+_CHUCK_UP = (
+    r"\b(?:been |kept? |keep |still )?chuck(?:s|ed|ing)?"
+    r" (?:it |them |his |her |my |their |our )?up\b"
+    r"(?=\s*(?:$|[,.!?;:]|(?:all|every|again|still|constantly|most|so|since|at|during|"
+    r"yesterday|today|tonight|tomorrow|now|once|twice|last|this|in|for|after|before|"
+    r"the other\b)\b"
+    r"|(?:my |the |his |her |their |your |our |some |that )?"
+    r"(?:lunch|dinner|breakfast|tea|supper|food|water|drink|drinks|milk|coffee|beer|wine|"
+    r"blood|bile|medicine|meal|it)\b))")
+
 PARTS = (
     ("head",
      r"\bmigraines?\b|\bmigranes?\b|\bheadaches?\b|\bhead aches?\b"
@@ -77,16 +97,12 @@ PARTS = (
      r"is (?:sore|cramping))\b"
      r"|\b(?:(?:going|gonna|about)\s+to\s+|been |kept? |keep |still )?(?:throwing up|"
      r"thrown up|threw up|throws up|throw up|vomiting|vomited|vomit|vomits|puk(?:e|es|ed|ing)|"
-     r"barf(?:s|ed|ing)?|"
-     r"chuck(?:s|ed|ing)? (?:it |them |his |her |my |their )?up"
-     # "chucking up some shelves" is hanging them, so a determiner after "up" is the other verb
-     r"(?!\s+(?:some|a|an|the|shelves|shelf|pictures|photos|posters|decorations|curtains|"
-     r"lights|frames|wall|walls|tiles|baubles))|"
+     r"barf(?:s|ed|ing)?|" + _CHUCK_UP +
      # The same sickness in every tense people say it. Only the forms that say it happened are
      # read: "im sick" alone is ill rather than being sick, and "get sick out of a car seat" is
      # cleaning. "sick of" and "sick to death of" are the other word for it (fed up), which is
      # what the lookahead keeps out.
-     r"(?:be|been|being|was|were) sick(?!\s+(?:of|to death|and tired)\b)|nauseous|nausea)\b"
+     r"|(?:be|been|being|was|were) sick(?!\s+(?:of|to death|and tired)\b)|nauseous|nausea)\b"
      # A fragment is the whole line when a count or a time follows "sick": "sick twice today",
      # "sick since friday". "sick today" on its own is not read, because "im off sick today" is
      # a day off work rather than a symptom.
@@ -228,6 +244,84 @@ A_POO_COLOUR = re.compile(r"\b(?:pale|black|tarry|bloody|blood|red|floats?|green
                           r"color|mucus|slimy)\b", re.I)
 
 
+# A part name typed with the wrong letter is still the part. "my stomacs been rough all week"
+# was answered "Got it. Is there anything you'd like a hand with?", "my teath is killing me" with
+# "Ugh - your teath sounds relentless" and "my stamach is killing me" with a question about the
+# stamach, while the same lines spelled right get the stomach, the dentist and the stomach. The
+# tables below are written the way each word is spelled, so a line that misses the spelling by
+# one letter misses the part, and with it the pool and the card the part decides.
+# The repair is the smallest one there is - a letter added, left out, or put in another's place -
+# and it is made only when the typed word is not a word at all (the lexicon already settles the
+# typos that matter, and one that lands on a real word is the other word: "cheat" is a letter
+# from "chest") and when the part it reaches is the only part it could be, because two
+# candidates are two parts and the line would be guessing between them.
+PART_NOUNS_BY_LENGTH = {}
+for _part_name, _part_pattern, _part_nouns in PARTS:
+    for _noun in _part_nouns:
+        PART_NOUNS_BY_LENGTH.setdefault(len(_noun), set()).add(_noun)
+
+
+def _one_letter_apart(typed, spelled):
+    """True when the word is the part with one letter added, left out, or put in another's place."""
+    if abs(len(typed) - len(spelled)) > 1:
+        return False
+    if len(typed) == len(spelled):
+        return sum(1 for typed_at, spelled_at in zip(typed, spelled)
+                   if typed_at != spelled_at) == 1
+    short, long_ = sorted((typed, spelled), key=len)
+    return any(long_[:at] + long_[at + 1:] == short for at in range(len(long_)))
+
+
+def _a_part_typed_with_one_letter_wrong(word):
+    """The one part noun this word is a letter away from, or None when it is none or more than one."""
+    fits = set()
+    for length in (len(word) - 1, len(word), len(word) + 1):
+        for noun in PART_NOUNS_BY_LENGTH.get(length, ()):
+            if noun[0] == word[0] and _one_letter_apart(word, noun):
+                fits.add(noun)
+                if len(fits) > 1:
+                    return None
+    return fits.pop() if fits else None
+
+
+# A real word that happens to sit one letter from a part is the word, not a typo of the part:
+# "my gout is bad again" is gout, and read as a gut it got "fluids first, plain food". The
+# lexicon settles most of these, but it is a list of the words the reader needs for spelling and
+# it does not hold every ordinary word, so the ones within a letter of a part are named here.
+# A word only belongs here when it is a word of its own AND a letter from a part: a misspelling
+# nobody writes on purpose is not a word and stays repaired. A named illness is here by another
+# route - `topics.CONDITIONS` is the engine's own list of them, so gout, piles and sciatica are
+# fenced without being written twice.
+A_WORD_OF_ITS_OWN = frozenset("""
+    bella bell bully chesty chess earns glut glum heady heal heap heat heed tommy threat
+    """.split())
+
+
+def _a_word_rather_than_a_typo(word):
+    """True when the word is a word already, so it is never read as a part typed wrong.
+
+    The conditions list is imported here rather than at the top because `topics` imports this
+    module for its gut words, and the reading is only ever asked for a word the lexicon has
+    never seen, which is rare enough for the import to be free.
+    """
+    if word in COMMON_WORDS or word in A_WORD_OF_ITS_OWN:
+        return True
+    from .topics import CONDITIONS
+    return word in CONDITIONS
+
+
+def _spell_the_parts(text):
+    """The line with a part name typed one letter wrong spelled the way the tables have it."""
+    repaired = text
+    for word in set(re.findall(r"[a-z]+", text.lower())):
+        if len(word) < 4 or _a_word_rather_than_a_typo(word):
+            continue
+        part = _a_part_typed_with_one_letter_wrong(word)
+        if part:
+            repaired = re.sub(r"\b%s\b" % word, part, repaired)
+    return repaired
+
+
 def _the_gut_is_settled(text):
     """True unless the only word for the gut here is "stool" and nothing else settles it.
 
@@ -254,7 +348,7 @@ def read(text):
     # is a mark of where the sentence was split rather than a word the person said, so it is
     # taken out. A shape that runs across the break - "im hot and then im cold" - is one thing
     # said in two halves, and the two words either side of the "and" are still one breath.
-    text = text.replace("|", " ")
+    text = _spell_the_parts(text.replace("|", " "))
     if (A_LOOSE_STOOL.search(text) and not A_SAMPLE.search(text)
             and not A_POO_COLOUR.search(text) and not A_CHAIR_WORD.search(text)
             and not A_THING_IS_TERRIBLE.search(text)
@@ -434,6 +528,14 @@ PAIN_ADJECTIVE = frozenset("""sore painful aching achy bad swollen cramping cram
 PAIN_BETWEEN = frozenset("""is am are was were be been being feels feel felt gets getting got
     gone keep keeps kept very really so too quite a bit little just now still often always""".split())
 PAIN_REACH = 3
+# Whose part is being talked about, for the one word that is not only a state. "off" is a
+# particle as well as a way of saying a part is wrong, so a part with "off" straight after it and
+# nothing at all between them is the phrasal verb far more often than a complaint: "im gonna head
+# off", "head off" and "im gonna head off to the shop" were all read as a sore head and answered
+# with "water, food, a painkiller and twenty minutes away from a screen". Whose it is decides it -
+# "my stomach's off" and "my stomach is off" say whose stomach, and "head off" says nothing about
+# anybody's part at all.
+POSSESSIVE = frozenset("my his her their our your".split())
 # The words that say a part is unwell without naming any pain in it: "my stomach is off", "my
 # guts are rough". They only count beside a part, which is why they can be as ordinary as "off".
 PLAIN_UNWELL = frozenset("""off rough bad awful terrible horrible rubbish dodgy queasy
@@ -472,6 +574,9 @@ def _pain_after(words, index):
         if at >= len(words):
             return False
         if _an_unwell_word(words, at):
+            # See POSSESSIVE: "head off" is a leaving and "my stomach's off" is a stomach.
+            if words[at] == "off" and not (index > 0 and words[index - 1] in POSSESSIVE):
+                break
             return True
         if words[at] not in PAIN_BETWEEN:
             break

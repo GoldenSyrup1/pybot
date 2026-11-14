@@ -16,6 +16,7 @@ import re
 
 from ..compose import loss
 from ..compose import pick as compose_pick
+from ..knowledge import lookup
 
 PRIORITY = 2100  # above the loss module: a follow-up inside a loss is this module's turn
 ANSWERS = ("feelings", "grief", "loss")
@@ -73,6 +74,14 @@ HARD = re.compile(r"\b(?:it|that|yesterday|today|this morning|the day|last night
                   r"(?:hard|tough|awful|horrible|brutal|rough|difficult|shit|hell|"
                   r"the worst)\b")
 CRYING = re.compile(r"\b(?:cry|crying|cried|tears|sobbing)\b|\bi broke down\b")
+# Talking about it is the commonest thing a grieving person says, and nothing here read it:
+# "i cant talk about it" reached a card about a child who cannot speak yet ("not speaking yet",
+# "cant talk" in the family knowledge base) because one word was all that card needed. This line
+# has no subject of its own - it refers back - so the loss keeps it, whatever else it matches.
+TALK_ABOUT = re.compile(
+    r"\b(?:cant|can't|couldnt|couldn't|could not|dont|don't|do not|not able to|not ready to|"
+    r"struggl\w* to|hard to|too (?:hard|painful|raw|much) to)\s+(?:really\s+|even\s+|ever\s+)?"
+    r"talk(?:ing)?\s+(?:about|of)\s+(?:it|him|her|them|that|this|any of it|any of that)\b")
 # Every word for a person or a pet the composer knows, for the cues that need one of them.
 _LIVING = "|".join(sorted(loss.PEOPLE | loss.PET_WORDS, key=len, reverse=True))
 # Missing someone, and the dates: "i miss my old job" and "my friend forgot my birthday" are
@@ -81,6 +90,25 @@ MISSING = re.compile(r"\b(?:miss (?:her|him|them)|i miss my (?:"
                      + _LIVING + r")|think about (?:her|him|them)|"
                      r"(?:the|her|his|their) birthday|anniversary|dreamt? about (?:her|him)|"
                      r"photos? of (?:her|him|them))\b")
+# "i cant talk to my brother about it" is that conversation, not a refusal to talk to me, so the
+# sentence it needs is about the brother and keeps the reply it had.
+TALK_TO_SOMEONE = re.compile(
+    r"\b(?:talk|talking|speak|speaking)\s+(?:to|with)\s+(?:" + _LIVING +
+    r"|my|our|the|his|her|a|an)\b"
+    r"|\babout (?:it|that|this)\s+(?:with|to)\s+(?:" + _LIVING +
+    r"|my|our|the|his|her|a|an)\b")
+# A person saying they cannot talk about it, or will not: "i still cant talk about it", "i dont
+# want to talk about it", "its too soon". The one thing the bot must not do with a line like
+# that is answer it with something practical about the death - it was read as a care question
+# about an older person living alone and answered with a council needs assessment, which is
+# advice for a problem nobody named. A refusal is answered by accepting it.
+CANT_TALK = re.compile(
+    r"\b(?:i|we)\s+(?:still\s+|just\s+|really\s+)?"
+    r"(?:cant|can't|couldnt|couldn't|cannot|won't|wont|dont|don't|do not|wouldnt|wouldn't|am not|not)\b"
+    r"[^.!?]{0,24}\b(?:talk|talking|speak|speaking|say|saying)\b"
+    r"[^.!?]{0,16}\b(?:about (?:it|that|this|him|her|them)|yet|now|today)\b"
+    r"|\b(?:its|it's|that's|thats)\s+(?:too\s+(?:soon|raw|early|fresh)|too hard)\b"
+    r"|\bnot ready to talk\b|\bcan we not talk about\b|\blets not talk about\b")
 # The signs of them still around: listening for the door, saying goodnight.
 SIGNS = re.compile(r"(?:still|keep) (?:look|looking|listen|listening|wait|waiting|expect|expecting) for "
                    r"(?:her|him|them)|(?:still|keep) (?:expect|expecting) (?:her|him|them)|(?:still|keep) (?:talk|talking|say|saying|tell|telling)\b"
@@ -177,8 +205,20 @@ FAMILY = re.compile(r"\b(?:brother|sister|dad|mum|stepdad|stepmum|uncle|aunt|nan
                     r"family|relatives|in-laws|siblings)\b[^.]{0,40}?\b(?:argue|arguing|"
                     r"argument|row|rows|rowing|fight|fighting|falling out|fell out|"
                     r"not talking|won'?t talk)\b")
-TELL = re.compile(r"\b(?:who do i (?:tell|notify|ring)|who needs to know|who to tell|"
-                  r"tell us once|who do i inform)\b")
+# Who has to be told. The shape above reads only the bare "who do i tell", and the way people
+# actually ask it puts the modal in the middle: "who do i have to tell", "who do i need to
+# notify", "do i have to tell everyone". Those went to whatever card the composer had for the
+# words - "who do i have to tell" was answered with how to talk to a child about a death, and
+# "do i have to tell everyone" with an insurance policy. Both are the notification ask, and its
+# answer is Tell Us Once and the register office.
+TELL = re.compile(r"\b(?:who (?:do|should|must|would) (?:i|we) (?:have to |need to |ought to )?"
+                  r"(?:tell|notify|inform|ring|contact)"
+                  r"|who (?:needs? to know|needs? to be told|has to know|should (?:know|be told))"
+                  r"|who to (?:tell|notify|inform)"
+                  r"|(?:do|should) (?:i|we) (?:have to |need to )?(?:tell|notify|inform|ring) "
+                  r"(?:everyone|everybody|anyone|people|the (?:council|bank|pension|tax office|"
+                  r"dwp|hmrc|authorities|employer))"
+                  r"|tell us once|who do i inform)\b")
 # "what do i say to her mum", "how do i tell the kids" — words for a person, not paperwork.
 # Two different asks hide in "what do i say": telling someone the news ("how do i tell the kids")
 # wants the plain sentence to use, and being with someone who already knows ("she gets lonely
@@ -208,7 +248,35 @@ WORK_PRESSURE = re.compile(r"(?:(?=.*" + WORK_WORD + r").*?\b(?:back to work|off
                            r"|\b(?:people|everyone|folks|the team) at work\b)")
 # The asks inside a loss that want a practical answer, not sympathy. They are answered even when
 # the composer reads the line as one about the death too ("how do i register the death").
-PRACTICAL = (TELL, TELLING, SAY_TO, WORK_PRESSURE, WORK, REGISTER, COST, PROBATE,
+# The paperwork of a death is one job with many names, and people report it rather than ask
+# about it: "i still havent sorted his paperwork", "i havent cancelled his pension", "is there
+# a form to fill in". Read as a remark, each of those got a sympathy line ("I'm here. Take your
+# time with it") or, for the form, a card about signing a PDF - the coldest possible answers to
+# somebody saying what they are stuck on. Naming a piece of the admin is asking for help with it,
+# whether or not the line has a question mark in it, so this is the reading for it.
+ADMIN = re.compile(
+    r"\b(?:paperwork|the papers|(?:a|any|one|the|that) forms?|filling in|fill in|"
+    r"(?:his|her|their|the) (?:bank|banks|accounts?|pension|pensions|insurance|policies|policy|"
+    r"passport|driving licence|licence|mobile|phone contract|utilities|bills?|mortgage|"
+    r"tenancy|landlord|affairs)|council tax|(?:his|her|their) (?:benefits?|tax credits)|"
+    r"universal credit|hmrc|the dwp|the tax office|dvla|the council|"
+    r"(?:cancel|close|stop|sort out|sorted out|sorted|deal with|notify|inform|tell)\b"
+    r"[^.]{0,36}?\b(?:subscription\w*|direct debits?|accounts?|pension|insurance|policy|"
+    r"doctor'?s (?:surgery|practice)|dentist|the vet|employer|the council|the bank|"
+    r"the tax office|his phone|her phone|the phone|the house|the mortgage|the tenancy)\b)\b")
+ADMIN_REPLIES = (
+    "None of it has to be done this week, and it goes faster by phone than by letter. The bank, "
+    "the pension and the council each have a bereavement team: ring one a day, ask them to stop "
+    "the letters, and write the reference number down on a single sheet as you go.",
+    "One call does most of it: Tell Us Once tells the tax office, the council, the passport "
+    "office and the DVLA in one go, and the register office sets it up when the death is "
+    "registered. The bank and any pension are their own two calls.",
+    "Do it in the order it hurts least: the bank first, because the account keeps running, then "
+    "the pension, then the bills. As next of kin you can do all of it on their behalf, and you "
+    "don't need probate to tell anybody anything.",
+)
+
+PRACTICAL = (TELL, TELLING, SAY_TO, WORK_PRESSURE, WORK, REGISTER, COST, PROBATE, ADMIN,
              PAPERWORK, ARRANGEMENTS, BELONGINGS)
 
 # A line about a child, or about someone ill right now, is not a remark about the loss: those
@@ -249,6 +317,11 @@ HARD_REPLIES = (
     "It's allowed to be that hard. Nothing about the first days is normal, so don't measure "
     "yourself against anyone else getting through it.",
 )
+TALK_ABOUT_REPLIES = (
+    "You don't have to. Say as much or as little as you want, and I'm here for the parts that "
+    "aren't words.",
+    "That's alright. Nothing has to be said here - tell me when you want to, and not before.",
+)
 CRYING_REPLIES = (
     "Crying is the pressure valve, not a setback. Let it come, then get outside for ten minutes "
     "if you can.",
@@ -259,6 +332,14 @@ MISSING_REPLIES = (
     "telling them.",
     "The dates are the hard ones — the birthday, Christmas, the day itself. Doing one small "
     "thing for {who}, a photo out or a meal they liked, can take the edge off.",
+)
+CANT_TALK_REPLIES = (
+    "That's alright, you don't have to — not now, not with me. I'm here whenever it helps, "
+    "and we can talk about anything else in the meantime.",
+    "Then we won't. Say as much or as little as you want, and we can leave {who} out of it "
+    "for now.",
+    "Fair enough. Nothing to explain, and no rush: tell me about something ordinary instead "
+    "if that's easier today.",
 )
 SIGNS_REPLIES = (
     "That's one of the strangest parts — the house keeps the shape of {who}. It eases on its "
@@ -612,7 +693,12 @@ def _fill(pool, who):
 # a pet's thread reaches HMCTS, and the price of buying a puppy reaches "how much does it cost
 # to cremate a dog"), it says the true thing instead of swapping one wrong turn for another:
 # a pet has none of that. The vet arranges the cremation or the burial.
-PERSON_ONLY = (REGISTER, COST, PROBATE, PAPERWORK, ARRANGEMENTS)
+# The asks that are about a person's paperwork, and have no meaning for an animal. The
+# notification ask belongs here for the same reason the register office does: a cat has no
+# passport, no HMRC record and no Tell Us Once, so "my cat died" / "who do i need to notify" was
+# answered with Tell Us Once - the person's answer, for an animal that has none of it. The pet
+# answer is the vet, who arranges the cremation or the burial.
+PERSON_ONLY = (REGISTER, COST, PROBATE, PAPERWORK, ARRANGEMENTS, TELL, ADMIN)
 
 ANIMAL_PAPERWORK_REPLIES = (
     "None of that applies to {who}: nothing gets registered and there is no estate to deal "
@@ -633,6 +719,14 @@ def respond(text, memory):
     clean = " ".join(words)
     if OTHER_PERSON.search(clean) or EMERGENCY.search(clean):
         return None  # a child's bad night, or someone ill right now, is another module's turn
+    if lookup.a_colour_is_worn(memory.get("understood") or {}):
+        # A colour asked about the funeral is the wearing question, and the knowledge base holds
+        # that row ("Familiar, subdued clothes are the thing: black or dark colours"). The pools
+        # here are about the person and about the arrangements, and a chat that already carries a
+        # death read "is black ok at the funeral" as the day itself: "be early, sit near the back
+        # if you might need air". The composer stands aside for the same lines, so this module
+        # has nothing to answer even when the line has no death word in it of its own.
+        return None
     if loss.FUNERAL.search(clean) and loss.a_part_of_the_day_asked(clean):
         # The parts of the day - the music, the readings, the flowers, how long it runs, whether
         # the children come - are knowledge rows, and this module's pools are about the person,
@@ -658,16 +752,27 @@ def respond(text, memory):
     # said another way ("3am again") already came here. So the composer is not asked about these.
     pool = None if SLEEP.search(clean) else _composer_pool(text, memory)
     if pool is not None:
-        practical = _asks(clean) and any(p.search(clean) for p in PRACTICAL)
+        practical = (_asks(clean) or ADMIN.search(clean)) and any(
+            p.search(clean) for p in PRACTICAL)
         # A work ask takes the turn whatever the composer has: its reply is about comforting
         # someone bereaved ("offer one concrete thing - a lift, a meal, covering a shift"),
         # which is not what "how do i ask for bereavement leave" is asking.
-        if not (practical and (pool is loss.LOSS_REPLIES or WORK.search(clean) or WORK_PRESSURE.search(clean)
-                               or TELLING.search(clean))):
+        # The admin and the telling ask do too. Somebody who names the paperwork they are stuck
+        # on is not asking to be comforted, and "who do i have to tell" is not a question about
+        # how to talk to a child: on those words the composer's card is a guess at a subject,
+        # where this module has the answer. Only a loss pool beats every one of them.
+        if not (practical and (pool is loss.LOSS_REPLIES or WORK.search(clean)
+                               or WORK_PRESSURE.search(clean) or TELLING.search(clean)
+                               or TELL.search(clean) or ADMIN.search(clean))):
             return None
     if loss.reads_as_loss(clean) and not any(p.search(clean) for p in PRACTICAL):
         return None
     who = record["who"]
+    if CANT_TALK.search(clean) and not TALK_TO_SOMEONE.search(clean):
+        # A refusal to talk about it is not a question about the death, and the answer is to
+        # accept it: no advice, no question, the door left open.
+        record["replied"] = len(memory.get("turns") or [])
+        return _pick(_fill(CANT_TALK_REPLIES, who), memory, clean)
     # An open "what do i do now" is answered here rather than by the loop below: it names no
     # thing for any of those patterns to read, which is how it reached the search hedge. It is not
     # claimed when the answer already on the table was a practical one: "my dog is dying" / "where
@@ -691,10 +796,12 @@ def respond(text, memory):
                           (TELLING, TELLING_REPLIES), (SAY_TO, SAY_TO_REPLIES),
                           (REGISTER, REGISTER_REPLIES), (COST, COST_REPLIES),
                           (PROBATE, PROBATE_REPLIES), (PAPERWORK, PAPERWORK_REPLIES),
+                          (ADMIN, ADMIN_REPLIES),
                           (ARRANGEMENTS, ARRANGEMENTS_REPLIES),
                           (BELONGINGS, BELONGINGS_REPLIES), (EXPECTED, EXPECTED_REPLIES),
                           (SUDDEN, SUDDEN_REPLIES),
-                          (SLEEP, SLEEP_REPLIES), (HARD, HARD_REPLIES), (GUILT, GUILT_REPLIES),
+                          (SLEEP, SLEEP_REPLIES), (HARD, HARD_REPLIES),
+                          (TALK_ABOUT, TALK_ABOUT_REPLIES), (GUILT, GUILT_REPLIES),
                           (CRYING, CRYING_REPLIES), (AGE, None),
                           (SIGNS, SIGNS_REPLIES), (MISSING, MISSING_REPLIES)):
         if pattern in PERSON_ONLY and _any_animal(who):

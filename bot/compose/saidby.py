@@ -26,7 +26,18 @@ Two things live here so they cannot drift apart:
 
 The chat module reads both (`bot/modules/chat.py`): the plan reply ("Worth doing") and the thing
 reply ("fair enough") both stand down for a line this answers, and a card the knowledge base can
-answer keeps its turn, because this is read from inside chat, not in front of it.
+answer keeps its turn, because this is read from inside chat, not in front of it. That last part
+was a promise this module did not keep: the reading only asked whether the line was somebody
+else's words, never whether something else could answer them, so two lines with a card of their
+own were asked what went through the person's head instead:
+
+    my son said "i hate you" and went to his room
+        -> "That's a big thing to have said to you."  where the child card says not to argue
+    my wife said "i want a divorce" last night
+        -> "Hard to be on the end of that one."  where the money card has the first move
+
+`_the_card_keeps_its_turn` asks the module that owns the base, so the rule is the base's answer
+and not a list of subjects kept here (cream-flag, #routing 179).
 """
 import re
 
@@ -186,9 +197,33 @@ def _fits_the_head(line, who):
     return "{Who}" not in line or bool(who)
 
 
+def _the_card_keeps_its_turn(text, memory):
+    """True when the knowledge base has a card for the line, which then keeps its turn.
+
+    The reply here asks about the person holding the words, which is right when nothing else can
+    answer them. When the base does answer them it is the better reply by every rule in STYLE.md -
+    it says what to do about the thing, not how the person might be feeling about it - so this
+    reading stands down and `bot/modules/answers.py` says its piece. Asked of the module that
+    owns the base rather than of a subject list here, so a card added there needs nothing added
+    here.
+    """
+    if not text:
+        return False
+    try:  # lazy: `answers` reads the composer, so this import belongs inside the call
+        from ..modules import answers
+    except Exception:  # noqa: BLE001 - a module that will not import answers nothing
+        return False
+    try:
+        return bool(answers.respond(text, {} if memory is None else memory))
+    except Exception:  # noqa: BLE001 - a card that raises answers nothing
+        return False
+
+
 def reply_for(text, memory=None):
     """One reply that asks about the person holding somebody else's words, or None."""
     if not reads_as_somebody_elses_wish(text):
+        return None
+    if _the_card_keeps_its_turn(text, memory):
         return None
     said = " ".join(str(text or "").lower().split())
     who = _who_phrase(said)

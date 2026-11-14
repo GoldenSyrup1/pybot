@@ -27,6 +27,8 @@ that carries them is said back. It is deliberately narrow:
 """
 import re
 
+from . import kinds
+
 _KIND_WORDS = ("size", "time", "date", "day", "price", "cost", "number",
                 "weight", "height", "dose")
 _A_KIND = {
@@ -47,7 +49,12 @@ _A_KIND = {
     "day": re.compile(r"\b(?:%s)\b" % "|".join(
         ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
          "tomorrow", "tonight")), re.I),
-    "date": re.compile(r"\b(?:the\s+)?(\d{1,2}(?:st|nd|rd|th))\b"
+    # A day of the month is one of thirty-one, so an ordinal past the thirty-first is not a
+    # date: "its for my dads 70th" is his birthday, and "what date was it again" after "the
+    # party is on the 14th" / "actually the 21st" was answered "You said 70th." - the newest
+    # ordinal in the chat, read as a day. The range is the whole of the rule: any number from
+    # one to thirty-one with an ending on it is a day, and nothing past it is.
+    "date": re.compile(r"\b(?:the\s+)?((?:0?[1-9]|[12][0-9]|3[01])(?:st|nd|rd|th))\b"
                        r"|\b(?:in|on)\s+(january|february|march|april|may|june|july|august"
                        r"|september|october|november|december)\b", re.I),
     "price": re.compile(r"(?:£|\$|€)\s?\d[\d,]*(?:\.\d+)?"
@@ -282,8 +289,19 @@ _A_VALUE_VERB = re.compile(r"^(?:quoted|paid|charged|cost|costs|size|in\s+(?:a|a
                            re.I)
 
 
+# "what day is it", "what time is it": the calendar and the clock. The words are the shape of an ask
+# for something said earlier ("what day is it again"), so one without "again", "before" or a thing
+# named is read as the ask about today, and the reader for a kind leaves it alone.
+# Only the present tense: "which day was it" is the day they gave, said back.
+_A_THE_CALENDAR = re.compile(r"^\W*(?:what|which)\s+(?:day|date|time)\s+is\s+it\s*\??$", re.I)
+_A_SAID_AGAIN = re.compile(r"\b(?:again|before|earlier|did\s+(?:i|we)|have\s+i|you\s+know|"
+                           r"tell\s+me|remind)", re.I)
+
+
 def _the_kind_asked(said):
     """The kind of value the ask is about, when the ask is about the attribute and nothing else."""
+    if _A_THE_CALENDAR.search(said) and not _A_SAID_AGAIN.search(said):
+        return None
     words = {word for word in _words(said) if word in _A_KIND_FOR_WORD}
     if not words:
         # "how much was it again" names no attribute: a quantity asked that way is a price.
@@ -420,6 +438,36 @@ def _the_line_itself(said, lines, memory):
 _MEMORY_READERS = (_the_value_of_the_kind, _the_figure_for_a_thing, _the_line_itself)
 
 
+def _the_kind_they_gave(said, lines, memory):
+    """The earlier line that holds the kind of detail this line asks for, said back.
+
+    The readers above are matched on the words an ask shares with their lines, and a whole family
+    of asks shares none: "and what make is the boiler" against "its a worcester bosch", "what
+    colour was it" against "its a dulux one, the blue tin". The ask names the kind of detail it
+    wants and the line gives it without the word. The table for that is `bot/memory/kinds.py`; the
+    line it finds is quoted in the voice the other readers use.
+    """
+    found = kinds.the_line_that_gives(said, lines)
+    if not found:
+        return None
+    return 'You said: "' + found["line"] + '"'
+
+
+
+def the_kind_they_gave(text, memory):
+    """The earlier line of theirs that gives the kind of detail this line asks for, or None.
+
+    The reading behind `said_back`'s reply, for a caller that has to know whether the chat answers
+    the line before it lets something else answer it.
+    """
+    said = flat(text)
+    if not said:
+        return None
+    if _A_THE_CALENDAR.search(said) and not _A_SAID_AGAIN.search(said):
+        return None  # "what day is it" is the calendar, as the readers above have it
+    return kinds.the_line_that_gives(said, the_lines(memory))
+
+
 def an_earlier_turn(text, memory):
     """Is this line asking for something said earlier, and what was said?
 
@@ -428,16 +476,19 @@ def an_earlier_turn(text, memory):
     is one check with one answer rather than a rule in each module.
     """
     said = flat(text)
-    if not is_a_recall_ask(said):
-        return None
     lines = the_lines(memory)
     if len(lines) > 1 and lines[-1] == said:
         lines = lines[:-1]  # the line being answered is the last of them
+    if not is_a_recall_ask(said):
+        # Not every ask for something said earlier names a past act: "and what make is the boiler"
+        # is a question about the world in its words and about their own line in what it asks for.
+        # That reader runs on its own, so a recall ask never loses the turn to it.
+        return _the_kind_they_gave(said, lines, memory)
     for reader in _MEMORY_READERS:
         answer = reader(said, lines, memory)
         if answer:
             return answer
-    return None
+    return _the_kind_they_gave(said, lines, memory)
 
 
 def reply_for(text, memory):

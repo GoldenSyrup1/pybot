@@ -256,6 +256,16 @@ TASTE = ("worth", "worth it", "buy", "buying", "get", "getting", "need", "recomm
 
 CHOICE_ASKS = ("should i", "shall i", "should we", "is it worth", "would i be better")
 
+# The words that put two things as a choice rather than a list, which `_either` needs before it
+# will answer a line that carries no question word: "air fryer or slow cooker", "butter or
+# margarine in a cake", "train rather than drive", "tea vs coffee".
+CHOICE_IN_WORDS = re.compile(r"(?:^|[^a-z])(?:or|vs|versus|rather than|instead of)(?:[^a-z]|$)")
+
+# The words that make a pair a question about which rather than a report of what the person does:
+# "should i use butter or margarine" asks, "i like tea or coffee in the morning" tells.
+CHOICE_ASK_WORDS = frozenset("should shall would which better rather worth recommend pick "
+                             "choose prefer".split())
+
 
 def _is_a_choice(understood):
     """True when the line compares two things: a choice word, or a question that picks one.
@@ -354,7 +364,31 @@ def _either(id, a, b, reply, avoid=(), bias=0):
         # entry's question just because it says walk.
         if not (_names(understood, a) and _names(understood, b)):
             return None
-        return _asked(reply)(memory, understood)
+        said = _asked(reply)(memory, understood)
+        if said is not None:
+            return said
+        # Both halves named with an "or" between them is the question, even with no question
+        # word and no question mark: "air fryer or slow cooker", "butter or margarine in a cake",
+        # "train or drive to edinburgh". `_asked` declined every one of those for being a
+        # statement, so the pair fell to whichever card owned one of the two names - a shelf
+        # over the door for a small kitchen, the shortbread recipe for butter, the packing list
+        # for a train - and the table never got its own question. A person weighing two things
+        # up is asking which, whatever punctuation they use. A line that says what they think
+        # ("i think tea is better than coffee") is still their own opinion, not a request.
+        words = set(understood.get("words") or ())
+        text = str(understood.get("text") or "").lower()
+        # The pair has to be put as a choice, not merely named together: "i take the bus and the
+        # train to work" is the commute, and a list of both halves is not a question about which.
+        if not re.search(CHOICE_IN_WORDS, text):
+            return None
+        # And a choice the person states as a fact about themselves is a report, not a question:
+        # "i like tea or coffee in the morning" is answered by saying it back, which is what it
+        # got before. The ask words are what turn the same halves into a question.
+        if set(words) & FIRST_PERSON and not set(words) & CHOICE_ASK_WORDS:
+            return None
+        if OWN_OPINION.search(text) and not words & {"you", "your", "yourself", "yours"}:
+            return None
+        return reply(memory, understood) if callable(reply) else reply
     # The choice words also gate the match itself: a line with none of them ("so why is there
     # snow on mountains in summer") must not select this entry at all, or the entry would hold
     # the line and decline it, and the science answer it deserves would never be reached.
@@ -390,7 +424,7 @@ OTHER_INSTRUMENTS = ("guitar", "piano", "ukulele", "violin", "keyboard", "bass",
 
 
 def _on_drums(memory, understood):
-    """True when this line or the one the bot just gave is about drums rather than a guitar."""
+    """True when this line, or a line or two back, is about drums rather than a guitar."""
     if _names(understood, DRUMS):
         return True
     if _names(understood, OTHER_INSTRUMENTS):
@@ -410,6 +444,10 @@ def _on_drums(memory, understood):
             return True
         if _names({"text": str(turn.get("user") or "")}, DRUMS):
             return True
+        # The newest line wins either way: a guitar taken up after the drums ended the drum
+        # answers, so the drum is not read back past it.
+        if _names({"text": str(turn.get("user") or "")}, OTHER_INSTRUMENTS):
+            return False
     return False
 
 
@@ -446,6 +484,10 @@ INSTRUMENTS = {
         "how_long": ("With 15–20 minutes a day, four chords and a simple song come together in about "
                      "a month, and something recognisable with a few more chords in three to six "
                      "months."),
+        "how_often": ("Fifteen to twenty minutes a day, five or six days a week, beats one long "
+                      "session at the weekend: the chord changes are what need repeating, and your "
+                      "fingertips need the odd rest day more than the extra minutes. Ten minutes is "
+                      "enough on a busy day - the streak matters more than the length."),
     },
     "piano": {
         "names": ("piano", "pianos", "keyboard", "keyboards", "electric piano"),
@@ -460,6 +502,9 @@ INSTRUMENTS = {
         "how_long": ("With 15–20 minutes a day, a simple tune with the right hand comes together in "
                      "a few weeks, and both hands in three to six months — faster than most people "
                      "expect, because the notes are laid out in front of you."),
+        "how_often": ("Twenty minutes a day, five or six days a week, and shorter on a bad day "
+                      "rather than skipping it: ten focused minutes of scales and one bar done "
+                      "slowly is worth more than an hour on Sunday evening. Keep a day off."),
     },
     "violin": {
         "names": ("violin", "violins", "viola", "fiddle", "cello"),
@@ -475,6 +520,10 @@ INSTRUMENTS = {
         "how_long": ("Expect a few months of short tunes on one or two strings, and about a year "
                      "before something sounds like the tune you set out to play: the bow is the "
                      "slow part, not the fingers."),
+        "how_often": ("Ten to fifteen minutes a day, every day if you can, because it is the bow "
+                      "arm and the intonation that have to repeat - a week off costs you more on "
+                      "the violin than on any other instrument. Stop while it still sounds good "
+                      "rather than practising tired."),
     },
     "flute": {
         "names": ("flute", "flutes", "recorder", "piccolo"),
@@ -488,6 +537,10 @@ INSTRUMENTS = {
                      "in the easy keys, slowly."),
         "how_long": ("A clean sound takes a few weeks, a simple tune two or three months, and "
                      "something you would play for someone else six months to a year."),
+        "how_often": ("Ten to fifteen minutes a day is plenty, most days: five of long notes and "
+                      "the awkward fingering, then a short tune. Daily is what settles the "
+                      "embouchure, and a day off now and then does no harm - a tired mouth is "
+                      "where squeaks come from."),
     },
     "reed": {
         # A saxophone has no head joint: the mouthpiece and the reed are the awkward part, and a
@@ -504,6 +557,9 @@ INSTRUMENTS = {
                      "short tune in the easy keys, slowly."),
         "how_long": ("A clean sound takes a few weeks, a simple tune two or three months, and "
                      "something you would play for someone else six months to a year."),
+        "how_often": ("Ten to fifteen minutes a day, most days: long notes and a clean start to "
+                      "each one first, then a tune. Daily repetition is what builds the "
+                      "embouchure, and the mouth is what gives out first if you push it."),
     },
 }
 
@@ -521,6 +577,10 @@ INSTRUMENT_GENERIC = {
                  "breathing — ten minutes a day, then a short piece slowly. Speed comes last."),
     "how_long": ("With 15–20 minutes a day, a simple tune is usually a few months and something "
                  "recognisable six months to a year, depending on the instrument."),
+    "how_often": ("Short and often: ten to twenty minutes a day, most days of the week, beats one "
+                  "long session at the weekend. Whatever is awkward in it gets the first five "
+                  "minutes, and stopping while it is still going well is what keeps you coming "
+                  "back to it."),
 }
 
 
@@ -643,6 +703,28 @@ def _how_long_song(memory, understood):
                 "months before it holds together with a song at full speed. Play along to songs you "
                 "like before you buy a kit.")
     return _instrument_table(memory, understood)["how_long"]
+
+
+def _how_often_at_it(memory, understood):
+    """How often to practise, for the instrument this line (or the last one) named.
+
+    A frequency question is not the practice-first question and not the how-long-until-a-song
+    question: it wants a rate, and the answer that carries the rate is the one thing the
+    instrument tables did not hold. "how often should i practise the piano" was the shrug and
+    "how often should i practise guitar" was the buy-a-guitar row, because "guitar" plus an ask
+    word was all that row needed.
+    """
+    if _on_drums(memory, understood):
+        return ("Ten minutes a day, five or six days a week, on a practice pad: single strokes "
+                "slow and even first, then the basic beat played along to a song. The hands want "
+                "the day off more than they want the extra twenty minutes.")
+    table = _instrument_table(memory, understood)
+    if table is INSTRUMENT_GENERIC and not _an_instrument_is_in_play(memory, understood):
+        # Practising with nothing musical in play is still practising, and the rate is the same
+        # for a language, a serve or a drawing hand, so the answer that fits any instrument
+        # answers the line that names none.
+        return INSTRUMENT_GENERIC["how_often"]
+    return table["how_often"]
 
 
 # "What do you think is the best season" wants the taste and nothing else; "i cant decide mine"
@@ -1034,6 +1116,47 @@ def _the_normal_answer(memory, understood):
     return None
 
 
+def _a_table_bills_line(understood):
+    """True when the split in the line is a bill at a table, or asks whether it is rude.
+
+    A dinner's bill and a household's bills are the same words: "split bills" is one and
+    "how do we split the bills" is the other, and the plural is what people type for both. The
+    row this guards is the manners answer - even split, ask for separate bills - and it holds a
+    table's bill however the person asks it, including the how-to wording with no judgement word
+    in it ("should i split the bill", "how do i split the bill").
+
+    What it must not hold is every other thing that gets split. Its key is a split phrase and a
+    how or should, so once the phrase list grew to "split bills" and "split the cost" it
+    answered "how do i split bills with my partner", "how should we split the cost of a villa"
+    and "how do i split the cost of a present" with the even-split rule for a dinner, over the
+    couple's answer and the chip-in answer those lines have. A home word, or a person the money
+    is shared with, keeps those rows' own answers.
+    """
+    text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not text:
+        text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if _A_SHARED_HOME.search(text):
+        return False
+    return bool(_A_MANNERS_WORD.search(text) or _A_TABLE_BILL.search(text))
+
+
+_A_MANNERS_WORD = re.compile(
+    r"\b(?:rude|ruder|politest|polite|impolite|cheeky|stingy|stingey|tight|mean|weird|strange"
+    r"|normal|ok|okay|fine|wrong|right|fair|acceptable|unacceptable|awkward|etiquette|manners"
+    r"|bad\s+form|selfish|generous|expected|allowed|supposed|unfair|annoying|greedy"
+    r"|cheapskate)\b")
+# The bill itself and the table it is on: a dinner out rather than a household's standing bills.
+_A_TABLE_BILL = re.compile(
+    r"\b(?:bill|tab|check|cheque|dinner|lunch|brunch|meal|restaurant|drinks|round"
+    r"|takeaway|takeout|coffee|starter|dessert|menu)\b")
+# A home's bills, and the person the money is shared with: those are the household rows' lines.
+_A_SHARED_HOME = re.compile(
+    r"\b(?:rent|flats?|houses?|housemates?|flatmates?|roommates?|household|landlord|tenancy"
+    r"|mortgage|council\s+tax|utilit(?:y|ies)|electricity|energy|heating|broadband|wifi"
+    r"|internet|partner|husband|wife|spouse|boyfriend|girlfriend|couple|income|earns?|salary"
+    r"|pays?\s+(?:half|halves)|joint\s+account|bills?\s+between\s+us)\b")
+
+
 ENTRIES = [
     # --- the bot's taste on everyday things ------------------------------------
     entry("best-season", ("season", ("best", "favourite", "favorite", "think", "pick", "prefer",
@@ -1280,7 +1403,12 @@ ENTRIES = [
                           # the plural with no article is how people write it: "what is the
                           # etiquette for splitting bills" was stood down by money's row and
                           # then shrugged, because no key here held the plural
-                          "split bills", "splitting bills"),
+                          "split bills", "splitting bills",
+                          # "divide the bill" is the same question as "split the bill", and the
+                          # verb was not here: "how do i divide the bill between 4 people" reached
+                          # the household row and was answered with rent by room.
+                          "divide the bill", "dividing the bill", "divvy up the bill",
+                          "share the bill", "sharing the bill"),
                          ("fair", "ok", "rude", "should", "right", "better", "how", "best",
                           "friends", "even",
                           # "is it fine to split the bill" and "is it okay to split the bill" are
@@ -1311,9 +1439,33 @@ ENTRIES = [
           # answer), and the chip-in rows keep their own lines: "should i chip in for a present"
           # names no split of a bill, so nothing here competes for it.
           bias=1,
+          # A dinner's bill and a household's bills are the same words, so the row needs the table
+          # in the line or the manners question, and it stands down where the line names a home
+          # or the person the money is shared with. See `_a_table_bills_line`.
+          guard=_a_table_bills_line,
           avoid=("housemate", "housemates", "flatmate", "flatmates", "roommate", "roommates",
                  "household", "flat share", "house share", "shared flat", "shared house",
-                 "with my flat", "council tax", "electricity", "broadband")),
+                 "with my flat", "council tax", "electricity", "broadband",
+                 # the plural key below ("split bills") also fits two people pooling their money,
+                 # and that is the couple row's: "how do i split bills with a partner" came back
+                 # with the table answer. The house-share words above keep a shared flat's bills
+                 # out for the same reason.
+                 "partner", "husband", "wife", "boyfriend", "girlfriend", "fiance", "fiancee",
+                 "other half", "as a couple", "joint account", "our bills", "the rent",
+                 # ... and neither is a cost away from a table. "split the cost" is a phrase this
+                 # row keys, so a taxi, a hotel room, a rented cottage and a whip round for a
+                 # present all arrived here and were told about who had the steak and the wine.
+                 # Those are money's share-a-cost, and the subject is what tells them apart.
+                 "taxi", "taxis", "cab", "cabs", "uber", "ride", "fare", "fares", "petrol",
+                 "diesel", "fuel", "parking", "toll", "tolls",
+                 "hotel", "hotel room", "a room", "the room", "rooms", "cottage", "cottages",
+                 "airbnb", "villa", "caravan", "holiday house", "holiday home", "apartment",
+                 "present", "presents", "gift", "gifts", "collection", "whip round", "kitty",
+                 "secret santa", "leaving present", "wedding present",
+                 # the same for the two biggest shared costs people ask about: a group holiday
+                 # and the flights to it have their own card in money
+                 "holiday", "holidays", "vacation", "flight", "flights", "trip", "weekend away",
+                 "week away", "weekend break", "city break", "abroad", "group holiday")),
     entry("regift", (("regift", "re-gift", "re gift", "give it away"),
                      ("ok", "rude", "fine", "should", "wrong")),
           _asked("Fine, with two rules: the person who gave it to you never finds out, and the "
@@ -1377,6 +1529,28 @@ ENTRIES = [
           avoid=("driving", "exam", "test", "interview", "speech", "presentation", "football",
                  "singing", "language", "spanish", "french", "italian", "german", "amp", "buy",
                  "purchase", "shop", "pedal", "strings", "course", "app", "tutor", "teacher")),
+    # The same verb, the other question: how often rather than what first. A rate is a figure
+    # and the practice-first row has none, so the two rows never want the same line.
+    entry("instrument-how-often", (("practise", "practice", "practising", "practicing"),
+                                   ("how often", "often", "how many times", "times a week",
+                                    "a day", "per day", "how much should i practise",
+                                    "how much practice", "every day", "daily", "minutes")),
+          _how_often_at_it,
+          # a driving lesson, a language app and a football session have their own rows, and a
+          # line about buying the thing or resting an injury is not asking for a rate
+          avoid=("driving", "exam", "test", "interview", "speech", "presentation", "football",
+                 "tennis", "golf", "singing", "language", "spanish", "french", "italian",
+                 "german", "amp", "buy", "purchase", "shop", "pedal", "strings", "course",
+                 "app", "tutor", "teacher", "rest", "stop", "hurt", "hurts", "pain", "sore",
+                 "injury", "injured",
+                 # A thing practised that is not an instrument has its own row and its own
+                 # rate: "how often should i practise my serve" was the tennis answer and came
+                 # back as the generic instrument one.
+                 "serve", "serves", "toss", "tosses", "swimming", "swim", "running", "run",
+                 "cycling", "cycle", "gym", "weights", "yoga", "dancing", "dance", "singing",
+                 "boxing", "climbing", "skating", "skiing", "batting", "bowling", "cricket",
+                 "golf", "putting", "netball", "hockey", "basketball", "rugby", "football",
+                 "tennis", "badminton", "squash", "rowing", "sailing")),
 
     # --- this or that ---------------------------------------------------------
     # What it costs to keep each one is a row of its own, with the yearly figures in it, so a
@@ -1506,3 +1680,15 @@ ENTRIES = [
                  "two", "second", "pair", "better than one", "another"),
           guard=_not_another_cats_question),
 ]
+
+
+
+# A machine with its own worth-it row in shopping.py is not the rule of thumb's line, and the
+# phrases that carry one of these names inside them named the wrong machine: "is a vacuum sealer
+# worth it" was told a vacuum cleaner is worth it if you would use it three times a week. The
+# words go on the entry after the list rather than inside the tuple, because the rule of thumb is
+# one row among many and this is one fact about it.
+for _rule_of_thumb in ENTRIES:
+    if _rule_of_thumb.id == "worth-an-appliance":
+        _rule_of_thumb.avoid = _rule_of_thumb.avoid + (
+            "sealer", "sealers", "vacuum sealer", "vacuum sealers", "food sealer", "food sealers")

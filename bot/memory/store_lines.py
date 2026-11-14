@@ -875,6 +875,46 @@ NOTHING_STARTED = (
     "We're still at the beginning — you haven't given me anything to hold onto yet.",
 )
 
+# A line that points back at what was said before, when there is nothing before it: "same as
+# before", "the usual", "and the other one", "the thing you said". The small-talk pools answered
+# these with a receipt of a line nobody gave ("Thanks for telling me — I'm here if you want to dig
+# into any of that"), which thanks a person for a pointer and answers nothing. What is true is
+# that there is no before to go on, so that is the line, with the thing itself asked for.
+POINTS_BACK_NOTHING = (
+    "There's nothing before this chat for that to be, so I've no 'before' to go on. What is it "
+    "you want?",
+    "We've only just started, so there's nothing before this to point at — say the thing itself "
+    "and I'll answer it.",
+    "Nothing said yet for that to be. Tell me the thing in a word or two and I'll take it from "
+    "there.",
+    # A reader said the line this replaces ("That points back at something I haven't got") read
+    # like a machine reporting an error. The same thing in a person's words, and a warmer one for
+    # "the usual", which is the most conversational of the lines that get this pool.
+    "You haven't said the thing itself yet — what is it?",
+    "‘The usual’ is what you'd say to someone who already knows. I don't yet — what is it?",
+)
+
+# An ask whose only subject is a pointing word, as the first thing said in a chat: "how do i do
+# it", "how long will it take", "do that again". There is nothing for the word to be, and the
+# answer says so and asks for the thing in the fewest words that will name it.
+POINTING_WORD_NOTHING = (
+    "There's nothing before this chat for that to be. What are we working on?",
+    "I haven't got anything for that to point at yet — give me the thing in a few words and "
+    "I'll answer for it.",
+    "That's the first thing you've said, so I've nothing in hand for it to mean. What is it?",
+    "Nothing said yet for that to be: tell me the thing itself in a word or two and I'll take it "
+    "from there.",
+)
+
+# An ask about what they said or were worried about, as the first thing in a chat: "what was it i
+# was worried about". There is nothing to recall, and the honest answer says so instead of taking
+# the line as a worry of theirs and giving advice about worrying.
+WHAT_I_SAID_NOTHING = (
+    "Nothing yet — you haven't told me anything, so there's nothing for that to be. What was on "
+    "your mind?",
+    "You haven't said yet, so I'd be making it up. Tell me what it was and I'll keep it.",
+)
+
 # A clause that says how to go on with a change rather than in full: the advice's own limit, and
 # the words it opens with. Read from the answer, never written here, so the limit stays the one
 # the bot already gave.

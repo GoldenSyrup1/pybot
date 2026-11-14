@@ -13,6 +13,8 @@ waited on, so a line with its own answer never reaches it.
 """
 import re
 
+from ..memory import holds as earlier
+
 # The ask itself: how long a wait is, and whether a date holds. Kept to shapes a person types
 # with no subject of their own, because a line that names its subject has an answer elsewhere.
 A_WAIT_ASK = re.compile(
@@ -182,9 +184,7 @@ def _the_thread(clean, memory):
     service such as next-day delivery" about a late sofa put a repairer in a thread about a shop.
     """
     said = [str(clean or "")]
-    for turn in (memory.get("turns") or [])[-4:]:
-        if isinstance(turn, dict):
-            said.append(str(turn.get("user") or turn.get("them") or ""))
+    said.extend(earlier.lines(memory)[-4:])
     return " ".join(said).lower()
 
 

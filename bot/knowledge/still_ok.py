@@ -159,7 +159,15 @@ OFF_ASKS = ("ok", "okay", "safe", "still", "eat", "eat it", "bin", "throw", "use
             # reached no row here - it took the lean-protein card and then a shrug, while "is
             # chicken still ok" had the answer all along.
             "next day", "the next day", "the day after", "day after", "day later",
-            "days later", "yesterday", "in the fridge", "out of the fridge")
+            "days later", "yesterday", "in the fridge", "out of the fridge",
+            # A food that has *gone* is the report of a sign, not a question, and it is the whole
+            # question a person has: "my chicken has gone slimy" was "Thanks for telling me" -
+            # the shrug STYLE.md names - because none of the words above is a way of asking. The
+            # sign itself is the ask: nobody says "my chicken has gone slimy" for any reason but
+            # to be told whether to bin it.
+            "slimy", "gone slimy", "went slimy", "is slimy", "looks slimy",
+            "smells off", "smelt off", "smells wrong", "smells funny", "has gone",
+            "gone bad", "has gone bad", "looks off", "is off")
 
 # A bare "off" is also a preposition, and those lines are about something else: the skin off a
 # fish, the smell of frying off the kitchen, the pan off the heat. Each keeps its own answer.
@@ -207,7 +215,59 @@ OFF_WORDS = PACK_DATE + (
              # spelled out here as the one rule they are.
              "after a day", "after one day", "after 2 days", "after two days", "after 3 days",
              "after three days", "after 4 days", "after four days", "after 5 days",
-             "after five days", "a couple of days later", "a few days later")
+             "after five days", "a couple of days later", "a few days later",
+             # "should i bin my chicken", "do i need to throw the mince away". The decision is
+             # the state as far as the person asking is concerned: they have already decided the
+             # food is suspect and want the signs. The row scored nothing at all on these, so
+             # they fell to the composer's "not mine to decide" shrug.
+             "bin", "bin it", "throw", "throw it", "throw away", "throw out", "chuck",
+             "toss", "chuck it", "toss it",
+             # "can i still eat this chicken" is the same question as "is this chicken still ok",
+             # and it scored nothing: "still" and "eat" are ways of asking, not signs, so no
+             # state word was in the line and the row never fired. The eating shapes are signs
+             # too - a line that offers to eat the thing is asking about the thing in its hand.
+             "still eat", "eat this", "eat that", "can i eat", "still alright",
+             "still all right", "alright")
+
+# A spoilage question is a yes/no about safety, and the row that can answer it has to beat the
+# row that only describes the food. On main it lost every tie: "my chicken smells a bit, can i
+# cook it" got the room-smell card (open a window and simmer a lemon), "my pork smells can i cook
+# it" the same, "is my chicken still ok to eat" the lean-protein card, and "my chicken went out of
+# date yesterday can i eat it" the keeping card. Every one of those is a row that scored the same
+# as this one - the food word and one ask word each - and a tie was enough to take the turn. A
+# person asking whether the food in their hand is safe is asking the one question where a dull,
+# wrong answer does real harm, so these rows are nudged above anything they tie with. The gates
+# above are what keep them off the lines that are not about spoilage.
+SPOILAGE_BIAS = 3
+
+# The foods the knowledge base already has a card for. A line that names one of these has its
+# own answer and must keep it: the row below is for the lines that name no food at all.
+EXTRA_FOODS = ("yogurt", "yoghurt", "cream", "soured cream", "single cream", "double cream",
+               "ham", "gammon", "leftover", "leftovers", "pate", "smoked salmon", "prawn",
+               "prawns", "sausage", "sausages", "burger", "burgers", "milk", "kefir")
+
+
+def _names_no_food(understood):
+    """True when the line names no food, so the unnamed spoilage row is the one to answer.
+
+    "smells off can i still cook it" has nothing to look up, so the questions below are the whole
+    question. "my milk smells a bit off, should i still use it" names the milk, and the milk card
+    says more about it than any general rule can; without this test the general row took that
+    line and gave back a rule about rice and hard cheese.
+
+    The pantry table is read here rather than imported at the top of the file, because it is
+    built from this module's own tables and the import would go round in a circle.
+    """
+    from . import meals
+    understood = understood if isinstance(understood, dict) else {}
+    words = {str(word).lower() for word in (understood.get("words") or ())}
+    text = " " + str(understood.get("clean") or "").lower() + " "
+    known = meals.IN_A_DISH | set(meals.INGREDIENTS) | set(EXTRA_FOODS)
+    if any(word in known for word in words):
+        return False
+    # A pantry name of two words ("soured cream", "coconut milk") is never one word of the line.
+    return not any(name in known and (" %s " % name) in text for name in known)
+
 
 # A food that is bad for you is a nutrition line, never a spoilage one. Shared by every row so
 # the gate is one list; "is ham processed meat bad" was being answered with a slimy-ham test.
@@ -260,7 +320,23 @@ _NOT_THIS = ("frozen", "defrost", "defrosting", "thaw", "thawing", "left out", "
              # a meat or a fish that is going back in the freezer is the refreezing question, not
              # the sniff test: "is it safe to refreeze meat" was the colour-of-a-chop card,
              # because this row names the meat and carries the bias that settles the tie
-             "refreeze", "refroze", "re-freeze", "refreezing", "freeze again", "frozen again")
+             "refreeze", "refroze", "re-freeze", "refreezing", "freeze again", "frozen again",
+             # A food somebody was sold already past its date is a complaint to the shop, not a
+             # sniff test: "the shop sold me out of date chicken" wants the refund, and it was
+             # reaching the chicken card once the spoilage rows stopped losing their ties. Any
+             # way of saying "I bought it like this" stands these rows down; "i bought chicken
+             # yesterday, is it still ok" keeps every word and is still the spoilage question.
+             "sold me", "sold us", "sold it to me", "refund", "money back", "take it back",
+             "take them back", "bring it back", "return it", "bought it like that",
+             "illegal to sell", "sell food", "selling food", "sell by", "complaint",
+             "complain", "bought out of date", "bought it out of date", "bought this out of date",
+             "buying out of date", "out of date when i bought", "was out of date when i bought",
+             # Freezer burn is the one patch of food that looks wrong and is safe, and the
+             # freezer's own card says so: "is it safe to eat freezer burnt meat" was the
+             # red-meat sniff test once these rows stopped losing their ties, which is the
+             # opposite of the answer. The freezer-burn row is the answer to this one.
+             "freezer burn", "freezer burnt", "freezerburn", "freezer-burn", "freezer burned",
+             "frost bitten", "frostbite")
 
 # Unripe fruit and vegetables are safe: hard, sour and starchy rather than sweet, and not
 # poisonous. It is asked in exactly the words of the spoilage questions - "is it ok to eat unripe
@@ -299,9 +375,16 @@ MINCE_WORDS = ("mince", "minced", "mincemeat", "mince meat", "ground beef", "gro
                "ground lamb", "ground pork", "beef mince", "lamb mince", "pork mince",
                "turkey mince", "chicken mince")
 
+# The keeping question about mince is the one that counts days - "is the mince ok the next day",
+# "how long does mince keep in the fridge" - and the keeping row has that number. The verdict
+# question - "is this mince still ok to eat", "my mince smells a bit is it still ok" - is the
+# sniff test, and it was being sent away with the days: "still ok" and "still good" are how the
+# verdict is asked, so they are deliberately not here, and `MINCE_VERDICT_WORDS` below says so
+# outright. With them the line reached the doneness card about pink centres, which answers what
+# temperature mince needs and not whether the pack in the fridge has had it.
 MINCE_KEEPING_WORDS = ("day", "days", "next day", "the day after", "day after", "days later",
-                       "keep", "keeps", "keeping", "kept", "how long", "still ok", "still good",
-                       "still fine", "still safe", "ok to eat", "safe to eat", "use by",
+                       "keep", "keeps", "keeping", "kept", "how long",
+                       "ok to eat", "safe to eat", "use by",
                        "yesterday", "tomorrow", "tonight", "left out", "left over", "leftovers",
                        "in the fridge", "out of the fridge", "fridge", "freezer", "frozen")
 
@@ -321,6 +404,14 @@ def _not_a_fault_in_the_dish(understood):
     said = str((understood or {}).get("clean") or "").lower()
     return not _A_FAULT_IN_THE_DISH.search(said)
 
+# The words that make a mince line the verdict about the pack in the fridge rather than the
+# doneness policy: a person asking "is this mince still ok to eat" is holding it, and the answer
+# is the sniff test. On its own "ok to eat" is not enough - "is it safe to eat mince" is a
+# question about pink middles, and the red-meat doneness row answers it.
+MINCE_VERDICT_WORDS = ("still ok", "still good", "still fine", "still safe", "still alright",
+                       "still all right", "smells", "smell", "smelly", "slimy", "sour", "off",
+                       "gone bad", "gone off", "went off", "looks off", "is off", "green")
+
 
 def _mince_keeping_is_its_own_row(understood):
     """False when the line is a keeping question about mince, which has a row of its own."""
@@ -328,6 +419,8 @@ def _mince_keeping_is_its_own_row(understood):
                " ".join((understood or {}).get("words") or ())).lower()
     said = " %s " % re.sub(r"[^a-z0-9']+", " ", said).strip()
     if not any(" %s " % word in said for word in MINCE_WORDS):
+        return True
+    if any(" %s " % word in said for word in MINCE_VERDICT_WORDS):
         return True
     return not any(" %s " % word in said for word in MINCE_KEEPING_WORDS)
 # A cooked dish is the subject of two different questions: what to do with it (the recipe) and
@@ -339,10 +432,135 @@ _KEEPING_IN_THE_LINE = ("fridge", "freezer", "keep", "keeps", "keeping", "last",
                         "how long", "bin", "throw", "eat")
 
 
+# A dish made on a day gone by is the pot in the fridge rather than the recipe, so the day is a
+# keeping word when the line asks nothing about cooking: "stew made yesterday can i have it" is
+# the leftovers question, and it was answered with the two hours the stew takes to cook.
+_PAST_KEEPING = ("yesterday", "last night", "this morning", "days ago", "day ago",
+                 "the day before", "a couple of days", "a few days")
+_COOKING_ASK = ("what can i make", "what can i do with", "what should i make", "what can i cook",
+                "what shall i cook", "what should i cook", "cook tonight", "cook for dinner",
+                "make tonight", "recipe", "recipes", "meal idea", "ideas for", "idea for",
+                "how do i make", "how to make", "how do i cook", "how to cook", "cook it",
+                "reheat", "re-heat", "use up", "using up", "what goes with", "serve with",
+                "side for", "freeze")
+
+
 def _not_a_recipe_now(understood):
     """False for "what can i make with the leftover curry", true for "is the curry still ok"."""
     text = " ".join(str((understood or {}).get("clean") or "").lower().split())
-    return any(word in text for word in _KEEPING_IN_THE_LINE)
+    # The cooking ask is read first: "we had curry last night what can i cook tonight" carries
+    # "ok" inside "cook" and "last" inside "last night", so the keeping words matched it and the
+    # pot in the fridge answered a line that asks for tonight's dinner.
+    if any(word in text for word in _COOKING_ASK):
+        return False
+    if any(word in text for word in _KEEPING_IN_THE_LINE):
+        return True
+    return any(word in text for word in _PAST_KEEPING)
+
+
+# How many days ago the dish was cooked or put in the fridge, for the row that answers the
+# leftover. "can i eat stew that was made 4 days ago" is answered "a cooked dish keeps 3 to 4
+# days" and left there: the rule is given and the person's own dish is not. The count is what
+# turns the rule into the verdict, so it is read here in the words people use for it - the number
+# in front of "days ago", and the plain phrases for the same thing.
+_COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+                "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fourteen": 14,
+                "a couple of": 2, "a few": 3, "a": 1}
+_DAYS_AGO = re.compile(
+    r"\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fourteen)"
+    r"\s+days?\s+(?:ago|old|since)\b|"
+    # "been in the fridge for 4 days", "sat in there 3 days", "in the fridge 2 days"
+    r"\b(?:in the fridge|in there|sat there|sitting there|been there|in the pot|in the tub)"
+    r"(?:\s+(?:for|about|nearly|over))?\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|"
+    r"nine|ten|eleven|twelve|fourteen)\s+days?\b|"
+    r"\b(?:made|cooked|did it|made it|cooked it)\s+(\d{1,2}|one|two|three|four|five|six|seven|"
+    r"eight|nine|ten|eleven|twelve|fourteen)\s+days?\b", re.I)
+_DAYS_SAID = (
+    ("the day before yesterday", 2), ("yesterday", 1), ("this morning", 0), ("last night", 1),
+    # "is leftover curry ok to eat the next day": the dish is from today, and the question is
+    # about tomorrow, so the day asked about is the first one the rule allows.
+    ("tomorrow", 1), ("the next day", 1), ("next day", 1),
+    ("a couple of days", 2), ("two days", 2), ("a few days", 3), ("three days", 3),
+    ("a week", 7), ("a fortnight", 14), ("a month", 30),
+)
+
+
+def _how_many_days_ago(text):
+    """The day count the line gives for the dish, or None when the line gives none."""
+    match = _DAYS_AGO.search(text)
+    if match:
+        said = next(part for part in match.groups() if part)
+        number = _COUNT_WORDS.get(said.lower())
+        return int(said) if number is None else number
+    for phrase, days in _DAYS_SAID:
+        if phrase in text:
+            return days
+    return None
+
+
+# What makes a line the question the verdict answers. A statement about the pot - "i made a curry
+# last night", "i went for a curry last night" - already gets the rule and is left alone; only a
+# line that asks gets a yes or a no in front of it.
+# "leftover stew made yesterday ok" ends on the ask itself, with no verb in front of it, and got
+# the rule with no verdict because none of the asks below is in it. A line that ends on one of
+# these words is asking, whatever it starts with; a statement about the pot does not end on one
+# ("i made a curry last night").
+_ENDS_ON_AN_ASK = re.compile(r"\b(?:ok|okay|alright|all right|safe|edible)\s*[.!]*$", re.I)
+_VERDICT_ASKS = ("can i", "could i", "should i", "shall i", "do i", "is it", "is that", "is this",
+                 "will it", "would it", "are they", "does it", "ok to", "okay to", "safe to",
+                 "still ok", "still good", "still fine", "am i ok", "too late", "gone off")
+
+# The keeping rule for a cooked dish, and the same rule said as a verdict about the day count.
+# "At the edge" is deliberate on the fourth day: 3 to 4 days is a range, so the fourth day is the
+# last one the bot will call fine, and it says which way it would go rather than hedging.
+def _the_verdict_on_the_days(days):
+    if days is None:
+        return ""
+    if days <= 0:
+        return "Yes - it is from today or last night, so it is fine."
+    if days == 1:
+        return "Yes - a day in the fridge is nothing, so it is fine."
+    if days <= 3:
+        return ("Yes - %d days is inside the 3 to 4 days a cooked dish keeps in the fridge, so it "
+                "is fine." % days)
+    if days == 4:
+        return ("At the edge, I'm afraid: 3 to 4 days is the limit, so today is the last day I "
+                "would eat it and I would not leave it for tomorrow.")
+    return ("No, I would not: a cooked dish keeps 3 to 4 days in the fridge, and rice only 1, so "
+            "%d days is past it." % days)
+
+
+_LEFTOVERS_RULE = ("Cooled within two hours and kept covered in the fridge, a cooked dish keeps 3 "
+                   "to 4 days, and anything with rice in it only 1. Reheat only the portion you "
+                   "are eating, once, until it is piping hot right through - a second reheating is "
+                   "where people get caught. It is past it if it smells sour or looks slimy, and "
+                   "if it sat out warm for more than 2 hours, bin it whatever it looks like.")
+
+
+def _the_leftovers_answer(memory, reading):
+    """The keeping rule, opened by the verdict on the days this line gives.
+
+    A verdict is an answer to a question, so it is only given to one: "i made a curry last night"
+    is news about the pot rather than a question about it, and a "Yes - a day in the fridge is
+    nothing" in front of the rule would be answering something nobody asked.
+    """
+    from .lookup import the_line
+
+    reading = reading if isinstance(reading, dict) else {}
+    said = " ".join(str(reading.get("clean") or "").lower().split())
+    asked = (any(word in said for word in _VERDICT_ASKS)
+             or "?" in str(reading.get("text") or "")
+             or bool(_ENDS_ON_AN_ASK.search(said)))
+    if not asked:
+        return _LEFTOVERS_RULE
+    verdict = _the_verdict_on_the_days(_how_many_days_ago(the_line(reading)))
+    if not verdict:
+        return _LEFTOVERS_RULE
+    if verdict.startswith("No"):
+        return verdict + (" Reheating does not make it safe: the toxins old food builds up do not "
+                          "all break down with heat and they do not all smell.")
+    return verdict + " " + _LEFTOVERS_RULE
+
 
 
 # "Left over" is a dish in one line and a sum of money in the next, and "each month" fits both:
@@ -357,7 +575,13 @@ _MONEY_IN_THE_LINE = re.compile(
     r"rent|mortgage|bills?|overdraft|debt|direct debit|standing order)\b|"
     # a sum this size is not a portion: "200 left over" is money a hundred times for every time
     # it is sausages, and the dish rows only need to stand down when they cannot be sure
-    r"\b\d{2,}\s*(?:left over|spare|over a month|over each|over every)\b")
+    # "leftover" written as one word is the same sum, and it was the spelling that got through:
+    # `i have 200 leftover each week` was told "past it, I'm afraid - bin it" while the spaced
+    # twin got the budgeting card
+    r"\b\d{2,}\s*(?:left ?overs?|spare|over a month|over each|over every)\b|"
+    # and "each"/"every"/"per" with a period is a habit of money rather than a date on food:
+    # a dish is left in the fridge for "a week", never "each week"
+    r"\b(?:left ?overs?|spare)\b[^?.!]{0,20}\b(?:each|every|per)\s+(?:week|month|year|payday)\b")
 
 
 def _not_about_money(understood):
@@ -419,7 +643,7 @@ ENTRIES = (
           "keeps 1 to 2 days in the fridge and cooked chicken 3; if it has sat out warm for more "
           "than 2 hours, that is enough on its own.",
           avoid=DIET_WORDS + UNDERCOOKED_PINK + _NOT_THIS + PET_LINE_WORDS + OFF_THE_THING,
-          ask=OFF_ASKS, bias=1),
+          ask=OFF_ASKS, bias=SPOILAGE_BIAS),
     entry("still-meat", (("meat", "beef", "lamb", "pork", "steak", "mince", "joint"), OFF_WORDS),
           "Red meat is more forgiving than chicken: a grey-brown colour on the outside of a chop "
           "is just air and it is fine, but a sour or putrid smell, a sticky tacky surface or "
@@ -431,7 +655,7 @@ ENTRIES = (
           # keeping question about mince leaves this row; the freshness question keeps it.
           guard=_mince_keeping_is_its_own_row,
           avoid=DIET_WORDS + UNDERCOOKED_PINK + _NOT_THIS + PET_LINE_WORDS + OFF_THE_THING,
-          ask=OFF_ASKS, bias=1),
+          ask=OFF_ASKS, bias=SPOILAGE_BIAS),
     entry("still-fish", (("fish", "salmon", "cod", "prawns", "prawn", "haddock", "tuna",
                           # "how do i know if fish is off" is the same question as "is the fish
                           # off", and it was reaching the cooking method and the rod licence
@@ -458,26 +682,42 @@ ENTRIES = (
              # prawns or last night's curry.
              "dishwasher", "washing machine", "fridge", "freezer", "oven", "microwave", "sink",
              "bin", "bins", "bin smells", "cupboard smells", "room smells", "house smells",
-             "smells of fish", "smells like fish", "smelling of fish"),
-          ask=OFF_ASKS, bias=2),
+             "smells of fish", "smells like fish", "smelling of fish",
+             # how often is not how fresh: "how often can i eat tuna" and "how often can i eat
+             # salmon" were told how to tell a fish that has gone off. How many days it keeps is
+             # still this row's question, so the frequency is what stands it down.
+             "how often", "a week", "per week", "every day", "every other day", "twice a week",
+             "three times a week", "times a week"),
+          ask=OFF_ASKS, bias=SPOILAGE_BIAS + 1),
     entry("still-ham", (("ham", "bacon", "sausage", "sausages", "salami", "chorizo"), OFF_WORDS),
           "Cured meat is not immune: a slimy feel, a sour or musty smell, or grey-green patches "
           "means bin it. Ham keeps about 3 days once the pack is open, dry-cured bacon up to a "
           "week, and sausages 2 to 3 days.",
           avoid=DIET_WORDS + RAW_WORDS + _NOT_THIS + PET_LINE_WORDS + OFF_THE_THING,
-          ask=OFF_ASKS, bias=1),
+          ask=OFF_ASKS, bias=SPOILAGE_BIAS),
     entry("still-yogurt", (("yogurt", "yoghurt", "cream", "creme fraiche", "soured cream"),
                            OFF_WORDS),
-          "A little watery separation on yogurt or cream is fine, so stir it back in; a fizzy "
-          "taste, a sour-bitter smell or any mould means bin it. Cream keeps about 5 days once "
-          "opened, and yogurt a week past its date if it has been in the fridge.",
+          "Bin it if it smells sour or fizzy rather than tangy, or if there is any mould on the "
+          "surface; a little watery separation on top is fine, so stir it back in. Cream keeps "
+          "about 5 days once opened, and yogurt a week past its date if it has been in the fridge.",
           # a cream for the skin is not a cream for the fridge: "does sun cream go off" was told
           # to stir it back in, and "has my moisturiser gone off" the same
           avoid=DIET_WORDS + _NOT_THIS + PET_LINE_WORDS + OFF_THE_THING
           + ("sun cream", "suncream", "sunscreen", "sunblock", "moisturiser", "moisturizer",
              "face cream", "hand cream", "body cream", "eczema cream", "nappy cream",
-             "shaving cream", "cold cream", "ice cream", "eye cream", "facial cream", "spot cream"),
-          ask=OFF_ASKS, bias=1),
+             "shaving cream", "cold cream", "ice cream", "eye cream", "facial cream", "spot cream",
+             # A yogurt question that names the date is the date rule, which says how long an
+             # opened and an unopened tub keep and ends with the same sniff test; the verdict
+             # card has the bin rule and no number, so the date question keeps its own card.
+             "out of date", "past the date", "past its date", "past their date", "use by",
+             "use by date", "best before", "date on the lid", "went out of date",
+             # A sourdough starter is a jar of flour and water on the counter, not a pot in the
+             # fridge, and comparing its smell to a yoghurt is how people describe a healthy one:
+             # "my starter smells like yoghurt" was told "bin it if it smells sour or fizzy rather
+             # than tangy". The starter rows know a yoghurt smell is good, so a starter names
+             # another question and stands this row down.
+             "starter", "starters", "sourdough", "ginger bug", "kombucha scoby"),
+          ask=OFF_ASKS, bias=SPOILAGE_BIAS),
     # The foods nothing else knows: "is my tofu out of date" and "is my avocado out of date" were
     # the dried fruit row, and a general card that says which of the two dates matters is a far
     # better answer than a punt. It sits at bias -3 so a row that knows the food always wins.
@@ -519,6 +759,31 @@ ENTRIES = (
                  "fire extinguisher", "medicine", "medication", "tablets", "inhaler", "epipen",
                  "food bank", "sell by date", "sell-by", "expiry date", "expires"),
           ask=OFF_ASKS, bias=-3),
+    # A food that has gone off, with nothing naming which food: "smells off can i still cook it",
+    # "this smells a bit off is it ok". The rows above all need a food word and there is none
+    # here, so the line reached the room-smell card - a lemon down the sink for a question about
+    # whether the dinner is safe. What a friend says does not depend on which food it is: a sour
+    # smell is the one sign that means bin it whatever it is. It sits below the rows that name the
+    # food, so knowing the food always wins, and it stays off a room, a bin or an appliance, which
+    # have their own cards. It sits above the room-smell card, which it tied with on "smells off
+    # can i still cook it" and lost.
+    entry("still-unnamed",
+          (("smells off", "smelt off", "smells funny", "gone off", "has gone off",
+            "went off", "smells wrong", "smells a bit off", "gone bad", "has gone bad",
+            "looks off", "smells iffy", "smells dodgy"),
+           ("can i cook", "can i eat", "cook it", "eat it", "still cook", "still eat",
+            "ok to eat", "safe to eat", "is it ok", "is it safe", "use it", "bin it",
+            "throw it", "keep it", "should i")),
+          "If it smells sour, or wrong rather than just strong, bin it - cooking does not make an "
+          "off food safe. Cooked rice, cooked meat and anything with a sauce are the strict ones; "
+          "hard cheese and dry bread are the ones you can judge by looking.",
+          avoid=("kitchen", "room", "rooms", "house", "flat", "home", "bin", "bins",
+                 "drain", "drains", "fridge", "freezer", "oven", "microwave",
+                 "dishwasher", "washing machine", "tumble dryer", "sink", "cupboard",
+                 "car", "cars", "van", "garage", "loft", "shed", "sofa", "carpet",
+                 "dog", "dogs", "cat", "cats", "puppy", "pet", "pets", "vet",
+                 "smoke", "damp", "mould", "mold", "musty", "gas", "paint") + PET_LINE_WORDS,
+          ask=OFF_ASKS, bias=2, guard=_names_no_food),
     # "safe" on its own is how half these lines are asked - "are green tomatoes safe" matched
     # none of OFF_WORDS, which only carries the phrase "is it safe" and "safe to eat" - so the
     # plain verdict words are in the key too.
@@ -690,8 +955,14 @@ ENTRIES = (
                  "baby", "babies", "toddler", "child", "children", "dog", "cat", "pregnant",
                  # "left over" is money as often as it is a dish, and "each month" is the
                  # period that made this row answer it: "i have 200 left over each month" is a
-                 # budgeting question and it was told "past it, I'm afraid - bin it".
-                 "each month", "every month", "left over each", "left over every"),
+                 # budgeting question and it was told "past it, I'm afraid - bin it". The other
+                 # periods and the one-word spelling are the same question, and a dish is left
+                 # in the fridge for "a week", never "each week".
+                 "each month", "every month", "each week", "every week", "each year",
+                 "every year", "per week", "per month", "per year", "each payday",
+                 "left over each", "left over every", "left over per",
+                 "leftover each", "leftover every", "leftover per", "leftover a month",
+                 "leftover this month", "leftovers each", "leftovers every"),
           # the dish and the period together are this row's line, so it outranks the cooling rows
           # and the recipes that share one of the two
           bias=3,
@@ -709,6 +980,11 @@ ENTRIES = (
             "tomorrow", "fridge", "gone off", "go off", "went off", "smell", "smells",
             "smelly", "sour", "slimy", "days", "day", "how long", "keep", "keeps", "last",
             "lasts", "bin", "throw", "been in", "sat in", "made on", "cooked it on",
+            # "stew made yesterday can i have it" gave the row only "stew": the ask it carries is
+            # the phrase "can i have", which is grammar and names nothing, so the second position
+            # had no word of its own. The day the dish was made is that word, and it is the one
+            # the person used instead of a count.
+            "yesterday", "last night", "this morning",
             # A long period said in weeks or months is the same keeping question as a few days:
             # "the stew has been in the fridge a week" was answered "straight in is fine - a
             # modern fridge copes with a warm pot", and "is a week in the fridge too long for
@@ -717,11 +993,7 @@ ENTRIES = (
             "a week", "one week", "two weeks", "three weeks", "a fortnight", "fortnight",
             "weeks", "a month", "one month", "two months", "months", "week old", "weeks old",
             "last week", "the week before", "a while", "ages")),
-          "Cooled within two hours and kept covered in the fridge, a cooked dish keeps 3 to 4 "
-          "days, and anything with rice in it only 1. Reheat only the portion you are eating, "
-          "once, until it is piping hot right through - a second reheating is where people get "
-          "caught. It is past it if it smells sour or looks slimy, and if it sat out warm for "
-          "more than 2 hours, bin it whatever it looks like.",
+          _the_leftovers_answer,
           # `_NOT_THIS` is not used here: the words it holds out are the keeping words this row
           # answers with ("in the fridge", "3 days", "how long"), and holding them out is what
           # kept the row off "leftover curry in the fridge is it ok". The cooking and defrosting
@@ -758,12 +1030,16 @@ ENTRIES = (
                    "how to make", "how do i cook", "how to cook", "how long do i cook",
                    "how long to cook"),
           ask=("ok", "okay", "safe", "eat", "eat it", "still", "next day", "tomorrow", "fridge",
+               # "stew made yesterday can i have it" asks the same thing as "is it still ok"
+               # without a keeping word in it, and reached the two-hour recipe for stew.
+               "can i have", "have it", "have some", "can i still have", "can i eat it",
                "gone off", "go off", "went off", "smell", "smells", "smelly", "sour", "slimy",
                "days", "day", "how long", "keep", "keeps", "last", "lasts", "bin", "throw",
                "should i", "made it", "made on", "cooked it on", "been in", "sat in",
                "a week", "two weeks", "a month", "last week"),
           # the period makes this the keeping question, and the cooling rows name a pot and no
-          # period: this row answers the dish that has been in the fridge for days or weeks
+          # period: this row answers the dish that has been in the fridge for days or weeks. The
+          # recipe for the dish is keyed on the same word.
           bias=2,
           # A line whose subject is a dish somebody wants to cook tonight is the recipe, not the
           # pot in the fridge: "what can i make with leftover curry" and "how do i make a curry"
@@ -882,7 +1158,43 @@ _LEAFY_GREENS = ("spinach", "baby spinach", "lettuce", "lettuce leaves", "little
 _LEAFY_SIGNS = ("yellow", "yellowed", "yellowing", "gone yellow", "going yellow",
                 "turning yellow", "turned yellow", "gone a bit yellow", "slightly yellow",
                 "gone slimy", "slimy", "slime", "brown", "browning", "gone brown",
-                "turned brown", "black spots", "mushy", "gone soft")
+                "turned brown", "black spots", "mushy", "gone soft",
+                # The plural leaf is how people say it when the colour is on the leaf rather than
+                # on the bag: "my kale has yellow leaves can i eat it", "can i eat spinach with
+                # yellow leaves". Without these the autumn card and the houseplant card took those
+                # lines on "yellow leaves" alone, though neither is about a bag in a fridge.
+                "yellow leaves", "yellow leaf", "yellowed leaves", "yellowing leaves",
+                "brown leaves", "slimy leaves", "soggy", "soggy leaves",
+                # the ask said in the same line as the sign: "the kale is yellow and soggy can i
+                # use it" is a spoilage question, and the pan-of-water card was taking it
+                "use it", "eat it", "still use", "still eat")
+
+# A leaf that has only gone limp has its own good answer - wilting is water loss and iced water
+# brings it back - so this row asks the line for a colour or a slime before it answers. Without
+# the fence "my kale is wilted can i still use it" was taken by this row on the words "still
+# use", and the short wilting answer it had was better than the long spoilage one.
+_LEAFY_SHOWS = re.compile(
+    r"\b(?:yellow\w*|brown\w*|black\w*|slimy|slime|mushy|sour\w*|smell\w*|smelly)\b", re.I)
+
+
+def _the_leaf_shows_a_colour(understood):
+    """The line names a colour, a slime or a smell on the leaf, not just that it went limp."""
+    if not isinstance(understood, dict):
+        return False
+    return bool(_LEAFY_SHOWS.search(understood.get("clean") or understood.get("text") or ""))
+
+
+# A cabbage is the same question with a different answer: yellow there is the two or three outer
+# leaves, and the head behind them keeps for weeks. Keyed on its own so it does not pull the bag
+# of leaves answer apart, and so "can i eat cabbage thats gone yellow" stops landing on the
+# caterpillar card.
+_CABBAGES = ("cabbage", "white cabbage", "green cabbage", "red cabbage", "savoy",
+             "savoy cabbage", "hispi", "pointed cabbage")
+
+_CABBAGE_SIGNS = ("yellow", "yellowed", "yellowing", "gone yellow", "going yellow",
+                  "turning yellow", "yellow leaves", "yellow leaf", "brown", "browning",
+                  "gone brown", "limp", "wilting", "wilted", "soft", "outer leaves",
+                  "slimy", "smelly")
 
 ENTRIES = ENTRIES + (
     entry("leafy-greens-yellow",
@@ -907,7 +1219,29 @@ ENTRIES = ENTRIES + (
                  # went soggy in the pan is the cooking answer rather than a spoilage one
                  "revive", "reviving", "bring it back", "crisp", "crispness", "fresh again",
                  "use up", "using up", "what can i do with", "what can i make", "ideas",
-                 "cook", "cooking", "cooked", "soggy", "pan", "boil", "boiling", "steam",
+                 "cook", "cooking", "cooked", "pan", "boil", "boiling", "steam",
                  "steaming", "wilt it", "wilted in a pan"),
-          bias=1),
+          guard=_the_leaf_shows_a_colour,
+          # bias 2, not 1: "my kale has yellow leaves can i eat it" and "can i eat spinach with
+          # yellow leaves" scored level with the autumn card, and the tie went to the card about
+          # trees. Two words of the line name the greens; nothing in it is about a tree.
+          bias=2),
+    entry("cabbage-yellow-outer-leaves",
+          (_CABBAGES, _CABBAGE_SIGNS),
+          "Yellow or brown outer leaves on a cabbage are just age: peel off the ones that have "
+          "gone, trim the dried stem end, and the firm head inside is still good - a whole "
+          "cabbage keeps a month or more in the fridge, and a cut half keeps a couple of weeks "
+          "wrapped. The one to bin is a head that is slimy or sour-smelling right through, or "
+          "soft all the way to the middle. If only the outside looks tired, it is a stir-fry or "
+          "a soup rather than the bin.",
+          # a cabbage in the ground is the garden's question, and a slaw or a recipe is about
+          # cooking it rather than about whether it is still good
+          avoid=("garden", "gardening", "allotment", "plot", "compost", "feed", "fertiliser",
+                 "fertilizer", "blight", "grow", "growing", "grown", "plant", "plants",
+                 "planting", "seed", "seeds", "seedlings", "sow", "sowing", "soil",
+                 "flower", "flowers", "flowering", "bolted", "bolting", "recipe", "recipes",
+                 "slaw", "coleslaw", "pickle", "pickling", "ferment", "sauerkraut",
+                 "how long does", "how long do", "how long can i", "keep", "keeps", "last",
+                 "lasts", "freeze", "frozen", "how do i cook", "how to cook", "roast"),
+          bias=3),
 )

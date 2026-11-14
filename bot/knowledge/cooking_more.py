@@ -17,7 +17,8 @@ defined above the point where `cooking.py` imports this file.
 """
 import re
 
-from .lookup import entry, find
+from .lookup import (asks_the_kinds, entry, find,
+                     says_it_has_gone_off as _says_it_has_gone_off)
 
 from .cooking import (
     CROWD,
@@ -32,6 +33,7 @@ from .cooking import (
     _SWAP_ASK,
     _a_brew_not_a_dinner,
     _crowd,
+    _table_text,
     _excluded,
     _fold,
     _mentions,
@@ -598,6 +600,57 @@ _AHEAD = re.compile(r"\badvance\b|\bahead\b|\bnight before\b|\bday before\b|"
                     r"\bmake ahead\b|\bprepare\b|\bprep\b", re.I)
 
 
+# A crowd row answers a question about food. "my neighbour keeps having parties" met the words
+# "party" and "keeps" and was answered with the holding temperature of a buffet, and the same
+# shape turns up in every line about somebody else's evening: "the people upstairs have parties
+# every weekend", "the pub is having a party". The party in those lines is other people's noise;
+# this row is the food at one. So a crowd row is only an answer when the line names food, says
+# what the food has to do ("keep it warm"), gives a count to cater for, or says the party is the
+# asker's own. A list of neighbour words would only fix the wordings somebody thought of.
+_FOOD_IN_LINE = frozenset(PANTRY) | frozenset(_INGREDIENT_WORDS) | frozenset((
+    "food", "foods", "meal", "meals", "dish", "dishes", "cook", "cooking", "eat", "eaten",
+    "buffet", "sandwiches", "sandwich", "quiche", "sausage roll", "sausage rolls", "finger food",
+    "nibbles", "canapes", "cake", "soup", "plates", "platter", "spread", "catering", "menu",
+    "recipe", "recipes", "bake", "baked", "roast", "salad", "cheese", "crisps", "dips",
+    "vegetarian", "vegan", "picnic", "barbecue", "bbq", "pudding", "dessert", "starter"))
+_FOOD_JOB = re.compile(r"\b(?:warm|hot|cold|chill|fresh|safe|soggy|sitting out|sat out|"
+                       r"left out|stand out)\b", re.I)
+_OUR_OWN = re.compile(
+    r"\b(?:im|i am|i'm|we are|we're|were|my|our|me and|my wife and i)\b[^.]{0,24}"
+    r"\b(?:having|throwing|hosting|organis|organiz|putting on|holding|planning)\b"
+    r"|\b(?:my|our|the) (?:party|barbecue|bbq|buffet|wake|christening|wedding) (?:food|spread)\b"
+    r"|\bfor \d+ (?:people|guests|heads)\b|\bfor \w+ (?:people|guests)\b", re.I)
+
+
+# A follow-up says "it" instead of naming the food. The food word was in the turn before, so a
+# holding verb with a pronoun for its object is the same question: "how do i keep it warm for a
+# party", "how do i keep things warm for a party", "how do i keep them cold". Those lines were
+# answered with the portions row, because "it" is not a food word and this guard stood the
+# holding row down. The verb is what makes it a pronoun about something held - "is it warm in
+# spain for a party" stays out, since nothing is being kept.
+_A_PRONOUN_HELD = re.compile(
+    r"\b(?:keep|keeps|keeping|kept|hold|holds|holding|stay|stays|staying|stand|stands|"
+    r"standing|serve|serves|serving|served|leave|leaves|leaving|left|put|puts|putting)\s+"
+    r"(?:[a-z']+\s+){0,2}(?:it|them|that|those|these|things|everything)\b[^.]{0,24}"
+    r"\b(?:warm|hot|cold|chill|chilled|fresh|safe)\b", re.I)
+
+
+def _about_the_food(understood):
+    """True when a crowd line is about the food: what it is, or what the food has to do."""
+    line = " " + " ".join(str(word) for word in (understood.get("words") or ())).lower() + " "
+    words = set(re.findall(r"[a-z']+", line))
+    if words & _FOOD_IN_LINE:
+        return True
+    if _OUR_OWN.search(line):
+        return True
+    if _A_PRONOUN_HELD.search(line):
+        return True
+    # "how do i keep it warm for 20 people" names no food, but the clock and the count are the
+    # question a buffet is served by: the thing being held is the food.
+    return bool(_FOOD_JOB.search(line)) and bool(
+        re.search(r"\b(?:people|guests|heads|crowd|everyone)\b", line))
+
+
 def _wake_food(memory, understood):
     """What to put out at a wake: food people can take with one hand."""
     return ("Food that needs no carving and no serving: sandwiches cut small, sausage rolls, a "
@@ -630,7 +683,7 @@ ENTRIES.append(entry(
     ((WAKE_WORDS),
      ("cook", "food", "make", "serve", "bring", "sandwiches", "tea", "catering", "buffet",
       "much", "how many", "feed", "after", "reception")),
-    _wake_food, bias=2,
+    _wake_food, bias=2, guard=_about_the_food,
     # Someone grieving is the loss answer's turn, not the buffet's: only the cooking shapes here.
     # And a baby is not a funeral: "my baby wakes every hour" and "waking for feeds at 8 months"
     # reached this row on the word "wake", which is a verb about a night feed before it is tea
@@ -649,7 +702,7 @@ ENTRIES.append(entry(
     ((HOLD_WORDS),
      ("keep", "warm", "hot", "cold", "chill", "advance", "ahead", "night before", "day before",
       "make ahead", "prepare", "prep", "safe", "left out", "sit out", "stay fresh")),
-    _buffet_holding, bias=2,
+    _buffet_holding, bias=2, guard=_about_the_food,
     # The food ideas are a different question with the same words: "what can i make for a party"
     # wants a menu, and this one is about the hour before people arrive.
     avoid=("ideas", "idea", "suggest", "suggestions", "what can i make", "what should i make",
@@ -663,7 +716,14 @@ ENTRIES.append(entry(
            # "how do i keep kids busy at a party" has "keep" and "party" and nothing about food:
            # keeping them busy is the games, and this row answers the temperature of a buffet
            "kids", "kid", "children", "child", "toddlers", "toddler", "games", "game", "play",
-           "playing", "activities", "activity", "busy", "entertain", "bored", "occupy")))
+           "playing", "activities", "activity", "busy", "entertain", "bored", "occupy",
+           # A party next door is noise, not catering: "my neighbour keeps having parties" met
+           # "party" and "keeps" and nothing about food, and it was answered with the holding
+           # temperature of a buffet. A party somebody else is having is the nuisance letter;
+           # a party in the line without food words is somebody looking for the number.
+           "neighbour", "neighbours", "neighbor", "neighbors", "next door", "next-door",
+           "upstairs", "downstairs", "flat above", "flat below", "loud music", "noise", "noisy",
+           "keeps having", "keeps throwing", "every weekend", "all night", "all hours")))
 # Most kitchens have these already, so a dish that needs one is not a shopping trip.
 STAPLES = frozenset("""garlic onion salt pepper oil butter flour milk stock lemon tomato
 cheese bread""".split())
@@ -688,6 +748,32 @@ HEAT_WORDS = frozenset("""spicy spice spicier spicy-hot hotter hottest chilli ch
 chillis kick fiery heat""".split())
 HEAT_IN_TEXT = ("chilli", "chili", "curry", "cajun", "paprika", "harissa", "hot sauce",
                 "spice", "spiced", "curried", "spicy", "ginger", "cumin")
+# The pantry names that carry the heat, so a line that refuses the taste refuses them: the dish
+# that answers "wont eat anything spicy" is a dish with no chilli in it, and the words below are
+# the ones a dish's own text uses to put the heat in.
+HEAT_INGREDIENTS = ("chilli", "chili", "chillies", "chillis", "cayenne", "paprika", "harissa",
+                    "sriracha", "jalapeno", "tabasco", "chilli powder", "curry powder",
+                    "hot sauce", "chilli flakes", "chilli sauce", "cajun")
+# A taste word under a refusal is a ban on the taste, not a wish for it: "and the kids wont eat
+# anything spicy" sets the heat flag like "something spicy" does, so the dish on the table came
+# back with "Add chopped chilli or a pinch of chilli flakes" in it - the one thing the line said
+# nobody would eat. "a kid who wont eat anything green" already has this shape in `no_green`.
+# Only the little words that join a refusal to its taste may sit between them, so "i dont want it
+# bland, something spicy" stays a wish for the heat.
+_TASTE_RULED_OUT = re.compile(
+    r"\b(?:wont|won't|wouldnt|wouldn't|doesnt|doesn't|dont|don't|didnt|didn't|never|no|"
+    r"hates?|hated|dislikes?|disliked|refuses?|refused|not)\b"
+    r"(?:\s+(?:eat|eats|eating|to|anything|something|food|foods|stuff|things|thing|meals?|"
+    r"dishes|very|too|much|that|this|these|those|so|really|any|all|of|or|and|the|a|an|it|"
+    r"them|sort|kind|hot|fan|keen|into|like|likes|at))*"
+    r"\s+(?:spicy|spiced|spicier|spice|chilli|chili|chillies|chillis|curry|curried|fiery)\b")
+# "hot" alone is the weather, a bath or an oven ("its too hot to cook"), so it only counts as the
+# taste when the line says it is food.
+_HOT_FOOD_RULED_OUT = re.compile(
+    r"\b(?:wont|won't|wouldnt|wouldn't|doesnt|doesn't|dont|don't|didnt|didn't|never|"
+    r"hates?|hated|dislikes?|refuses?|refused)\b"
+    r"(?:\s+(?:eat|eats|eating|anything|something|very|too|much|that|so|really|any))*"
+    r"\s+hot\s+(?:food|foods|stuff|things|sauce|curry|dishes?)\b")
 VEG_WORDS = frozenset("vegetarian vegan veggie meatless".split())
 # "she doesnt eat meat" is a vegetarian meal asked for without the word.
 MEAT_FREE_PHRASES = ("no meat", "without meat", "not eat meat", "doesnt eat meat",
@@ -838,7 +924,7 @@ SAID_PHRASES = ("what did i say", "what did i tell", "did i tell you", "what did
 # What a plan can be made of. Used to decide whether a line adds anything to a meal, and
 # whether the meal behind a bare "what should i cook" is worth answering.
 PLAN_KEYS = ("have", "avoid", "limit", "veg", "vegan", "occasion", "simple", "no_green",
-             "sweet", "crowd", "heat")
+             "sweet", "crowd", "heat", "no_heat")
 # A dish that mentions one of these is not for someone who said no to the first name: saying
 # "no cheese" rules out the parmesan in the pasta as much as the cheese on top.
 AVOID_TEXT = {"cheese": ("cheese", "parmesan", "cheddar", "mozzarella", "feta", "halloumi",
@@ -1093,7 +1179,16 @@ def wants(understood, old=None):
     if words & LIMIT_WORDS or any(phrase in said_clean for phrase in SIMPLE_PHRASES):
         context["simple"] = True
     if words & HEAT_WORDS:
-        context["heat"] = True               # "something spicy" on the dish already on the table
+        if _a_taste_ruled_out(said_clean):
+            # The line refuses the taste, so nothing that carries it goes in: the dish and the
+            # ideas are read against the pantry names below, and `_with_heat` adds no heat.
+            context["no_heat"] = True
+            avoid = context.setdefault("avoid", [])
+            for name in HEAT_INGREDIENTS:
+                if name not in avoid:
+                    avoid.append(name)
+        else:
+            context["heat"] = True           # "something spicy" on the dish already on the table
     sweet = bool(words & SWEET_WORDS) or any(phrase in _clean(understood) for phrase in SWEET_PHRASES)
     if sweet and not ingredients(understood):
         context["sweet"] = True               # "and a pudding" asks for the sweet, not the main
@@ -1111,6 +1206,8 @@ def _fits(names, context):
     if context.get("veg") and names & MEAT_NAMES:
         return False
     if context.get("no_green") and names & GREEN_NAMES:
+        return False
+    if context.get("no_heat") and names & set(HEAT_INGREDIENTS):
         return False
     return True
 
@@ -1262,6 +1359,9 @@ def plan_reply(context, memory=None, skip=()):
         if context.get("no_green") and any(word in dish["text"].lower()
                                            for word in GREEN_IN_TEXT):
             continue                         # peas in the rice are still greens to a child
+        if context.get("no_heat") and any(word in dish["text"].lower()
+                                          for word in HEAT_IN_TEXT):
+            continue                         # a curry base is heat to the one who refused it
         if _text_conflict(dish, context):
             continue                         # a refusal covers the cheese in the words too
         scored.append((_score(dish, context), dish))
@@ -1278,10 +1378,27 @@ def plan_reply(context, memory=None, skip=()):
     return None
 
 
+def _a_taste_ruled_out(said):
+    """True when the line refuses the heat rather than asking for it.
+
+    "and the kids wont eat anything spicy" is the same words as "something spicy" to the heat
+    flag, and the dish on the table came back with chilli put into it. "its not spicy enough" is
+    the other way round - the line wants more - so a taste word followed by "enough" is a wish
+    even with "not" in front of it.
+    """
+    for pattern in (_TASTE_RULED_OUT, _HOT_FOOD_RULED_OUT):
+        for found in pattern.finditer(said or ""):
+            after = (said or "")[found.end():found.end() + 12].lower()
+            if after.strip().startswith("enough"):
+                continue
+            return True
+    return False
+
+
 def _with_heat(text, context):
     """The dish, with the heat asked for put into it when its own words have none."""
-    if not context.get("heat"):
-        return text
+    if not context.get("heat") or context.get("no_heat"):
+        return text                      # nothing asked for, or the taste was refused
     lowered = (text or "").lower()
     if any(word in lowered for word in HEAT_IN_TEXT):
         return text                      # already a curry, a chilli or something spiced
@@ -1318,6 +1435,14 @@ def remembered(understood, memory):
     if not isinstance(understood, dict):
         return None
     if understood.get("kind") in ("empty", "greeting"):
+        return None
+    if _says_it_has_gone_off(understood.get("clean")):
+        # A food that has gone off is not in the kitchen: "my chicken smells a bit, can i cook it"
+        # is the sniff test, and nothing about that chicken is a plan for dinner. It used to be
+        # stocked anyway, because naming a food is all this reads, so three spoilage questions in
+        # a row left chicken, pork and mince in the plan - and the next one, "my mince smells a
+        # bit is it still ok", was answered "mince and tomatoes make a ragu". A plan already on
+        # the table is left as it was: this line adds nothing to it.
         return None
     plan = plan_recent(memory)
     words = set(_said_words(understood))
@@ -1707,6 +1832,11 @@ def follow_up(understood, memory):
     # A line that names a food they cannot have is the record's question, not a narrowing of the
     # dish: after "my son is allergic to nuts" and a dish offered, "what about pesto" must not be
     # answered with a recipe for it.
+    if _says_it_has_gone_off(understood.get("clean")):
+        # A recipe is no answer to "is this still ok": the food in the plan was fine when the
+        # plan was made, and a dish picked from it says nothing about the one in their hand. The
+        # entries' sniff test answers this line, and the plan waits for the next one.
+        return None
     pointed_food = pointed_at_a_food(understood, memory)
     if pointed_food:
         return pointed_food
@@ -1714,6 +1844,12 @@ def follow_up(understood, memory):
     if not plan:
         return None
     said = _clean(understood)
+    # A line that asks which kinds a thing comes in is a question of its own, and the dish on the
+    # table is not its subject: "what types of potato are there" two turns after a dish was named
+    # was answered with the plan's next step ("mash the boiled potatoes") for a question about
+    # which potatoes exist. The kinds row for the subject the line names answers it.
+    if asks_the_kinds(understood):
+        return None
     if _only_an_acknowledgement(said):
         return None
     if A_SUM_OF_MONEY.search(said):
@@ -1818,12 +1954,28 @@ def _refuses(understood):
     return bool(REFUSAL.search(_clean(understood)))
 
 
+# "the best way to cook a jacket potato" asks how to cook the thing it names, and the thing's own
+# method row answers that. A plan picked a dish out of the table instead: the jacket potato in a
+# hurry was answered "Mash the boiled potatoes with butter and a splash of warm milk", which is
+# not a jacket potato at all, and the same for "the best way to cook rice quickly" (an egg fried
+# rice idea). The hurry word is how soon they want to eat, not permission to pick a different
+# dish, and the line has to ask for *the way*: "something quick for dinner" is still a plan's.
+THE_WAY_TO_COOK = re.compile(
+    r"\b(?:best|quickest|fastest|easiest|simplest|cheapest|healthiest|healthier|safest|right|"
+    r"proper|good|nice) way (?:to|of)\b"
+    r"|\bthe way (?:to|of) (?:cook|cooking|make|making|bake|baking|roast|boil|fry|steam)\b")
+
+
 def _meal_asked(understood):
     """Is this line a meal being asked for, rather than a dish, a bake or two foods?
 
     A line that names a dish ("an easy curry"), a bake ("a lemon drizzle") or two foods asks a
-    question the entries and the dish table answer better, so it starts no plan.
+    question the entries and the dish table answer better, so it starts no plan. So does a line
+    that asks the way to cook the one thing it names: that is the method's question.
     """
+    said = _clean(understood)
+    if THE_WAY_TO_COOK.search(said):
+        return False                         # "the best way to cook a jacket potato"
     words = set(_said_words(understood))
     if not words & MEAL_FRAME:
         return False                         # not a meal asked for, whatever else it names
@@ -1839,9 +1991,16 @@ def _meal_asked(understood):
 
 # The properties a food is asked *about*, rather than asked to be cooked: "is oat milk gluten
 # free", "how many calories in rice and chicken", "how long does brown rice take".
+#
+# A verdict is a property of the food too, and the commonest one there is: "is oat milk ok" and
+# "is almond milk ok" name two things from the kitchen (oat milk and milk, almond milk and
+# almonds), so the pantry table read them as "what can I make with these" and answered a yes or
+# no with a bowl of porridge and a handful of toasted almonds. A question that asks whether the
+# thing is good, fine, alright, ok or bad is a fact about it, and no dish answers a fact.
 FOOD_PROPERTY = re.compile(
     r"\b(?:gluten|wheat|dairy|lactose|calories|calorie|carbs|carb|protein|fat|fattening|sugar|"
-    r"salt|healthy|healthier|safe|vegan|vegetarian|allergy|allergic|coeliac)\b", re.I)
+    r"salt|healthy|healthier|safe|vegan|vegetarian|allergy|allergic|coeliac|"
+    r"ok|okay|fine|alright|good|bad|worth it)\b", re.I)
 # A line that asks for cooking, in the words people use for it, is a meal question however many
 # foods it names.
 COOK_REQUEST = re.compile(r"\b(?:cook|cooks|cooking|cooked|make|makes|making|bake|recipe|recipes|"
@@ -2074,6 +2233,24 @@ SLOT_ASKS = ("what should i", "what can i", "what shall i", "what do i", "ideas"
              "suggest", "suggestions", "make", "have", "eat", "cook", "fix", "quick", "easy")
 
 
+def _one_person_at_this_meal(understood):
+    """Whether the line is one person's meal rather than a table to cook for.
+
+    "what shall i make for lunch for four of us" is a table of four, and the shape for one
+    person's lunch - a sandwich and a piece of fruit - is not what four people cook. The crowd
+    row answers a counted table, so this row stands aside for it. Both the line as typed and the
+    reading are asked: the reading puts the first person in ("for four of me"), and a table can
+    only be counted off the words that were typed.
+    """
+    if not understood:
+        return True
+    for field in ("text", "clean"):
+        line = str(understood.get(field) or "").lower()
+        if line and _table_text(line):
+            return False
+    return True
+
+
 def _a_meal_for_the_slot(memory, understood):
     """A shape for the meal the line names, when it names no food to cook."""
     text = " " + str((understood or {}).get("clean") or "").lower() + " "
@@ -2099,6 +2276,8 @@ ENTRIES.append(entry(
            "leftovers", "calories", "healthy", "diet", "batch", "pudding", "dessert",
            "birthday", "kids", "toddler", "baby", "weaning", "school lunch", "lunchbox",
            "restaurant", "takeaway", "book", "table for"),
+    # one person's meal only: a lunch for a table is the crowd row's question
+    guard=_one_person_at_this_meal,
     bias=1))
 
 

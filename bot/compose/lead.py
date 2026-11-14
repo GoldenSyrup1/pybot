@@ -109,6 +109,51 @@ def _wants_the_method(understood):
     return want in _METHOD
 
 
+# The line that asks how often, and the rate it is answered with. "Once a week", "every other day",
+# "two or three times a week" - a phrase a sentence can open on, which is what makes it movable: a
+# rate named inside a sentence about something else ("most freezers need this once or twice a
+# year") is that sentence's fact and stays where it is.
+_ASKS_HOW_OFTEN = re.compile(
+    r"\bhow\s+(?:often|frequently)\b|\bhow\s+many\s+times\b|\bwhat\s+interval\b", re.I)
+_A_RATE = re.compile(
+    r"\b(?:once|twice|(?:three|four|five|six|\d+)\s+times"
+    r"|every(?:\s+other)?(?:\s+\w+)?\s+(?:day|week|month|year|morning|evening|night)"
+    r"|daily|weekly|monthly|yearly|nightly|fortnightly"
+    r"|\d+\s+times\s+(?:a|an|per|each)\s+(?:day|week|month|year)"
+    r"|(?:two|three|four|five)\s+times\s+(?:a|an|per|each)\s+(?:day|week|month|year))"
+    r"(?:\s+(?:a|an|per|each)\s+(?:day|week|month|year))?\b", re.I)
+
+
+def rate_first(reply, understood, line=None):
+    """The rate sentence leads when the line asked how often and the row puts it second.
+
+    A row holds one answer for every way its subject is asked about, and a row written for the job
+    answers the frequency later: "Cut them straight across rather than down the sides, leave a
+    millimetre or two of white ... Once a fortnight is plenty". Read out to someone who asked
+    "how often should i trim my toenails", that answers a different question for a sentence and
+    reaches the rate last.
+
+    Only a sentence that opens on the rate is moved - "Once a fortnight is plenty", "Every six
+    months", "Two or three times a week" - because a rate named inside a sentence about something
+    else ("most freezers need this once or twice a year") is that other sentence's fact, not the
+    rate on its own. Nothing is added, cut or reworded: the same sentence moves, and the sentence
+    it passes keeps its place behind it.
+    """
+    if not isinstance(reply, str) or not reply.strip():
+        return reply
+    if not isinstance(line, str) or not _ASKS_HOW_OFTEN.search(line):
+        return reply
+    parts = _sentences(reply)
+    if len(parts) < 2:
+        return reply
+    if _A_RATE.search(parts[0]):
+        return reply
+    for at, sentence in enumerate(parts[1:], 1):
+        if _A_RATE.match(sentence) and len(sentence.split()) <= 22:
+            return " ".join([sentence] + parts[:at] + parts[at + 1:])
+    return reply
+
+
 def answer_first(reply, understood, line=None):
     """The answer leads: a sentence that only announces the answer is not the answer.
 
@@ -125,15 +170,86 @@ def answer_first(reply, understood, line=None):
     """
     if not isinstance(reply, str) or not reply.strip():
         return reply
+    # A line that asks how often gets the sentence that says how often, in front: see `rate_first`.
+    reply = rate_first(reply, understood, line)
     parts = _sentences(reply)
     if len(parts) > 1:
         first = parts[0].rstrip(".!? ").strip()
         if first and _SIGNPOST.match(first):
             reply = " ".join(parts[1:])
+    # A yes-or-no ask read out gets a description first: the air-fryer card opens on what the
+    # machine is and reaches "Worth it for one or two people" in its second sentence, and the
+    # person asked whether to buy one. The verdict is in the card, so it leads.
+    reply = verdict_first(reply, understood, line)
     # A method ask is already turned round by `method_first`, which moves the one sentence that
     # is only the whole job's clock and leaves every step's own time inside the method.
     if _wants_the_method(understood):
         return method_first(reply, understood)
+    return cause_first(reply, understood)
+
+
+# A sentence that opens with the answer to a yes-or-no question. It is the row's own words, and
+# the words are what make it a verdict: "Worth it for one or two people", "Not worth it for most
+# people", "Yes", "No", "It depends". A sentence that merely happens to hold "yes" or "no" later
+# on ("which is not a reason to buy one") is not this, because a verdict is said at the start.
+_VERDICT_OPENS = re.compile(
+    # A bare yes or no, as an answer of its own: "Yes, but ...", "No. A test is ...". The word has
+    # to end there - "No real bank asks for that" is a statement about banks, not a no.
+    r"^(?:yes|yeah|yep|no|nope)\b(?=\s*[,.;:!?-]|\s*$)"
+    r"|^(?:not really|not usually|not always)\b"
+    r"|^(?:worth it|not worth it|worth the money)\b"
+    r"|^(?:it is|it's) (?:worth|not worth|fine|safe|okay|ok|not safe|not fine)\b"
+    r"|^(?:it depends|usually|definitely|in most cases|most of the time)\b", re.I)
+
+
+# A verdict on the thing is not a verdict on thinking about it. "It is worth asking whether ...",
+# "worth a conversation", "worth thinking about" all open the question rather than answer it, and
+# the card that says one of them says the answer in its next sentence.
+_THINKING_IT_OVER = re.compile(
+    r"\bworth\b[^.]{0,40}\b(?:whether|asking|thinking|a thought|considering|wondering|"
+    r"talking about it|a conversation|a talk|checking first)\b", re.I)
+
+
+def verdict_first(reply, understood, line=None):
+    """The verdict leads when the line asked yes or no and the card gave it later.
+
+    A row holds one answer for every way its subject is asked about, and the worth-it cards are
+    written to be read whole: what the thing is, who it suits, what to pay. Asked "is it worth
+    it", the first thing the person gets is a description, and the sentence that answers them is
+    the second one. STYLE.md puts the answer in the first sentence, so the sentence that opens
+    with a verdict is moved to the front and the rest follows in the order it was written.
+
+    Nothing is added or reworded, and the move is only made when the shape check can see that the
+    opening sentence is *not* a yes or no: `fit.gives(opening, "yesno", line) is False`. So a card
+    that already answers first is left alone, a card whose opening the check cannot read is left
+    alone, and a line that did not ask yes or no never comes here.
+    """
+    if not isinstance(reply, str) or not reply.strip():
+        return reply
+    if _the_want(understood) != fit.YESNO:
+        return reply
+    parts = _sentences(reply)
+    if len(parts) < 2:
+        return reply
+    bare_opening = parts[0].rstrip(".!? ").strip()
+    if _VERDICT_OPENS.match(bare_opening):
+        return reply
+    for place, sentence in enumerate(parts[1:], 1):
+        bare = sentence.rstrip(".!? ").strip()
+        if not bare or not _VERDICT_OPENS.match(bare):
+            continue
+        if _THINKING_IT_OVER.search(bare):
+            # "It is worth asking whether you want them or the life you had with them" is the
+            # reply turning the question back, not the verdict on it: the sentence that settles
+            # it ("Go back only if ...") is the one that answers.
+            continue
+        try:
+            if fit.gives(bare, fit.YESNO, line) is False:
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        rest = " ".join(parts[:place] + parts[place + 1:])
+        return "%s %s" % (sentence, rest)
     return reply
 
 
@@ -157,6 +273,57 @@ def method_first(reply, understood):
     if not rest:
         return reply
     return "%s %s" % (rest, opening)
+
+
+# A sentence whose own subject is the cause: "The reason is hair, soap and grease caught in the
+# trap", "The usual cause is too much water", "The commonest cause is worms". Only such a sentence
+# moves, because it says what it is about and stands on its own at the head of a reply. "That is
+# because ..." and "It is because ..." point back at the sentence before them, so moved to the
+# front they would lead with a word that names nothing.
+_CAUSE_SENTENCE = re.compile(
+    r"^\s*(?:the|a|an)\s+"
+    r"(?:usual|main|most likely|likely|commonest|common|real|other|whole)?\s*"
+    r"(?:reason|cause)s?\b(?![?!])",
+    re.I)
+
+
+def _wants_the_cause(understood):
+    if not isinstance(understood, dict):
+        return False
+    want = understood.get("wants")
+    if isinstance(want, str):
+        want = want.strip().lower()
+    return want == fit.REASON
+
+
+def cause_first(reply, understood):
+    """The cause sentence leads when the line asked why and the card puts it last.
+
+    A card is written for the screen and for every way its subject is asked about, so the fix
+    comes first and the cause closes the paragraph: "Pull the hair and soap out of the trap first
+    ... The reason is hair, soap and grease caught in the trap and the bend." Read out to someone
+    who asked "why is my drain slow", that answers a different question for two sentences and
+    reaches their answer last.
+
+    So when `memory["understood"]["wants"]` is `reason`, a sentence that names itself as the cause
+    is moved to the front. Nothing is added, cut or reworded - the same sentence moves - and a
+    reply whose first sentence is already a cause is left exactly as it is. Every other shape of
+    line is left alone: "how do i unblock my drain" wants the fix first whatever the card says
+    later, and `method_first` above owns the `steps` case.
+    """
+    if not isinstance(reply, str) or not reply.strip():
+        return reply
+    if not _wants_the_cause(understood):
+        return reply
+    parts = _sentences(reply)
+    if len(parts) < 2:
+        return reply
+    for index in range(1, len(parts)):
+        if _CAUSE_SENTENCE.match(parts[index]):
+            moved = parts[index]
+            rest = parts[:index] + parts[index + 1:]
+            return " ".join([moved] + rest)
+    return reply
 
 
 # The shapes a single sentence can carry, and so the shapes a row can owe a sentence for. The
@@ -190,6 +357,24 @@ def _already_said(lead_said, opening):
     there = set(_SAID_WORD.findall(opening.lower()))
     return all(word in there for word in mine)
 
+
+def _the_own_sentence_holding(parts, bare):
+    """The place of the reply's own sentence that says the declared words, or None.
+
+    A row written for the harder question puts the plain answer in its second or third sentence
+    ("... and it booms loudest when you accelerate. It is not an emergency, but fumes can get
+    into the cabin ..."). `bare` is usually the opening of that sentence rather than all of it,
+    so the test is whether every word they share is in it - the sentence's own trailing detail
+    ("but fumes can get into the cabin") is carried along with it.
+    """
+    mine = [w for w in _SAID_WORD.findall(bare.lower()) if len(w) > 2]
+    if not mine:
+        return None
+    for at, part in enumerate(parts):
+        there = set(_SAID_WORD.findall(part.lower()))
+        if all(word in there for word in mine):
+            return at
+    return None
 
 def the_sentence_owed(reply, understood, declared=None):
     """The sentence the line asked for, put in front, when the row declares one for its shape.
@@ -246,4 +431,160 @@ def the_sentence_owed(reply, understood, declared=None):
             return reply
     except Exception:  # noqa: BLE001 - a shape check must never cost a turn its reply
         return reply
+    # The row already says this sentence, later on. A row written for the harder question has the
+    # plain answer in its second or third sentence, so prepending the words would say the answer
+    # twice ("It is not an emergency. ... It is not an emergency, but fumes can get into the
+    # cabin."). The sentence that holds them moves to the front instead, whole, and everything
+    # else keeps its order: nothing is added, cut or reworded.
+    parts = _sentences(reply)
+    at = _the_own_sentence_holding(parts, bare)
+    if at is not None and at > 0:
+        return " ".join(parts[at:] + parts[:at])
     return "%s. %s" % (bare, reply.lstrip())
+
+
+# The shapes a sentence can be lifted for: each one is a check `fit.gives` can make on a single
+# sentence, so the lift only moves a sentence the checker has already read as the answer.
+_LIFTABLE = frozenset((fit.TIME, fit.AMOUNT, fit.PLACE))
+
+# A sentence that only makes sense after the one before it cannot be lifted to the front: "It is
+# 150cm", "That takes about an hour", "They go every two weeks" all point at something said
+# already, and read first they point at nothing.
+_POINTS_BACKWARDS = re.compile(
+    r"^\s*(?:it|its|it's|that|that's|this|these|those|they|them|their|there\s+(?:it|they|you|we|that|those|these)\b|then|so|and|but|also|"
+    r"otherwise|still|though|however|either|neither|both|such|the same|which|who|if|unless|"
+    r"in that case|at that point|after that|for now)\b", re.I)
+
+
+# Sympathy is the answer's opening whatever was asked: "my dog died, how much is a cremation" was
+# answered "I'm sorry, that's one of the hardest days. Nothing has to be decided today..." and
+# moving the practical sentence in front of the condolence puts the price before the person. No
+# figure is worth leading with over that, so a reply that opens with it is left as it was written.
+_OPENS_WITH_SYMPATHY = re.compile(
+    r"^\s*(?:(?:i'm|i am|so|very|truly)\s+)*(?:sorry|apologies)\b|"
+    r"^\s*that'?s\s+(?:hard|awful|terrible|rough|grim|rotten|a lot)\b|"
+    r"^\s*i'?m\s+so\s+sorry\b|^\s*my\s+(?:heart|sympathies)\b", re.I)
+
+
+# An opening that warns says what to do about the answer, so it is never traded for a figure:
+# "There is no safe number of drinks before driving" read as the legal figure instead buried the
+# warning, and "Do not drink the water" read as the bacteria count below it does the same. The
+# reading is the head of the sentence only - a "never" or a "do not" anywhere in the reply is an
+# ordinary sentence and not this opening.
+_OPENS_WITH_A_WARNING = re.compile(
+    r"^\s*(?:there'?s?\s+(?:is\s+)?no\s+safe\b|no\s+safe\b|never\b|do\s+not\b|don'?t\b|"
+    r"(?:call|ring|phone)\s+999\b|999\b|go\s+to\s+(?:a&e|the\s+hospital)\b)", re.I)
+
+
+# A sentence that names nothing the line names is not the answer to it, whatever figure it
+# carries: "A second quote is normal and free, and the partial retest is free if the work is back
+# within 10 working days" answers a question about quotes, and read first after "is that
+# expensive" it answers nothing the person asked. A sentence that does share a word with the line
+# is the one the answer is about - "Six to eight weeks off running ... for a stress fracture".
+_SHARED_WORDS = frozenset((
+    "the", "and", "for", "that", "this", "with", "you", "your", "have", "has", "are", "was",
+    "were", "what", "when", "where", "which", "who", "why", "how", "should", "could", "would",
+    "will", "been", "being", "about", "there", "their", "them", "they", "from", "into", "than",
+    "then", "some", "any", "can", "does", "did", "doing", "not", "but", "one", "out", "over",
+    "very", "just", "like", "get", "gets", "got", "much", "many", "more", "most", "long",
+    "take", "takes", "need", "needs", "want", "wants", "make", "made", "is", "it"))
+
+
+def _words(text):
+    return {word for word in re.findall(r"[a-z]{4,}", str(text or "").lower())
+            if word not in _SHARED_WORDS}
+
+
+def _names_the_line(sentence, line):
+    """True when the sentence shares a word with the line that asked."""
+    if not line:
+        return True
+    asked = _words(line)
+    return bool(asked & _words(sentence))
+
+
+def _sentence_stands_alone(sentence):
+    """True when a sentence reads as an answer with nothing before it."""
+    text = " ".join(str(sentence or "").split())
+    if len(text.split()) < 4:
+        return False
+    if _POINTS_BACKWARDS.match(text):
+        return False
+    return not text.endswith("?")
+
+
+def shape(reply, understood, line=None):
+    """The reply with the sentence that answers the wanted kind of question moved to the front.
+
+    `understood` is the turn's reading, whose `wants` names the kind of answer the line asked for
+    (`bot/compose/fit.py`). A method asks for its own move (`method_first`); a time, an amount or a
+    place lifts the first sentence that gives that kind of answer, and only when the reply's
+    opening does not already give it. A yes or no and a pick are left alone: their checks cannot
+    be sure enough that a sentence is the answer rather than a remark that mentions one.
+    Everything else is returned unchanged, and a sentence is never reworded, only moved.
+    """
+    if not isinstance(reply, str) or not reply.strip():
+        return reply
+    if not isinstance(understood, dict):
+        return reply
+    want = understood.get("wants")
+    if not isinstance(want, str):
+        return reply
+    want = want.strip().lower()
+    if want in _METHOD:
+        return method_first(reply, understood)
+    if want not in _LIFTABLE:
+        return reply
+    parts = _sentences(reply)
+    if len(parts) < 2:
+        return reply
+    # The opening already answers the question, so there is nothing to lift; and a reply that
+    # opens on a shrug is not reshaped here, because the sentence after it is not an answer the
+    # row wrote to be read first.
+    if fit.gives(parts[0], want, line) is True or fit.is_a_punt(parts[0]):
+        return reply
+    # An opening that names the thing asked about and carries a figure is an answer the check may
+    # have no unit for - "A marathon is 26.2 miles, or 42.2 kilometres" for "how long is a
+    # marathon", where `fit` has no reading for a length in miles. Lifting past it trades a right
+    # answer for a wrong one on the strength of a miss the checker invented. Found by
+    # salmon-llama on #12640.
+    if re.search(r"\d", parts[0]) and _names_the_line(parts[0], line):
+        return reply
+    if _OPENS_WITH_SYMPATHY.search(parts[0]):
+        return reply
+    # An opening that warns is the answer, whatever figure comes after it: "how many units is over
+    # the limit" opens "There is no safe number of drinks before driving", and lifting the legal
+    # figure past it put the warning in the middle of the reply. A person who asked about the
+    # limit is told the warning first. Found by plucky-frame on #13381.
+    if _OPENS_WITH_A_WARNING.search(parts[0]):
+        return reply
+    # A "when" is answered by a moment - a clock time or a season - and not by a length of time:
+    # "when is a player booked" is answered "A yellow card is a formal warning", and lifting "in
+    # football two of them in a match mean a red ... ten minutes in the bin" put a duration where
+    # the moment belongs. The clock and the season are `fit`'s own reading (`CLOCK`).
+    when_asked = bool(line) and re.search(r"\bwhen\b", line, re.I) is not None
+    for index in range(1, len(parts)):
+        sentence = parts[index]
+        if when_asked and not fit.CLOCK.search(sentence):
+            continue
+        # A sentence that warns is never lifted to the head either: "Never give a child aspirin
+        # under 16" read before "Check the label for the dose" answers a dose question with a
+        # warning out of its order. A warning is not a figure, so it is not the sentence lifted.
+        if _OPENS_WITH_A_WARNING.search(sentence):
+            continue
+        if not _sentence_stands_alone(sentence):
+            continue
+        # A sentence whose answer is a duration or an amount answers the clock or the amount it
+        # was asked about and no other shape: "Roughly 30 minutes, start to finish" read as the
+        # pick for "what should i cook" would put the time of the job where the dish belongs. The
+        # same sentence is exactly what a "how long" or a "how much" came for, so it is lifted
+        # for those two and left where it is for every other ask.
+        if want not in (fit.TIME, fit.AMOUNT) and (fit._a_time(sentence) or fit._an_amount(sentence)):
+            continue
+        if fit.gives(sentence, want, line) is not True:
+            continue
+        if not _names_the_line(sentence, line):
+            continue
+        moved = [sentence] + parts[:index] + parts[index + 1:]
+        return " ".join(moved)
+    return reply

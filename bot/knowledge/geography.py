@@ -340,6 +340,163 @@ _REGION_COUNTRY = {
 }
 
 
+# ---- is a place being crossed? -------------------------------------------------------------
+# "Can I bring this food somewhere" is two questions with one set of words: a dish to carry to a
+# do, and a food rule at the border. The rows that answer them (travel's `customs-food` and
+# occasions' `bring-dish`) have to agree on which one the line is, or the dish row tells somebody
+# asking about carrying food into Brazil to bring a traybake. Two hand-written lists of countries
+# cannot agree - whatever is left off one gets the picnic - so both rows ask this one reading,
+# and it is written as the shape of the line rather than as a list of places.
+#
+# A line crosses a border when it says so: a crossing word ("back", "home", "abroad", "customs",
+# "import", "declare", "duty"), a bag that travels (a suitcase, hold luggage), or a direction
+# followed by a place that is not an everyday one. The everyday places only have to cover the
+# rooms, buildings and dos a person carries a dish to, which is a short list that people do not
+# invent; the places on the other side are countries, which they do - so the country side is read
+# from COUNTRIES above and a place that is not in either list is treated as a border, because a
+# wrong picnic is worse than a hedge.
+_BRITAIN = ("uk", "u.k.", "united kingdom", "britain", "great britain", "england", "scotland",
+            "wales", "northern ireland", "country", "the country", "this country",
+            "our country", "home", "back home")
+
+_CROSSING_WORD = re.compile(
+    r"\b(?:abroad|overseas|customs|import|imports|importing|imported|declare|declaring|duty|"
+    r"back home|"
+    # "can i bring cheese back" says the return with "back" a word or two after the verb, and the
+    # verb is what makes it a return: "back home" is only the same phrase when nothing sits
+    # between. "brings it back up" is a dog and its dinner rather than a border, so "back up" is
+    # left out of it.
+    r"(?:bring|brings|bringing|brought|take|takes|taking|took)\s+"
+    r"(?:(?!the\s+back\b)\w+\s+){0,3}?back(?!\s*up\b)|"
+    r"from abroad|"
+    # "can i bring ham home" says the return without the word "back": the verb and "home" are what
+    # make it a crossing, and "what can i bring home for dinner" is the same shape, so it is read
+    # as a return too - a dinner question is not a dish-to-a-do question either way.
+    r"(?:bring|brings|bringing|brought|take|takes|taking|took)\s+(?:\w+\s+){0,3}?home|"
+    r"suitcase|suitcases|luggage|hold bag|hold luggage|"
+    r"checked bag|checked luggage|carry-on|carry on bag|rucksack|backpack)\b")
+
+# "from", "into" and "to" are the directions a border is said with. "in" is deliberately not
+# here: "bake it in the oven", "in a cool bag" and "in case" are how a dish line talks.
+# The words after the direction stop at the next direction word or joining word, so "into the
+# country from spain" is read as "the country" and not as "country from".
+_DIRECTION = re.compile(
+    r"\b(?:from|into|to)\s+(((?!(?:from|into|to|in|at|for|with|and|but|if|when|because|so|on|"
+    r"about|before|after)\b)[a-z][a-z'\u2019.-]*\s*){1,3})")
+
+# Rooms, buildings, journeys and dos: the places a dish is carried to, where nothing is crossed.
+_EVERYDAY_PLACE = (
+    "work", "the office", "office", "school", "nursery", "college", "university", "class",
+    "the library", "library", "canteen", "staff room", "cafeteria", "the hospital", "hospital",
+    "ward", "clinic", "surgery", "care home", "the church", "church", "mosque", "temple",
+    "synagogue", "the restaurant", "restaurant", "cafe", "the pub", "pub", "bar", "cinema",
+    "theatre", "theater", "gig", "concert", "festival", "the match", "match", "gym", "club",
+    "meeting", "interview", "shift", "the station", "station", "the airport", "airport",
+    "ferry", "the ferry", "train", "the train", "bus", "the bus", "coach", "plane", "flight",
+    "the car", "campervan", "caravan", "tent", "campsite", "the hotel", "hotel", "hotel room",
+    "hostel", "b&b", "airbnb", "house", "flat", "the park", "park", "the beach", "beach",
+    "party", "birthday", "dinner", "dinner party", "lunch", "tea", "supper", "brunch",
+    "breakfast", "barbecue", "bbq", "picnic", "buffet", "potluck", "bake sale", "wake",
+    "funeral", "christening", "wedding", "housewarming", "baby shower", "engagement",
+    "anniversary", "reunion", "do", "get-together", "gathering", "playdate", "sleepover",
+    "fair", "fete", "market", "sale", "christmas", "easter", "thanksgiving", "hanukkah",
+    "diwali", "eid", "mothers day", "fathers day", "a meet", "the class",
+)
+
+# A word after "to" is usually a verb, not a place: "can i bring something to eat".
+_NOT_A_PLACE = ("eat", "make", "cook", "bake", "bring", "take", "do", "share", "serve", "drink",
+                "feed", "contribute", "prepare", "buy", "get", "have", "go", "be", "see", "help",
+                "keep", "put", "leave", "give", "add", "use", "find", "stay", "come", "know",
+                "say", "ask", "try", "start", "fill", "cover", "heat", "freeze", "store",
+                "carry", "hold", "wrap", "cut", "mix", "pick", "choose", "order", "book")
+
+_ARTICLE = re.compile(r"^(?:a|an|the|my|our|his|her|their|your|some|any|this|that|these|those)\s+")
+
+
+def _bare_place(phrase):
+    """The place words after a direction, without the article in front of them."""
+    phrase = (phrase or "").strip().strip(".,!?;:")
+    while True:
+        shorter = _ARTICLE.sub("", phrase, count=1)
+        if shorter == phrase:
+            return phrase
+        phrase = shorter
+
+
+def directed_place(line):
+    """The place a line carries something towards, in its own words, or None.
+
+    "can i bring food into brazil" -> "brazil"; "what should i bring to a dinner party" ->
+    "dinner party". The last word of a longer phrase is what decides, so "into the north of
+    spain" is read through "north of spain".
+    """
+    for match in _DIRECTION.finditer(line or ""):
+        place = _bare_place(match.group(1))
+        if place and place not in _NOT_A_PLACE:
+            return place
+    return None
+
+
+def _is_everyday(place):
+    """True when the place words name a room, a building or a do rather than a country."""
+    place = _bare_place(place)
+    for name in _EVERYDAY_PLACE:
+        if place == name or place.startswith(name + " ") or place.endswith(" " + name):
+            return True
+    return False
+
+
+def _is_a_place(line):
+    """The place the line travels towards, if it is one and not an everyday room or do."""
+    place = directed_place(line)
+    if place is None or _is_everyday(place):
+        return None
+    return place
+
+
+def crosses_a_border(line):
+    """True when the line carries something across a border rather than to a do.
+
+    `customs-food` speaks only for these lines and `bring-dish` stands down for them, so the two
+    rows can never read one line two ways.
+    """
+    line = (line or "").lower()
+    if _CROSSING_WORD.search(line):
+        return True
+    return _is_a_place(line) is not None
+
+
+_DESTINATION = re.compile(
+    r"\b(?:into|to)\s+(((?!(?:from|into|to|in|at|for|with|and|but|if|when|because|so|on|"
+    r"about|before|after)\b)[a-z][a-z'\u2019.-]*\s*){1,3})")
+
+
+def destination_place(line):
+    """The place a line travels into or to, in its own words, or None.
+
+    Only "into" and "to": "back from france" names where the food came from, which is the
+    question the Great Britain rule answers, so it is not a destination.
+    """
+    for match in _DESTINATION.finditer((line or "").lower()):
+        place = _bare_place(match.group(1))
+        if place and place not in _NOT_A_PLACE:
+            return place
+    return None
+
+
+def carries_it_out_of_britain(line):
+    """True when the place travelled to is named and is not Britain.
+
+    The food rule in this knowledge base is the one for coming into Great Britain, so a line
+    about carrying food into Spain or China is not that row's question: it stands down and the
+    bot hedges rather than give one country's rule for another. A line with no place named
+    ("can i bring cheese back from france", "can i bring ham home") is coming here, and speaks.
+    """
+    place = destination_place(line)
+    if place is None or _is_everyday(place):
+        return False
+    return place not in _BRITAIN
+
 _ORDINAL = re.compile(r"\b(?:second|third|fourth|fifth|2nd|3rd|4th|5th)\b")
 
 # Which place an ordinal names, so "the second biggest country in africa by population" can say
@@ -377,8 +534,18 @@ def _region_name(clean):
 
 
 def _region_row(clean, table=None):
+    table = table if table is not None else _REGION_COUNTRY
     name = _region_name(clean)
-    return (table if table is not None else _REGION_COUNTRY).get(name) if name else None
+    if name and name in table:
+        return table[name]
+    # A place that is not a world region - England, the UK, Ireland - is still its own answer
+    # where the table has a fact for it, and it must be read before a region word in the line is
+    # not. Longest name first, so "northern ireland" is not read as "ireland" and "great britain"
+    # is not read as "britain".
+    for key in sorted((key for key in table if key not in _PLACES), key=len, reverse=True):
+        if re.search(r"\b" + re.escape(key) + r"\b", clean):
+            return table[key]
+    return None
 
 
 def country_extreme(kind, world_reply):
@@ -526,6 +693,66 @@ _REGION_EXTREME = {
         "mountain": ("Puncak Jaya, at 4,884 m, in Indonesian Papua. Australia's own highest is Mount "
                      "Kosciuszko, at 2,228 m."),
         "desert": ("The Great Victoria Desert, at about 348,000 square km, in Australia."),
+    },
+    # The home islands are four countries and a shared island, so each one has its own answer:
+    # "the longest river in england" is the Severn and "in scotland" is the Tay, and the world
+    # record is neither. Nothing here came back for those lines before.
+    "uk": {
+        "river": ("The Severn, at about 354 km (220 miles), is the longest river in the UK, rising "
+                  "in Wales and reaching the sea past Bristol. The Thames is second at about 346 km."),
+        "lake": ("Lough Neagh in Northern Ireland is the largest lake in the UK by area, at about "
+                 "383 square km. Loch Ness holds the most water, about 7.5 cubic km."),
+        "deep lake": ("Loch Morar is the deepest lake in Britain, at 310 metres, deeper than the "
+                      "North Sea is in most places. Loch Ness is 230 metres but holds far more water."),
+        "desert": ("There are no deserts in the UK: nowhere here is dry enough to count as one. The "
+                   "closest thing is a dune system such as the Sefton coast or Braunton Burrows."),
+    },
+    "britain": {
+        "river": ("The Severn, at about 354 km, is the longest river in Britain, with the Thames "
+                  "second at about 346 km and the Trent third."),
+        "lake": ("Loch Lomond, at about 71 square km, is the largest lake in Britain by area. "
+                 "Windermere is the largest in England at about 14.7 square km."),
+        "deep lake": ("Loch Morar, at 310 metres, is the deepest lake in Britain. Loch Ness is "
+                      "second at 230 metres and holds more water than all the lakes of England and "
+                      "Wales together."),
+    },
+    "england": {
+        "river": ("The Severn, at about 354 km (220 miles), is the longest river in England, though "
+                  "it rises in Wales. The Thames is second at about 346 km, and the longest river "
+                  "wholly inside England."),
+        "lake": ("Windermere is the largest lake in England, about 14.7 square km and 18 km long. "
+                 "Wastwater is the deepest, at 74 metres, and was voted Britain's favourite view."),
+        "deep lake": ("Wastwater in the Lake District is the deepest lake in England, at 74 metres, "
+                      "and the coldest: it is a long narrow trench under the Screes."),
+    },
+    "scotland": {
+        "river": ("The Tay, at about 188 km (117 miles), is the longest river in Scotland and the "
+                  "biggest by water, carrying more than the Thames and the Severn together."),
+        "lake": ("Loch Lomond is the largest lake in Scotland by area, about 71 square km. Loch "
+                 "Ness is bigger by volume and holds more fresh water than all of England and "
+                 "Wales put together."),
+        "deep lake": ("Loch Morar in the west Highlands is the deepest lake in Scotland and in "
+                      "Britain, at 310 metres."),
+    },
+    "wales": {
+        "river": ("The Severn rises in the Welsh hills and is the longest river to run through "
+                  "Wales, at about 354 km. The longest river wholly inside Wales is the Tywi, at "
+                  "about 120 km."),
+        "lake": ("Llyn Tegid, also called Bala Lake, is the largest natural lake in Wales at about "
+                 "4.8 square km, and it has its own species of whitefish, the gwyniad."),
+    },
+    "northern ireland": {
+        "river": ("The Bann, at about 129 km, is the longest river in Northern Ireland: the Upper "
+                  "Bann feeds Lough Neagh and the Lower Bann carries it to the sea at Coleraine."),
+        "lake": ("Lough Neagh is the largest lake in Northern Ireland and in the British Isles, at "
+                 "about 383 square km, and it supplies much of Belfast's drinking water."),
+    },
+    "ireland": {
+        "river": ("The Shannon, at about 360 km, is the longest river in Ireland, running from the "
+                  "Cavan hills south to Limerick and the Atlantic."),
+        "lake": ("Lough Neagh, in Northern Ireland, is the largest lake on the island of Ireland at "
+                 "about 383 square km. The largest in the Republic is Lough Corrib, about 176 "
+                 "square km, in County Galway."),
     },
     "antarctica": {
         "river": ("There are no real rivers: the Onyx is a seasonal meltwater stream about 30 km "
@@ -1513,11 +1740,25 @@ ENTRIES = [
                  "Australia is bigger but is counted as a continent rather than an island, which "
                  "is the usual quiz gotcha."),
           avoid=("how many islands", "number of islands", "count islands")),
+    # "what is the smallest country in the world" was answered with Russia, because travel.py's
+    # biggest-country reads "country" plus the word world and won the tie. The nudge is a
+    # tie-break rather than a stand-down there, because "the smallest country in asia by area" is
+    # the same question and already had the right answer from that entry.
     entry("smallest-country", ("country", ("smallest", "world")),
           country_extreme("small", "Vatican City is the smallest country, at about 0.49 square "
                                    "kilometres and roughly 800 people. Monaco is the second "
                                    "smallest, and both are smaller than most city parks."),
+          bias=2,
+          # The end of the scale the line names decides which row answers: a line that says
+          # "largest" or "biggest" ties this row with the biggest-country row on "country" and
+          # "world", and the bias below handed it the smallest answer. The other end stands
+          # this row down. None of these words is in this row's own key.
           avoid=("how many countries", "number of countries", "count countries",
+                 "largest", "biggest", "largest by area", "biggest by area",
+                 # A country's size is its area, so a line that asks how many people live there
+                 # is a population question: "most populous country in the world" came back as
+                 # Vatican City, the smallest country in the world.
+                 "population", "populous", "people live", "inhabitants", "most people",
                  "have", "has", "with", "without", "allow", "allows", "legal", "ban", "bans")),
 
     # --- the world records people ask in quizzes and homework ---------------------
@@ -1535,14 +1776,17 @@ ENTRIES = [
                  "drops in one unbroken fall of about 807 metres, so it is still falling long "
                  "after Niagara would have hit the bottom.")),
     entry("largest-lake", ("lake", ("largest", "biggest", "world")),
-          _world("The Caspian Sea is the largest lake, at about 371,000 square kilometres, and it "
-                 "is salty. Lake Superior is the largest freshwater lake by area; Lake Baikal holds "
-                 "the most fresh water."),
+          region_extreme("lake",
+                         "The Caspian Sea is the largest lake, at about 371,000 square kilometres, "
+                         "and it is salty. Lake Superior is the largest freshwater lake by area; "
+                         "Lake Baikal holds the most fresh water."),
           avoid=("how many", "number of", "count", "deep", "deepest", "depth",
                  "near me", "nearby", "local", "around here")),
     entry("deepest-lake", ("lake", ("deepest", "depth", "deep")),
-          _world("Lake Baikal in Siberia is the deepest lake, at 1,642 metres. It holds about a "
-                 "fifth of the world's unfrozen fresh water, more than all the Great Lakes together."),
+          region_extreme("deep lake",
+                         "Lake Baikal in Siberia is the deepest lake, at 1,642 metres. It holds "
+                         "about a fifth of the world's unfrozen fresh water, more than all the "
+                         "Great Lakes together."),
           avoid=("largest", "biggest", "near me", "nearby", "local", "around here")),
     entry("longest-mountain-range", (("mountain range", "range of mountains"),
                                      ("longest", "biggest", "world")),
@@ -1618,7 +1862,10 @@ ENTRIES = [
                  "city", "cities", "capital")),
     entry("most-people-country",
           (("most people", "most populous", "biggest population", "largest population",
-            "most population", "highest population", "most populated"),
+            "most population", "highest population", "most populated",
+            # "largest country by population" measures people, not area: without the bare word
+            # the line was answered with Russia, the biggest country by area.
+            "population", "populous"),
            ("country", "countries", "nation", "world")),
           _world("India has the most people, at about 1.45 billion, just ahead of China at "
                  "about 1.41 billion since 2023. The United States is a distant third, at about "

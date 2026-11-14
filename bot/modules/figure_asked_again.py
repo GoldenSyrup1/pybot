@@ -22,14 +22,20 @@ PRIORITY = 1000  # above the knowledge base, below loss (2000), grief (2100) and
 
 
 def respond(text, memory):
-    """The reply to a yes/no about a figure the bot gave, or None for every other line."""
-    return stands.reply_for(text, memory)
+    """The reply to a yes/no about a figure the bot gave, or None for every other line.
+
+    Two shapes: a figure in the line ("so is eight weeks still right"), and a change with no figure
+    in it ("does that change the time?", after "actually its a veggie one, no mince"). Both are the
+    chat's own answer handed back, and both are here because the answer is the same figure.
+    """
+    return stands.reply_for(text, memory) or stands.change_reply(text, memory)
 
 
 def takes_as_it_comes(text, memory):
     """Only on a yes/no about a figure of this chat's own answers, and nowhere else."""
     try:
-        return bool(stands.the_figure_asked_about(text, memory))
+        return bool(stands.the_figure_asked_about(text, memory)
+                    or stands.the_change_asked_about(text, memory))
     except Exception:  # noqa: BLE001 - a hook that raises claims nothing
         return False
 

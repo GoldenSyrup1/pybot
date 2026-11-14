@@ -30,6 +30,14 @@ from . import again, condition, repeat
 
 # The copula, a pronoun and the prepositions a detail can open on. The pronoun and the copula are
 # scaffolding ("its", "it's", "theyre") and are not part of the detail itself.
+# A joining word in front of the detail is not part of it: "and in the cupboard", "also in the
+# hall", "plus the bathroom" add to the answer the person was given just as "in the cupboard" does.
+# The openers below strip these words for themselves; the bare phrase ("in the cupboard", "with two
+# kids"), which is how a detail that follows on is usually said, did not, and every one of those
+# lines came back as no detail at all: "and in the cupboard" after the ant answer was answered with
+# advice about clearing a cupboard out.
+JOIN_OPEN = re.compile(
+    r"^(?:(?:and|but|so|oh|also|plus|then|well|yeah|yep|ok|okay|right|alright)\b[\s,]+)+", re.I)
 COPULA_OPEN = re.compile(
     r"^\W*(?:(?:and|but|so|oh|also|well|yeah|yep|ok|okay|right|alright)\W+)*"
     r"(?:it'?s|it\s+is|its|they'?re|they\s+are|there'?s|there\s+is|there\s+are|"
@@ -151,6 +159,42 @@ LEADS_FOR = (
 # the bottom, the same:" instead of "The bottom - same answer:".
 PREPOSITION = re.compile(r"^(?:on|in|at|near|by|from|for|with|about|along|across|round|"
                          r"around|under|down)\b\s*", re.I)
+# A fixed phrase that opens on a preposition and names no place and no use: "in the end", "at
+# first", "in my case", "for now", "on the whole", "at least", "in general", "for ages".
+# They are how a person says how something went, and they open on the same prepositions a place
+# does, so opening on one is not the test - what follows it is. A remark like "and in the end i
+# called someone" was cut at its joining word, read as a detail of the ant answer, and said back
+# with the answer's first instruction behind it ("In the end i called someone, then. Give the bait
+# a week or two."), which is the person's own clause handed back to them, the thing STYLE.md rules
+# out by name. The fixed phrases are a closed, everyday class (a determiner and an abstract noun,
+# a possessive and one of the nouns a remark is built from, or a bare adverb), not a list of lines.
+# A phrase says where the thing is or what it is for; a clause says how it went. A subject with its
+# own verb after the preposition ("at home he refuses", "in the end i called someone") is a report
+# about the person's own life, and the answer's step is not the reply to it. "my" and "our" are not
+# subjects here: "for my dad" is a use and "in our flat" is a place.
+A_SUBJECT_OF_ITS_OWN = re.compile(
+    r"\b(?:i|im|i'm|ive|i've|id|i'd|he|hes|he's|she|shes|she's|they|theyre|they're|we|you|"
+    r"it|its|it's)\b", re.I)
+NAMES_NOTHING = re.compile(
+    r"^(?:(?:the|a|an|this|that|these|those)\s+)?"
+    r"(?:end|ends|beginning|start|meantime|meanwhile|moment|whole|same|fact|facts|case|cases|"
+    r"point|first|last|least|most|main|long|short|past|future|addition|total|average|balance|"
+    r"purpose|way|ways|sense|practice|theory|hindsight|conclusion|contrast|order|mind|own|"
+    r"once|now|ages|while|time|times)\b"
+    r"|(?:my|your|his|her|their|our|its)\s+(?:case|part|opinion|view|mind|experience|defence|"
+    r"book|own|shoes|honour)\b"
+    r"|(?:general|particular|large|all|once|now|ages)\b", re.I)
+# A detail that says when is not a narrowing of the answer by where or by what for: "and in october"
+# after a weather answer was handed the answer's first sentence, "In october - same answer:
+# Weathering is rock being broken up where it sits." A day, a month, a time or a length of time
+# after the preposition is a when, and the step a where-detail gets is not the answer to it.
+A_WHEN = re.compile(
+    r"^(?:in|on|at|by|before|after|until|till|within|during)\s+(?:the\s+|a\s+|an\s+)?"
+    r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|few|couple|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekday|weekend|"
+    r"january|february|march|april|may|june|july|august|september|october|november|december|"
+    r"morning|afternoon|evening|night|week|fortnight|month|year|day|hour|minute|"
+    r"tomorrow|tonight|today)\w*", re.I)
 
 # The verb of showing is how the trouble is put, not a report about it: "its coming from the front
 # corner" after a leak answer names the same thing as "its from the front corner", and the place
@@ -244,6 +288,18 @@ def the_detail(text):
     # How the trouble shows is part of the asking: with the verb of showing taken away, "its
     # coming from the front corner" is "its from the front corner", and the place is the detail.
     said = " ".join(SHOWS_OUT.sub("from ", SHOWS_FROM.sub("", said)).split())
+    joined = JOIN_OPEN.sub("", said).strip()
+    if joined and joined != said and PREPOSITION.match(joined):
+        said = joined
+    if PREPOSITION.match(said) and (
+            _names_nothing(said) or A_SUBJECT_OF_ITS_OWN.search(said)):
+        # A fixed phrase ("in the end", "at least") and a clause of the person's own ("at home he
+        # refuses") open on a preposition and name no place and no use: they are a remark, and the
+        # answer's step is not the reply to one. Without this the clause was read as a detail and
+        # said back with the step behind it - "At home he refuses: Put the child's name and class
+        # in the subject." - which is the person's own words returned to them. It holds with a
+        # joining word and without, because a detail is the same phrase either way.
+        return None
     words = said.split()
     if len(words) > MOST_WORDS:
         return None
@@ -507,6 +563,16 @@ def the_step_for(text, memory):
                         or _opening_said(plain))
             else:
                 step = _a_step(plain)
+                # An answer that opens on a long sentence of several clauses has no opening move
+                # the step reader knows, so it came back with no step at all and a detail of it
+                # was left unanswered: "its in the kitchen" after the ant answer got the
+                # composer's "I'm listening - say more if it helps." What the span branch above
+                # already does for a span is what this needs too - the answer's first instruction,
+                # or failing that its opening sentence said briefly - and only for a detail that
+                # says where or what for, since that is the kind of detail a step of the answer is
+                # about. A detail that names a thing of its own was asked the cards above.
+                if not step and _says_where(detail):
+                    step = _first_instruction(plain) or _opening_said(plain)
         if not step:
             continue
         if repeat._already_repeated(step, memory):  # noqa: SLF001 - said once already
@@ -517,6 +583,179 @@ def the_step_for(text, memory):
                 return None
         return detail, said, step, False
     return None
+
+
+# --- a line that is only a time or a frequency ----------------------------
+#
+# "my back hurts" gets the paragraph and "mostly in the morning" got the line said back
+# ("Got it - mostly in the morning"), which is the echo this module exists to replace. The line
+# is not a detail of the answer - how often or when the thing happens is not which thing it is,
+# so it must not take the answer's step under its own words as a name ("Same for mostly in the
+# morning: ...") - and it is not small talk either: it is the one thing that makes this person's
+# case different from the paragraph they were given.
+#
+# What a friend does with it is the same thing this module does with any other detail: hand back
+# the step of the answer they already have, for the time they named. The reading is the same one
+# `the_detail` makes, with the time words kept where a detail drops them, so a line naming a
+# thing ("mainly going up stairs", "mostly when i sit") stays with the card that answers it.
+TIME_OF_DAY = frozenset("""morning mornings afternoon afternoons evening evenings night nights
+    night-time nighttime daytime bedtime lunchtime teatime weekend weekends weekday weekdays
+    monday tuesday wednesday thursday friday saturday sunday""".split())
+FREQUENCY = frozenset("""every each once twice thrice couple few several most usually often
+    sometimes always daily nightly weekly monthly""".split())
+# The qualifiers that make a time the worst of it, rather than a time at all.
+A_QUALIFIER = frozenset("""mostly mainly usually generally especially worse worst better
+    particularly right first thing late early""".split())
+# A greeting that happens to hold a time of day is not the time a thing happens: "good morning"
+# in the middle of a hard conversation is somebody saying hello, and handing them the answer's
+# step under the name of the morning is the bot talking over them.
+A_GREETING = re.compile(r"^(?:good\s+)?(?:morning|afternoon|evening|night|night night|"
+                        r"gnight|nighty night)$", re.I)
+# A line that stops on a joining word is half a phrase ("what about the morning of"), and the
+# half it left out is the part that names the thing.
+A_DANGLING = frozenset("""in on at by of to from for with about the a an and or than as""".split())
+# A count is how much, not when: "just one in the morning" is a number of cups, and the answer to
+# it is about how much is safe, which the answer before it already said.
+A_COUNT_WORD = frozenset("""one two three four five six seven eight nine ten eleven twelve
+    thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty
+    hundred thousand""".split())
+# The times people say as a phrase of their own, with no time word in them at all.
+A_TIME_IDIOM = ("first thing", "first thing in the morning", "middle of the night",
+                "all day", "all night", "an odd night", "every so often")
+# The words that join a time to the thing without naming either ("mostly in the morning", "worse
+# at night", "on a weekend"), so the test for a time reads the time and not the joining word.
+A_SMALL_WORD = frozenset("""in on at by of to from and or the a an this that these those
+    thing things time times""".split())
+LEADS_FOR_A_TIME = (
+    "{detail_cap}, then. {step}",
+    "{detail_cap} - the same steps: {step_low}",
+)
+
+
+def the_time_in_the_line(text):
+    """The time or frequency the line names and no thing, or None.
+
+    "mostly in the morning", "worse at night", "its most evenings", "like every couple of
+    months", "a couple of times a week": the whole line is when the thing happens. A line that
+    names a thing as well is that thing's question and not this one.
+    """
+    said = _flat(text)
+    if not said or "?" in said or len(said.split()) > MOST_WORDS:
+        return None
+    said = " ".join(SHOWS_OUT.sub("from ", SHOWS_FROM.sub("", said)).split())
+    body = said
+    for opener in (ABOUT_OPEN, LIKE_OPEN, COPULA_OPEN, PRONOUN_OPEN):
+        stripped = opener.sub("", body).strip()
+        if stripped and stripped != body:
+            body = stripped
+            break
+    body = re.sub(r"^(?:but|and|so|oh|also|well|yeah|yep|ok|okay|right|alright)[\s,]+", "", body,
+                  flags=re.I).strip()
+    words = _words(body)
+    if not words or len(words) > MOST_WORDS:
+        return None
+    if any(_a_verb(word, before) for before, word in zip([""] + words, words)):
+        return None
+    if A_GREETING.match(body.strip(" .,!;:")):
+        return None
+    if words[-1] in A_DANGLING:
+        return None
+    if any(word in A_COUNT_WORD or word.isdigit() for word in words):
+        return None
+    for idiom in A_TIME_IDIOM:
+        if body.strip().lower() == idiom:
+            return body.strip(" .,!;:")
+    content = [word for word in words if word not in VAGUE and word not in STATE
+               and word not in A_QUALIFIER and word not in A_SMALL_WORD]
+    if not content or not all(word in TIME_WORDS for word in content):
+        return None
+    # A time of day or a frequency, and not only a span: "its been about three weeks now" is how
+    # long it has been going on, and `the_detail` already hands that one back as a span.
+    if not any(word in TIME_OF_DAY or word in FREQUENCY for word in content):
+        return None
+    return body.strip(" .,!;:")
+
+
+def _a_time_step(said, detail):
+    """The sentence of the answer that speaks of the same time, or None.
+
+    It is the better reply when there is one ("a cough that is worse at night ... that wakes you
+    at night"), because it answers the time with something about the time rather than with the
+    step that would have been given anyway.
+    """
+    named = [word for word in _words(detail) if word in TIME_WORDS]
+    if not named:
+        return None
+    for sentence in re.split(r"(?<=[.!?])\s+", _flat(said)):
+        here = _words(sentence)
+        if any(word in here for word in named):
+            sentence = sentence.strip()
+            if sentence and len(sentence.split()) >= 3:
+                return sentence
+    return None
+
+
+# --- the answer one turn back -------------------------------------------------------------
+
+def _the_answer_before(memory, text):
+    """What the bot said to the turn before this one, or "" when it has said nothing yet.
+
+    The line being answered is skipped by its own words, because the store writes the turn down
+    as it goes and a reader asking about the chat runs while that turn is in progress. A turn with
+    no line of the person's in it is not an exchange, so it is skipped too.
+    """
+    turns = (memory or {}).get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list):
+        return ""
+    here = _flat(text).lower().rstrip(".!?, ")
+    for turn in reversed(turns):
+        if not isinstance(turn, dict):
+            continue
+        said = _flat(turn.get("user")).lower().rstrip(".!?, ")
+        if not said or (here and said == here):
+            continue
+        reply = _flat(turn.get("bot"))
+        if reply:
+            return reply
+    return ""
+
+
+def the_step_for_a_time(text, memory):
+    """The time named, the answer it belongs to and the step to hand back, or None.
+
+    Only the answer one turn back counts, for the same reason as `the_step_for`: an older answer
+    is a different thing they may have moved on from. An answer with nothing to do in it hands
+    nothing back, and the line is left to the composer rather than answered with the paragraph
+    it already had.
+    """
+    if not memory:
+        return None
+    detail = the_time_in_the_line(text)
+    if not detail:
+        return None
+    from ..compose import trouble
+    if trouble.reads_as_trouble(_flat(text)):
+        return None
+    said = _the_answer_before(memory, text)
+    if not said:
+        return None
+    if repeat.NEXT_STEP_EMERGENCY.search(said):
+        # The answer before is the emergency route, so the only thing to say next is that route.
+        # A time of day is not a reason to hand back a lesser step, and a greeting in the middle
+        # of that conversation is not a reason for anything at all.
+        return None
+    # An answer made only of cases ("see a GP if ...") is still an answer with a move in it, so
+    # the whole of it is read here rather than the branches being left out: a time is not one of
+    # the cases, and the move the whole paragraph opens with is the one to hand back.
+    plain = _without_branches(said) or _flat(said)
+    step = _a_time_step(plain, detail) or _first_instruction(plain) or _a_step(plain)
+    if not step:
+        return None
+    if repeat._already_repeated(step, memory):  # noqa: SLF001 - said once already
+        step = _first_clause(step)
+        if not step or repeat._already_repeated(step, memory):  # noqa: SLF001
+            return None
+    return detail, said, step, False
 
 
 # A word in the detail that counts people or portions: "6 of us", "4 people", "3 days".
@@ -543,9 +782,108 @@ def _the_figure(said):
     return None
 
 
+# --- a follow-up that names only words of the answer just given --------------------------------
+#
+# "my kitchen tap keeps dripping" gets the washer-or-cartridge paragraph, and "what part would i
+# need" then got nothing at all: `the_step_for` reads a detail *said* about the thing ("mostly in
+# the morning"), and a wh-question that names no thing of its own is not that shape, so the line
+# fell through to the composer's fallback ("That is all of what I know on it ..."). The answer was
+# one turn back, in the bot's own words: the reply is the clause of it that holds the words asked
+# about. "and do they need water" after the birds gets "Yes - put out water too" rather than the
+# whole feeding card again.
+ASKS_A_PART = re.compile(
+    r"^(?:(?:and|but|so|also|oh|well|yeah|yep|ok|okay|right|alright)\s+)*"
+    r"(?:what|which|how much|how many|how long|how often|when|where|why|do|does|did|should|"
+    r"shall|can|could|would|will|is|are|was|were|the|that|those|these)\b", re.I)
+# The words that ask rather than name. What is left is what the line is about, and every one of
+# them has to be a word of the answer for this to be a part of that answer.
+ASKING = frozenset("""what which how much many long often when where why who whom whose do does
+    did should shall can could would will is are was were i me my we our us you your they them
+    their it its that this these those the a an and but so also too oh well yeah yep ok okay
+    right alright now then just really very please
+    need needs needed want wants like get gets got have has had there here one any some
+    again more""".split())
+A_PART_WORDS = 26
+
+
+def _the_carrying_words(text):
+    """The words of the line that name something, with a plural ending taken off.
+
+    A line made only of short words ("what should i put out") names no part of the answer: "put"
+    and "out" are how a thing is done, and the clause they land on is about one item of a list
+    rather than the part asked about - the bird answer came back "Put out water too", which
+    answers a question about water and not the one asked. So a word of four letters is needed
+    before any of this counts, and such a line is left to answer for itself.
+    """
+    if not any(len(word) > 3 for word in _words(text) if word not in ASKING):
+        return []
+    return [word.rstrip("s") for word in _words(text)
+            if word not in ASKING and len(word) > 2]
+
+
+def _the_clause_that_holds(words, said):
+    """The sentence, or the clause of it, that holds the words asked about, or ""."""
+    wanted = set(words)
+    for sentence in re.split(r"(?<=[.!?])\s+", _flat(said)):
+        here = {word.rstrip("s") for word in _words(sentence)}
+        if not wanted & here:
+            continue
+        clauses = [piece.strip(" ,;:-") for piece in _clauses(sentence) if piece.strip(" ,;:-")]
+        best = max(clauses, key=lambda piece: len(wanted & {w.rstrip("s") for w in _words(piece)}),
+                   default="")
+        held = wanted & {word.rstrip("s") for word in _words(best)}
+        if not held or not best:
+            continue
+        best = JOIN_LEAD.sub("", best).strip()
+        if len(best.split()) < 4:
+            # A clause this short is half a sentence ("use the extractor fan"), so the sentence it
+            # came from is the smallest thing worth handing back.
+            best = JOIN_LEAD.sub("", _flat(sentence)).strip(" ,;:-")
+        if not best or len(best.split()) > A_PART_WORDS:
+            continue
+        return best[:1].upper() + best[1:]
+    return ""
+
+
+def the_part_of_the_answer(text, memory):
+    """The reply when the line asks about a part of the answer one turn back, or "".
+
+    The line has to ask, has to name no thing of its own - every word of it that carries meaning
+    is a word of that answer - and the answer has to hold a sentence or a clause with those words
+    in it. Anything else is a new question, and this reader passes.
+    """
+    said = _flat(text)
+    if not said or len(said.split()) > MOST_WORDS or not ASKS_A_PART.match(said):
+        return ""
+    carrying = _the_carrying_words(said)
+    if not carrying:
+        return ""
+    from ..compose import trouble
+    if trouble.reads_as_trouble(said):
+        return ""
+    answer = ""
+    for back, _asked, said_before in repeat._recent_answers(memory):  # noqa: SLF001
+        if back > 1:
+            break
+        if said_before:
+            answer = str(said_before)
+            break
+    if not answer:
+        return ""
+    there = {word.rstrip("s") for word in _words(answer)}
+    if any(word not in there for word in carrying):
+        return ""
+    clause = _the_clause_that_holds(carrying, answer)
+    if not clause:
+        return ""
+    if repeat._already_repeated(clause, memory):  # noqa: SLF001 - said once already
+        return ""
+    return clause if clause.endswith((".", "!", "?")) else clause + "."
+
+
 def answers_the_line(text, memory):
     """True when `answer_for` will answer this line: the answer just given has its step."""
-    return the_step_for(text, memory) is not None
+    return the_step_for(text, memory) is not None or the_step_for_a_time(text, memory) is not None
 
 
 def answer_for(text, memory):
@@ -555,7 +893,18 @@ def answer_for(text, memory):
     moved on from, which is `repeat`'s call, not this one's.
     """
     found = the_step_for(text, memory)
+    a_time = False
     if found is None:
+        # The line names no thing, only when the thing happens: it takes the same answer's step,
+        # under the time rather than under a name of its own.
+        found = the_step_for_a_time(text, memory)
+        a_time = found is not None
+    if found is None:
+        # The line names no thing of its own, only words the answer just gave: "what part would i
+        # need" after the dripping tap is answered by the answer's own clause.
+        a_part = the_part_of_the_answer(text, memory)
+        if a_part:
+            return repeat._handed_back(memory, a_part)  # noqa: SLF001 - the next ask counts it
         return None
     detail, said, step, whole = found
     if whole and _the_same_answer_as_the_one_it_narrows(step, said):
@@ -581,9 +930,148 @@ def answer_for(text, memory):
         repeat._handed_back(memory, step)  # noqa: SLF001 - the next ask counts it
         return framed or step
     thing = PREPOSITION.sub("", detail).strip() or detail
+    if a_time:
+        # "Same for mostly in the morning" reads as advice about a time of day. The time goes in
+        # front of the step it belongs to, which is how a person says it: "Mostly in the morning,
+        # then. Keep walking and carry on with your usual jobs."
+        reply = repeat.pick(LEADS_FOR_A_TIME, memory, text).format(
+            detail_cap=_capital(detail), thing=thing, step=_capital(step),
+            step_low=step[:1].lower() + step[1:])
+        return repeat._handed_back(memory, reply)  # noqa: SLF001 - the next ask counts it said
     leads = LEADS_LEAD if thing != detail else LEADS_FOR
     reply = repeat.pick(leads, memory, text).format(
         detail_cap=_capital(detail), thing=thing, step=_capital(step))
+    return repeat._handed_back(memory, reply)  # noqa: SLF001 - the next ask counts it said
+
+
+# AN ASK THAT THE ANSWER JUST GIVEN ALREADY COVERS
+#
+# ```
+# my washing machine smells
+#   -> Run a hot 60C or 90C service wash with a washing-machine cleaner or a cup of bicarbonate of
+#      soda, and clean the filter and the door seal.
+# what do i put in it
+#   -> That's beyond what I know well, sorry. Searching for it will turn up better sources than I
+#      can offer.
+#
+# i twisted my ankle yesterday
+#   -> Ice for 15 minutes, raise it, and take it easy for a day or two. ...
+# ok so whats the best thing to do tonight
+#   -> That's beyond what I know well, sorry. ...
+# ```
+#
+# Neither line names a thing of its own: "it" is the thing the answer was about, and "tonight" is
+# when they want to do it. `the_detail` above does not take them, because there is no detail to put
+# in front of a step, and no other reader does either, so both fell through to the one passage that
+# takes what nothing else wanted and got the search hedge - over an answer that had just said what
+# to put in it, and what to do tonight.
+#
+# So the reply is the step of the answer just given, in the answer's own words and framed as the
+# answer it is. Nothing is invented and nothing is looked up: the person asked for the part of the
+# reply they had in front of them, and that part is handed back rather than pointed at.
+#
+# The rule is narrow on purpose:
+# * the line opens on a wh-word (with the fillers in front of an ask that carry no meaning), so a
+#   report or a verdict is never answered this way;
+# * every word after it is a word with nothing of its own in it - an auxiliary, a pronoun, an ask
+#   verb, a time word. "what do i put in the bath" after the sink answer names the bath, so it is
+#   the bath's question and not this one's;
+# * it asks what to do or how, not how much, how long or how often: a quantity is not in the step,
+#   and handing back the method to a question about the price would answer the wrong thing;
+# * the answer just given has to be a knowledge answer or an emergency one with a step in it, and
+#   that step must not have been handed back already.
+PLAIN_ASK = re.compile(
+    r"^(?:(?:ok|okay|so|and|but|then|right|yeah|yes|hmm)[\s,]+)*"
+    r"(?:what|whats|what's|where|wheres|which|how|hows|how's)\b", re.I)
+
+# The words a line may carry and still name nothing of its own: the wh-word itself, the auxiliaries
+# and pronouns of an ask, the verbs of one ("put", "use", "get"), and the time words that say when.
+ASK_ONLY = frozenset("""what whats what's where wheres which how hows how's do does did should would could can shall will i we you
+me us it that this these those them they he she one ones the a an my our your their his her its
+best good right next first thing things bit bits way ways time put use add get buy need want take
+clean start make there in on for to with of about at from into more else other any some all
+now tonight today tomorrow evening weekend afternoon morning week month please just tell again
+honestly actually really still also even lets let go on ok okay so right yeah yes hmm then but
+and though well""".split())
+
+# An ask for a quantity is a different question: the step says what to do, not what it costs.
+A_QUANTITY_ASK = re.compile(r"\b(?:how\s+(?:much|many|long|often)|much|many|long|often)\b", re.I)
+
+# The time word the line already used, so the reply can open on it instead of inventing one.
+A_WHEN = re.compile(r"\b(tonight|today|tomorrow|now|this evening|this weekend|this afternoon|"
+                    r"first|next)\b", re.I)
+
+PLAIN_LEADS = ("For that, {step}",
+               "That's the bit that matters: {step}",
+               "What I would start with: {step}",
+               "For that one, {step}")
+
+# A knowledge answer, a store answer and an emergency answer all have a step in them; a nod, a
+# hedge or a question does not.
+STEP_ANSWERS = ("answers", "memory_store", "safety")
+A_STEP_ANSWER = 50
+
+
+def _the_answer_just_given(memory):
+    """The bot's last reply when it was an answer with a step in it, or ""."""
+    turns = [turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)]
+    if not turns:
+        return ""
+    last = turns[-1]
+    if last.get("module") not in STEP_ANSWERS:
+        return ""
+    said = str(last.get("bot") or "").strip()
+    if len(said) < A_STEP_ANSWER or said.rstrip().endswith("?"):
+        return ""
+    return said
+
+
+def _bare_step(step):
+    """The step with its capital taken off where it carries on a sentence: "Start with ..." ->
+    "start with ...". An opening that is all capitals is a name and stays ("CO2", "RG"), so it is
+    only ever the first letter and only when the first two are not both capitals.
+
+    Every lead here continues into the step - "For that one, start with a plunger" - and a step
+    left with its capital in it reads as a new sentence inside the sentence: "For that one, Start
+    with a plunger over the plughole with a little water in the bowl."
+    """
+    if len(step) > 1 and step[:2] == step[:2].upper():
+        return step
+    return step[:1].lower() + step[1:]
+
+
+def the_plain_ask(text, memory):
+    """The step of the answer just given, when the line asks about it and names no thing, or None.
+
+    Returned framed rather than bare, so it reads as the answer it is and not as an answer given
+    twice: "For that, run a hot 60C or 90C service wash with a washing-machine cleaner."
+    """
+    if not memory:
+        return None
+    said = _flat(text)
+    words = said.lower().split()
+    if not words or len(words) > MOST_WORDS or not PLAIN_ASK.match(said):
+        return None
+    if A_QUANTITY_ASK.search(said):
+        return None
+    for word in words:
+        if word.strip("?,.!;:") not in ASK_ONLY:
+            return None
+    answer = _the_answer_just_given(memory)
+    if not answer:
+        return None
+    step = _a_step(answer) or _first_instruction(answer)
+    if not step or len(step.split()) < 2:
+        return None
+    if repeat._handed_back_already(step, memory):  # noqa: SLF001 - same package
+        return None
+    when = A_WHEN.search(said)
+    if when:
+        # They said when, so the reply opens on their own word: "Tonight - ice for 15 minutes,
+        # raise it, and take it easy for a day or two."
+        reply = _capital(when.group(1)) + " - " + _bare_step(step)
+    else:
+        reply = repeat.pick(PLAIN_LEADS, memory, text).format(step=_bare_step(step))  # noqa: SLF001
     return repeat._handed_back(memory, reply)  # noqa: SLF001 - the next ask counts it said
 
 
@@ -693,6 +1181,13 @@ def _another_thing(detail, said):
     and that is still the same answer's detail. What is left is a thing of its own.
     """
     if not _head_word(detail) or _head_word(detail) in NOT_A_THING:
+        return False
+    # A detail that opens on a preposition says where the thing is or what it is for - "and in the
+    # cupboard", "and for a holiday" - so it is the same answer narrowed to that place or that use,
+    # whatever words it uses. Read as a thing of its own it reached a card about a different
+    # subject: "and in the cupboard" after the ant answer was answered with advice about clearing a
+    # cupboard out, and "and for a holiday" after the Spanish answer with nothing at all.
+    if PREPOSITION.match(_flat(detail)):
         return False
     want = {word.rstrip("s") or word for word in _words(detail) if word not in VAGUE}
     have = {word.rstrip("s") or word for word in _words(said)}
@@ -905,6 +1400,55 @@ NUMBER_WORDS = frozenset("""one two three four five six seven eight nine ten ele
                                 str(digit) for digit in range(0, 100))
 LEAD_AND = re.compile(r"^(?:and|then|but|or|also|so|plus)\s+", re.I)
 
+# Several entries open with the thing they are about and a colon: "Air fryer: chicken thighs 25
+# minutes at 190C", "Slow cooker: chilli, curry, stew". That heading names the subject the person
+# already has, so it can never be the step handed back to them.
+#
+# It could be, because a heading's first word is sometimes a verb: "air" is one, so "Air fryer" went
+# through the check for an opening instruction and became the whole step. A follow-up that narrowed
+# the answer then got the label and nothing else on the line that asked about it:
+#
+#     i got an air fryer for christmas and i dont know where to start
+#     its a 4 litre one -> For a 4 litre one: Air fryer.
+#
+# A label is a short name: one or two words, no article in front of it, and no clause in it ("Water
+# is unusual: ..." and "Canberra, not Sydney: ..." are the answer's own opening and stay). Only a
+# step that is the label and nothing else is replaced, so an answer with anything in it is left
+# exactly as it was.
+HEADING = re.compile(r"^(?!(?:the|a|an|my|your|our|their|his|her|it|they)\b)"
+                     r"[^:!?.;]{1,24}:\s+(?=\S)", re.I)
+HEADING_WORDS = 2
+CLAUSE_WORDS = frozenset("""is are was were be been am not no yes for and or but so of in on at
+    with to from by as that which who what when how why""".split())
+
+
+def _the_heading(said):
+    """The label a card opens with ("Air fryer:", "Slow cooker:"), or "" when it has none."""
+    text = str(said or "").strip()
+    found = HEADING.match(text)
+    if not found:
+        return ""
+    label = found.group(0).rstrip().rstrip(":")
+    words = label.split()
+    if not words or len(words) > HEADING_WORDS:
+        return ""
+    if any(word.lower().strip("*_\"',") in CLAUSE_WORDS for word in words):
+        return ""
+    return label
+
+
+def _is_the_label_itself(text, label):
+    """True when the words are the label and nothing else, whatever the punctuation."""
+    return _flat(text).strip(" .,;:") == _flat(label).strip(" .,;:")
+
+
+def _without_the_heading(said):
+    """The answer without the label in front of it, or the answer itself when it has none."""
+    label = _the_heading(said)
+    if not label:
+        return str(said or "")
+    return str(said).strip()[len(label):].lstrip().lstrip(":").lstrip()
+
 
 # A span said of a length: "in about eight weeks", "after two days", "3 months". This is the
 # sentence that speaks to somebody who has already been at it for a while.
@@ -992,6 +1536,35 @@ def _opening_of(said):
     return first + "." if not first.endswith((".", "!", "?")) else first
 
 
+def _names_nothing(detail):
+    """True when the phrase opens on a preposition and names no place and no use.
+
+    "in the end", "at first", "in my case", "for now" all open on a preposition and none of them
+    says where the thing is or what it is for, so they are a remark rather than a narrowing of the
+    answer. One answer to "is this a place?" is shared by the join cut and by `_says_where`, which
+    is what decides whether a detail gets the answer's own step: a phrase that names nothing gets
+    neither.
+    """
+    flat = _flat(detail)
+    opening = PREPOSITION.match(flat)
+    if not opening:
+        return False
+    return bool(NAMES_NOTHING.match(flat[opening.end():].strip()))
+
+
+def _says_where(detail):
+    """True when the detail narrows the answer by where or by what for, and not by when.
+
+    One answer to "is this a place?" for both readers: a phrase that opens on a preposition narrows
+    the answer, unless it is a fixed phrase that names nothing ("in the end", "at least") or a
+    clause of the person's own with a subject in it ("at home he refuses"). Those are remarks, and
+    the answer's step is not the reply to one.
+    """
+    flat = _flat(detail)
+    return (bool(PREPOSITION.match(flat)) and not A_WHEN.match(flat)
+            and not _names_nothing(flat) and not A_SUBJECT_OF_ITS_OWN.search(flat))
+
+
 def _a_step(said, questions_are_steps=False):
     """The one move out of the answer, cut at a clause boundary so it is not the answer again.
 
@@ -1008,9 +1581,15 @@ def _a_step(said, questions_are_steps=False):
     # instruction. An opening sentence too long to be a move on its own was skipped, and the last
     # instruction of the paragraph was handed back instead: for a blocked sink the step was "Skip
     # the chemical cleaner until last", which is the opposite of what to try first.
+    label = _the_heading(said)
     opening = _opening_of(said)
-    if opening:
+    if opening and not (label and _is_the_label_itself(opening, label)):
         move = opening
+    if label:
+        # The card's heading is not the move: what the entry says about the thing is.
+        move = _without_the_heading(move) or move
+        if _is_the_label_itself(move, label):
+            move = _the_move_itself(_without_the_heading(said)) or move
     pieces = [p.strip() for p in _clauses(_the_move_itself(move)) if p.strip()]
     kept = pieces[0] if pieces else move
     for piece in pieces[1:]:
@@ -1024,6 +1603,14 @@ def _a_step(said, questions_are_steps=False):
             break
         kept = trial
     kept = kept.strip(" ,;:-.")
+    label = _the_heading(said)
+    if kept and label and _is_the_label_itself(kept, label):
+        # The step is the card's own heading and nothing else, which says nothing to a person who
+        # is holding the thing. The substance after the colon is the answer, so the step is read
+        # off that instead.
+        body = _without_the_heading(said)
+        if body and body != said:
+            return _a_step(body, questions_are_steps=questions_are_steps)
     return kept + "." if kept else ""
 
 
@@ -1114,6 +1701,25 @@ again too also only even not no yes yeah yep ok okay well right then than
 NOT_AN_ANSWER = ("i don't know enough", "i dont know enough", "beyond what i know", "no live ",
                  "i'm not sure what you mean", "can't help with that", "searching for it",
                  "a search should", "better sources")
+# A sentence that opens on one of these is the second half of the sentence before it, not an
+# answer: "If you can't bear weight or it's very swollen and bruising fast, have it looked at"
+# was handed to somebody who had just said their ankle was swollen, and "Then write three
+# questions for them about the team" to somebody who said the job was casual. Handing one of
+# them over alone leaves the person to guess what the first half said. Every answer given by a
+# later sentence of an earlier one goes through this, whichever part of the bot chose it.
+OPENS_MID_THOUGHT = re.compile(
+    # `that` and `this` are left out on purpose: "That's lovely news" and "That ache a day after
+    # new exercise is normal" are whole replies that happen to open on a demonstrative, and a
+    # check that turns those away costs more leftovers than it saves fragments.
+    r"^\W*(?:and|but|so|then|if|unless|when|whenever|while|because|though|although|which|"
+    r"also|plus|otherwise|either|instead|or|yet|nor|whereas|even so|in that case|as well|"
+    r"a search|searching for it|the search|(?:a|the) quick search)\b", re.I)
+
+
+def stands_alone(sentence):
+    """Whether a sentence can be read as the reply, with nothing before it on the screen."""
+    said = str(sentence or "").strip()
+    return bool(said) and not OPENS_MID_THOUGHT.match(said)
 
 
 def _report_stem(word):
@@ -1162,6 +1768,11 @@ def a_report_about_the_thing(text, memory):
         if len(sentence.split()) < 5:
             continue  # a fragment is not an answer on its own
         if sentence.endswith("?") or not REPORT_BEHAVIOUR.search(sentence):
+            continue
+        # A sentence that only makes sense after the one before it is not the answer to a report
+        # about the thing: "it is very swollen" was met with "If you can't bear weight or it's very
+        # swollen and bruising fast, have it looked at", which opens on a condition they never saw.
+        if not stands_alone(sentence):
             continue
         # A sentence that tells them to ring somebody, or to be seen, is advice to act and says
         # nothing about the detail they just added: "my chest hurts when i climb the stairs" /

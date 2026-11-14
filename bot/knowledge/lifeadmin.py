@@ -20,7 +20,7 @@ legal answer is worse than a pass.
 import re
 
 from .health import NO_DRUGS
-from .lookup import A_HOURS_ASK, IMPROVE, entry
+from .lookup import A_HOURS_ASK, IMPROVE, a_price_not_a_loan, entry
 from .technology import APP_ACCOUNT_WORDS
 
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
@@ -50,6 +50,36 @@ def _council_owns_the_drain(understood):
     if _A_STREET_PLACE.search(line):
         return True
     return not _ASKS_WHO.search(line)
+
+
+# Everything a complaint can be asked with and still name nobody: the ask, the pronouns and the
+# glue. What is left over is the subject, and a line with a subject in it is answered by the row
+# that subject belongs to.
+_ONLY_THE_ASK = re.compile(
+    r"\b(?:who|whom|whose|do|does|did|i|im|i'm|we|you|to|can|could|should|shall|would|will|how|"
+    r"where|what|whats|what's|when|if|is|are|was|be|been|it|its|it's|this|that|these|those|them|"
+    r"they|there|my|our|your|a|an|the|and|but|or|so|then|just|really|actually|please|make|making|"
+    r"put|raise|raising|register|registering|start|starting|go|goes|going|get|getting|complain|"
+    r"complains|complaining|complaint|complaints|complainabout|about|with|of|in|on|at|for|from|"
+    r"want|wants|wanted|need|needs|like|tell|report|reporting|someone|somebody|anyone|anybody|"
+    r"somewhere|somewhere|right|thing|things|sort|sorted|formal|officially|official|properly|now|"
+    r"help|me|us|him|her|have|has|had|not|no|bad|badly|same|again|still|more|up|down|out|off)\b")
+
+
+def _a_complaint_with_no_subject(understood):
+    """True only for a complaint that names nothing to complain about: "who do i complain to".
+
+    The row is the shape of a complaint - write it down, say what you want, then the ombudsman
+    for whoever it turns out to be - so it is only right when the line names nobody. Every word
+    that could be a subject is left out of `_ONLY_THE_ASK`, and a line with one word left over
+    is stood down here and answered by the row that word belongs to, which is what keeps "who
+    do i complain to about noise" on the noise answer and "about a parcel" on the consumer one.
+    """
+    line = " ".join(str((understood or {}).get("clean")
+                        or (understood or {}).get("text") or "").lower().split())
+    if not re.search(r"\bcomplain", line):
+        return False
+    return not _ONLY_THE_ASK.sub(" ", line).strip()
 
 
 def _change_name(memory, understood):
@@ -696,6 +726,49 @@ def _a_fine_is_a_paper(line):
     return False
 
 
+# A feeling in front of a form is not the form. The topic can arrive through a pronoun ("she
+# has anxiety about it", four turns into a chat about a daughter starting secondary school), and
+# the row then answers the worry with a deadline. A guard and not another avoid word: an avoid
+# word joins the vocabulary the whole registry is scored against, and a word added here moved
+# unrelated lines off their own rows.
+_A_FEELING_ABOUT_IT = re.compile(
+    r"\b(?:anxiety|anxious|worried|worry|worries|nervous|scared|frightened|afraid|upset|"
+    r"crying|cries|panicking|dreading|dread)\b", re.I)
+
+
+# The card is a form, so it needs a question about the form. Once the chat has said "secondary
+# school" the topic follows the conversation, and then any line that only mentions the school
+# reached it: "we live about 2 miles from the school" got the admissions deadline, and so did
+# "the school has a buddy system apparently". What the card is for is the word below - applying,
+# a deadline, an appeal, a place, a refusal - so a line without one is somebody talking about
+# their school, not asking how to get in.
+_AN_ASK_ABOUT_A_PLACE = re.compile(
+    r"\b(?:apply|applying|applied|application|applications|admission|admissions|appeal|appeals|"
+    r"appealing|appealed|register|registering|registration|enrol|enroling|enrolling|enrolment|"
+    r"waiting list|deadline|deadlines|catchment|refused|rejected|placed|placing|place|places|"
+    r"offer|offers|offered|"
+    # The plainest way a person says a school said no: "the school said no what do we do" is a
+    # refusal, which is exactly what this card is for (it even says a refusal is appealed), and
+    # with only the word "refused" in the key it fell to the complaint card.
+    r"said no|turned down|didnt get in|didn't get in|no place|no places|not offered|"
+    r"didnt get a place|didn't get a place)\b", re.I)
+
+
+def _the_line(understood):
+    """The line the user typed, from whichever field the reading carries it in."""
+    reading = understood or {}
+    return str(reading.get("clean") or reading.get("text") or "") or " ".join(
+        str(one) for one in (reading.get("words") or ()))
+
+
+def _an_ask_about_a_place(understood):
+    """Whether the line asks about a place rather than saying something about a school."""
+    text = _the_line(understood)
+    if _A_FEELING_ABOUT_IT.search(text):
+        return False
+    return bool(_AN_ASK_ABOUT_A_PLACE.search(text))
+
+
 def _the_fine_is_the_noun(understood):
     """True unless the line is using "fine" as an adjective with nothing about a court in it."""
     line = " " + re.sub(r"[^a-z0-9' ]+", " ",
@@ -708,6 +781,68 @@ def _the_fine_is_the_noun(understood):
     if _FINE_AS_A_MOOD.search(line):
         return any(word in line for word in _FINE_IS_THE_NOUN)
     return _a_fine_is_a_paper(line) or any(word in line for word in _FINE_IS_THE_NOUN)
+
+
+# A bigger voluntary excess is a price lever, not a claim: "does a bigger voluntary excess really
+# save much" asked what the cover costs and was answered with how to report a claim. The claim
+# card keys on "excess", so it stands down when the line asks whether the excess saves money.
+_EXCESS = re.compile(r"\bexcess(?:es)?\b|\bpremium\b", re.I)
+# The shape that asks what the lever costs: the excess or premium comes first and a price word
+# follows it ("does a bigger excess really save much", "is a higher excess cheaper", "bigger
+# excess worth it"). "can i reduce my excess" puts the price word in front, which is a question
+# about the size of the excess rather than about what it saves.
+_EXCESS_PRICE_ASK = re.compile(
+    r"\bexcess(?:es)?\b[^.?!]{0,70}\b(?:save|saves|saving|saved|cheaper|cheap|worth|reduce|lower)\b"
+    r"|\bpremium\b[^.?!]{0,70}\b(?:save|saves|saving|saved|cheaper|cheap|lower)\b", re.I)
+# A line with a claim or a loss in it is the claim card's, even when it also asks what the
+# excess costs: "my claim was refused, can i reduce my excess" is about the refused claim.
+_A_CLAIM_OR_LOSS = re.compile(
+    r"\bclaim\w*|\bdamag\w*|\baccident\w*|\bcrashed\b|\bstolen\b|\bflood\w*|\bleak\w*"
+    r"|\bwrite off\b|\bpayout\b|\brefused\b|\bnot covered\b", re.I)
+
+
+def _the_excess_is_a_price_question(understood):
+    text = understood.get("clean") or understood.get("text") or ""
+    return not (_EXCESS.search(text) and _EXCESS_PRICE_ASK.search(text)
+                and not _A_CLAIM_OR_LOSS.search(text))
+
+
+# The dictionary row in money_words.py owns "an excess", "insurance excess" and "policy excess";
+# this row must not answer those lines too. A price or a loss in the line is the premium answer
+# or the claim card's, and "my"/"our" asks for the figure in their own policy, read off the
+# schedule. Anything outside the definition's own vocabulary is another subject that happens to
+# use the word ("what is excess baggage", "an excess charge on my phone bill").
+_EXCESS_DICTIONARY_PHRASE = re.compile(
+    r"\ban excess\b|\binsurance excess\b|\bpolicy excess\b|\bdeductible\b", re.I)
+_EXCESS_DEFINITION_WORDS = frozenset((
+    "what", "whats", "what's", "is", "are", "was", "an", "a", "the", "does", "do", "did",
+    "mean", "means", "meaning", "definition", "define", "explain", "explained", "tell", "me",
+    "about", "of", "on", "in", "please", "exactly", "actually", "how", "work",
+    "works", "excess", "excesses", "voluntary", "compulsory", "insurance", "insurer",
+    "insurers", "policy", "policies", "cover", "covered", "premium", "home", "house", "car",
+    "buildings", "contents", "travel", "motor", "pet", "health", "dental", "joint", "family",
+    "landlord", "tenant", "van", "bike", "motorcycle", "holiday", "trip"))
+
+
+def _the_excess_is_what_it_means(understood):
+    """True when the line asks what a voluntary or compulsory excess is, and not the dictionary row's.
+
+    The dictionary row answers a line that says "an excess", "insurance excess" or "policy excess",
+    so this one stands down for it rather than shadowing the same answer. It also stands down for
+    a price question ("does a bigger voluntary excess save much"), a claim or loss, and "my"/"our"
+    (the figure in their own policy is read off the schedule). A word outside the definition's own
+    vocabulary means the subject is something else ("what is excess baggage"), so only a line that
+    says nothing but the ask and the policy words gets the answer.
+    """
+    text = understood.get("clean") or understood.get("text") or ""
+    if _EXCESS_DICTIONARY_PHRASE.search(text):
+        return False
+    if _EXCESS_PRICE_ASK.search(text) or _A_CLAIM_OR_LOSS.search(text):
+        return False
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    if not words or any(word in ("my", "our") for word in words):
+        return False
+    return all(word in _EXCESS_DEFINITION_WORDS for word in words)
 
 
 ENTRIES = [
@@ -1214,7 +1349,11 @@ ENTRIES = [
                  # can say yes, not the till" and a market stall.
                  "renewal", "renewals", "insurer", "insurers", "insurance", "premium",
                  "premiums", "tariff", "tariffs", "contract", "contracts",
-                 "subscription", "subscriptions", "supplier", "providers")),
+                 "subscription", "subscriptions", "supplier", "providers"),
+          # "money off" is in the key and it also reads as "money off my mum". The words that tell
+          # a discount from a loan are the same for every row that reads a price, so the test is
+          # `lookup.a_price_not_a_loan` and not a phrase list here.
+          guard=a_price_not_a_loan),
 
     # "should i haggle on a car price" is not a shop discount: the money rule of thumb and the
     # haggling both belong in the answer, and neither entry had both.
@@ -1235,7 +1374,10 @@ ENTRIES = [
                  # the price word came from the bill, not from anything for sale.
                  "bill", "bills", "renewal", "premium", "premiums", "tariff", "energy",
                  "electricity", "gas", "broadband", "phone", "mobile", "rent", "mortgage",
-                 "subscription", "subscriptions", "council tax", "water")),
+                 "subscription", "subscriptions", "council tax", "water"),
+          # "should i borrow money off my nan for a car" was this row's forecourt script: asking a
+          # relative for the money is the borrowing rows' question, not the dealer's.
+          guard=a_price_not_a_loan),
 
     # A coat bought in the sale is the policy question, not the haggle: a shop cannot refuse a
     # refund just because the item was reduced.
@@ -1835,7 +1977,27 @@ ENTRIES = [
                  "eviction", "repair", "broken", "damp", "mould", "rent rise", "increase",
                  "arrears", "landlord wants", "landlord is", "landlord has", "end my tenancy",
                  "leave early", "break clause", "mortgage", "buy a house", "buying a house",
-                 "council house", "housing benefit", "universal credit")),
+                 "council house", "housing benefit", "universal credit",
+                 # telling a landlord you are going is the notice letter: "i want to move out
+                 # how do i tell my landlord" was answered with the deposit and payslip list
+                 "tell my landlord", "tell the landlord", "how do i tell", "how to tell")),
+    # A tenant's reference is the same noun as a job reference and was answered with a hedge:
+    # "will my landlord give me a reference for a flat" got "Citizens Advice answers tenant
+    # questions free". The asker, what is asked and what to do when the landlord says no are
+    # what the person actually wants.
+    entry("landlord-reference",
+          (("landlord", "landlady", "letting agent", "letting agency", "my agent"),
+           ("reference", "references", "referee", "letter from", "written")),
+          "Ask in writing and make it easy: a short message naming the address, the dates you "
+          "rented and asking whether they will confirm that rent was paid on time. Landlords "
+          "usually just verify dates, rent and that the property was left in good order, so "
+          "you can offer your bank statements or a rent statement alongside it. If they say no "
+          "or go quiet, an employer or a previous letting agent will do, and a guarantor "
+          "covers the gap.",
+          avoid=("mortgage", "buying a house", "house price", "job", "employer", "cv",
+                 "interview", "sacked", "reference letter", "character reference"),
+          bias=2),
+
     entry("tenancy-copy",
           (("tenancy agreement", "copy of my tenancy", "copy of the tenancy",
             "tenancy contract", "renting agreement", "assured shorthold"),
@@ -2251,6 +2413,13 @@ ENTRIES = [
             # "who do i tell when someone dies" and "how do i close my late father's account" are
             # the same errand as registering it: the registration is where the Tell Us Once code
             # comes from, and nothing else in the tables answers either line.
+            # the plainest shape of all names no paperwork: "what do i need to do when someone
+            # dies" and "what are the first things to do when someone dies" were a stall about
+            # agreements and a hedge, because registration words were the only key.
+            "someone dies", "somebody dies", "someone has died", "somebody has died",
+            "when someone dies", "when somebody dies", "a death in the family",
+            "death in the family", "someone close to me dies", "after a death",
+            "first things to do", "what to do first",
             "who do i tell", "who to tell", "who do i need to tell", "who should i tell",
             "close my late", "his accounts", "her accounts", "their accounts",
             "close his account", "close her account", "close their account"),
@@ -2264,10 +2433,72 @@ ENTRIES = [
           "benefits at once. Scotland and Northern Ireland differ, so ask the register office.",
           # grief, the funeral and the will are separate answers
           avoid=("cry", "crying", "grief", "grieving", "miss him", "miss her", "miss them",
+                 # what to say to someone who has been bereaved is the condolence card's, and
+                 # the phrase "when someone dies" is in both lines
+                 "what do i say", "what to say", "say to", "saying to", "sympathy card",
+                 "condolence", "condolences", "card say",
                  "funeral", "cremation", "burial", "ashes", "wake", "sympathy", "condolence",
                  "eulogy", "probate", "will", "sorry for your loss",
                  # a birth, a marriage and the electoral roll are other registrations
                  "birth", "born", "marriage", "married", "vote", "voting", "electoral")),
+
+    # -- whose money pays for a funeral -------------------------------------
+    # "Who pays for a funeral" is not "who pays for dinner": the answer is where the money comes
+    # from, and the day it is asked the person does not know that the estate settles the bill
+    # first or that the council will bury somebody with no money at all. It is here, beside the
+    # registration, because it is asked in the same week and by the same person. The cost of the
+    # funeral, the help with paying it and the arrangements themselves are other answers.
+    entry("who-pays-for-the-funeral",
+          (("funeral", "funerals", "cremation", "burial", "buried", "undertaker",
+            "funeral director", "funeral directors", "the deceased", "the estate",
+            # the wake is the same bill, and it is asked the same way ("who pays for the wake").
+            # Only the phrases: "wake" on its own is a baby, a night's sleep and a funeral tea.
+            "the wake", "at the wake", "the wake food", "the wake reception"),
+           ("who pay", "who pays", "who paid", "who is paying", "who should pay", "who covers",
+            "who is responsible", "whose responsibility", "who is liable", "liable",
+            "pay", "pays", "paid", "paying", "afford", "affords", "cant afford",
+            "can't afford", "invoice", "invoiced", "the bill", "bill",
+            "claim it back", "claim the money back")),
+          "The bill comes out of the estate before anything is shared out, so the money the "
+          "person left pays for their own funeral. The person who signs the funeral director's "
+          "form is the one who owes it if the estate cannot cover it, and a bank will often pay "
+          "the funeral director straight from the account on an invoice. If there is no money at "
+          "all the council has to arrange and pay for a basic funeral, and the DWP funeral "
+          "expenses payment covers part of the bill for people on certain benefits.",
+          bias=3,
+          # what a funeral costs, the help with paying it, the arrangements, the wake food and
+          # the flowers are all other answers
+          avoid=("how much", "expensive", "cheaper", "cheapest", "compare", "or burial",
+                 "or cremation", "what should i wear", "arrange", "arranging", "plan the",
+                 "planning", "sandwiches", "buffet", "catering", "flowers", "eulogy", "speech",
+                 "condolence", "sympathy", "sorry for your loss", "cry", "crying", "grief",
+                 "missing", "miss him", "miss her")),
+
+    # "Do I need a funeral director", "can I do a funeral myself": the row that plans a funeral
+    # (family.py) needs a planning word and the money rows need a cost word, so the question of
+    # whether anyone has to be paid to do it fell through to a search hedge. It is a legal and
+    # practical fact, not a plan or a price, so it lives here beside the registration.
+    entry("funeral-without-a-director",
+          (("funeral", "funerals", "cremation", "crematorium", "burial", "memorial",
+            "funeral director", "funeral directors", "undertaker", "undertakers",
+            "direct cremation", "diy funeral"),
+           ("do i need", "do we need", "must i", "must we", "have to", "has to", "can i",
+            "can we", "myself", "ourselves", "on my own", "on our own", "without",
+            "needed", "required", "allowed", "legally", "law", "possible", "instead")),
+          "No - in England and Wales you can arrange a funeral yourself; nobody has to be paid to "
+          "do it. What the crematorium or cemetery needs is the paperwork: the death registered, "
+          "the registrar's green certificate (or the coroner's order if there was a post-mortem), "
+          "and a signed application form from whoever is arranging it. Ask the crematorium or the "
+          "council's bereavement office what their form and fee are before you decide, because the "
+          "fee is the same either way and the director's charge is the part you would be saving. A "
+          "direct cremation, no service and no mourners, is the cheapest version of the same thing "
+          "and you can buy it from a director for about a thousand pounds.",
+          bias=2,
+          # the cost of a funeral, help with paying for one, and the three decisions of planning
+          # one are each other answers, and this row is only about whether a director is required
+          avoid=("cost", "costs", "price", "much", "pay", "pays", "paid", "afford", "help with",
+                 "dwp", "claim", "grant", "fund", "budget", "plan", "planning", "arrange",
+                 "arranging", "organise", "organizing", "where do i start", "cannot afford")),
 
     # A name is admin, not paperwork for one occasion: after a marriage, after a divorce, or by
     # deed poll when nothing has happened at all. "how do i change my name after marriage" was a
@@ -2393,7 +2624,14 @@ ENTRIES = [
             "nobody turned up", "didnt arrive", "didn't arrive", "didnt show", "didn't show",
             # "the recycling wasnt taken" is the same report in the other verb
             "wasnt taken", "wasn't taken", "not taken", "didnt take", "didn't take",
-            "not picked up", "wasnt picked up", "wasn't picked up", "not been picked up")),
+            "not picked up", "wasnt picked up", "wasn't picked up", "not been picked up",
+            # a complaint about the bins is this report in the asking words: "how do i complain
+            # about the bin collection" was "ask in writing and name what you want: a refund, a
+            # repair, or money for the trouble", which is a company complaint, and the first
+            # thing to do about a bin that was not emptied is ring the council the same day.
+            # The first part already names the bins, so the complaint words cannot reach here
+            # on their own.
+            "complain", "complains", "complaining", "complaint", "complaints")),
           "Report it to the council the same day: a missed bin is free to report, the form is on "
           "their waste page, and most rounds come back within two working days. Leave the bin out "
           "at the kerbside where they can reach it, note the date and any reference, and if it "
@@ -2620,7 +2858,14 @@ ENTRIES = [
                  # carried it
                  "startup", "start up", "start-up", "business", "company", "investor",
                  "investors", "seed funding", "seed round", "shares", "equity", "customers",
-                 "revenue", "profit", "invoice", "invoices")),
+                 "revenue", "profit", "invoice", "invoices",
+                 # Giving a thing away is not raising money for a charity: "how do i donate old
+                 # clothes to charity" and "how do i donate a bike" were both handed the
+                 # JustGiving page, because "donate" and "charity" are in the key. The rubbish
+                 # domain answers where the thing goes.
+                 "donate", "donated", "donating", "donation", "donations", "give away",
+                 "giving away", "gave away", "clothes", "furniture", "books", "toys", "bike",
+                 "bikes", "bicycle", "mattress", "sofa", "charity shop", "charity shops")),
     # The rise is the one council tax question the letter and band entries both pass: nothing is
     # wrong with the bill, and the band is not in question, so the person wants to know who sets
     # the number and when it changes. "How much is council tax" asks for the number, so that one
@@ -2775,6 +3020,39 @@ ENTRIES = [
                  # contract with o2" was landing here
                  "o2", "vodafone", "giffgaff", "voxi", "tesco mobile", "sky mobile",
                  "airtime", "pac code", "phone contract", "mobile contract", "sim contract")),
+    # Telling the landlord you are going is not the same question as getting out early, and the
+    # two answers that had these lines were both about something else: "how do i tell my landlord
+    # im leaving" got the job offer card ("not until you have a written offer you would accept"),
+    # and "how much notice do i give my landlord" got the housing benefit card. The key needs the
+    # landlord's own word, because "how do i end my tenancy" is the break-clause card above and
+    # has no landlord in it, and the leaving word has to be there, because "how do i tell my
+    # landlord about a repair" is the repair row's line.
+    entry("tell-the-landlord-im-leaving",
+          (("landlord", "landlords", "landlady", "letting agent", "letting agents"),
+           ("notice", "notices", "leaving", "leave", "leaves", "move out", "moving out",
+            "hand back the keys", "give the keys back", "last month", "end of the tenancy",
+            "quit")),
+          "Put it in writing, dated, and keep a copy: say you are leaving on the date your notice "
+          "runs out - a month on a rolling tenancy in England, two on a fixed term with a break "
+          "clause - and that it should end on the day the rent is due. Ask them to confirm the "
+          "end date in writing, and book the deposit return, the final meter readings and the "
+          "council tax move for that day.",
+          ask=("notice", "leaving", "leave", "move out", "moving out", "hand back the keys",
+               "last month", "quit"),
+          # a landlord who is stopping them, evicting them, or refusing something wants the
+          # rights answer, and a repair, a deposit or a rent rise is its own row
+          avoid=("stop me", "can my landlord", "does my landlord have to", "refuse", "refuses",
+                 "wont let me", "won't let me", "evict", "eviction", "section 21", "section 8",
+                 "deposit", "deposits", "repair", "repairs", "broken", "boiler", "damp", "mould",
+                 "mold", "leak", "leaking", "heating", "rent rise", "increase the rent", "raise the",
+                 "arrears", "behind with", "sell the flat", "sell the house", "pets", "a cat",
+                 # notice in the other direction is the tenant's rights, not the tenant's
+                 # letter: "how much notice must a landlord give a tenant" was told to write and
+                 # date their own notice
+                 "give me", "give a tenant", "give their tenant", "to a tenant", "to the tenant",
+                 "must a landlord", "does my landlord", "has my landlord", "landlord has to give",
+                 "landlord give me", "landlord must",
+                 "a dog", "housemate", "flatmate", "sublet", "buying it", "buy the flat")),
     entry("child-bank-account",
           (("bank account", "savings account", "current account", "account", "bank"),
            ("child", "children", "my son", "my daughter", "kids", "kid", "teenager", "teen",
@@ -2798,9 +3076,21 @@ ENTRIES = [
           "An NHS check-up is £27.40 in England, and a dental school or a community clinic is "
           "cheaper still.",
           # pain, a broken tooth and a cost question are other answers
-          # a line about being frightened of the dentist is nerves, not registration:
+          # a length is another: "how long does a dentist appointment last", "how long does a
+          # check up at the dentist take" and "how long does it take to register with a dentist"
+          # were all answered with how to find a practice that takes new patients, because the
+          # word "appointment" is in this key and no word says the line wants a time. The times
+          # - the visit's length, and the wait - are written in the dentist appointment answer,
+          # so this card stands down for every shape that asks for one. The words held out are
+          # the ASK, not the noun: "the waiting list is two years, what can i do" and "the
+          # dentist waiting list is months" are complaints about access and want this card, so
+          # "wait", "waiting" and "waiting list" must never appear here - only "how long",
+          # "how soon", "how many minutes" and "last"/"lasts", which are the shape of a length
+          # question and nothing else.
+          # A line about being frightened of the dentist is nerves, not registration:
           # "i'm nervous about a dentist appointment tomorrow" was getting the NHS list answer
           avoid=(
+                 "how long", "how soon", "how many minutes", "last", "lasts",
                  # "teething problems with the new car" is a new thing finding its feet, and
                  # "teething" is a form of "teeth" to the word matcher, so this entry answered a
                  # new car, a new boiler and a new job with "ring practices near you ... whether
@@ -2871,10 +3161,22 @@ ENTRIES = [
                  # how to get a tablet down is not how to get more of them
                  "swallow", "swallowing", "with water", "can't swallow", "cant swallow",
                  # a tablet you wipe is not a tablet you swallow: "how do i clean a tablet screen"
-                 # was told to order a repeat prescription a week before running out
+                 # was told to order a repeat prescription a week before running out, and so was
+                 # "how do i stop my kid being on his tablet all day" - a child on a tablet is a
+                 # screen question and the only word this row needs is the one in "tablets"
+                 "on his tablet", "on her tablet", "on their tablet", "on the tablet",
+                 "on a tablet", "on my tablet", "his ipad", "her ipad", "the ipad", "an ipad",
+                 "cartoons", "youtube",
                  "screen", "screens", "tablet screen", "clean", "cleaning", "cleaned", "wipe",
                  "wiping", "smudge", "smudges", "fingerprint", "fingerprints", "greasy",
                  "scratch", "scratches", "cracked",
+                 # a tablet that will not start is not a medicine either: "how do i reset my
+                 # tablet" was told to order a repeat prescription a week before running out.
+                 # The faults a device has are never the words on a repeat slip.
+                 "reset", "resetting", "restart", "restarting", "reboot", "rebooting",
+                 "turn on", "turns on", "turn it on", "wont turn on", "won't turn on",
+                 "wont start", "won't start", "charging", "charger", "battery", "update",
+                 "updates", "updating", "sync", "syncing", "frozen", "froze", "stuck",
                  # "how do i get rid of a headache without tablets" and "i need painkillers for a
                  # sore back" are remedy questions: the word "tablets" plus "how do i" was enough
                  # to be told to order a repeat a week before running out.
@@ -3216,6 +3518,7 @@ ENTRIES = [
           "you list several schools with the one you most want first. An application after the "
           "deadline is only looked at once everyone else has been placed, and if you are refused "
           "you appeal to the school's admission authority, which is usually the council.",
+          guard=_an_ask_about_a_place,
           avoid=("school run", "school holidays", "term dates", "uniform", "bullying", "bullied",
                  "homework", "teacher", "exam", "exams", "gcses", "a levels", "fees",
                  # the council form is for a school: "how do i apply for a university place" is
@@ -3232,6 +3535,25 @@ ENTRIES = [
     # "how do i claim on my insurance" got nothing, "how do i complain to the ombudsman" got
     # nothing, and "how long does a refund take" fell on the sale-refund rule about faulty goods.
     # A warranty claim is in `shopping.py` with the rest of the consumer-rights answers.
+    # The excess is also a price lever, and the claim card keyed on "excess" answered "does a
+    # bigger voluntary excess really save much" with how to report a claim. A question about
+    # changing the excess is a question about the premium, so it has its own answer.
+    entry("voluntary-excess",
+          (("excess", "excesses", "voluntary excess"),
+           ("insurance", "insurer", "policy", "premium", "cover", "car", "home", "buildings",
+            "contents", "save", "saves", "saving", "cheaper", "cheap", "worth", "reduce",
+            "lower", "bigger", "higher", "increase", "raise")),
+          "A bigger voluntary excess does cut the premium, but by less than most people expect: "
+          "moving from £100 to £250 often takes £20 to £80 off a year, and the next £250 usually "
+          "saves less again. Ask the same insurer for the quote at two or three excess levels and "
+          "weigh the yearly saving against what you would pay on a claim, because the excess is "
+          "what you find on the day. Do not set it higher than you could pay at short notice, and "
+          "check that a lease or finance agreement does not cap it.",
+          ask=("save", "saves", "saving", "cheaper", "cheap", "worth", "reduce", "lower",
+               "bigger", "higher", "increase", "raise"),
+          avoid=("claim", "claiming", "claimed", "damage", "accident", "crashed", "stolen",
+                 "flood", "leak", "write off", "payout", "not covered", "refused"),
+          bias=1),
     entry("insurance-claim",
           (("insurance", "insurer", "insurers", "home insurance", "contents insurance",
             "travel insurance", "car insurance", "buildings insurance"),
@@ -3244,6 +3566,7 @@ ENTRIES = [
           "receipts and quotes, and report a theft to the police for a crime number. Ask what the "
           "excess is before you go ahead, because a claim smaller than the excess costs you money, "
           "and claim on one policy only when two could cover it.",
+          guard=_the_excess_is_a_price_question,
           avoid=("cancel", "cancelling", "renewal", "renew", "cheaper", "cheap", "cheapest",
                  "compare", "quote", "worth it", "how much is insurance", "life insurance",
                  "pet insurance", "shop around", "average price", "reduce my", "lower my",
@@ -3251,6 +3574,43 @@ ENTRIES = [
                  # insurance" was answered with "tell the insurer before you fix or replace
                  # anything", which is the claim answer
                  "switch", "switching", "switch insurer", "change insurer", "change insurance")),
+    # "who do i complain to" names nobody at all, and it was a shrug on main: the answer that
+    # helps is the shape of a complaint - put it in writing, say what you want, then the
+    # ombudsman for whoever it turns out to be. The guard is what makes that safe: the row
+    # answers only when the line has no subject left in it, so "who do i complain to about
+    # noise", "... about a parcel" and "... about the damp" keep the rows those subjects belong to
+    # (the first draft of this row was `escalate-complaint` with "who do i" added, and it took
+    # all three of them - three deck chats got a company letter instead of their own answer).
+    entry("a-complaint-with-no-subject",
+          (("complain", "complains", "complaining", "complaint", "complaints",
+            "complain about", "make a complaint", "raise a complaint"),
+           ("who do i", "who to", "who can i", "where do i", "how do i", "who should i",
+            "i want to", "want to", "need to", "can i", "complain", "complaint", "formal",
+            "help", "rights")),
+          "Ask in writing and name what you want: a refund, a repair, or money for the trouble. "
+          "Once eight weeks pass, or they send a final response you disagree with, take it to "
+          "the ombudsman for that industry - Financial for a bank or insurer, Energy for a "
+          "supplier, Communications for broadband and phones, and the Local Government Ombudsman "
+          "for a council - which is free and needs no lawyer. Keep the date of every call and "
+          "letter: the timeline is the case.",
+          guard=_a_complaint_with_no_subject),
+    # The dictionary row for "deductible" answers "an excess", "insurance excess" and "policy
+    # excess". It does not answer "a voluntary excess", "a compulsory excess" or a bare "what does
+    # excess mean", which used to be a search hedge or the how-to-claim card. This is the other
+    # half of the same word, and it stands down whenever the dictionary row's own phrase is in the
+    # line, so the two never compete and the dictionary answer is never shadowed.
+    entry("the-excess-is-what-you-pay",
+          (("excess", "excesses", "voluntary excess", "compulsory excess"),
+           ("what is", "what are", "what does", "whats", "what's", "meaning", "mean",
+            "explain", "definition", "define", "tell me about", "how does", "how do")),
+          "An excess is the first part of any claim you pay yourself: if the repair is £900 and "
+          "your excess is £250, the insurer pays £650. Every policy has a compulsory excess and "
+          "you can usually add a voluntary one on top in return for a lower premium. It applies "
+          "to each claim rather than each year, so two separate claims mean paying it twice; the "
+          "schedule says the amount and whether it comes off the payout or goes to the repairer.",
+          guard=_the_excess_is_what_it_means,
+          bias=3,
+          ),
     entry("escalate-complaint",
           (("complain", "complaint", "complain about", "ombudsman", "deadlock letter",
             "final response", "still not fixed", "not been fixed", "no reply", "not replying",
@@ -3262,7 +3622,12 @@ ENTRIES = [
             # "how do i complain to the ombudsman" names no company: the words of the question
             # itself have to carry the second signal.
             "ombudsman", "complain", "complaint", "how do i", "how to", "what can i do",
-            "help", "rights", "take it further", "take this further", "further"),
+            "help", "rights", "take it further", "take this further", "further",
+            # The ask for the route is the same question as the act of complaining, and it was
+            # the one shape this row could not read: "who do i complain to about a bus driver"
+            # reached the coach-pricing card instead, which answered a question nobody asked.
+            "who do i", "who should i", "who can i", "who to complain", "who do i complain",
+            "where do i complain"),
            # The ombudsman line names no company at all, so the phrase has a part of its own:
            # "how do i complain to the ombudsman" has to reach the answer that names which
            # ombudsman, not the shop complaint that mentions one on the way past.
@@ -3298,6 +3663,14 @@ ENTRIES = [
                  # complaint goes to a trade body or small claims, so keep the honest answer
                  "builder", "builders", "tradesman", "tradesmen", "plumber", "electrician",
                  "roofer", "decorator", "contractor", "garage", "mechanic",
+                 # a bin, a pothole or a street light is a service the council runs, and the
+                 # report of that fault has its own answer: "i want to complain to the council
+                 # about the bins" was the ombudsman card here, and the council's nuisance
+                 # line before this branch added a row in front of it.
+                 "bin", "bins", "bin bag", "bin bags", "wheelie", "wheelie bin", "recycling",
+                 "bin collection", "missed bin", "not collected", "refuse collection",
+                 "litter", "fly tipping", "flytipping", "fly-tipping", "pothole", "potholes",
+                 "street light", "street lights", "graffiti", "dog fouling",
                  # a decorator made this list and a painter did not, so "how do i complain about
                  # a painter" was told to take it to the Financial or Energy ombudsman: a person
                  # doing work on your house has no ombudsman at all, and `tradesman-bad-job`
@@ -3590,9 +3963,23 @@ ENTRIES = [
             "sell the house", "selling a flat", "sell a flat", "selling the flat",
             "house buying", "buying a house", "buying my first flat", "house purchase",
             "purchase of a house", "completion", "chain",
-            "solicitor", "conveyancing"),
+            "solicitor", "conveyancing",
+            # The week that matters is exchange to completion, and asking about it named neither
+            # "house" nor "sale": "when do we exchange contracts" was a search hedge, "when will
+            # we complete" the same, and "when do we get the keys" was the sport row asking for a
+            # date. Every one of these is the sale, so they are the row's own words now.
+            "exchange contracts", "exchange of contracts", "contracts exchanged",
+            "exchange and completion", "exchange date", "completion date",
+            "when do we exchange", "when will we exchange", "when we exchange",
+            "after exchange", "before exchange", "on exchange",
+            "when do we complete", "when will we complete", "when we complete",
+            "complete on the house", "complete on the flat", "completion statement",
+            "get the keys", "get my keys", "get our keys", "keys to the house",
+            "keys to the flat", "house keys",
+            "move in date", "moving in date"),
            ("how long", "how many weeks", "how many months", "time", "take", "takes", "wait",
-            "when", "slow", "stuck", "delayed", "months", "weeks")),
+            "when", "slow", "stuck", "delayed", "months", "weeks", "same day", "same week",
+            "exchange date", "completion date")),
           "From an accepted offer, eight to twelve weeks is normal, and a chain adds a few weeks "
           "per link. Searches and the freeholder's pack are what drag, not the mortgage offer, so "
           "ask the solicitor how the searches are going and agree a target completion date in "
@@ -3602,7 +3989,37 @@ ENTRIES = [
                  "how much", "price", "worth", "stamp duty", "declutter", "packing",
                  # "do i need a survey when buying a house" is the survey's own card: the one
                  # word "when" in this row's ask list was enough to answer it with a timeline
-                 "survey", "surveys", "surveyor", "surveyors", "valuation", "snagging")),
+                 "survey", "surveys", "surveyor", "surveyors", "valuation", "snagging",
+                 # Backing out is not a question about how long the week is: "can the seller pull
+                 # out after exchange" and "can they change their mind after exchange" want to
+                 # know what binds them, and the timeline answered neither. `house-sale-binding`
+                 # owns those words now, so this row stands down on them.
+                 "pull out", "pulls out", "back out", "backs out", "change their mind",
+                 "changes their mind", "changed their mind", "gazump", "gazumping",
+                 "gazumped", "legally bound", "binding")),
+    # Whether anyone can still walk away is a different question from how many weeks the week
+    # takes, and it is the one people actually ask at the worst moment: "can the seller pull out
+    # after exchange", "can they change their mind after exchange", "what happens if the seller
+    # pulls out". The answer is the exchange, so the row is keyed on the backing out and on the
+    # sale, and the timeline keeps every question that is only about time.
+    entry("house-sale-binding",
+          (("pull out", "pulls out", "pulling out", "back out", "backs out", "backing out",
+            "change their mind", "changes their mind", "changed their mind", "changing their mind",
+            "gazump", "gazumped", "gazumping", "walk away", "legally bound", "binding"),
+           ("sale", "sale agreed", "house", "flat", "property", "offer", "offer accepted",
+            "exchange", "exchanged", "contracts", "contract", "completion", "deposit",
+            "buying a house", "seller", "buyer")),
+          "Exchange is the moment the sale becomes legally binding: after that neither side can "
+          "simply walk away, and if the seller refuses "
+          "to complete you can sue for the deposit back and your costs, or press for the sale to go "
+          "through. Before exchange either of you can pull out for any reason and owes nothing but "
+          "their own legal fees - which is exactly the window a seller uses to take a better offer, "
+          "and that is gazumping. So the practical answer is to push to exchange as soon as the "
+          "searches are back, and to keep the deposit small until then.",
+          avoid=("how long", "how many weeks", "how many months", "how soon", "weeks", "months",
+                 "how much", "price", "worth", "survey", "surveyor", "packing", "declutter",
+                 "rent", "renting", "tenancy", "landlord", "council tax", "mortgage rate")),
+    # "how do i budget" and "how do i read my payslip" are `money.py`'s: a budget split and the
     # "how do i budget" and "how do i read my payslip" are `money.py`'s: a budget split and the
     # three payslip lines are already answered there, and a second copy here would fight them.
     # The alarm a person wears is not the alarm on a phone: "how much do those pendant alarms
@@ -3798,6 +4215,10 @@ ENTRIES = [
                  "planning", "visa", "immigration", "grade", "school", "exam", "housing")),
 ]
 
+from .costs import time_entries
+# A haircut is an appointment with a length, and life admin is where the appointments live.
+ENTRIES += time_entries("haircut")
+
 # "how do i complain about a builder" got a Citizens Advice hedge, and the entries that do handle
 # a complaint are about one company (an energy supplier, a shop) or about whether to hire someone
 # at all. A tradesperson who did a bad job is a shape of its own, and the steps are the same for
@@ -3818,6 +4239,9 @@ ENTRIES.append(entry(
       "refund", "small claims", "trading standards", "did a runner", "went bust",
       # the complaint is often just what the work looks like: a wall left in a state, a
       # plastered wall that is not flat
+      # "how do i report a dodgy builder" is the same complaint in the plainest words: "report"
+      # is how the question is put, and "dodgy" is what the work or the trader is called.
+      "dodgy", "report", "reporting",
       "made a mess", "mess of", "terrible job", "awful job", "dreadful job", "badly",
       "uneven", "patchy", "streaky", "left a mess", "ruined", "came out wrong")),
     "Put it in writing before anything else: say what is wrong, what you want - it fixed, or your "
@@ -3840,7 +4264,11 @@ ENTRIES.append(entry(
            # and "how do i spot a cowboy builder" is asking the same picking question, which the
            # comment above already says: spotting one is how to avoid one
            "spot a", "spot one", "how do i spot", "how can i tell", "what should i ask",
-           "before i hire", "before i pay")))
+           "before i hire", "before i pay",
+           # "report" is also the document a trade sends you, so the senses that make it one
+           # stand this entry down: a report card, an annual report, the report they wrote.
+           "report card", "the report", "a report", "report says", "report shows", "report from",
+           "annual report", "school report", "survey report", "written report")))
 
 # "how long should i keep tax records" reached a Citizens Advice hedge, "how long do i keep
 # payslips" the gross-and-net explanation and "how long do i keep my accounts" a punt: nothing
@@ -4397,7 +4825,7 @@ ENTRIES.append(entry(
       "get a card", "get one", "membership", "member", "lost", "misplaced", "stolen",
       "ebook", "ebooks", "e-book", "e-books", "audiobook", "audiobooks", "kindle",
       "app", "online", "register", "registering", "need to bring", "what do i need",
-      "how do i get", "can i borrow", "moved", "moving", "just moved", "new address",
+      "how do i get", "moved", "moving", "just moved", "new address",
       "new here", "proof of address", "no address", "from abroad", "temporary")),
     "Free to join: take the card or the form and something with your name and address on it - a "
     "bill, a driving licence, a bank statement - to any branch, or join on your council's library "
@@ -4418,31 +4846,242 @@ ENTRIES.append(entry(
     # renewing it, and what happens when it is late. "Can i return a library book late" and "my
     # library book is overdue" are the most common of these and both used to reach a card about
     # parcels.
+#
+# One subject, several questions: how long a loan is, how many at once, how to reserve one,
+# whether it can be renewed, what a late one costs and what a lost one costs. The single
+# paragraph below answered all six with the first of them, so "how many books can i borrow"
+# was told three weeks and "can i reserve a book" was told about fines. Each kind now gets the
+# sentence it asked for, and the order of the readings matters: a renewing question that also
+# says "how many times" is a renewal, not a count of books.
+_LIBRARY_RENEW = re.compile(
+    r"\brenew(?:s|ed|ing|al|als)?\b|\bextend(?:ed|ing)? (?:the |my )?(?:loan|borrowing|book)"
+    r"|\bkeep (?:it|them) (?:for )?(?:another|longer)", re.I)
+_LIBRARY_COUNT = re.compile(
+    r"\bhow many\b|\bat (?:a|one) time\b|\bat once\b|\bhow many items\b", re.I)
+_LIBRARY_RESERVE = re.compile(
+    r"\breserv(?:e|es|ed|ing|ation|ations)\b|\brequest(?:s|ed|ing)?\b"
+    r"|\bput (?:a|the|it) (?:on )?hold\b|\bon hold\b|\bwaiting list\b", re.I)
+_LIBRARY_LOST = re.compile(
+    r"\blost\b|\bcan'?t find\b|\bcannot find\b|\blose\b|\bdamag\w*\b|\bchewed\b"
+    r"|\btorn\b|\btore\b|\bspill\w*\b|\bspilt\b|\bruined\b|\bsoaked\b|\bgot wet\b"
+    r"|\bstained?\b|\bscribbl\w*\b|\bdropped it in\b|\bleft it on the (?:bus|train)", re.I)
+_LIBRARY_LATE = re.compile(
+    r"\boverdue\b|\blate\b|\bfines?\b|\bblocked\b|\bsuspended\b|\bcharged? (?:for|me)\b"
+    r"|\bwhat happens if (?:it|its|it's) late\b", re.I)
+_LIBRARY_RETURN = re.compile(
+    r"\breturn(?:s|ed|ing)?\b|\bdrop (?:it |them )?(?:off|box)\b|\bletterbox\b"
+    r"|\bafter hours\b|\boutside the branch\b", re.I)
+_LIBRARY_HOW_LONG = re.compile(
+    r"\bhow long\b|\bhow many (?:weeks|days)\b|\bdue back\b|\bwhen is it due\b"
+    r"|\bhow much time\b", re.I)
+
+
+def _the_library_loan(memory, reading):
+    """The library's answer to the question the line asked about its loan.
+
+    Six questions share one subject, and answering the wrong one is what this row did before:
+    "how many books can i borrow from the library" got the loan length, and "can i reserve a
+    book at the library" got the fines. The reading is the ask, in the order a person means it:
+    renewing, then how many, then reserving, then a lost or damaged copy, then a late one, then
+    returning it, and only then the length of the loan itself.
+    """
+    said = " %s " % " ".join(str(((reading or {}).get("clean")
+                                or (reading or {}).get("text") or "")).lower().split())
+    if _LIBRARY_RENEW.search(said):
+        return (
+            "Renew it online, in the library's app or by phone, before the date falls: most "
+            "libraries allow two or three renewals unless somebody has reserved the book, and "
+            "the renewal is what to try first because it costs nothing and stops a fine. Where "
+            "the renewals have run out, ask at the desk - a librarian can usually override it "
+            "for one more if nobody is waiting.")
+    if _LIBRARY_COUNT.search(said):
+        return (
+            "About a dozen at a time at most libraries, twenty at the big city ones, and a "
+            "child's card is usually half that - the number is on the card's page or at the "
+            "desk, and it counts everything, so a DVD or a jigsaw uses one of the dozen. "
+            "Reference books and anything in the local-history room never leave the building.")
+    if _LIBRARY_RESERVE.search(said):
+        return (
+            "Reserve it from the library's own catalogue or at the desk and it comes to your "
+            "branch when it is free - nothing at most libraries and a small charge at some. "
+            "You get an email or a text when it arrives and a week or so to collect it, so "
+            "choose the branch you actually use, and ask for a book that is on the shelf "
+            "elsewhere in the county now rather than waiting for a copy to come back.")
+    if _LIBRARY_LOST.search(said):
+        return (
+            "Tell the desk as soon as you know: a lost or damaged book is charged at the "
+            "replacement price, not the cover price and not a fine, and staff can often renew "
+            "it once more to give you time to find it. If it turns up, the charge is refunded "
+            "at most libraries, and a book damaged by a child or a dog is the same conversation "
+            "- say what happened, because a librarian decides, not a rule.")
+    if _LIBRARY_LATE.search(said):
+        return (
+            "Renew it first, online or by phone, because that costs nothing and clears most of "
+            "it. Where a book is late, most councils have dropped the daily fine altogether and "
+            "simply block the card until it comes back; where there is one it is pennies a day "
+            "and capped, and a child's card is never charged. Take it back and tell the desk - "
+            "they can usually unfreeze the card there and then.")
+    if _LIBRARY_RETURN.search(said):
+        return (
+            "Returns go in the drop box inside or outside the branch, so a book can go back at "
+            "midnight, and the date it is checked in is the date it came back, not the date "
+            "somebody got round to it. Where there is no drop box, any branch in the same "
+            "council will take it - it does not have to go back where it came from.")
+    return (
+        "Three weeks is the usual loan, and most libraries renew it two or three times online or "
+        "by phone unless somebody has reserved it, which is the difference between a three-week "
+        "book and one you can keep for two months.")
 ENTRIES.append(entry(
     "library-loan",
           (("library book", "library books", "book i borrowed", "books i borrowed",
             "borrowed book", "borrowed books", "borrowed a book", "library loan",
-            "the book from the library", "library", "libraries"),
+            "the book from the library", "library", "libraries",
+            # a hold is a reservation, and the phrase itself has to be a key word or the
+            # book-subject card takes it: "can i put a library book on hold" reached that
+            "on hold at the library", "hold a library book", "put a book on hold",
+            "put a library book on hold", "a book on hold"),
            ("overdue", "late", "late back", "return late", "returning late", "back late",
             "fine", "fines", "charge", "charges", "renew", "renewing", "renewal", "renewed",
             "reserve", "reserved", "reservation", "request", "how long", "how many",
             "keep it", "keep them", "borrow", "borrowing", "return", "returning", "drop off",
-            "drop box", "letterbox", "after hours", "closed", "damaged", "lost")),
-          "Three weeks is the usual loan, and most libraries renew it two or three times online or "
-          "by phone unless somebody has reserved the book - the renewal is what to try first, "
-          "because it costs nothing and stops the fine. Where a book is late, most councils have "
-          "dropped the daily fine altogether and simply block the card until it comes back; where "
-          "there is one it is pennies a day and capped, and a child's card is never charged. "
-          "Returns go in the drop box inside or outside the branch, so a book can go back at "
-          "midnight, and a book that is lost or chewed by a dog is charged at the replacement "
-          "price, which the desk will usually take in instalments.",
+            "drop box", "letterbox", "after hours", "closed", "damaged", "lost",
+            # a copy that has been spoiled is the same question as one that was lost or late
+            "damage", "tore", "torn", "spilled", "spilt", "ruined", "chewed", "got wet",
+            "scribbled", "dropped it")),
+          _the_library_loan,
           ask=("how long", "how many", "how much", "fine", "fines", "renew", "renewed",
                "late", "overdue", "return", "returns", "returning", "back", "borrow",
                "borrowing", "keep", "keep it", "drop off", "drop box", "lost", "where",
-               "what happens", "can i", "am i", "is there"),
+               "what happens", "can i", "am i", "is there",
+               # a copy that has been damaged is the same question as a copy that was lost, and
+               # "my library book got damaged" reached nothing at all while it was missing here
+               "damaged", "damage", "torn", "ruined", "chewed", "spilled", "dropped",
+               "got wet", "scribbled",
+               # reserving is a question about the loan too: "how do i reserve a library book"
+               # and "can i put a library book on hold" were read as nothing at all
+               "reserve", "reserved", "reservation", "hold", "on hold", "request",
+               "how do i", "how can i", "take out", "including", "include"),
           avoid=("opening hours", "opening times", "join", "joining", "sign up", "membership",
                  "ebook", "ebooks", "audiobook", "audiobooks", "app", "kindle",
                  "shop", "shopping", "order", "refund", "courier", "seller", "amazon",
                  "parcel", "delivery", "tracking", "post office", "stamp", "hotel", "flight",
                  "train", "table", "restaurant", "hire", "car", "van", "bike", "bicycle",
                  "dvd", "video game", "tool", "tools", "carpet cleaner")))
+
+# A sanction is its own benefit question, and it is asked with one word: "they sanctioned me",
+# "how long does a sanction last", "what is a sanction". The appeal row is keyed on "sanction"
+# too, but it needs a second key word from the decision words, so a line that only says the
+# sanction reached nothing at all - a shrug, or "Sorry to hear that. What would help most?".
+ENTRIES.append(entry(
+    "benefit-sanction",
+    (("sanction", "sanctioned", "sanctioning", "sanction letter", "they sanctioned me",
+      "got sanctioned", "been sanctioned", "on a sanction",
+      # the failure that earns one, said the way people say it
+      "missed my appointment", "missed my work coach", "missed the appointment",
+      "missing an appointment", "missed an appointment", "missed appointments",
+      "didnt turn up to", "didnt go to my appointment", "sanctioned for"),
+     ("what", "whats", "how long", "how many", "last", "lasts", "long", "why", "how", "help",
+      "money", "benefit", "benefits", "universal credit", "uc", "jobcentre", "job center",
+      "work coach", "hardship", "advance", "end", "lifted", "stopped", "cut", "days", "weeks",
+      "months",
+      # "they sanctioned me" says the subject and nothing else, and the row is the answer to it:
+      # the sanction words count on both sides so the bare statement is not left to a shrug.
+      "sanction", "sanctioned", "sanctions")),
+    "A universal credit sanction cuts your standard allowance for a set number of days: 7 for a "
+    "first missed appointment, up to 28 for repeats, and 91 days up to three years for leaving a "
+    "job. Check the letter for the dates it runs between, then ask for a reconsideration if the "
+    "decision is wrong and a hardship payment if the money has gone: repayable, and there for "
+    "exactly this.",
+    # the appeal against the decision is the row above, and a question about the claim itself is
+    # not about a sanction
+    avoid=("appeal", "appeals", "appealing", "mandatory reconsideration", "tribunal",
+           "reconsideration", "how do i claim", "how to claim", "am i entitled", "do i qualify",
+           "migrating", "migration", "move to universal credit",
+           # a sanction in the ordinary sense: approval, or a council's
+           "approved", "approval", "sanctioned by the council"),
+))
+
+# "my payment hasnt come through", "my benefit hasnt been paid this month", "my universal credit
+# didnt go in": every one of them got an echo or "I'm listening - say more if it helps". A payment
+# that has not arrived is the commonest benefit question there is, and the answer is the same
+# whether it is universal credit, PIP, ESA or tax credits.
+ENTRIES.append(entry(
+    "benefit-payment-not-arrived",
+    # "money" on its own is fenced rather than removed: "my money hasnt come through" is what a
+    # person says when the payment they live on has not landed, and taking the word out of the key
+    # left it with nothing at all - an acknowledgement is worse than a card that names the letter.
+    # The wage words in `avoid` are what keep it off a payslip line.
+    (("benefit", "benefits", "universal credit", "uc", "pip", "esa", "tax credits",
+      "child benefit", "payment", "payments", "allowance", "money"),
+     ("havent been paid", "havent had it", "hasnt been paid", "hasnt come through",
+      "hasnt arrived", "havent received", "not received", "didnt go in", "did not go in",
+      "didnt arrive", "not arrived", "still waiting", "late", "overdue", "missing",
+      "hasnt gone in", "havent gone in", "not gone in", "didnt go through",
+      "not gone through", "nothing in my account", "no money", "not been paid")),
+    "Check the online account and the award letter first: a change of circumstances, bank details "
+    "that failed or a sanction all stop a payment showing, and the letter says which. Ring the "
+    "number on the latest letter the same day and ask why, and ask for a hardship payment if "
+    "there is nothing coming in - it is repayable from future awards. Keep a note of who you "
+    "spoke to and when.",
+    # a parcel, a wage and a bill are not a benefit payment, and "payment" is in the key
+    avoid=("parcel", "parcels", "delivery", "courier", "tracking", "order", "orders", "refund",
+           "seller", "amazon", "ebay", "shop", "shopping", "wages", "salary", "pay slip",
+           "payslip", "employer", "overtime", "bonus", "invoice", "client", "freelance",
+           "rent", "landlord", "mortgage", "bill", "bills", "energy", "council tax", "water",
+           "broadband", "phone bill", "loan", "credit card", "card payment",
+           "direct debit", "standing order", "overdraft", "pension", "insurance", "dividend",
+           # "money" is in the key, so every line about money that is not a benefit payment has
+           # to be held out: wages, a payslip, a shift and a boss are the wage row's, and "my
+           # money hasnt come through" after a week's work is a wage that did not arrive.
+           "wages", "wage", "payday", "shift", "shifts", "hours worked", "my boss", "my manager",
+           "my employer", "payroll", "self employed", "self-employed"),
+))
+
+# --- the name of a process is a subject in itself ------------------------------------
+# "how do i ask for a mandatory reconsideration" and "what is a hardship payment" were both
+# shrugs, and both are named processes rather than anything the person has to explain. The rule:
+# a line that names one of these processes is a benefit question even when it does not name the
+# benefit, so the process word is the subject and the ask is the second group. The appeal row
+# above needs a benefit word beside its subject ("how do i appeal a benefit decision" answers,
+# "how do i ask for a mandatory reconsideration" did not), which is the right fence for "appeal"
+# and the wrong one for a name only the benefit system uses.
+_ASKED_ABOUT_A_PROCESS = ("how", "how do i", "how to", "what", "what is", "whats",
+                          "request", "apply", "applying", "write", "writing", "when",
+                          "deadline", "time limit", "long", "do i", "can i", "start", "first",
+                          "much", "get", "repay", "repayable", "amount", "turn", "wrong")
+
+ENTRIES.append(entry(
+    "benefit-reconsideration",
+    (("mandatory reconsideration", "reconsideration", "tribunal"), _ASKED_ABOUT_A_PROCESS),
+    "A mandatory reconsideration is the benefit office looking at its own decision again. Ask "
+    "within one month of the decision letter: ring the number on it, then put the request in "
+    "writing and ask for the statement of reasons. If it is still wrong, appeal to the tribunal "
+    "within one month of that notice - free, and you can ask for a phone hearing.",
+    # a tribunal is also where a housing, employment, parking or school case goes, and none of
+    # those is the benefit office's; a line that already names the benefit is the appeal row's,
+    # which goes on to say what evidence to send with it
+    avoid=("universal credit", "benefit", "benefits", "tax credit", "tax credits", "pip", "esa",
+           "overpaid", "overpayment", "underpaid", "sanction", "sanctioned",
+           "housing", "eviction", "rent", "landlord", "council", "parking", "ticket", "school",
+           "exam", "grade", "university", "planning", "immigration", "visa", "employment",
+           "dismissal", "unfair", "tax", "hmrc", "child arrangement", "contact order",
+           # an employment tribunal is about an employer, and the line names the employer
+           "employer", "boss", "manager", "sacked", "dismissed", "redundancy", "redundant",
+           "wages", "wage", "pay slip", "payslip", "contract of employment")))
+
+ENTRIES.append(entry(
+    "hardship-payment",
+    (("hardship payment", "hardship"), _ASKED_ABOUT_A_PROCESS),
+    "A hardship payment is extra universal credit, up to 60% of your standard allowance for the "
+    "month, for when a sanction or a delay has left you short of rent, heating or food - and it is "
+    "taken back out of later awards. Ask in your journal or at the jobcentre the same day, and ask "
+    "the council about the Household Support Fund meanwhile.",
+    # a hardship fund is a grant from a university or an energy supplier, and neither is the DWP's.
+    # A council's own hardship or welfare-assistance payment is not universal credit either: "do i
+    # get hardship from the council" was told the 60% of standard allowance rule, which is the
+    # wrong fund said with confidence. The council words hold the row out of those lines.
+    avoid=("hardship fund", "hardship grant", "university", "student", "students", "energy",
+           "supplier", "water", "council tax", "rent arrears", "charity", "grant",
+           "council", "from the council", "local authority", "discretionary", "welfare",
+           "welfare assistance", "household support", "household support fund"),
+    bias=1))

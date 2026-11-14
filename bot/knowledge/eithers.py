@@ -471,4 +471,50 @@ ENTRIES = [
             "the jar for camping and an office kitchen.",
             avoid=("caffeine", "decaf", "how much", "pregnant", "pregnancy", "stain", "stains",
                    "machine", "how do i make", "best", "which brand")),
+    # --- the pairs that name a way of doing it rather than two products -------------------
+    # "should i use butter or margarine in a cake" was answered with the shortbread recipe, "is
+    # it cheaper to make bread than buy it" with the price of the flour and no verdict, and
+    # "should i book the flight now or wait" with "Not mine to decide, sorry". A person weighing
+    # two ways of doing a job wants the verdict, and the one thing that decides it.
+    _either("butter-or-margarine-in-a-cake",
+            ("butter", "butters", "real butter"),
+            ("margarine", "margarines", "soft spread", "low fat spread", "baking spread"),
+            "Butter, when the recipe says butter: it creams, it holds the air a sponge needs and "
+            "it tastes of something, and a spread has more water in it, so the cake rises less "
+            "and tastes flat. Margarine is fine in a plain traybake or a crumble topping, and it "
+            "is the wrong thing for shortbread, pastry or anything that has to set hard as it "
+            "cools.",
+            avoid=("how much", "how long", "how do i", "recipe", "toast", "bread", "sandwich",
+                   "salted", "unsalted", "substitute", "instead of butter", "gone off", "rancid",
+                   "flour", "icing", "frosting", "vegan", "lactose", "dairy free", "calories",
+                   # Which of the two a body is better off eating is the nutrition answer, not
+                   # the baking one: "is butter or margarine better for you" got a sponge
+                   # instruction, because the health words never say "calories".
+                   "healthier", "healthy", "unhealthy", "better for you", "bad for you", "good for you",
+                   "good for me", "bad for me", "cholesterol", "saturated", "unsaturated",
+                   "trans fat", "diet", "nutrition", "nutritious", "heart", "cut out", "cut down",
+                   "cutting out", "lose weight", "weight", "eat", "eating", "in my diet")),
+    _either("make-bread-or-buy-it",
+            ("make bread", "make my own bread", "bake bread", "bake my own bread",
+             "homemade bread", "making bread", "baking bread", "baking my own"),
+            ("buy bread", "buying bread", "bought bread", "shop bread", "buy it", "from the shop",
+             "from a shop", "supermarket bread"),
+            "Cheaper to make if you bake more than a loaf a week: flour, yeast and salt come to "
+            "about 55p for a large loaf against £1.20 to £2.50 in a shop, but the oven costs 30 "
+            "to 40p a bake and a bag of flour goes stale, so the saving is only real if the bread "
+            "gets eaten. Make it for the taste and the smell; treat the money as a bonus.",
+            avoid=("how do i", "recipe", "sourdough starter", "went wrong", "not rising",
+                   "dough", "knead", "yeast", "flour", "gluten", "machine", "bread maker",
+                   "breadmaker")),
+    _either("book-now-or-wait",
+            ("book now", "book it now", "book the flight", "book flights", "book the flights",
+             "book the ticket", "book the train", "book the hotel", "booking now"),
+            ("wait", "waiting", "hold off", "book later", "leave booking", "leave it"),
+            "Book now if the trip is within about six weeks or the dates cannot move: short-haul "
+            "fares are lowest six to eight weeks out, and the cheap seats are gone after that. "
+            "Wait if it is more than three months away and the dates can move - long-haul is "
+            "cheapest two to four months ahead - and Tuesday and Wednesday flights cost less "
+            "than Friday ones.",
+            avoid=("how do i", "refund", "cancel", "cancelled", "missed", "check in",
+                   "baggage", "luggage", "passport", "visa", "airport", "hotel is", "booking com")),
 ]

@@ -14,13 +14,14 @@ import string
 
 from .. import memory as mem
 from ..compose import NEGATORS, goodnews, lead, pick, with_name
+from ..compose import fit as shapes
 from ..compose.repair import amends_to
 from ..compose import trouble as trouble_reading
-from ..knowledge import (by_topic, cooking, dishes, entries as all_entries, freshness,
-                         home, meat_in_a_card, pets, shopping, topics, work)
+from ..knowledge import (by_topic, cooking, dishes, entertainment, entries as all_entries,
+                         freshness, home, meat_in_a_card, pets, shopping, topics, work)
 from ..knowledge.lookup import (EXPLAIN_FILLER, EXPLAIN_LEADS, about_the_chat,
                                 about_the_topic, find, leans_on_a_subject,
-                                names_its_own_subject)
+                                names_its_own_subject, names_nothing_of_its_own)
 from ..knowledge.lookup import entry as lookup_entry
 # `repeat` is read by `_answer` on every line, so it is imported with the rest: inside the hook
 # that declares a request for less, the import is there for `TAKES_AS_IT_COMES` and missing for
@@ -29,16 +30,18 @@ from ..memory import (ack, deadline, healing, named, narrow as length, onset, pr
                       taste, when)
 # not `hope` or `matters` on their own: `_answer` and its helpers use those names for other things
 from ..memory import hope as a_wish, matters
+from ..memory import topics as memory_topics  # not `topics`: this module has a `topics()` of its own
 from ..knowledge.maths import solve
 from ..understanding.kinds import ANSWERING_A_QUOTED_ASK, SUMMONS_WHO
 from ..memory import a_year_of_birth
-from ..memory import baking, trips
+from ..memory import baking, doing_it, trips
 from ..memory import repeat
 from ..memory import outfit
 from ..memory import (followup_reading, keywords, recall, remember_answer, resize,
                      same_as_before, the_ask_about_the_thing_it_points_at)
 from ..memory import stuck as stuck_line
 from ..memory import again as same_again  # the short of an answer already on the screen
+from ..memory.again import NOTHING_MORE  # said of an answer with nothing further in it
 from ..memory.again import AGAIN_HELP, DETAIL_AGAIN, SAME_ADVICE  # the lead-ins on a repeat
 # A request for less ("keep it brief", "shorter") is the answer they already have, cut down, and
 # it is read before the lookup so the short form comes back rather than a new entry.
@@ -67,7 +70,7 @@ from ..memory import (a_detail_of_the_thing_we_hold, answers_about_another_creat
 # I know well, sorry".
 from ..memory import repeat
 from ..memory.narrow import (CAUSE, RATE, SIGNALS, asks_a_part, flat, kind_of as asked_kind,
-                             narrow, the_part_asked, words_of)
+                             narrow, the_outcome_asked, the_part_asked, words_of)
 from ..understanding import understand
 
 PRIORITY = 0
@@ -190,8 +193,19 @@ def _without_a_lead(text):
 
 
 def _opening(text, words=8):
-    """The first few words of a reply: two answers that open the same way are the same answer."""
-    return " ".join(_without_the_verdict(text).lower().split()[:words])
+    """The first few words of a reply: two answers that open the same way are the same answer.
+
+    A card read out to a why line has its cause sentence moved to the front
+    (`bot/compose/lead.cause_first`), and it is still the card that opened on its fix a turn ago.
+    So a leading sentence that names itself as the cause is stepped over before the opening is
+    read: without that, "why is my drain slow" then "how do i fix it" handed the whole card back
+    a second time, because the repeat reading no longer recognised the answer it had just given.
+    """
+    said = _without_the_verdict(text) or ""
+    parts = re.split(r"(?<=[.!?])\s+", said.strip())
+    while len(parts) > 1 and lead._CAUSE_SENTENCE.match(parts[0]):
+        parts.pop(0)
+    return " ".join(" ".join(parts).lower().split()[:words])
 
 
 def _most_of_it_said(reply, memory, keep=3, least=40):
@@ -232,12 +246,10 @@ def _said_before(reply, memory, keep=3):
 # The same line asked again gets the same answer, and saying it word for word twice in a row
 # is what a machine does (STYLE.md, "Never answer the same way twice in a row"). The answer is
 # still right, so it is given again rather than replaced; what changes is that the bot says it
-# is giving it again, which also leaves room for the person to say what did not work.
-AGAIN = (
-    "Same as before: {reply}",
-    "As I said: {reply}",
-    "Like I said: {reply}",
-)
+# is giving it again, which also leaves room for the person to say what did not work. The
+# wordings are the shared pool's, in `bot/memory/again` and `bot/memory/topics`, so that every
+# lead-in the bot can put in front of an answer is in one place and can be read back off it.
+AGAIN = tuple(memory_topics.REPEAT) + same_again.LIKE_I_SAID
 # Asked a third time, the answer is not landing, so the bot says so and asks what went wrong
 # rather than handing over the same paragraph again.
 # The lead-ins that name the detail a follow-up asked about ("what about the biting"), and what
@@ -251,6 +263,39 @@ NOT_A_DETAIL = frozenset("""
 think thinks thinking thought know knows knowing say says saying tell tells telling ask asks
 asking wonder wonders wondering guess guesses guessing consider considers considering decide
 decides deciding choose chooses choosing
+# "reckon" is what a lot of people say for "think", and it is an ordinary word, so the repeat
+# lead-in named it: "why am i always tired do u reckon" after the tiredness card came back
+# "Nothing separate for reckon - it is the same advice: ...", which is a sentence about a word
+# nobody asked about, and it reads worse than the plain "same answer" because "reckon" is not a
+# part of anything. The line still carries the word - it is how the opinion is asked for, and the
+# readers that answer one key on it - so it is dropped here, where the lead-in is chosen, and not
+# from the reading.
+reckon reckons reckoned reckoning rekon rekons reckin
+""".split()) | frozenset("""
+# Nor is the word a negation hangs on: "i dont know why" after the low-mood card came back
+# "There is nothing separate for dont - it is the same advice", and "i have no idea why" named
+# "idea". A line that says where the person has got to is not naming a part of the answer, so
+# the words of not-knowing name nothing here.
+dont doesnt didnt cant cannot couldnt wouldnt wont shant sure idea explain explains explained clue
+""".split()) | frozenset("""
+# The same verb said the other ways people say it: how somebody regards the thing is the asking,
+# whatever verb carries it. "i want to start running but i find it boring" reached this lead-in as
+# "Nothing separate for find - it is the same advice", where the word named is the person's own
+# verb and the answer says nothing about it. The line is a repeat ask and gets the plain lead-in.
+find finds finding found reckon reckons reckoning suppose supposes supposing imagine imagines
+imagining feel feels feeling felt hope hopes hoping wish wishes wishing
+""".split()) | frozenset("""
+# How somebody hopes it will go is not a part of the thing either: "i want to start running but i
+# hope it gets easier" came back "Nothing separate for easier - it is the same advice", which names
+# a comparison the answer was never about. A comparative is the shape of the wish, not a subject.
+easier easy better worse harder faster slower quicker sooner longer cheaper dearer
+""".split()) | frozenset("""
+# Nor is the opinion itself a part of the thing, and it is the word people reach for: covering
+# the verb of thinking left the adjective behind, so "i want to start running but i find it dull"
+# still came back "Nothing separate for dull - it is the same advice" while its nearest synonym
+# "boring" was answered. How they regard the thing is not a part of the answer, whichever word
+# they regard it with.
+boring dull tedious pointless rubbish repetitive monotonous uninteresting
 """.split()) | frozenset("""
 # A time is not a part of the thing either: "she had a fall a week ago" came back "Nothing
 # separate for ago - it is the same advice", which names a word nobody was asking about. The
@@ -335,6 +380,25 @@ FILLER_WORD = frozenset("""
     actually really honestly seriously literally basically obviously definitely absolutely
     certainly clearly surely probably perhaps maybe quite rather even only just still again
     though although anyway anyhow then ok okay right please sure well so yes yeah
+    hmm hmmm hm mhm mm um umm uhm uh er erm ah ahh oh ohh eh
+""".split())
+
+# A word that says what the thing is *like* is not a part of the answer either, and neither is the
+# determiner in front of it. "when is the best time to buy a laptop" answered the calendar, and the
+# same question said the other way - "when should i buy a new laptop" - came back "Nothing separate
+# for **a new** - it is the same advice: Laptops and tablets are cheapest on Black Friday ...". The
+# walk back from the end of the line had skipped `laptop` (the chat had just used it, so it names
+# nothing new) and then taken the quality word beside it as the name of a part of the answer. There
+# is no part of an answer called "a new", and "Same for a new: ..." is not a sentence: a quality
+# word describes the thing and never names a piece of what the answer says about it. The same fault
+# put "Same for a new" on the tv, the car and the phone, and "No separate fix for cheapest" on a
+# bed.
+A_QUALITY_WORD = frozenset("""
+    new newer newest old older oldest young younger youngest
+    cheap cheaper cheapest expensive pricey costly dear
+    best better worst worse decent proper secondhand latest
+    big bigger biggest small smaller smallest large larger huge tiny
+    long longer longest short shorter shortest tall heavy light
 """.split())
 
 # A word that only joins one clause to the next is not a part of the thing. After the rescue-dog
@@ -361,6 +425,17 @@ A_PLEA_FOR_TIPS = re.compile(
     r"want some|more|any more|another|a few|any other)\s+)?"
     r"(?:tips?|advice|pointers?|tricks?|hints?)"
     r"(?: (?:at all|then|please|too|now|really|anyway))*[.!?]*$", re.I)
+
+
+# A word no name in English contains: an auxiliary, a question word, a joining word. Asked the
+# calendar question a second way - "when are laptops cheapest" - the plural reader walked up to
+# three words back from `laptops` and took the question with it, and the person was told "Everything
+# about **when are laptops** is in what I said above". A name is the thing and its modifiers, so
+# both walks back over a candidate stop at one of these.
+NOT_IN_A_NAME = A_JOINING_WORD | frozenset("""
+    am is are was were be been being do does did done have has had having should would could can
+    will shall may might must not
+""".split())
 
 
 def _in_short(reply):
@@ -429,6 +504,87 @@ def _flat(text):
 # at it in one sentence. Two wordings, because the answer either names the part or it does not -
 # "the 28 tram" is on the Lisbon card, so the trams are in the answer rather than missing from it,
 # while a card about a phone battery that never says "screen" cannot claim to have covered it.
+A_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
+A_CLAUSE_FINE = re.compile(r"[,;:]\s+|\s+\u2014\s+")
+A_CLAUSE_BREAK = re.compile(r";\s+|:\s+|\s+\u2014\s+|,\s+(?:and|plus|but|so|which|then|with)\s+")
+A_OPENS_A_CLAUSE = re.compile(r"^(?:and|plus|but|so|which|then|with|also|also\s)\b", re.I)
+A_SAYS_NOTHING = frozenset(("it", "this", "that", "they", "them", "one", "ones"))
+
+
+# A clause says something when it has a figure in it or a verb: "Insurance 8 to 20 a month",
+# "Ask the vet about the rest". "Pubs away from Temple Bar for music" names the part and says
+# nothing - it is the card's list with the sentence taken off it, so the pointer is better.
+A_SAYS_SOMETHING = re.compile(
+    r"\b(?:is|are|was|were|be|been|has|have|had|does|did|do|can|could|will|would|should|must|"
+    r"need|needs|cost|costs|keep|keeps|want|wants|get|gets|give|gives|use|uses|take|takes|book|"
+    r"books|buy|buys|put|puts|try|tries|ask|asks|check|checks|avoid|avoids|work|works|help|"
+    r"helps|last|lasts|make|makes|mean|means|come|comes|go|goes|say|says|pay|pays|save|saves|"
+    r"hold|holds|fit|fits|wear|wears|eat|eats|drink|drinks|start|starts|set|sets|add|adds|mix|"
+    r"stir|stirs|cook|cooks|freeze|freezes|leave|leaves|order|orders|ring|rings|call|calls|wait|"
+    r"waits|run|runs|sit|sits|stand|stands|open|opens|close|closes|clean|cleans|wash|washes|"
+    r"dry|dries|walk|walks|feed|feeds|soak|soaks|cover|covers|worth)\b", re.I)
+
+
+def _says_something(clause):
+    """Whether the clause reads as a sentence rather than a list with the sentence taken off."""
+    return bool(A_SAYS_SOMETHING.search(clause) or re.search(r"\d", clause))
+
+
+def _the_part_in_the_answer(answer, detail):
+    """The clause of `answer` that names the detail, said as its own sentence, or "".
+
+    A follow-up that names a part of the last answer is owed the part. The answer above is on the
+    screen, so the clause is not read out again - but a sentence about the conversation instead of
+    about the thing ("Everything about insurance is in what I said above - there is no more than
+    that") is what a person gets when the turn cannot find the clause, and it withholds the only
+    line that answers them. Here it is found by name and handed back on its own.
+
+    Only a clause that stands up as a sentence is used: four words or more, not opening on a
+    joining word, and not a bare pronoun. A fragment is worse than the pointer.
+    """
+    last = (detail.split() or [""])[-1].lower()
+    if len(last) < 3:
+        return ""
+    words = WORD.findall(str(answer or "").lower())
+    if len(words) < 5:
+        return ""
+    # The loose split first, so the clause handed back keeps as much of its own sentence as still
+    # reads as one; a list inside a sentence ("jabs and a microchip 60 to 100, neutering 60 to
+    # 120 ..., insurance 8 to 20 a month") is one piece at that level and drops to the commas
+    # only when no piece at the loose level both names the part and stands up.
+    for splitter in (A_CLAUSE_BREAK, A_CLAUSE_FINE):
+        for sentence in A_SENTENCE_BREAK.split(str(answer or "")):
+            for clause in splitter.split(sentence):
+                clause = clause.strip(" ,;:-\u2014")
+                if not clause:
+                    continue
+                body = WORD.findall(clause.lower())
+                if not any(_names_it(word, last) for word in body):
+                    continue
+                if len(body) < 4 or len(body) > 18:
+                    continue
+                if A_OPENS_A_CLAUSE.match(clause):
+                    continue
+                if body[0] in A_SAYS_NOTHING:
+                    continue
+                if not _says_something(clause):
+                    continue
+                clause = clause[0].upper() + clause[1:]
+                if clause[-1] not in ".!?":
+                    clause += "."
+                return clause
+    return ""
+
+
+def _names_it(word, last):
+    """Whether a word of the answer is the detail by name, or the stem of it."""
+    if word == last:
+        return True
+    if len(word) < 4 or len(last) < 4:
+        return False
+    return word.startswith(last) or last.startswith(word)
+
+
 SAID_ABOVE = (
     "Everything about {detail} is in what I said above \u2014 there is no more than that.",
     "All there is on {detail} is in the answer above, and nothing beyond it.",
@@ -484,7 +640,8 @@ def _a_part_named_in_the_line(text, memory, answer):
         before = index - 1
         while (before >= 0 and len(words) < 3 and raw[before] not in DETERMINERS
                and raw[before] not in ASK_ONLY and raw[before] not in STOP_BEFORE_A_PART
-               and raw[before] not in PRAISE_WORD):
+               and raw[before] not in PRAISE_WORD and raw[before] not in NOT_IN_A_NAME
+               and raw[before] not in A_QUALITY_WORD):
             words.insert(0, raw[before])
             before -= 1
         if any(word in SUBJECT_WORD for word in words):
@@ -792,6 +949,23 @@ def _ask_verb(text):
     return str(match.group(1) or "").lower() if match else ""
 
 
+def _the_outcome_owed(item, text):
+    """The sentence this row owes a line that asks how its subject turns out, or None.
+
+    "will it be alright" after the phone went in the sink asks about the subject the last answer
+    was about, and every sentence that answers it is already on the screen. A row that declares
+    one (`entry(..., outcomes=(("survives", "..."),))`) has written that answer as a line of its
+    own, so the turn gives the person that instead of a paragraph they have read.
+    """
+    which = the_outcome_asked(text)
+    if not which or item is None:
+        return None
+    for shape, sentence in getattr(item, "outcomes", ()) or ():
+        if shape == which and str(sentence or "").strip():
+            return sentence
+    return None
+
+
 def _said_before_now(text, memory):
     """The words the person has already used in this chat, before this line."""
     seen = set()
@@ -826,8 +1000,70 @@ def _a_fact_about_the_person(memory):
             and bool(understood.get("first_person")))
 
 
-def _the_detail_named(text, memory=None):
+def _the_detail_named(text, memory=None, with_quality=False):
+    """The part a follow-up names, or "" when it names nothing the answer has not already said.
+
+    A follow-up that names a part of the answer worth its own sentence is framed as one ("Same for
+    the trams: ..."). A follow-up that says the thing again in more words names no new part, and
+    the frame announced the answer back at the person: after the banging card, "its a banging sound
+    when the heating comes on" came back "Same for the heating: a knocking that comes at the end of
+    a burn is limescale on the heat exchanger..." - a different fault, invented out of a word the
+    answer had just used. If every word of the part is already in the answer above it, there is
+    nothing separate being named, and the reply is found without the frame.
+    """
+    named = _the_part_named(text, memory, with_quality)
+    if named and _a_restatement_of_the_answer(memory) and _all_of_it_in_the_answer(named, memory):
+        return ""
+    return named
+
+
+def _a_restatement_of_the_answer(memory):
+    """True when the line tells the bot something rather than asking about a part of the answer.
+
+    A question about a part ("what about the crate") is the framing's whole use, so it is never
+    taken from it. A statement is the person adding what they know to the same subject, and what it
+    names is the subject, not a part - the same test `_a_fact_about_the_person` makes.
+    """
+    understood = memory.get("understood") if isinstance(memory, dict) else None
+    if not isinstance(understood, dict):
+        return False
+    return understood.get("kind") == "statement" and not understood.get("asks")
+
+
+def _all_of_it_in_the_answer(named, memory):
+    """True when the answer just given already says every word of the part named."""
+    said = WORD.findall(str(mem.last_bot(memory if isinstance(memory, dict) else {}) or "").lower())
+    words = [word for word in WORD.findall(str(named or "").lower())
+             if len(word) > 2 and word not in A_JOINING_WORD]
+    return bool(words) and all(word in said or stem(word) in said for word in words)
+
+
+# A word straight after a clause's subject is that clause's verb, and the line says so without
+# naming the verb: "he bites when i stroke him" named `stroke` and answered "Same for stroke: that
+# is usually over-stimulation ...", where nobody was talking about a part of the answer called
+# "stroke". `stroke` is not on any verb list, and a list can only ever cover the verbs on it, so the
+# test is the position rather than the word.
+CLAUSE_OPENER = frozenset("when whenever if once after before while until as".split())
+CLAUSE_SUBJECT = frozenset("i you he she it we they u".split())
+NUMBER_OR_OWNER = frozenset("the my your his her their our this that a an".split())
+
+
+def _the_clause_s_verb(raw, index):
+    """True when the word at `index` is the verb of a when-or-if clause, whatever the word is."""
+    if index >= 2 and raw[index - 2] in CLAUSE_OPENER and raw[index - 1] in CLAUSE_SUBJECT:
+        return True
+    # "when the heating comes on", "when my boiler fires": an opener, then a determiner and the
+    # thing itself, and the next word is what the thing does.
+    return bool(index >= 3 and raw[index - 3] in CLAUSE_OPENER
+                and raw[index - 2] in NUMBER_OR_OWNER)
+
+
+def _the_part_named(text, memory=None, with_quality=False):
     """The word a follow-up names as the part of the thing it asks about ("the biting"), or "".
+
+    `with_quality` reads the line the way it was read before a quality word was known to name no
+    part, so the caller can see what the name would have been and answer the repeat rather than
+    stand down (see `_only_a_quality_name`).
 
     The word is kept with the word in front of it when that is a determiner, so the lead-in reads
     "Same for the biting" rather than "Same for biting".
@@ -870,7 +1106,8 @@ def _the_detail_named(text, memory=None):
         # whose stem is a keyword is that keyword.
         if word not in wanted and stem(word) not in wanted:
             continue
-        if word in PRAISE_WORD or word in NOTHING_WORD or word in FILLER_WORD:
+        if (word in PRAISE_WORD or word in NOTHING_WORD or word in FILLER_WORD
+                or (word in A_QUALITY_WORD and not with_quality)):
             continue
         if verb and (word == verb or word.startswith(verb) or verb.startswith(word)):
             continue
@@ -881,6 +1118,8 @@ def _the_detail_named(text, memory=None):
         # behind "the" or "my" it is a noun ("the seating", "the wedding"), otherwise it is a verb.
         if raw[index - 1] not in DETERMINER_BEFORE_DETAIL and (
                 word in kinds.VERBISH
+                or word in kinds.VERB_THIRD
+                or _the_clause_s_verb(raw, index)
                 or (len(word) > 4 and word.endswith(("ed", "ing")))):
             continue
         if word in already:
@@ -915,6 +1154,21 @@ def _the_detail_named(text, memory=None):
             return ""
         return word
     return ""
+
+
+def _only_a_quality_name(text, memory=None):
+    """Whether the part the line names is a quality word and nothing else ("a new"), or False.
+
+    A quality word says what the thing is like and names no piece of what the answer says about
+    it, so such a line names no part at all. The caller still has to know that a part *was* read
+    there: a repeat of a question the answer already covers must be answered as a repeat, not
+    stood down to a search hedge, and reading the line the old way says which lines those are.
+    """
+    named = _the_detail_named(text, memory, with_quality=True)
+    if not named:
+        return False
+    words = [word for word in named.split() if word not in DETERMINERS]
+    return bool(words) and all(word in A_QUALITY_WORD for word in words)
 
 
 # A word in front of the part and the part are one name ("a scratch post", "my new bike"), and the
@@ -954,11 +1208,30 @@ def _named_whole(raw, index):
         if before in DETERMINER_BEFORE_DETAIL:
             return " ".join(raw[back - 1:index + 1])
         if (word in STOP_BEFORE_A_PART or word in BACK_POINTS or word in NOT_A_DETAIL
-                or word in FILLER_WORD or word in NOTHING_WORD or word in PRAISE_WORD):
+                or word in FILLER_WORD or word in NOTHING_WORD or word in PRAISE_WORD
+                or word in NOT_IN_A_NAME or word in A_QUALITY_WORD):
             return ""
         if word in kinds.VERBISH or (len(word) > 4 and word.endswith(("ed", "ing"))):
             return ""
     return ""
+
+
+FIRST_PERSON = frozenset("""i im ive id ill i'm i've i'd""".split())
+
+
+def _their_own_state(text):
+    """True when the line is about the person themselves and asks nothing of the thing.
+
+    A follow-up that names no part of the answer and says how the person is ("i dont know why",
+    "im not sure why") has nothing to be told about: the card on the screen above is not a second
+    answer, and reading part of it out again is the bot talking at somebody who has just said
+    they do not know.
+    """
+    text = str(text or "")
+    if ASKS_ABOUT_HOW_IT_TURNED_OUT.search(text) or _ask_verb(text):
+        return False
+    raw = WORD.findall(text.lower())
+    return bool(raw) and raw[0] in FIRST_PERSON
 
 
 def _named_in(part, detail):
@@ -1194,7 +1467,7 @@ def _times_the_answer_was_said(reply, memory):
     return times
 
 
-def _with_detail(detail, part, times, text="", memory=None):
+def _with_detail(detail, part, times, text="", memory=None, card=""):
     """`part` with the detail in front of it, said as what it is: the subject, or the same advice."""
     body = str(part or "").strip()
     if not detail or not body:
@@ -1211,18 +1484,39 @@ def _with_detail(detail, part, times, text="", memory=None):
         # has not changed, and saying "Nothing separate for think" made it read as one word doing
         # another's job. The plain repeat lead-in is the honest one.
         return same_again.AGAIN[min(times, len(same_again.AGAIN)) - 1].format(reply=body)
-    pool = DETAIL_AGAIN if _named_in(body, detail) else SAME_ADVICE
-    return pool[min(times, len(pool)) - 1].format(detail=detail, reply=_small_letter(body))
+    # The lead-in may only name what the answer itself names: see
+    # `again.the_name_the_answer_says`, the one rule both frames use. It fixes the ask's own verb
+    # being glued into the name ("a scratching post help") and the fragment left when the line
+    # says "a bigger" and the answer only ever says "bigger".
+    # The dictionary is the whole answer the person has, not only the sentence handed back: the
+    # amount sentence of the paint card says "emulsion" and never "paint", while the card's own
+    # opening names the paint. Reading the sentence alone dropped the person's word from the
+    # lead-in and fell back to the plain frame, when naming it back is what the lead-in is for.
+    named = same_again.the_name_the_answer_says(body, detail, card=card)
+    if not named and _a_yes_no_ask(memory):
+        # Nothing the lead-in could name, and a yes/no ask has no other word to build one from.
+        # "Nothing separate for a bigger" claims the answer covers a fragment; the plain repeat
+        # lead-in says the answer has not changed and hands it over with nothing glued in.
+        return same_again.AGAIN[min(times, len(same_again.AGAIN)) - 1].format(reply=body)
+    pool = DETAIL_AGAIN if named else SAME_ADVICE
+    return pool[min(times, len(pool)) - 1].format(detail=named or detail,
+                                                  reply=_small_letter(body))
+
+
+def _a_yes_no_ask(memory):
+    """True when the line asks yes or no ("would a service help")."""
+    understood = memory.get("understood") if isinstance(memory, dict) else None
+    if not isinstance(understood, dict):
+        return False
+    return "yesno" in (understood.get("asks") or ())
 
 
 # The answer given again for a line that names no part of it ("what else can i do with it"): there
 # is no detail to put in the lead-in, so the lead says the entry has nothing further and the short
-# form of the answer follows, rather than the paragraph word for word.
-NOTHING_MORE = (
-    "Nothing more on it I'm afraid: {reply}",
-    "That is all I have on it: {reply}",
-    "There is nothing further to add: {reply}",
-)
+# form of the answer follows, rather than the paragraph word for word. The wording lives with the
+# other frames, in `bot/memory/again` (as `NOTHING_MORE`), because every lead-in has to be
+# readable back to its answer in one place: a family written here was not, and the answer under
+# it read as a new one.
 
 
 # The words that ask for the rest of what the entry knows. A line with one of them is not asking
@@ -1291,7 +1585,7 @@ def _the_detail_said_again(reply, text, memory):
         # after the women's-vote answer was handed "The campaign for women's votes split into..."
         # behind the lead-in, and the dates the person asked for were in the next sentence.
         short = _repeat_short(reply, text, memory) or reply
-    return _with_detail(detail, short, times, text, memory)
+    return _with_detail(detail, short, times, text, memory, card=reply)
 
 
 def _detail_lead_in(text, part, memory):
@@ -1310,7 +1604,16 @@ def _detail_lead_in(text, part, memory):
         break
     if not times:
         return ""
-    return _with_detail(detail, part, times, text, memory)
+    return _with_detail(detail, part, times, text, memory, card=_the_answer_on_screen(memory))
+
+
+def _the_answer_on_screen(memory):
+    """The whole answer the person is looking at, which is the dictionary a lead-in may name from."""
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    for turn in reversed(list(turns or ())[-2:]):
+        if isinstance(turn, dict) and isinstance(turn.get("bot"), str) and turn["bot"].strip():
+            return turn["bot"]
+    return ""
 
 
 def _the_part_said_again(part, text, understood, memory):
@@ -1343,9 +1646,28 @@ def _already_said(reply, memory, keep=3):
         if not isinstance(turn, dict):
             continue
         bot = " ".join(str(turn.get("bot") or "").lower().split())
-        if bot and (bot == mine or bot.endswith(mine)):
+        if bot and (bot == mine or bot.endswith(mine) or _the_same_sentences(bot, mine)):
             return True
     return False
+
+
+def _the_same_sentences(said, mine):
+    """True when two replies are the same sentences with one of them moved to the front.
+
+    A row that declares the sentence it owes a whether-line (`lead=("yesno", sentence)`) answers
+    with that sentence first and the rest of the card after it, so the card that is on the screen
+    is the entry's own reply with its sentences in a different order. Read as a string that is not
+    the answer already given, and a follow-up about the card reaches it again as if new: "can i
+    compost cooked food" / "and bones?" lost "The same goes for the bones: no cooked food or meat"
+    and got the whole paragraph back instead.
+    """
+    if not said or not mine or said == mine:
+        return False
+    # Compared in lower case here rather than trusted from the caller: a call site that forgets to
+    # flatten the case would otherwise make two replies the same sentences on case alone.
+    parts = [part.lower() for part in re.split(r"(?<=[.!?])\s+", said) if part]
+    others = [part.lower() for part in re.split(r"(?<=[.!?])\s+", mine) if part]
+    return len(parts) > 1 and len(parts) == len(others) and sorted(parts) == sorted(others)
 
 
 # "who are you", "what can you do", "where are you": a question about the bot carries no subject
@@ -1398,11 +1720,28 @@ _A_LENGTH = re.compile(
     r"|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty)\s+"
     r"(?:to\s+\w+\s+)?(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b", re.I)
 
+# A length that is spent doing the thing, rather than a wait before it or a total to reach it:
+# "20 minutes", "half an hour", "ten minutes a day". An answer that opens with one of these is
+# answering "how long should i ..." in the form it was asked.
+_A_DURATION = re.compile(r"\b(?:minutes?|mins?|hours?|hrs?)\b", re.I)
+
+
+# An answer that defines the unit is not a length to spend doing the thing. "how long should i
+# practise each day" reached the row that says what a day is ("A day is 24 hours - the time from
+# one noon to the next") and that answer holds a figure of hours, so it looked like the length the
+# person asked for. The unit's own definition answers "how long is a day", never "how long should
+# i do this for".
+_DEFINES_THE_UNIT = re.compile(
+    r"^\W*(?:a|an|one|the)\s+(?:second|minute|hour|day|week|month|year|decade|century)s?\b"
+    r"\W+(?:is|are|has|have|takes|lasts|means)\b", re.I)
+
 
 def _answers_a_length(item, reply):
     """Whether this entry answers a length ask: its own key asks one and its answer gives one."""
     reply = str(reply or "")
     if not reply or any(mark in reply for mark in ("\u00a3", "$", "\u20ac")):
+        return False
+    if _DEFINES_THE_UNIT.match(reply):
         return False
     if not _A_LENGTH.search(reply):
         return False
@@ -2487,6 +2826,7 @@ day days week weeks month months year years morning evening night time times onc
 weekly monthly yearly every each a an all the at in on of and but to for with it them they him
 her these those i we my our just still also really always never usually sometimes about
 much many lot little bit twice three four five six two one few several
+last next ago past
 """.split())
 # The asking words of a question that names no thing of its own, so a line made of these and an
 # object pronoun is a question about the thing in hand: "how long will it take", "can i make it
@@ -2498,31 +2838,53 @@ take need want have has keep use get put make cook freeze reheat serve store pre
 it that this these those them they him her one ones
 """.split())
 
+# A colour said of the thing in hand is that thing's property, not a thing of its own: "i painted
+# it green last year" is a detail about the room, and "green" on its own reached the bag of salad
+# in the fridge. The colour belongs to the line's own object, so it cannot make the line a
+# follow-up in its own right.
+SAID_OF_THE_THING = frozenset("""
+red blue green yellow white black grey gray brown pink purple orange cream beige navy teal
+turquoise lilac mauve magenta gold silver bronze ivory charcoal
+""".split())
+
 
 def _off_the_topic(understood, memory):
-    """(the topic's key words, the domain of the entry that answers it) when this line is a
-    detail about that topic, else (empty, "")."""
+    """(the topic's key words, the domain of the entry that answers it, whether the line says what
+    the thing is) when this line is a detail about that topic, else (empty, "", False).
+
+    The third part is what tells a detail that names something of its own from a detail that only
+    says what was done: "i painted it green last year" says what the room is, and the salad in the
+    fridge was answering it; "i painted it last year" says what they did, and leaves the subject
+    to the chat - so the fence below is only thrown around the line that says what the thing is.
+    """
     if not isinstance(understood, dict) or not isinstance(memory, dict):
-        return frozenset(), ""
+        return frozenset(), "", False
     text = understood.get("clean") or understood.get("text") or ""
     detail = "?" not in text and bool(DETAIL_OF.search(text))
     # A question with an object pronoun and nothing else of its own is about the thing too.
     asking = bool(ASK_OF.search(text) and OBJECT_PRONOUN.search(text))
     if not (detail or asking):
-        return frozenset(), ""
-    allowed = REPORT_WORDS | DO_VERBS | (ASK_WORDS if asking else frozenset())
+        return frozenset(), "", False
+    allowed = (REPORT_WORDS | DO_VERBS | (ASK_WORDS if asking else frozenset())
+               | (SAID_OF_THE_THING if detail else frozenset()))
     # Anything it names of its own makes it a follow-up in its own right: "i bleed the
     # radiators every year" says what it is about, so it is left to the entries as it is.
+    # A word in the form a person puts a verb ending on is still the allowed word: "i painted it
+    # green last year" said "painted" where the list holds "paint", so the line was read as one
+    # naming a thing of its own and the salad in the fridge answered a question about a room.
+    says_what_it_is = False
     for word in said_topic.words(text):
-        if word.isdigit() or word in allowed:
+        if word.isdigit() or word in allowed or (said_topic.forms(word) - {word}) & allowed:
+            if detail and word in SAID_OF_THE_THING:
+                says_what_it_is = True
             continue
-        return frozenset(), ""
+        return frozenset(), "", False
     leans_on = understood.get("leans_on")
     if not isinstance(leans_on, dict):
-        return frozenset(), ""
+        return frozenset(), "", False
     said = str(leans_on.get("text") or "")
     if not said:
-        return frozenset(), ""
+        return frozenset(), "", False
     # What the detail is about is the answer that is on the screen: the entry behind it, and the
     # topic's own words. An entry from another domain is answering a different question that
     # happens to have the detail's words in it.
@@ -2535,13 +2897,13 @@ def _off_the_topic(understood, memory):
     # something, so "eat" in "she doesnt eat meat" does not make a workout answer about her.
     words = {word for word in said_topic.keywords(said)
              if word not in REPORT_WORDS and word not in DO_VERBS and word not in ASK_WORDS}
-    return frozenset(words), domain
+    return frozenset(words), domain, says_what_it_is
 
 
 def _from_another_domain(item, off_topic):
     """True when the entry is about neither the topic's words nor the topic's own kind of thing."""
-    words, domain = off_topic
-    if not domain or str(getattr(item, "domain", "") or "") == domain:
+    words, domain = off_topic[0], off_topic[1]
+    if domain and str(getattr(item, "domain", "") or "") == domain:
         return False
     return not _names_a_topic_word(item, words)
 
@@ -2758,7 +3120,18 @@ def _is_about(item, subject):
     words = [word for word in subject.split() if word not in DESCRIBING] or subject.split()
     head = (words or [""])[-1]
     head = head.rstrip("s") or head
-    return bool(head) and head in _key_words(item)
+    if not head or head not in _key_words(item):
+        return False
+    if head in kinds.VERBISH or (len(head) > 4 and head.endswith(("ed", "ing"))):
+        # A whole clause can stand where the thing should be, and a clause puts its verb last:
+        # "my headphones stopped working" is about the headphones, and the pension entry answers
+        # "how long does it last" only because "working" is one of its keys ("stop working").
+        # When the head is the verb, the entry also has to name something else the clause says.
+        named = [word for word in words if word not in kinds.VERBISH
+                 and not (len(word) > 4 and word.endswith(("ed", "ing")))]
+        keys = _key_words(item)
+        return any(word.rstrip("s") in keys or word in keys for word in named)
+    return True
 
 
 # Where a thing is cooked or kept is not a new subject: "how long does it keep in the fridge" and
@@ -2801,6 +3174,33 @@ year years date happen happened done
 def _only_a_property(words):
     """True when the line names no subject, only the property it asks about."""
     return bool(words) and not [word for word in words if word not in PROPERTY_WORDS]
+
+
+# A property word can also be the thing itself: a cold is an illness, a light is a lamp, a price
+# is what something costs, a date is when it happens. The words are in PROPERTY_WORDS because the
+# same word asks about a property ("how cold is it", "what price is that"), so the article is what
+# tells the two apart. Without this, "i have a cold" -> "how long does a cold last" read the
+# second line as a bare length ask about the first answer, and the greeting said how long a job
+# takes instead of answering the cold.
+PROPERTY_WORD_THAT_NAMES_A_THING = re.compile(
+    # A determiner before the word makes it a thing: "a cold", "my light", "the price".
+    r"\b(?:a|an|the|my|your|his|her|their|our|this|that|these|those|any|no)\s+"
+    r"(?:colds?|heats?|lights?|darks?|prices?|costs?|sizes?|times?|dates?|years?|days?"
+    r"|starts?|finishes?)\b"
+    # A plural of one of these words is a thing even with no determiner: "how long do colds
+    # last" was still read as a bare length ask, while "how cold is it" keeps the adjective.
+    r"|\b(?:colds|lights|prices|costs|sizes|dates|starts|finishes)\b",
+    re.I,
+)
+
+
+def _a_property_word_names_a_thing(text):
+    """True when a property word in the line is the thing the line is about, not the ask.
+
+    "how long does a cold last" is the cold's question; "how cold is it" is the sky's. Only a
+    line that is otherwise all property words needs this test, so it is cheap.
+    """
+    return bool(PROPERTY_WORD_THAT_NAMES_A_THING.search(str(text or "")))
 
 
 # What a thing costs, said either way round. A person asks "is it expensive" as often as "is
@@ -3356,6 +3756,54 @@ def _the_composer_has_options(memory):
         return False
 
 
+# A question can put two things up without any word of buying in it: "should we go to spain or
+# italy", "the train or the coach". `CHOICE_CONTEXT` reads the buying verbs, so a choice like
+# that was invisible to the choice reader, and the answer was a shrug or a request that the
+# person pick the thing the bot had already picked. The two things are the question's own words,
+# and the answer's first word is one of them.
+_AN_ALTERNATIVE = re.compile(r"\b(?:or|vs\.?)\b", re.I)
+_NOT_AN_OPTION = frozenset("""a an the i we you it that this these those and but so if for to of
+in on at by is are was were be been do does did would could should can will go get got one
+both either neither""".split())
+
+
+def _the_option_that_decides(said, reply):
+    """The option of theirs the answer opened with, or '' when it opened with something else."""
+    head = re.split(r"[.!?\u2014:;]", str(reply or "").strip(), 1)[0]
+    in_the_question = set(re.findall(r"[a-z][a-z'\u2019-]*", said.lower()))
+    for word in re.findall(r"[A-Za-z][A-Za-z'\u2019-]*", head)[:5]:
+        low = word.lower()
+        if low in in_the_question and low not in _NOT_AN_OPTION:
+            return word
+    return ""
+
+
+def _the_answer_to_a_choice_behind(memory):
+    """The answer that decided between two things the person put up, or None.
+
+    A choice is not always asked again on the next turn. "should we go to spain or italy" is
+    answered "Italy", then a detail about the kids, then "so which one" - and the answer on the
+    screen is about the kids. Reading only that answer refused a choice the bot had already
+    made. A line that offered two things is the one to read, and its answer's first word is the
+    pick when it is one of those two.
+    """
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    for row in reversed(turns if isinstance(turns, list) else ()):
+        if not isinstance(row, dict):
+            continue
+        said = " ".join(str(row.get("user") or "").lower().split())
+        reply = str(row.get("bot") or "").strip()
+        if not said or not reply or len(said.split()) > 16:
+            continue
+        if not _AN_ALTERNATIVE.search(said):
+            continue
+        option = _the_option_that_decides(said, reply)
+        if not option:
+            continue
+        return f"{option[:1].upper()}{option[1:]}. That is the one I would go for."
+    return None
+
+
 def _the_one_to_pick(text, memory):
     """The sentence of the last answer that decides which one of the things to take."""
     clean = " ".join(str(text or "").lower().split())
@@ -3365,7 +3813,7 @@ def _the_one_to_pick(text, memory):
         return None  # a comparison names the two things, and has an answer of its own
     earlier = _last_answer(memory)
     if not earlier:
-        return None
+        return _the_answer_to_a_choice_behind(memory)
     turns = memory.get("turns") or []
     turn = earlier.get("turn")
     before = ""
@@ -3798,6 +4246,11 @@ WHEN_OF_THE_DAY = re.compile(
 
 def _part_asked(text, memory):
     """The part of the last answer the line asks for, or None when it asks about something else."""
+    if _a_property_word_names_a_thing(text):
+        # "how long does the cold last" names the cold, so it is not a part of the answer on the
+        # screen even though every word in it is a property word. The entry for the cold answers
+        # it; narrowing the last answer gave "Rest, fluids... I can't say how long it will take".
+        return None
     if WHEN_OF_THE_DAY.search(str(text or "")) and asked_kind(text) == "date":
         return None
     earlier = _last_answer(memory)
@@ -4197,6 +4650,32 @@ def _sentence_naming_the_part(reply, text):
     return None
 
 
+# A head that counts the causes instead of naming one, and a head that only says a cause exists:
+# both are labels for the half after the colon. "One heavy thing is the usual cause: a duvet or a
+# bath mat balls up on one side" is one sentence in the washing-machine card, and cut at its colon
+# it answered "why does it do that" with "One heavy thing is the usual cause." - a label with the
+# cause, which was in the half that was dropped, gone.
+COUNTS_THE_CAUSES = re.compile(
+    r"^\s*(?:(?:it|that|this|there)\s+(?:is|are|s)\s+)?"
+    r"(?:(?:usually|often|mostly|nearly always|probably)\s+)?"
+    r"(?:one|ones|a few|a couple|several|a number|a combination|a mix|many|most|some|two|three|"
+    r"a lot|a range|nothing|everything)\b", re.I)
+# The words a head uses to say that a cause exists, or to count one, without naming it. What is
+# left when these are taken out is the subject: "Overwatering is the usual cause" keeps
+# overwatering, "the usual cause" keeps nothing and names nothing.
+NAMES_NO_CAUSE = frozenset("""cause causes reason reasons usual usually common commonest main
+mostly often likely probably real whole only most thing things something anything everything
+one ones part parts bit couple few number several combination mix lot lots many some""".split())
+
+
+def _names_no_cause(head):
+    """True for the head of a colon sentence that labels a cause without naming one."""
+    head = str(head or "")
+    if COUNTS_THE_CAUSES.match(head):
+        return True
+    return not (set(keywords(head)) - NAMES_NO_CAUSE)
+
+
 def _cause_part(part):
     """The side of a colon sentence that gives the reason, or the whole sentence when neither
     side names a cause. A colon can open a list of causes, a step, or the advice that follows
@@ -4206,6 +4685,10 @@ def _cause_part(part):
         return part
     head, tail = part.split(":", 1)
     for candidate in (head, tail):
+        if candidate is head and _names_no_cause(head):
+            # A head that only points at the cause is not the cause: the sentence is kept whole,
+            # because the half after the colon is where the reason actually is.
+            continue
         if CAUSE.search(candidate):
             candidate = candidate.strip().rstrip(",;")
             if candidate and candidate[0].islower():
@@ -5330,6 +5813,19 @@ def _names_its_own_thing(text, memory=None):
     return False
 
 
+def _the_topic_rules_it_out(item, memory):
+    """True when the topic's own words are on the entry's avoid list.
+
+    The knowledge base says which lines an entry is not about, and the topic is a line the
+    person said. An entry that stands down for it cannot be the answer to a follow-up that has
+    no subject of its own: nothing but the topic could have named it.
+    """
+    topic = mem.topics.topic_text(memory) if isinstance(memory, dict) else ""
+    if not topic:
+        return False
+    return bool(mem.topics.keeps_away(topic, topic, item))
+
+
 def _in_context(text, memory, reject=None):
     """The knowledge entry a follow-up is about, by naming the thing it refers to.
 
@@ -5434,6 +5930,15 @@ def _in_context(text, memory, reject=None):
                     return None
                 if _left_out(item, text):
                     return None  # the line names a thing this entry never mentions
+                if _the_topic_rules_it_out(item, memory):
+                    # The words put on the end came from the topic, so an entry the topic itself
+                    # rules out is not this chat's: "what do i need" after "im making a thai
+                    # green curry tonight" was read as "what do i need thai green curry" and
+                    # handed the what-to-order card, which rules itself out for "making" - the
+                    # person cooking tonight was told what to order in. Same test as the one
+                    # that guards the widened reading (`topics.keeps_away`), made here because
+                    # this is the other way a subject gets put back into the line.
+                    return None
                 return item
         return None
     if not fuller or fuller.strip() == text.strip():
@@ -5717,6 +6222,25 @@ def _adds_a_figure(text):
     return bool(A_FIGURE.search(said))
 
 
+# A line that changes a figure the chat already has, rather than one that adds a figure to it: the
+# sum on it replaces the sum before it, so the two are never the same question ("what if i can only
+# do 100" adds a rate, "make it 150 instead" moves one).
+A_PUT_RIGHT = re.compile(r"\b(?:make\s+(?:it|that|them)|instead|rather\s+than|i\s+meant|no\s+wait|"
+                         r"change\s+(?:it|that|them)|put\s+(?:it|that)\s+(?:to|up|down)|"
+                         r"bump\s+(?:it|that)|let'?s\s+say)\b", re.I)
+
+
+def _a_figure_put_right(text):
+    """True when the line moves a figure the chat already gave ("make it 150 instead")."""
+    text = str(text or "")
+    return bool(A_PUT_RIGHT.search(text) and re.search(r"\d", text))
+
+
+def _without_the_figures(line):
+    """The earlier line with its sums taken out, so only its words are handed on."""
+    return " ".join(re.sub(r"[£$]?\b\d[\d,.]*\b", "", str(line or "")).split())
+
+
 def _the_entry_asked_again(text, memory):
     """The entry that answered last, asked this line with its own subject still in it.
 
@@ -5748,7 +6272,14 @@ def _the_entry_asked_again(text, memory):
     line = str(said.get("user") or "").strip()
     if not line:
         return None
-    reading = understand(line + " " + text, memory)
+    # The earlier line is put in front so the entry can see what the ask is about ("how long will
+    # that take" carries no word of a credit card). A figure the line puts right is the one thing
+    # that must not come with it: read with the rate from two turns back in front of it the entry
+    # answered with both - "£2,500 at £200 a month" / "make it 150 instead" -> "£150 at £200 a
+    # month is a single month at that rate", a pot nobody named made out of the rate they were
+    # changing. The words still go in front, so "the car is" is still what the sum is for.
+    earlier = _without_the_figures(line) if _a_figure_put_right(text) else line
+    reading = understand(earlier + " " + text, memory)
     fresh = _payload(item, memory, reading)
     if not isinstance(fresh, str) or not fresh.strip():
         return None
@@ -5824,10 +6355,13 @@ def _the_sentence_owed(text, reply, memory):
     if not plain or not here:
         return None
     at = here.find(plain[:50])
-    if at < 0 or at > 12:
+    if at != 0:
         # the card is not what this reply says: it has been narrowed to one of its sentences, or
-        # wrapped as the answer already given ("Same answer, and it covers this: ..."), or the
-        # reply is another row's altogether. Only a reply that opens on the card gets its verdict.
+        # wrapped as the answer already given ("Same as before: ...", "As I said: ..."), or the
+        # reply is another row's altogether. Only a reply that opens on the card gets its verdict,
+        # because the sentence a row owes belongs in front of the card and not in front of a frame
+        # around it: "It is not an emergency. As I said: A suddenly louder exhaust ..." answers a
+        # line the person asked before with a verdict they have already been given.
         return None
     return item.lead
 
@@ -5845,7 +6379,16 @@ substitute substitutes substitution swap swaps swapping replace replaces replaci
 # got any milk" already read as a swap and never reach the refusal check at all, so a "no double
 # cream" line is the only one that needs this gate to open.
 STAND_IN_PHRASES = ("what can i use", "what do i use", "what should i use", "what else can i use",
-                    "what can i substitute", "in place of")
+                    "what can i substitute", "in place of",
+                    # The short way of asking, after a taste rather than a shortage: "i hate
+                    # broccoli what can i have instead" was neither a stand-in nor a refusal the
+                    # code knew, so the swap row for broccoli was handed back and the line got a
+                    # search hedge.
+                    "instead", "what can i have", "what could i have", "what else can i have",
+                    # The other way of asking it, which needs no stand-in at all: "i dont like
+                    # garlic can i leave it out" is the same swap question, and the swap row's
+                    # "leave it out - nothing collapses" was handed back as a refusal answer.
+                    "leave it out", "leave them out", "leave out", "skip it")
 
 
 # A line that names what it wants a stand-in for is answered by that name and nothing else:
@@ -5873,7 +6416,13 @@ def _wants_a_stand_in(reading):
         return False
     # "no double cream, what can i use" - the refusal is the line's own subject, so the entry
     # that says the thing back is the answer. "anything but cream" still goes through the check.
-    return bool(REFUSE_OPEN.match(clean)) and not REFUSE_CHOICE.match(clean)
+    #
+    # A taste opens the line the same way a lack does: "i hate broccoli what can i have instead"
+    # is the swap question put by someone who will not eat the food rather than by someone who
+    # has run out of it, and the swap row that answers it was being handed back because the
+    # refusal check only knew the shape a missing ingredient has.
+    return bool(REFUSE_OPEN.match(clean) or REFUSE_WISH.match(clean)) \
+        and not REFUSE_CHOICE.match(clean)
 
 
 def _a_swap_row(item):
@@ -5988,6 +6537,17 @@ def _a_gift_just_answered(memory):
     return None
 
 
+def _asks_what_to_give(reading):
+    """True when the line is asking what to give somebody, with a person to give it to.
+
+    The same reading the gift rows ask before they answer (topics.gift_ask), so one rule decides
+    for the rows and for the band: "get her" and "what should i buy my husband" are presents,
+    "cheap running shoes under 40 pounds" and "get him tested" are not.
+    """
+    from ..understanding import topics as present_reading
+    return present_reading.gift_ask(reading)
+
+
 def _the_interests(text, memory, item):
     """The hobbies this present is for, as the table names them: said in the chat, or in the key.
 
@@ -6043,14 +6603,21 @@ def _the_present_with_a_price(text, reading, memory):
         # a wedding, budget 60" wants the "about 50 pounds is usual" sentence, not an experience.
         return None
     only_a_limit = _only_a_limit(text)
+    interests = _the_interests(text, memory, item)
     if item is None:
         if only_a_limit:
             item = _a_gift_just_answered(memory)
             if item is None:
                 return None
-        elif not GIFT_WORD.search(str(text or "").lower()):
+        elif not GIFT_WORD.search(str(text or "").lower()) \
+                and not (interests and _asks_what_to_give(reading)):
+            # The words "gift" and "present" are how the order is usually put, and the rows that
+            # price a present are reached through them: "what should i get my wife who likes
+            # reading for under 100 pounds" names the person, the hobby and the limit and not
+            # the noun, so the band was refused and the line fell to the love-language card,
+            # which says a book and never mentions the hundred. A line the reading calls a gift
+            # ask with a hobby in it is the band's question however it says it.
             return None
-    interests = _the_interests(text, memory, item)
     if item is not None and not only_a_limit and not interests \
             and str(getattr(item, "id", "")) != "gift-generic":
         # A present for a named person, with no hobby named, is that person's row: the age picks
@@ -6469,12 +7036,31 @@ def _offer(reader, memory, reading):
     refused = _refused(text_here)
     # The first entry the price filter turned down, kept in case nothing below it states money.
     fallback = None
+    # The same for a line that asks for the words: the first entry whose reply says nothing to
+    # say is kept for the end, so a line with no "what to say" card still gets the answer its own
+    # words reached rather than a shrug.
+    # Only for the line the person just sent: a reader that puts the last turn's subject back
+    # into a follow-up hands back a reading whose plain words are that earlier line, and a card
+    # declined there is a card declined for a question nobody has asked yet ("what can i say to
+    # her" after a nervous-daughter turn stepped from the school answer to the weaning one).
+    here = str((reading or {}).get("plain") or "").strip().lower()
+    now = str((memory or {}).get("understood", {}).get("plain") or "").strip().lower() \
+        if isinstance(memory, dict) else ""
+    words_wanted = (_the_ask_is_for_words(reading)
+                    if not here or not now or here == now else False)
+    words_fallback = None
+    # How many cards the wording rule may turn down before the answer its own words reached is
+    # given after all. A line asks for the words, not for a walk through the card index: with no
+    # limit, "what can i say to her" (read on the whole chat, so the subject is "my daughter")
+    # stepped from the school answer past three cards to how to start a baby on solids.
+    words_declines = 0
     while True:
         got = reader(lambda one: one.id in declined)
         if got is None:
-            if fallback is None:
+            kept = fallback or words_fallback
+            if kept is None:
                 return None, None
-            item, held = fallback
+            item, held = kept
             reply = _payload(item, memory, held)
             return (item, reply) if reply.strip() else (None, None)
         # A reader that wrote the line out to reach the entry hands back the reading it used,
@@ -6511,6 +7097,21 @@ def _offer(reader, memory, reading):
             # answer the line had ruled out. Only a reply that says nothing about leaving the
             # thing out is handed back, and the entry below may still answer.
             declined.add(item.id)
+            continue
+        if (reply.strip() and words_wanted and words_declines < 3 and held is reading
+                and not _said_before(reply, memory)
+                and not SAID_OUT_LOUD.search(reply)
+                and not _puts_it_to_someone(reply)):
+            # The line asks for the words and this card answers the thing they are about: "how do
+            # i tell my flatmate to do the dishes" was answered with how to wash up, and "ordered
+            # a pizza and it came freezing cold, what can i say" with how long a pizza freezes.
+            # The card below it may be the one that says it; when none does, the answer here is
+            # still better than a shrug, so the first of them is kept for the end. A reply that
+            # already says how to put it to somebody is left alone: see `_puts_it_to_someone`.
+            if words_fallback is None:
+                words_fallback = (item, held)
+            declined.add(item.id)
+            words_declines += 1
             continue
         if reply.strip():
             return item, reply
@@ -7208,7 +7809,17 @@ THEIR_EAT = re.compile(r"\b(?:eat|eats|eating|diet|diets|vegetarian|vegan|pescat
 # i cook for my mum" is a cooking question even though it names her diet.
 COOK_WORD = re.compile(r"\b(?:cook|cooks|cooking|cooked|make|makes|making|recipe|recipes|meal"
                        r"|meals|dinner|lunch|tea|supper|dish|dishes|serve|serving|menu|feed"
-                       r"|buy|shop)\b", re.I)
+                       r"|buy|shop"
+                       # The oven verbs and the meals people name on their own. "my son cant
+                       # have dairy, what can i bake" was a fact kept and said back ("Your son
+                       # is dairy-free.") with the ask left unanswered, because "bake" was not
+                       # in this list while "cook" and "make" were: the same line in those words
+                       # got the swaps. A line that names what to bake is a request for food,
+                       # exactly as one that names what to cook is.
+                       r"|bake|bakes|baking|baked|roast|roasts|roasting|grill|grills|grilling"
+                       r"|fry|fries|frying|breakfast|breakfasts|snack|snacks|pudding|puddings"
+                       r"|dessert|desserts|cake|cakes|biscuit|biscuits|bread|packed lunch)\b",
+                       re.I)
 # A line that asks what was already said ("what did i say she doesnt eat").
 SAID_WORD = re.compile(r"\b(?:say|said|saying|tell|told|ask|asked|mention|mentioned|remember"
                        r"|remind)\b", re.I)
@@ -7664,8 +8275,65 @@ def _a_judgement_of_the_figure_on_the_table(text, memory):
         return False
 
 
+# The modules whose reply is an answer about the subject, rather than a nod at the person's line.
+_AN_ANSWER = frozenset(("answers", "memory_store"))
+
+
+def _the_bot_has_something_to_go_over(memory):
+    """True when one of the bot's last lines explains something the ask could be pointing at.
+
+    A line that asks what the bot meant points at the answer just given, so there has to be one.
+    Very often there is not: "i got a payslip" is answered "Good to hear. What was the best bit?",
+    which is the bot asking rather than answering, and standing the knowledge base down for that
+    turn took away the card that answered well - "what does that mean for my pay" got "I haven't
+    put anything about it into words yet" instead of the gross/net card. So the reading is asked
+    only after the bot has said something to explain: the same test the store uses to decide a
+    line is thick enough to hand back (`bot/memory/meant.py`), read here so the two cannot
+    disagree about whether there was an answer.
+    """
+    from ..memory import meant as _meant
+    from ..memory import repeat as _repeat
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    for turn in reversed((turns or [])[-_meant.LOOK_BACK_FAR:]):
+        if not isinstance(turn, dict):
+            break
+        said = str(turn.get("bot") or "").strip()
+        if not said:
+            continue
+        if str(turn.get("module") or "") in _meant.NOT_TO_REPEAT:
+            # An emergency or a condolence is not an explanation to point back at.
+            break
+        asked = str(turn.get("user") or "").strip()
+        if (_repeat.HEDGE.search(said) or _meant.CONDOLENCE.match(said)
+                or _meant.RECEIPT.search(said)):
+            continue
+        if str(turn.get("module") or "") in _AN_ANSWER or _meant._thick_enough(said, asked):
+            return True
+    return False
+
+
+def _the_line_asks_what_this_one_meant(memory):
+    """True when this turn asks what the bot's own last answer meant.
+
+    "what do you mean", "whats that supposed to mean", "wot u mean", "wdym": the line names
+    nothing of its own, so the answer is the last answer said again, which the store gives. The
+    reading settles it in every spelling (`understood["asks_what_was_meant"]`, see
+    `bot/understanding/kinds.py::_asks_what_was_meant`) so no list of spellings is kept here.
+    """
+    if not isinstance(memory, dict):
+        return False
+    understood = memory.get("understood")
+    if not (isinstance(understood, dict) and understood.get("asks_what_was_meant")):
+        return False
+    return _the_bot_has_something_to_go_over(memory)
+
+
 def respond(text, memory):
     """The knowledge base's reply, with the name the person just gave in front of it.
+
+    A line that is only the thing again with "still" on it is not a new subject for whatever
+    card its one word opens - "still cold" after "my shower is cold" is the shower, not the
+    common cold - so the store's reading of it keeps the turn (`bot/memory/tried.py`).
 
     A line that greets the bot and says what they are doing ("hi im jess, im saving for a car")
     is answered by the entry - the substance - and the greeting is the part an entry cannot see,
@@ -7673,15 +8341,33 @@ def respond(text, memory):
     turn (`bot/compose/__init__.py::with_name`).
     """
     from ..memory import not_this as _ruled_out
+    from ..memory import portions as _portions
     from ..memory import size as another_size
     from ..memory import trips as _trips
     from ..memory.thread import only_the_arrival as _only_the_arrival
+    from ..compose import said_about_me
+    if isinstance(memory, dict):
+        # The line as the person typed it, for the rows that have to tell the words of this line
+        # from the earlier subject written into it: a follow-up is read with the thing the talk
+        # is on put into it, so "can i freeze it" reads as "im making a chilli tonight can i
+        # freeze it", and a card keyed on the added word then answers a line that never said it.
+        # See `bot/knowledge/lookup.py::said_in_this_line`.
+        memory["asked_now"] = text
     if _only_the_arrival(text):
         # "im back", "back from work", "we are back home": nothing in it but the arrival. A chat
         # with a bad knee in it answered the word "back" as the part, and the arbiter prefers an
         # answer to the composer's "Welcome back. Where were we?", so the person who came back
         # from the shop was told about a back that gives trouble on and off. The return is the
         # composer's line, not the knowledge base's, so this module stands down for it.
+        return None
+    # A remark that comes back with a frequency on it - "she says it every time i visit" after "my
+    # mum says im not trying hard enough" - was answered out of the card the bot's own reply put in
+    # the thread ("Agree the length before you go... two nights is plenty for most trips"), because
+    # that reply said "mum" and this line says "visit". It is still about the remark, so the
+    # sentence that answers a pattern takes the turn and this module stands down
+    # (bot/compose/said_about_me.py, `answer_followup`).
+    if said_about_me.answer_followup(text, memory):
+        return None
         return None
     if _trips.THE_JOURNEY_ASK.search(text or "") and _trips.reply_for(text, memory):
         # A journey asked as a question while a trip is live is the trip's line. "how long will it
@@ -7690,6 +8376,17 @@ def respond(text, memory):
         # not about the trip. The trip reader has the reply, and the store leads the turn with it.
         # Only this shape is given up: the rest of the trip's detail questions (what to pack, what
         # to book first) are what the knowledge base is best at.
+        return None
+    if _the_line_asks_what_this_one_meant(memory):
+        # "what do you mean" names nothing of its own: it points at the answer just given, and
+        # the store says that answer again ("Just this: Top the pressure up to between 1 and 1.5
+        # bar"). Read as a follow-up, the knowledge base reached the subject of the last answer
+        # instead and took the word "mean" for the thing named: after "my tomato plants have
+        # blight", "wot u mean" was answered "The same goes for the wot u mean: cut off and bin
+        # the affected leaves" - the person's own slip said back at them as the subject - and
+        # the arbiter prefers a card to the composer's line, so that is the reply they got. The
+        # reading knows the shape in every spelling (`understood["asks_what_was_meant"]`), so
+        # this module stands down for it rather than keeping a list of its own.
         return None
     if _a_judgement_of_the_figure_on_the_table(text, memory):
         # The line only holds a figure up ("is 2000 too much" after the price of a bike, "is that
@@ -7707,7 +8404,22 @@ def respond(text, memory):
         # is my wage" was answered with the budgeting-a-weekly-wage lesson while the wage was in
         # the chat. The store says the figure, so no card is the answer to the ask.
         return None
+    if (_portions.an_ask(text or "", memory) or _portions.a_count_to_fill(text or "", memory)
+            or _portions.a_bare_count_to_fill(text or "", memory)):
+        # "how much potato salad for a party" / "how many does that feed" is a question about the
+        # answer in hand, and the store answers it from that answer. An entry that matches the
+        # word "party" answers a different question (cheap party food, not how much of this one to
+        # make), so the knowledge base stands down on the line rather than taking the turn.
+        # The same holds for a count they change after it ("so how much for 8", "actually 6 of
+        # us"): the figure is worked out from the answer's own per-head rule (bot/memory/portions.py).
+        return None
     understood = memory.get("understood") if isinstance(memory, dict) else None
+    if isinstance(understood, dict) and understood.get("subject_unclear"):
+        # The reading could not settle which thing the word means ("the bank was closed", "the
+        # seal is broken"). Any entry that matches the bare word is a guess, and a confident card
+        # for the other life is worse than saying which one is meant, so the knowledge base stands
+        # down and the composer asks. A line with a cue is not flagged.
+        return None
     if _a_bare_thanks(understood) and not (isinstance(text, str)
                                           and repeat.after_an_ack(text)):
         # A thank you and nothing else is not a follow-up to the answer it thanks. The readers
@@ -7779,6 +8491,10 @@ def respond(text, memory):
         # reader passes on everything that is not a size ask about the thing above.
         _keep_the_answer(text, resized, memory)
         return resized
+    if tried.a_card_is_not_the_answer(text, memory):
+        # "still cold" after "my shower is cold" is the shower, and the card its one word belongs
+        # to is the common cold: the thing keeps the turn, in the module that answers reports.
+        return None
     reply = with_name(_the_dish_by_name(a_year_of_birth.reply(text, memory)
                                        or _answer(text, memory), memory), memory)
     # The same judgement when the figure and the thing are in one line: "is 6000 too much for a
@@ -7813,6 +8529,13 @@ def respond(text, memory):
         # chilli" wants the method in its first sentence - see `bot/compose/lead.py`.
         reply = lead.answer_first(
             reply, memory.get("understood") if isinstance(memory, dict) else None, text)
+    if reply:
+        # The same reading for the other shapes of answer: a row holds one answer for every way
+        # its subject is asked about, so the sentence that gives the time, the amount or the place
+        # the line asked for is moved to the front when the card does not open on it. A declared
+        # `lead` still wins, because it goes in after this - see `bot/compose/lead.py`'s `shape`.
+        reply = lead.shape(reply, memory.get("understood")
+                           if isinstance(memory, dict) else None, text)
     if reply:
         # The sentence the line asked for, in front, when the entry that answered declares one:
         # `entry(..., lead=("yesno", "Usually, yes"))` is the whole of that row's work, in any
@@ -8102,6 +8825,17 @@ def _a_length_ask_with_no_figure(text, memory, answer=""):
     # honest line would otherwise be said.
     return _the_figure_the_thing_we_are_on_holds(text, memory) or honest
 
+def _a_city_card_asks_which_first(text, memory):
+    """True when the line asks which of a city card's places comes first.
+
+    The city rows know their own list of places, so the card they wrote answers it; imported here
+    rather than at the top because this is the only place in this module that reads them.
+    """
+    from ..knowledge import travel as travel_cards
+    return (travel_cards.asks_which_one_first(text)
+            and travel_cards.a_city_card_is_in_front(_the_answer_in_front(memory)))
+
+
 def _the_answer_in_front(memory):
     """The reply just given by the knowledge base, for a line asking which part of it to do.
 
@@ -8387,12 +9121,71 @@ def _answer(text, memory):
         # is answered by the relief pools, and this module's entry is the advice for a trouble
         # that is still there.
         return None
+    if isinstance(memory, dict):
+        the_moan = _the_ask_behind_a_moan(text, memory)
+        if the_moan:
+            # "i always get rice wrong" names the thing that comes out badly and nothing else, so
+            # every reader below passes it on and the line was answered with the intake form
+            # ("Got it. Is there anything you'd like a hand with?") while the card for the thing
+            # was in the knowledge base all along - "how do i get rice right" gets it. The moan is
+            # written out as that ask and read again; only an answer about the thing they named is
+            # taken, so a loose rewrite cannot hand back a card about something else.
+            return the_moan
     led = _a_lead_time(text)
     if led:
         # "how long before the day should we order the cake" is a lead time, and the cake's own
         # entry answers how long it keeps. It is read here, before the lookup, because the ask
         # names a length and a thing and every reader below would answer the length of the thing.
         return led
+    if isinstance(memory, dict):
+        # "i started learning guitar last month" / "my fingers hurt" / "how long should i
+        # practise" was the bone-healing card, because the line was read against the complaint
+        # about fingers and that card keys both "fingers" and "how long". The practicing is what
+        # the ask is about and the guitar is what the chat has been on, so the ask is written out
+        # with the guitar and read again. Only a rewrite that reaches an entry giving a length is
+        # taken, and only when its answer is not the one already on the screen, so a line whose
+        # own answer is the right one keeps the turn it had.
+        #
+        # The rewrite is only worth taking when it reaches a *different* entry from the one the
+        # line reaches on its own. "i started running last month" / "how long should i run for"
+        # reached how-often-to-run on its own, which narrows to "20 minutes." - the length asked
+        # for - and the rewrite ("how long should i run for running?") reached the same entry and
+        # handed back the whole training card instead. When both readings land on the same entry
+        # the person has already been answered about the thing they asked about, and there is
+        # nothing for this reader to add.
+        own = find(understand(text))
+        own_answers_the_length = False
+        if own is not None:
+            own_said = _payload(own, memory, understand(text))
+            own_answers_the_length = bool(_answers_a_length(own, own_said)
+                                          and _A_DURATION.search(str(own_said or "")))
+            # The line's own answer is already a length to spend doing it - "a mile is 20 minutes
+            # at a brisk walk ... half an hour a day is the number that earns most of the
+            # benefit" for "i started walking every day" / "how long should i walk". A rewrite
+            # reaches a card on the same practice with a figure of another kind (steps a day) or
+            # the whole training plan, and neither is the length the person asked for, so the
+            # line keeps the answer it had.
+        for written in doing_it.written_out(text, memory):
+            if own_answers_the_length:
+                break
+            reading = understand(written)
+            reached = find(reading)
+            if reached is None:
+                continue
+            if own is not None and reached is own:
+                continue
+            written_reply = _payload(reached, memory, reading)
+            if not _answers_a_length(reached, written_reply):
+                continue
+            if _said_before(_without_lead_in(written_reply), memory):
+                # The chat has had this answer already, and the ask is the same question about
+                # the same practice: the part asked is what the person wants back, not the whole
+                # paragraph a second time.
+                short = length.narrow(written_reply, text)
+                if short and not _said_before(short, memory):
+                    return short
+                continue
+            return written_reply
     if a_wish.reading(text):
         # A hopeful aside ("fingers crossed", "with luck", "hope it works") names nothing to look
         # up, and its own words reach whatever they fit: "fingers crossed" after the condensation
@@ -8485,7 +9278,12 @@ def _answer(text, memory):
     # to borrow, and the person asking which step of the plan to do first got a loan. `_last_answer`
     # is no help here - a bare ask shares no word with the answer, so the run is read as ended -
     # and the line in front is all the step reader needs.
-    if repeat.asks_which_part(text):
+    if repeat.asks_which_part(text) and not _a_city_card_asks_which_first(text, memory):
+        # A city card is a list of places to go, not a list of steps, and the card's second
+        # sentence is a local habit rather than one of them: "what should we do first" after the
+        # Barcelona guide came back "The thing to do first: Eat lunch at 2pm like locals." The
+        # city's own row answers which of the places comes first (`city-next`), so this reader
+        # stands down and the lookup has the turn.
         step = repeat.the_move(text, _the_answer_in_front(memory), memory)
         if step:
             return step
@@ -8544,9 +9342,16 @@ def _answer(text, memory):
             # The same card twice in a row is not a second answer, but it is the right card:
             # "whats the food like" asked after the city card reached nothing at all and got the
             # search hedge, and said again with a lead-in it at least names Trastevere for dinner.
-            again_told = same_again.instead(answer, text, memory)
-            if again_told:
-                return again_told
+            # A yes/no ask about the part is not the card said again. "is three days enough" after
+            # the days card asks for a verdict on the three days, and the card on the screen
+            # cannot give one: saying "That was the whole of my answer on it" answers their
+            # question with a remark about the bot. Where the card has already been read, the line
+            # is left to the modules that hedge - the same honest reply the chat got before the
+            # card - rather than handed a claim that it already had everything.
+            if not _A_YES_NO_ASK.match(str(text or "").strip()):
+                again_told = same_again.instead(answer, text, memory)
+                if again_told:
+                    return again_told
             if not _said_before(_without_lead_in(answer), memory):
                 return answer
     # A plan moved to a day, rather than to a time: "im cooking chilli for 6" / "can i make it
@@ -8654,12 +9459,34 @@ def _answer(text, memory):
             detail = (_a_part_named_in_the_line(text, memory, short_of_it)
                       or ("" if fact else _the_detail_named(text, memory)))
         if detail:
-            pool = SAID_ABOVE if _named_in(short_of_it, detail) else NOTHING_SEPARATE
-            return pool[0].format(detail=detail)
+            if _named_in(short_of_it, detail):
+                # The answer names the part, so it has something to say about it, and a sentence
+                # about the conversation ("Everything about insurance is in what I said above")
+                # withholds the one clause that answers the line. "how much does a cat cost to
+                # keep" prices insurance in passing (8 to 20 a month) and the follow-up "what
+                # about insurance" was told there is no more than that - which is not true, the
+                # figure is in the paragraph. The clause that names the part is the answer.
+                part = _the_part_in_the_answer(short_of_it, detail)
+                if part:
+                    return part
+            return NOTHING_SEPARATE[0].format(detail=detail)
+        if fact and _only_a_quality_name(text, memory):
+            # The only name in the line is a word that says what the thing is like ("a new"), and
+            # that names no part of the answer: there is nothing for a lead-in to say about it and
+            # the answer is already on the screen, so the repeat is answered as a repeat. Standing
+            # down said "I'm not sure about that one, sorry" to a question the card answers.
+            return AGAIN[0].format(reply=_repeat_short(short_of_it, text, memory))
         if fact:
             # A part the answer above does not name is not a part of it, and no paragraph is the
             # whole of a fact about themselves, so the turn goes to the parts of the bot that
             # answer a person saying something about themselves.
+            return None
+        if short_of_it and _their_own_state(text):
+            # The same goes for a line that says where the person has got to without asking
+            # anything of the thing: "i dont know why" after the low-mood card was read as the
+            # part of the answer named "dont" and given a sentence of the card again, and after
+            # "my 3 year old wont eat vegetables" it reached the question about why the sky is
+            # blue. A line that is the person's own state is theirs.
             return None
         return answer
     carried_on = more.reply_for(text, memory) if isinstance(memory, dict) else None
@@ -9260,11 +10087,66 @@ def _the_practice_is_answered(practice, entry):
     return any(_same_word(key, verb) for key in keys for verb in verbs)
 
 
+_A_YES_NO_ASK = re.compile(
+    r"^(?:is|are|was|were|would|will|do|does|did|can|could|should|shall|have|has)\b", re.I)
+
+
+# The words a thing named in a moan is made of, as the stems the answer is searched with.
+MOAN_STOP = frozenset("""a an the my our your his her their its me i we you it that this these
+those and or of to for in on at with from by up down out about right wrong""".split())
+
+
+def _the_ask_behind_a_moan(text, memory):
+    """The answer to the how-to ask behind "i always get rice wrong", or "".
+
+    The frame says the thing they do comes out badly, and the thing named is what they want to do
+    properly, so the ask behind it is the how-to about that thing. It is only taken when its
+    answer is about the thing the person named: read loosely, "how do i get the kids to bed
+    right" reaches the frost card, and a card about the wrong thing is worse than the line that
+    asked for help.
+    """
+    written = doing_it.the_ask_behind_a_moan(text)
+    if not written:
+        return ""
+    said = _ask_a_rewritten_line(written, memory)
+    if not said:
+        return ""
+    thing = written[len("how do i "):].rsplit(" right?", 1)[0]
+    # The thing's own name is the last word of it that is not grammar ("the rice", "my hours",
+    # "the timing"), and that is the word the answer has to have in it. A share of any words is
+    # not enough: "how do i get the tax return right" reaches the trading-allowance card, which
+    # says "tax" and is not about a return at all.
+    named = [word for word in WORD.findall(thing.lower())
+             if len(word) > 2 and word not in MOAN_STOP and word not in MOAN_VERB_WORDS]
+    if not named:
+        return ""
+    head = said_topic.stem(named[-1])
+    answered = {said_topic.stem(word) for word in WORD.findall(said.lower())}
+    if head not in answered:
+        return ""
+    if _said_before(_without_lead_in(said), memory):
+        return ""
+    return said
+
+
+MOAN_VERB_WORDS = frozenset("get do make cook pick find manage".split())
+
+
 def _ask_a_rewritten_line(line, memory):
-    """The answer to a line the person did not type, read with their own reading replaced."""
+    """The answer to a line the person did not type, read with their own reading replaced.
+
+    The shape of answer the turn asked for is carried onto the fresh reading: the reading of the
+    rewrite never passes through `bot/modules/intent.py`, which is what writes `wants`, so a module
+    underneath saw a line that asked for nothing. "and for 3kg" after a chicken time lost its
+    time, and the second "what should i cook tonight" in a chat lost its pick.
+    """
     was = memory.get("understood")
+    want = was.get("wants") if isinstance(was, dict) else None
     try:
-        memory["understood"] = understand(line, memory)
+        fresh = understand(line, memory)
+        if want and isinstance(fresh, dict):
+            fresh["wants"] = want
+        memory["understood"] = fresh
         return _respond(line, memory)
     finally:
         if was is None:
@@ -9313,7 +10195,11 @@ def _without_lead_in(answer):
         head = frame.split("{reply}")[0]
         if answer.startswith(head):
             return answer[len(head):].strip()
-    return answer
+    # Every other repeat frame in the codebase is a lead-in too, and they live in
+    # `bot/memory/again` ("Same answer, and it covers this: ...", "Nothing separate for the biting
+    # - it is the same advice: ..."). Not knowing them stacked a second lead-in in front of the
+    # first: "Same as before: Same answer, and it covers this: Wash the bin with hot soapy water".
+    return same_again.unframed(answer) or answer
 
 
 # A line that asks whether to make a call is not answered by saying the trouble's steps again:
@@ -9817,6 +10703,58 @@ def _the_sentence_with_a_figure(text):
             return said
     return ""
 
+# The words themselves, as a card says them: a sentence to say, given in quotes, or a reply that
+# opens on telling the person what to say. That is what the line asked for when `shapes.
+# asks_for_words` is true, and a card that answers the thing instead - "Fill the sink with the
+# hottest water" for how to tell a flatmate about the dishes - has neither.
+SAID_OUT_LOUD = re.compile(
+    r"[\"“][^\"”]{6,}[\"”]|'[^']{8,}'"
+    r"|^\s*(?:say|tell|ask|put it|word it|lead with|start with|open with|write)\b"
+    # A card that says which question to put is giving the person something to say, even when it
+    # writes it out without quotes: "ask each trader the same question: what would bring that
+    # down?" is the words to use.
+    r"|\b(?:ask|say|tell|raise)\b[^.?!]{0,40}\b(?:question|questions|sentence|words|wording)\b",
+    re.I)
+
+
+# A reply that is about taking the matter to somebody *is* the answer to "how do i tell them":
+# "how do i tell my dad to stop driving" was answered with the DVLA, his GP and a driving
+# assessment - advice about this very conversation, which is what the person was asking for - and
+# the wording card that took its place was a script for criticising somebody's pastry. It has to
+# be said to somebody, though, or be *their* person ("your instructor"): a dentist in the last
+# sentence of a card about bad breath, or the registrar in the second sentence of a card about
+# wedding costs, is not what that card is about.
+A_PERSON = (r"(?:gp|doctor|doctors|dentist|school|college|university|instructor|examiner|teacher"
+            r"|tutor|head of year|manager|boss|employer|hr|personnel|union|careers|adviser"
+            r"|advisor|consultant|council|citizens advice|solicitor|landlord|letting agent|vet"
+            r"|pharmacist|midwife|health visitor|social worker|ombudsman|registrar|therapist)")
+SAYING_IT_TO = re.compile(
+    r"\b(?:ask|asked|asking|tell|telling|speak|speaking|talk|talking|ring|phone|call|email|write"
+    r"|raise it|mention|sit down|take it|bring it up|have a word|report|complain)"
+    r"\b[^.!?]{0,60}?\b" + A_PERSON
+    + r"\b(?!['\u2019]s)",
+    re.I)
+YOUR_PERSON = re.compile(r"\byour\s+" + A_PERSON + r"\b(?!['\u2019]s)", re.I)
+_TWO_SENTENCES = re.compile(r"\s*(?:[^.!?]*[.!?]){1,2}")
+
+
+def _puts_it_to_someone(reply):
+    """True when the reply already says how to put this to a person rather than what the thing is."""
+    words = " ".join(str(reply or "").split())
+    if not words:
+        return False
+    found = _TWO_SENTENCES.match(words)
+    opening = found.group(0) if found else words
+    return bool(SAYING_IT_TO.search(opening) or YOUR_PERSON.search(opening))
+
+
+def _the_ask_is_for_words(reading):
+    """True when this line asks what to say rather than what to do (see `compose.fit`)."""
+    try:
+        return shapes.asks_for_words(reading)
+    except Exception:  # noqa: BLE001 - a reading this shape cannot use answers nothing here
+        return False
+
 
 def _respond(text, memory):
     if isinstance(text, str):
@@ -9853,6 +10791,27 @@ def _respond(text, memory):
             item, reply = _offer(lambda reject: find(asked, reject=reject), memory, asked)
             if item is not None and reply and not _already_on_the_screen(reply, memory):
                 return reply
+        # One attribute of the thing on the table, asked on a line of its own: after "im making
+        # bread" the person's next line is "and the oven temperature", which names no thing and
+        # reached the oven repair card ("the heating element is almost always the fault"); after
+        # "she wants a bike" the line "which size" reached the women's clothes chart. Written out
+        # with the thing on the table, "oven temperature for bread" and "what size bike do i need"
+        # are the questions the entries answer.
+        attributed = said_topic.attribute_of_the_thing(text, memory)
+        if attributed and attributed != text:
+            asked = understand(attributed, memory)
+            item, reply = _offer(lambda reject: find(asked, reject=reject), memory, asked)
+            if item is not None and reply:
+                if _already_on_the_screen(reply, memory):
+                    # The attribute is one the answer already gave: "im roasting a chicken" was
+                    # answered with the timing, and "and the timing" asks for it again. It is
+                    # given again and framed as the repeat it is, rather than leaving the turn to
+                    # the quantity reader, which answered a length of time with how much meat.
+                    return repeat.pick(same_again.SHORT_AGAIN, memory,
+                                       text).format(reply=reply)
+                # An entry's sentence can open on a lower-case word ("about 1 hour 40 at 190C for
+                # a 2kg joint or bird."), which is a fragment on a line of its own.
+                return reply[:1].upper() + reply[1:]
     if isinstance(text, str) and trips.the_bag_beats_the_list(text, memory):
         # "what should we pack" about a trip in October is the trip's line: the store knows the
         # place and the month ("Pack light for the Lakes in October - a waterproof, something
@@ -9876,6 +10835,19 @@ def _respond(text, memory):
         verdict = shopping.the_verdict_on_a_present(memory, understand(text, memory))
         if verdict:
             return verdict
+        # "make it longer" after a story or a poem is the verse just given with another part on
+        # the end. Every reader below treats it as the verse said again ("Nothing separate for a
+        # longer - it is the same advice"), as the hair-growth card, or as the search hedge, so it
+        # is answered here first, on the typed line, the way the verdict on a present is.
+        longer = entertainment.the_verse_longer(text, memory)
+        if longer:
+            return longer
+        # "one more about the moon" after a poem about the moon is another poem about the moon, in
+        # the form just given: the phrase names a subject and no form, so no row reads it as a
+        # request and main said "Got it - one more about the moon."
+        another = entertainment.the_next_verse(text, memory)
+        if another:
+            return another
     # A limit on a present is settled first, before anything reads the amount as something else:
     # "my budget is 30 pounds" after "a present for my sister" is the price of that present, and
     # the store reads a figure back, which is the right answer to the same line in a chat that is
@@ -10349,11 +11321,29 @@ def _respond(text, memory):
     else:
         asks_a_part = not (own and _new_thing(own, _the_run_said(memory, mem.last_bot(memory) or ""))
                            and not mem.asks_only(understood))
+    if asks_a_part and named.asks_a_part_of_the_trip(text, memory):
+        # A line that asks a part of the trip about the place in the chat asks its own question,
+        # not for a slice of the card on the screen: after the card for a city, "how many days do
+        # i need" was answered "The beach at Barceloneta for half a day." - the sentence of the
+        # card that happens to hold the words "half a day", where the trip reader has the days
+        # question for that place and the entry `city-stay` answers it.
+        asks_a_part = False
     if asks_a_part and mem.answer_about(text, memory):
         # The line's words belong to an answer from earlier in the chat than the last one ("and
         # how long in the oven" after the cake, with a turn about the frosting in between). The
         # part it asks for is in that answer and the one just given is about the other thing, so
         # the entries answer the line rather than a part of the frosting.
+        asks_a_part = False
+    # A line the knowledge base answers on its own words is a question of its own, not a part of
+    # the paragraph above it. "why do you want this job" after "how do i find a job" names no
+    # thing with a possessive in it, so every gate above said "a follow-up", and the only word it
+    # shared with the answer was "job": it was handed that answer's own sentence about jobs
+    # ("Most jobs come through a person rather than a portal") where the interview row has the
+    # answer to the line. The entries are asked before the part reader can cut a sentence out.
+    # The line has to name a thing of its own for that: "how long does it keep" also has an entry
+    # (the keeping row), and it is still a part of the answer just given - the lasagne card says
+    # three months frozen where the line wants the three days the cooling answer gave.
+    if asks_a_part and find(understood) is not None and understood.get("entities"):
         asks_a_part = False
     part = _part_asked(text, memory) if asks_a_part else None
     if part and cooking.keeping_ask(understood) and not FIGURE.search(part):
@@ -10373,7 +11363,9 @@ def _respond(text, memory):
         return again  # the same property asked again is answered again, not hedged
     earlier = _last_answer(memory)
     if (earlier and asked_kind(text) and _names_a_property(text)
-            and _only_a_property(keywords(text)) and not RATE.search(text)):
+            and _only_a_property(keywords(text))
+            and not _a_property_word_names_a_thing(text)
+            and not RATE.search(text)):
         # The line names a figure the answer just given does not have. Do not let a
         # different entry answer it with its own ("rest it" is not "roast 40 minutes").
         # A line that names a subject of its own ("what temperature for roast potatoes")
@@ -10495,7 +11487,13 @@ def _respond(text, memory):
     off_topic = _off_the_topic(understood, memory)
 
     def _guard(reject):
-        if not off_topic[1]:
+        # The fence goes up when the chat's answer has a domain to be off, or when the line says
+        # what the thing IS (a colour): both mean the line is about the thing in hand and an entry
+        # from elsewhere is answering a question that shares its words. A detail that only says
+        # what was done to it ("i painted it last year") names no subject of its own, so the entry
+        # reached through the chat's own domain is the answer to it, which is what the bot gave
+        # before the colour work and still does.
+        if not off_topic[1] and not off_topic[2]:
             return reject
         return lambda one: reject(one) or _from_another_domain(one, off_topic)
 
@@ -10530,7 +11528,17 @@ def _respond(text, memory):
         # when it reaches an entry of its own - never the one the line alone already had.
         beside = the_thing_a_detail_belongs_to(understood, memory)
         if beside is not None:
+            # The entry the stored kind and the detail were read together for is the only one
+            # those words vouch for. When that entry is turned down, the next best card from the
+            # same words is one the line itself never named, and it must not take the turn:
+            # "my rabbit bites me when i pick him up" then "how long should i boil an egg" read
+            # the egg line with the rabbit beside it, the cooking entry was refused, and the
+            # rabbit's heat card answered a question about boiling an egg.
+            vouched = find(beside)
             other, said = _offer(_keeping_reader(beside, memory), memory, beside)
+            if (other is not None and vouched is not None
+                    and getattr(other, "key", None) != getattr(vouched, "key", None)):
+                other, said = None, ""
             if other is not None:
                 if _said_before(said, memory) or _already_said(said, memory):
                     # The entry the detail belongs to has already answered - reaching it with the
@@ -10786,6 +11794,18 @@ def _respond(text, memory):
             lambda reject: find(reading, reject=_guard(reject),
                                 use_context=not other_food and not own_thing),
             memory, reading)
+        if item is not None:
+            # A follow-up that asks how the subject turns out is answered by the row that
+            # answered the line before it: "will it be alright" after the phone went in the sink,
+            # "will it survive" after the laptop got coffee in it. The row has an answer of its
+            # own for the ask when it declares one, and giving that is the whole turn - the card
+            # itself has already been read out, and saying it again is the paragraph the person
+            # is looking at. Without this the turn gave up and pointed at a search, over a
+            # subject the bot had answered a turn before.
+            owed = _the_outcome_owed(item, text)
+            if owed and (_said_before(reply, memory)
+                         or names_nothing_of_its_own(reading)):
+                return owed
         if item is not None and _said_before(reply, memory):
             # The entry the line reaches with the topic behind it is the one that gave the answer
             # already on the screen: what the line asks is a part of it the store can ask for, out
@@ -11234,3 +12254,15 @@ def _respond(text, memory):
         return same_again.instead(reply, text, memory) or reply
     return None
 
+from ..memory import again as _never_twice  # noqa: E402 - applied once the module is defined
+
+# Whatever this module answers, the last thing that happens to it is the earlier-turn
+# check (bot/memory/again.replied): `answers` alone served a card again on 59 deck turns.
+respond = _never_twice.replied(respond)
+
+from ..memory import paragraph  # noqa: E402 - the floor is applied once the module is defined
+
+# And the floor under all of it: a paragraph the chat has *had* is not printed again in the same
+# words. `again.replied` above frames a repeat of the answer just given; this one frames a card
+# that comes back several turns later, after a turn about something else, which no reader sees.
+respond = paragraph.then_framed(respond)

@@ -221,6 +221,29 @@ _WEDDING_PAPERS = ("paperwork", "notice", "registrar", "register office", "legal
 # "do we need to give notice to marry" name the thing and stop.
 _WEDDING_ASK = ("notice", "paperwork", "registrar", "register office", "need to", "to marry",
                 "witness", "witnesses")
+# Two questions about a wedding plan that the plan card had no answer for, and that other rows
+# took with a shrug or with the wrong card: "how many guests for a wedding" was answered with
+# advice on booking a hotel room, "how many guests should we have at our wedding" with a menu to
+# cook twice, and "how far ahead should we book the venue" with "times like that I can't see".
+_WEDDING_COUNT = re.compile(r"how many (?:guests|people|to invite|should we (?:invite|have))"
+                            r"|number of guests|how big|guest count|size of the wedding")
+_WEDDING_WHEN = ("far ahead", "how early", "how long before", "lead time", "how soon",
+                 "when should we book", "when do we book", "when to book", "when should i book",
+                 "book the venue", "book a venue", "book the photographer", "book a photographer",
+                 "book the registrar", "book the caterer", "book the church")
+_WEDDING_GUESTS = (
+    "There is no right number, only a price: each guest costs roughly \u00a3100 to \u00a3150 at "
+    "a catered wedding, so 100 guests is a \u00a310,000 to \u00a315,000 decision. Write two "
+    "lists - the people you would be sad not to see, then everyone else - and cut from the "
+    "second until the money works. The room is the other hard limit, because a seated meal needs "
+    "about 1.2 square metres a head, and children count towards both.")
+_WEDDING_LEAD_TIME = (
+    "Venue first: a year to 18 months ahead for a Saturday in summer, and six months is enough "
+    "for a winter Friday or a village hall. The registrar or celebrant as soon as the date is "
+    "fixed, the photographer nine to twelve months out, the caterer six to nine, the cake and "
+    "the outfit four to six. Ask the venue for its own notice period before you fall for a date, "
+    "because a barn that has to give notice to the council can block a summer Saturday.")
+
 _WEDDING_MONEY = ("cost", "costs", "much", "budget", "cheap", "cheapest", "afford", "price",
                   "save", "saving", "spend", "quotes", "quote", "\u00a3")
 
@@ -321,6 +344,10 @@ def _try_once_more(memory, understood):
 
 def _wedding_plan(memory, understood):
     line = " " + str(understood.get("clean") or understood.get("text") or "").lower() + " "
+    # When to book comes before the paperwork, because "how far ahead should we book the
+    # registrar" names the registrar and asks about the calendar.
+    if any(word in line for word in _WEDDING_WHEN):
+        return _WEDDING_LEAD_TIME
     if any(word in line for word in _WEDDING_PAPERS) and not any(
             word in line for word in _WEDDING_MONEY):
         return ("Give notice first: you each do it at your local register office at least 29 days "
@@ -328,6 +355,8 @@ def _wedding_plan(memory, understood):
                 "passport or birth certificate and proof of address. Book the venue and the "
                 "registrar's slot, and find two witnesses. The 29 days is a legal minimum, not a "
                 "booking window, so do not leave it late.")
+    if _WEDDING_COUNT.search(line):
+        return _WEDDING_GUESTS
     return ("Guest list first, because it sets the cost of everything else: the venue, the food and "
             "the drink are about 60% of a wedding, and halving the guest list roughly halves the "
             "bill. Book the venue and the registrar next (a year ahead for a Saturday), then the "
@@ -340,6 +369,12 @@ def _wedding_plan(memory, understood):
 FREE_TIME = ("weekend", "weekends", "this weekend", "next weekend", "long weekend",
              "saturday", "sundays", "on saturday", "on sunday", "day off", "bank holiday",
              "tonight", "this evening", "free evening", "after work", "free afternoon",
+             # The evening said as when the working day ends, which is how people write it:
+             # "what should i do when i get home from work" and "any ideas for when i finish
+             # work" carry the block and no other word for it, and both got a search hedge.
+             "home from work", "get home from work", "back from work", "from work",
+             "when i get home", "when i get in", "finish work", "finished work",
+             "leave work", "left work", "got home from work",
              "this afternoon", "afternoon off", "free day", "nothing planned",
              # a weekday evening said in the plural is the same free block: "what should i do with my
              # evenings" and "how do i fill my evenings" were a search hedge, and the row never saw
@@ -423,6 +458,15 @@ DAY_OFF_PLAN = (
     "market, a museum or gallery - most are free), one job you keep putting off that takes an "
     "hour, and one person to see. Put times on the first two the night before; a free day goes "
     "in small pieces when nothing is decided.")
+
+# The evening said as plain words and as when the working day ends. One list, so the row that
+# chooses the evening plan and the block that says the line has an evening in it cannot drift:
+# "what should i do when i get home from work" had the evening in FREE_TIME and the weekend
+# plan was chosen for it, because this branch knew "after work" and not "from work".
+_THE_EVENING = ("tonight", "this evening", "free evening", "after work", "evening", "evenings",
+                "home from work", "get home from work", "back from work", "from work",
+                "when i get home", "when i get in", "finish work", "finished work",
+                "leave work", "left work", "got home from work")
 
 EVENING_PLAN = (
     "Give the evening a shape rather than waiting for an idea: one thing you will actually "
@@ -565,6 +609,56 @@ def _said_now(understood):
     return _said_words(understood)
 
 
+# A move that is named without the word "house" is still the same plan. "how do i plan a move"
+# was a search hedge while "how do i organise a house move" answered, because every phrasing in the
+# row's key said house or flat and the plan words alone scored nothing. The phrases below are the
+# ones that mean a household move, and the guard keeps the ones that mean something else out: a
+# move abroad turns on a visa, a move of a team is a job, and a move on a chessboard is neither.
+_A_MOVE_TO_PLAN = re.compile(
+    r"\b(?:plan|planning|planned|organise|organize|organising|organizing|prep|prepare|preparing|"
+    r"arrange|arranging|checklist|tips?|advice|start|started|starting|before|ahead|get ready|"
+    r"getting ready|ready)\b.{0,24}\b(?:a move|the move|the house move|my move|our move|"
+    r"move out|move in)\b|\b(?:a move|the move|my move|our move)\b.{0,24}\b(?:plan|planning|"
+    r"organise|organize|checklist|tips?|advice|prepare|prep|arrange)\b"
+    # ...and the move named by time rather than by the word house: "what should i do first
+    # when moving" and "before we move" are a household move with the house left out, and
+    # the guard read them as a move nobody had named (a search hedge for the first).
+    r"|\bwhen\s+(?:i|we|you)\s+move\b|\bwhen\s+moving\b|\bbefore\s+(?:i|we|you)\s+move\b"
+    r"|\bwe\s*(?:'|\s)?re\s+moving\b", re.I)
+_A_MOVE_ELSEWHERE = re.compile(
+    r"\b(?:abroad|overseas|emigrat\w*|visa|another country|different country|new country|"
+    r"australia|canada|new zealand|america|usa|spain|france|portugal|germany|ireland|dubai|"
+    r"team|teams|job|jobs|career|office|house share|houseshare|chess|piece|checkmate|"
+    r"the goalposts|goalposts|"
+    # moving in together is its own plan and has its own card ("agree the boring things before
+    # the boxes"), so the words that say it are not a move of house: "when we move in together
+    # what should i do first" was taken off that card by the time-named move above.
+    r"in together|moving in with|move in with)\b", re.I)
+
+
+def _a_household_move(understood):
+    """True when the line asks for the plan of a move of house, spelled without the word house."""
+    said = _said_words(understood)
+    return bool(_A_MOVE_TO_PLAN.search(said)) and not _A_MOVE_ELSEWHERE.search(said)
+
+
+_HOME_IN_THE_LINE = re.compile(r"\b(?:house|houses|home|homes|flat|flats|apartment|apartments)\b",
+                               re.I)
+
+
+def _a_household_move_or_a_named_move(understood):
+    """True when the line names the home it is leaving, or asks for a move's plan without one.
+
+    The row's own key is written with the house in it ("moving house", "how do i move flat"),
+    so a line that says one of those keeps its answer. The guard only decides the newer guess -
+    "plan a move" with no house in it - which would otherwise take a move abroad or a move at
+    work.
+    """
+    if _HOME_IN_THE_LINE.search(_said_words(understood)):
+        return True
+    return _a_household_move(understood)
+
+
 # A day named on its own is not the weekend: "what should i do today" was handed two things in
 # the diary by Friday. The row keeps the line and answers the day it named instead.
 _TODAY_WORDS = ("today", "tonight", "this afternoon", "this morning", "this evening", "tomorrow")
@@ -694,8 +788,22 @@ def _a_stretch_of_time_to_fill(understood):
     words_named = re.findall(r"[a-z']+", AT_HOME.sub(" ", " ".join(named).lower()))
     if any(word in FREE_TIME_TIME for word in words_named):
         words_named = [word for word in words_named if word not in HOLIDAY_PREFIX]
+    # "after work" is the block and not the job, and "in the garden" is where the block is spent
+    # and not a thing to be about: both name a word the reading then calls the subject, so the
+    # free block was read as a work question or a gardening one and the row stood down - "what
+    # should i do after work" and "suggest something to do in the garden this weekend" were both
+    # handed the search hedge. The words come off the subject exactly as they come off the line.
+    covered = _covered_words(line_said, FREE_TIME)
+    # "for the garden at the weekend" is the block's place, so the place is read with "for" when
+    # the line already holds a block: "suggest something for the garden at the weekend" was the
+    # hedge while "suggest something to do in the garden this weekend" got the plan.
+    here_now = _the_place_the_block_is_at(
+        line_said, block=bool(covered) or bool(set(re.findall(r"[a-z']+", line_said))
+                                              & FREE_TIME_TIME))
     for word in words_named:
         if word in FREE_TIME_WORDS or word in FREE_TIME_WHO:
+            continue
+        if word in covered or word in here_now:
             continue
         return False        # the line names something of its own to be about
     # With nothing named at all, the row still needs a stretch of time to be the question: "cheap
@@ -707,6 +815,11 @@ def _a_stretch_of_time_to_fill(understood):
     if set(re.findall(r"[a-z']+", line)) & FREE_TIME_TIME:
         return True
     if AT_HOME.search(line):
+        return True
+    # A block said as a phrase is the subject even when the reading put a topic on the line for
+    # it: "after work" is read as a work line and "this weekend in the garden" as a garden one,
+    # and the topic is that word coming back round.
+    if covered:
         return True
     # The topic carried in from an earlier line is not the line's own: "what can i do at home"
     # after a talk about reading practice names nothing itself, and it is still a free day.
@@ -868,7 +981,12 @@ _TRIP_PHRASES = ("plan a trip", "planning a trip", "planning a holiday", "book a
                  # row's own card ends on exactly that: "Going somewhere, or is it a week at
                  # home?" A plan for the days at home answers neither.
                  "go somewhere", "going somewhere", "somewhere away", "stay at home",
-                 "staying at home", "at home or away", "away or at home")
+                 "staying at home", "at home or away", "away or at home",
+                 # "any ideas for a weekend away" and "a weekend away in october" are where-to
+                 # go questions, and a plan for the weekend at home answers neither: the same
+                 # line with the words in the other order ("weekend away ideas") already
+                 # reached the travel card.
+                 "weekend away", "weekends away", "away for the weekend", "away for a weekend")
 
 # the words that say the free block has a date and a place in it - a month, a season, or a
 # named kind of weather - so the answers that name a month own the line
@@ -879,6 +997,20 @@ _WHEN_AWAY = ("in january", "in february", "in march", "in april", "in may", "in
               "half term", "bank holiday week", "shoulder season", "in the sun", "for some sun")
 
 _MONEY_ONLY = ("quid", "pounds", "euros", "dollars", "budget", "cheap", "afford")
+
+# An ask for a thing to give is a gift question, and the party plan or the plan for a free day
+# is not the answer to it: "what should i get my mum for her birthday" was told how many people
+# fit in a pub's back room, and "present ideas for my mum" reached a card about a care home.
+# The gift rows answer both; these are the ways the ask is worded, with the person after it.
+_GIFT_ASK = ("what should i get", "what do i get", "what can i get", "what to get",
+             "what should i buy", "what can i buy", "what to buy", "should i get",
+             "ideas for a present", "ideas for a gift", "present ideas", "gift ideas",
+             "ideas for presents", "ideas for the present", "ideas for her", "ideas for him",
+             "present for", "presents for", "gift for", "gifts for", "buy for",
+             "get her for", "get him for", "get them for", "get my mum", "get my dad",
+             "get my mam", "get my mom", "get my mother", "get my father", "get my sister",
+             "get my brother", "get my nan", "get my gran", "get my partner",
+             "get my wife", "get my husband", "get my friend")
 
 # A month in the line is a month row's question: "i have a week off in january what should i do"
 # belongs to the January answer ("the Canaries for 20C and real sun, the Alps for snow"), and a
@@ -922,7 +1054,11 @@ _TIME_WORDS = frozenset(
     "tonight today tomorrow evening evenings afternoon afternoons morning mornings night "
     "nights weekend weekends week weeks weekday weekdays day days month months year years "
     "saturday sunday monday tuesday wednesday thursday friday summer winter spring autumn "
-    "christmas easter holiday holidays time break".split())
+    "christmas easter holiday holidays time break "
+    # A clause that says when the block is names no thing: "any ideas for when i finish work"
+    # and "any ideas for once the kids are in bed" are the block's question, and the word that
+    # opens the clause was being read as the thing the ideas were for.
+    "when once whenever after before until till while".split())
 # The words that point at nothing of their own: "any ideas for things to do" is the plan.
 _NO_SUBJECT = frozenset("things thing something anything stuff more other else".split())
 # The words a person puts in front of "ideas" without naming a thing: "coming up any ideas",
@@ -963,6 +1099,17 @@ def _ideas_about_a_thing(understood):
         # somewhere warmer, a weekend away: a trip is a place to go, not a plan at home
         if any(word in ("away", "somewhere", "abroad") for word in words):
             return True
+        if not words:
+            return False
+        # "any ideas for after work" asks for ideas about a free block and not about a thing: the
+        # words of the block ("after work", "off work tomorrow") come off what the ideas are for,
+        # the same way they come off the subject elsewhere. What is left is what the line is
+        # really asking about, and when nothing is left the plan is the answer.
+        covered = _covered_words(rest, FREE_TIME + WEEK_OFF)
+        # ...and the place the block is spent in is not a thing the ideas are for either:
+        # "any ideas for the front room tomorrow" asked what to do with the room's evening.
+        here = _the_place_the_block_is_at(clean, block=True)
+        words = [word for word in words if word not in covered and word not in here]
         if not words:
             return False
         return words[0] not in _TIME_WORDS and words[0] not in _NO_SUBJECT
@@ -1072,6 +1219,232 @@ _REQUESTING_TIME = ("book a day off", "book a week off", "book time off", "book 
                     "could i take", "could i book", "am i allowed to take")
 
 
+# The words a subject can be made of and still be the free block itself rather than a thing
+# the line is asking about. "what should i do with my day off" names the day, and the plan is
+# the answer to it; "what should i do with my drone this weekend" names the drone.
+_FREE_BLOCK_WORDS = frozenset((
+    "weekend", "weekends", "saturday", "sundays", "sunday", "day", "days", "evening",
+    "evenings", "night", "nights", "tonight", "afternoon", "morning", "holiday", "holidays",
+    "week", "weeks", "time", "leave", "rest", "break", "free", "off", "plans", "plan",
+    # "off work tomorrow with nothing planned" is the block said in the order people say it:
+    # "work" and "tomorrow" were read as the thing the line was about, and the plan it asked for
+    # went to the leave script instead
+    "work", "tomorrow", "today", "now", "later",
+    "nothing", "home", "myself", "ourselves", "me", "us", "family", "friends",
+    # the day it is on is the free block and not a thing to do: "i have the day off on friday"
+    "monday", "mondays", "tuesday", "tuesdays", "wednesday", "wednesdays", "thursday",
+    "thursdays", "friday", "fridays", "saturday", "weekday", "weekdays", "weeknight",
+    # a rainy day, a wet weekend and a day indoors are free blocks of the same kind
+    "rainy", "wet", "cold", "indoors", "outside", "sunny", "summer", "winter", "autumn",
+    "spring", "hot",
+))
+
+# The asking words themselves: a free block with one of these is the question this card
+# answers, and neither word names a thing of its own.
+_ASK_WORDS = frozenset((
+    "what", "whats", "what's", "which", "where", "when", "how", "why", "who",
+    "should", "shall", "can", "could", "would", "will", "do", "does", "did", "doing",
+    "i", "we", "you", "id", "im", "ive", "us", "me", "my", "our", "your",
+    "the", "a", "an", "this", "that", "these", "those", "next", "last", "coming",
+    "some", "any", "something", "anything", "nothing", "thing", "things", "stuff",
+    "ideas", "idea", "suggestions", "suggestion", "suggest", "recommend",
+    "tips", "tip", "advice", "advise", "good", "nice", "fun", "funny", "best", "better",
+    "on", "in", "at", "for", "to", "of", "and", "or", "but", "with", "without",
+    "around", "about", "out", "up", "there", "here", "together", "nearby", "local",
+    "all", "day", "whole", "long", "few", "couple", "off", "free", "bored", "nothing",
+    "fill", "busy", "keep", "make", "most", "use", "spend", "sort", "go", "going",
+    "somewhere", "anywhere", "nowhere", "else", "instead", "please", "help", "planned",
+    "plans", "plan", "properly", "proper", "decent", "little", "bit", "much", "spend",
+    "spending", "spent", "cost", "costs", "price", "prices", "hi", "hiya", "hey",
+    "hello", "yo", "ok", "okay", "so", "well", "just", "really", "actually", "still",
+))
+
+# The free block spent on a job, rather than on a thing to pick. "how do i use a week off to
+# sort my flat out" names the flat, and a plan for the week is still what is being asked for -
+# the thing named is what the time goes on, not something to choose between. A job word takes
+# the line back to the plan, and the rows that answer a named thing still get it first.
+_JOB_WORDS = frozenset((
+    "sort", "sorted", "sorting", "tidy", "tidying", "clear", "clearing", "clean", "cleaning",
+    "declutter", "decluttering", "pack", "packing", "unpack", "unpacking", "paint", "painting",
+    "fix", "fixing", "mend", "mending", "repair", "repairing", "decorate", "decorating",
+    "redecorate", "reorganise", "reorganising", "organise", "organising", "rearrange",
+    "hoover", "weed", "weeding", "tackle", "tackling", "file", "filing", "paperwork",
+))
+
+# How many of something the free block is, when what it counts is time: "i have three weeks off
+# in the summer" was stood down as if the three named a thing, and the week's plan was lost to
+# the echo behind it.
+_COUNT_WORDS = frozenset("""
+    one two three four five six seven eight nine ten eleven twelve dozen couple few several
+    half single both
+    """.split())
+
+# A thing the line names as the one thing it does *not* want. "something to do tonight that isnt
+# tv" names the tv to be rid of it, so the tv is not what the line is asking about and the plan
+# for the evening is still the answer; the same for "no tv", "without the telly".
+_NOT_THE_THING = frozenset((
+    "not", "isnt", "isn't", "arent", "aren't", "wasnt", "wasn't", "no", "without", "non",
+    "except", "besides", "bar", "minus", "other", "than", "rather", "instead", "nor", "never",
+))
+
+# Words that only say what the free block is for or how much it may cost, in a line that is
+# still asking what to do with it.
+_BLOCK_QUALIFIERS = frozenset((
+    "cheap", "free", "budget", "afford", "money", "quid", "pounds", "tenner", "fiver",
+    "spare", "skint", "pennies", "cash", "nice", "quiet", "lazy", "relaxing",
+    # saying there is no money is still asking what to do with the time: "im broke what should i
+    # do tonight" was handed the savings plan once the free block stood down for "broke"
+    "broke", "broken", "poor", "brassic", "skint", "tight", "moneyless", "bust",
+))
+
+
+# A room or the home named after "in", "at" or "on" is where the free block happens, not a
+# thing to plan for: "what should i do in my kitchen this weekend" and "any ideas for something
+# to do at home" ask what to do with the time, and the plan is the answer to that. The
+# preposition is what makes it a place - "any ideas for my garden" is the garden's own question
+# (what to plant in it), and there the plan stands down.
+#
+# A garden is not a room, and neither is an allotment or a shed: it is a place with work of its
+# own, and the answer to "suggest something to do in the garden this weekend" is the garden's
+# own card. Reading those as rooms did the opposite - the plan kept the line and answered a
+# garden question with "a walk you have not done, a park, the library", the one thing a garden
+# is not (deck rows afbt-06 and abpl-02 on this branch, both a loss against main). So the words
+# here are the places that hold the person's own time and nothing else, and the growing places
+# stay things of their own in the line.
+_AT_HOME = ("kitchen", "house", "flat", "home", "loft", "attic", "cellar",
+            "living room", "dining room", "bedroom", "bathroom", "spare room",
+            "conservatory", "study", "front room", "back room", "box room",
+            "utility room", "hall", "hallway", "landing", "porch")
+# The prepositions a place the time is spent in is said with. "for" is only read this way on a
+# line that holds a free block: "something for the garden at the weekend" is where the weekend
+# goes, and "any ideas for my garden" is the garden's own question.
+_AT_THE_PLACE_WORDS = ("in", "at", "on", "into", "inside", "around", "round")
+_FOR_THE_PLACE_WORDS = ("for",)
+_THE_OWNER = ("the", "my", "our", "your", "his", "her", "their")
+
+
+def _the_place_the_block_is_at(said, block=False):
+    """The words of the room or corner the free block is spent in, if the line names one.
+
+    "in the garden", "at home", "on the balcony", "in the back garden": the time is spent
+    there, and what to do with it is still the question, so the plan is the answer. Read word
+    by word rather than by regex, because a place is often two words, the first of them alone
+    ("back", "front", "living") is not the place, and one match must not eat the next.
+
+    `block` says the line holds a free block, which is what makes "for the garden" a place the
+    time is spent in rather than the thing it is about.
+    """
+    words = re.findall(r"[a-z']+", str(said or "").lower())
+    preps = set(_AT_THE_PLACE_WORDS) | (set(_FOR_THE_PLACE_WORDS) if block else set())
+    here = set()
+    for i, word in enumerate(words):
+        if word not in preps:
+            continue
+        j = i + 1
+        if j < len(words) and words[j] in _THE_OWNER:
+            j += 1
+        pair = " ".join(words[j:j + 2])
+        if pair in _AT_HOME:
+            here.update(pair.split())
+        elif j < len(words) and words[j] in _AT_HOME:
+            here.add(words[j])
+    return here
+
+
+def _names_the_free_block(named):
+    """Whether the line's subject is the free block itself rather than a thing of its own."""
+    words = [word for word in re.split(r"[^a-z0-9']+", str(named or "").lower()) if word]
+    if not words:
+        return True
+    return all(word in _FREE_BLOCK_WORDS or word in _ASK_WORDS or word in _BLOCK_QUALIFIERS
+               or word in _COUNT_WORDS for word in words)
+
+
+def _covered_words(text, phrases):
+    """The words of the phrases of `phrases` this line holds, counted once each.
+
+    A free block said as a phrase ("after work", "week off work", "day off tomorrow") brings
+    words of its own that name no thing: the plan is still the answer to "what should i do
+    after work". They come off the line before what is left is read as a thing.
+    """
+    covered = {}
+    left = " %s " % text
+    for phrase in sorted(phrases, key=len, reverse=True):
+        pattern = r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(phrase)
+        while re.search(pattern, left):
+            left = re.sub(pattern, " ", left, count=1)
+            for word in phrase.split():
+                covered[word] = covered.get(word, 0) + 1
+    return covered
+
+
+# A musing is not a question. "i suppose i should hire a skip" says what the person has already
+# made their mind up about, so the plan standing down only hands the line to an echo - which is
+# worse than the plan, and the one line that changed for the worse in 145 chats that say
+# "saturday". The plan is not the answer to a musing either (a skip card is), so this is a fence
+# around the regression and not the fix: the words say whether a line is asking anything.
+_MUSING = re.compile(r"\b(?:i|we)\s+(?:suppose|guess|reckon|expect|think)\b"
+                     r"|\b(?:maybe|perhaps|probably)\b[^.?!]*\b(?:i|we)\b")
+
+
+def _names_a_thing_of_its_own(understood):
+    """Whether the line names a thing the plan is not about.
+
+    A free block plus an ask is this card's question ("what should i do this weekend", "any
+    ideas for a rainy day"), and every other word of such a line either says when it is or
+    what it is for. A line that carries a word outside that vocabulary is asking about that
+    word: "any ideas for a film tonight" is a film and "give me three ideas for a cheap date"
+    is a date - both were answered with a plan for the evening or for a free day instead.
+    """
+    words = {word.lower().replace("'", "") for word in (understood.get("keywords") or ())
+             if isinstance(word, str)}
+    if words & _JOB_WORDS:
+        return False
+    said = " %s " % str(understood.get("clean") or "").lower()
+    if _MUSING.search(said):
+        return False
+    # The block can be said as a phrase ("after work", "off work tomorrow") or as a plain word
+    # of time ("tomorrow", "this evening"), and both make "for the garden" a place the time is
+    # spent in rather than the thing the line is about.
+    holds_block = bool(_covered_words(said, FREE_TIME + WEEK_OFF + _WORK_BLOCK)) or bool(
+        set(re.findall(r"[a-z']+", said)) & FREE_TIME_TIME)
+    here = _the_place_the_block_is_at(said, block=holds_block)
+    shown = understood.get("subject")
+    if isinstance(shown, str) and shown:
+        left = " ".join(word for word in re.split(r"[^a-z0-9']+", shown.lower())
+                        if word and word not in here)
+        if left and not _names_the_free_block(left):
+            return True
+    covered = _covered_words(said, FREE_TIME + WEEK_OFF + FREE_TIME_ASK + _ASKS + _WORK_BLOCK)
+    for word in understood.get("keywords") or ():
+        if not isinstance(word, str):
+            continue
+        low = word.lower().replace("'", "")
+        if (low in _FREE_BLOCK_WORDS or low in _ASK_WORDS or low in _BLOCK_QUALIFIERS
+                or low in _COUNT_WORDS):
+            continue
+        if low.isdigit():
+            continue
+        if low in here:
+            continue
+        if covered.get(low):
+            covered[low] -= 1
+            continue
+        if _said_as_the_thing_it_does_not_want(str(understood.get("clean") or ""), low):
+            continue
+        return True
+    return False
+
+
+def _said_as_the_thing_it_does_not_want(line, word):
+    """Whether this word comes into the line as the thing the person wants to get away from."""
+    found = re.search(r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(word.lower()), line.lower())
+    if not found:
+        return False
+    before = line[:found.start()].lower().split()
+    return bool(before[-2:] and set(before[-2:]) & _NOT_THE_THING)
+
+
 def _free_time(memory, understood):
     said = " ".join(str(word).lower() for word in (understood.get("words") or []))
     clean = str(understood.get("clean") or "").lower()
@@ -1153,12 +1526,24 @@ def _free_time(memory, understood):
     # to be named, so "what should i do tonight, im exhausted" keeps the evening plan.
     if _about_a_thing_the_person_has(understood):
         return None
+    # The free block is what this card is about, so a line that names a thing of its own is
+    # asking about that thing and not about the time it has in it. "any ideas for a film
+    # tonight" is a film to watch, "give me three ideas for a cheap date" is a date, and
+    # "what can i do with a bag of apples this weekend" is about the apples: all three were
+    # given a plan for the evening or for a free day instead of an answer about the thing they
+    # named. This is the last stand-down, after the rows above that answer a named thing on
+    # purpose (a new baby, a party, a wedding, a month), because those are the answers to the
+    # thing the line names, not plans given in place of one.
+    if _names_a_thing_of_its_own(understood):
+        return None
+    # a present is the gift rows' question, and the guest numbers are not the answer to it
+    if any(phrase in line for phrase in _GIFT_ASK):
+        return None
     if any(word in line for word in ("this afternoon", "free afternoon", "afternoon off")):
         plan = DAY_PLAN
     elif any(word in line for word in ("day off", "days off", "free day")):
         plan = DAY_OFF_PLAN
-    elif any(word in line for word in ("tonight", "this evening", "free evening", "after work",
-                                       "evening", "evenings")):
+    elif any(word in line for word in _THE_EVENING):
         plan = EVENING_PLAN
     elif ((_short_run(line)
            or any(word in line for word in ("few days", "couple of days")))
@@ -1333,6 +1718,78 @@ _CHILD_AT_PARTY = ("kid", "kids", "child", "children", "childs", "toddler", "tod
                    "nursery", "soft play", "playcentre", "reception class", "year one")
 _AGE_AT_PARTY = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\b")
 
+# A landmark birthday said as an age rather than as a party: "my mum is 70 next week what can i
+# do" names the person, the age and the day, and the row that plans a do for a grown-up never
+# heard "70" - the words that reach it are "70th", "birthday" and "for her birthday", and this
+# line says none of them. It was answered "I'm not sure about that one, sorry". The age has to
+# be a round one and a grown-up one, and a day has to be near, so a car's age and a child's
+# birthday stay where they were.
+_A_MILESTONE_PERSON = re.compile(
+    r"\b(?:mum|mums|mom|moms|mam|mams|dad|dads|father|mother|nan|nans|nana|nan's|gran|grans|"
+    r"granny|grandma|grandad|grandpa|grandmother|grandfather|aunt|auntie|uncle|sister|brother|"
+    r"wife|husband|partner|mother in law|father in law|she|he|son|sons|daughter|daughters|"
+    r"grandson|granddaughter|grandchild|godson|goddaughter|nephew|niece|kid|kids|child|children)\b")
+# A child's birthday said the same way ("my son is 7 next week what should we do"), where the age
+# is the child's own and the children's plan is the answer rather than the grown-up one.
+_A_CHILD_AT_A_MILESTONE = re.compile(
+    r"\b(?:son|sons|daughter|daughters|grandson|granddaughter|grandchild|godson|goddaughter|"
+    r"nephew|niece|kid|kids|child|children|boy|girl|toddler)\b")
+_A_MILESTONE_AGE = re.compile(
+    r"\b(?:is|turns|turning|will be|going to be|hits|becomes)\s+(?:the age of\s+)?(\d{1,2})\b")
+_A_MILESTONE_SOON = re.compile(
+    r"\b(?:next (?:week|month|weekend|saturday|sunday|friday|year)|this (?:week|weekend)|"
+    r"on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|soon|coming up|"
+    r"in \w+ (?:weeks|days))\b")
+
+
+# A line that asks for a present rather than for a do. "What should i get my mum who is 70 next
+# week" and "present ideas for my dad who turns 60" carry the same age and the same day as the
+# party lines, and the thing asked for is a gift: a noun for one, or a verb of buying, giving or
+# making with the person as its object. "What can i do for her" and "how should we celebrate"
+# name no gift, so the party row keeps those.
+_A_PRESENT_ASKED = re.compile(
+    r"\b(?:present|presents|gift|gifts)\b"
+    r"|\bwhat\s+(?:should|shall|can|could|do|would)\s+(?:i|we)\s+(?:get|buy|give|make|send)\b"
+    r"|\b(?:get|buy|give|make|send)\s+(?:her|him|them|my\s+(?:mum|mom|mother|dad|father|"
+    r"gran|grandma|grandad|granny|nan|nana|wife|husband|partner|son|daughter|sister|brother|"
+    r"friend|parents?))\b"
+    r"|\bideas?\s+(?:for|of)\s+(?:a\s+)?(?:present|gift)\b")
+
+
+# The same reading as phrases, because a row is reached by its own key words: "is 70", "turns 60",
+# "turning 80". The ages are every grown-up one and the verbs are the ways an age is said of
+# somebody; the guard is what keeps a boiler's age, a child's birthday and a line with no ask in
+# it away from the plan.
+_MILESTONE_AGES = tuple(range(1, 100))
+_MILESTONE_SAID = tuple("%s %d" % (verb, years)
+                        for years in _MILESTONE_AGES
+                        for verb in ("is", "turns", "turning", "will be"))
+
+
+def _a_milestone_said_as_an_age(understood):
+    """True when the line is somebody's birthday, said as an age and a day.
+
+    The age is a round one and a grown-up one, a day has to be near, and the person has to be
+    named: an age said of a boiler or a car is not a do, and a child's birthday has its own plan.
+    """
+    line = " ".join([str((understood or {}).get("clean") or "")]
+                    + [str(word) for word in ((understood or {}).get("words") or ())]).lower()
+    if not _A_MILESTONE_PERSON.search(line):
+        return False
+    age = _A_MILESTONE_AGE.search(line)
+    if not age:
+        return False
+    years = int(age.group(1))
+    if years < 18 and not _A_CHILD_AT_A_MILESTONE.search(line):
+        return False
+    # A birthday is also how people say which present they want: "what should i get my mum who
+    # is 70 next week" is a thing to give, not a do to plan, and the gift answer was there for
+    # the asking before this row existed. The age and the day are the same words in both lines,
+    # so what the line asks for is what tells them apart.
+    if _A_PRESENT_ASKED.search(line):
+        return False
+    return bool(_A_MILESTONE_SOON.search(line))
+
 
 def _party_plan(memory, reading):
     """The grown-up party plan, or the children's one when the line names a child.
@@ -1350,6 +1807,27 @@ def _party_plan(memory, reading):
     if any(re.search(r"\b" + word + r"\b", line) for word in _CHILD_AT_PARTY):
         return _KIDS_PARTY
     return _ADULT_PARTY
+
+
+def _not_a_gift_ask(understood):
+    """Whether the line is asking for a thing to give rather than for the do itself.
+
+    "what should i get my mum for her birthday" holds "birthday" and an ask, which is enough
+    for the party row, and the gift and the guest list are different answers. "how many people
+    should i invite to my mums 60th" names the do and not a present, so it keeps the plan.
+    """
+    line = " " + str((understood or {}).get("clean") or "").lower() + " "
+    line += " ".join(str(word).lower() for word in ((understood or {}).get("words") or ())) + " "
+    return not any(phrase in line for phrase in _GIFT_ASK)
+
+
+def _not_a_gift_or_a_date(understood):
+    """Both of the party row's stand-downs, so the row keeps neither a present nor a date.
+
+    The date question and the gift question arrive in the same words ("what should i do for my
+    mum's birthday this weekend" is neither), so the row asks both before it answers.
+    """
+    return _not_a_gift_ask(understood) and _not_a_date_question(understood)
 
 
 _KITCHEN_PLAN = (
@@ -1502,7 +1980,21 @@ ENTRIES = [
             "how do i move house", "how do i move home", "how do i move flat",
             "how do i move out", "how to move house", "how to move home",
             "how do i move to a new house", "how do i move to a new flat",
-            "what do i need to move house", "what do i need to move home"),
+            "what do i need to move house", "what do i need to move home",
+            # "how do i plan a move" and "tips for moving out" name the move without the word
+            # house or flat, and the guard above is what tells them from a move abroad or a move
+            # at work.
+            # "what should i do first when moving" named the move with the participle only:
+            # "moving house" and "moving home" are the phrases this row keys, and the plainest
+            # way of saying it - when moving - was a search hedge.
+            "when moving", "when we move", "when i move", "when you move", "if we move",
+            "plan a move", "planning a move", "plan the move", "planning the move",
+            "organise a move", "organising a move", "organize a move", "organizing a move",
+            "a move to plan", "before a move", "before the move", "the move go",
+            "prepare for a move", "prepare to move", "get ready for a move",
+            "get ready to move", "ready for a move", "start with a move",
+            "start on a move", "start with moving", "sort out a move",
+            "moving out of my", "moving out next"),
            ("plan", "planning", "start", "organise", "organize", "checklist", "prepare",
             "sorted", "first", "ahead", "organise", "where do i", "tips", "advice",
             # The verb itself: the ask phrase above is one word of the key, and the score wants
@@ -1514,6 +2006,7 @@ ENTRIES = [
           "council, energy, water and broadband a month before, because the bills follow you. Box "
           "the things you don't use three weeks out, label every box with its room, and pack one "
           "bag with a kettle, mugs, loo roll, bedding and chargers for the first night.", ask=PLAN_ASK,
+          guard=_a_household_move_or_a_named_move,
           # A move that names the paperwork, the doctor or the price is a different answer:
           # "how do i register with a doctor after moving house" is the registration row, and
           # "how do i move house cheaply" is the man-with-a-van row.
@@ -1528,6 +2021,10 @@ ENTRIES = [
                  "hoping", "hopin", "hope to move", "hopin to move", "hopes to",
                  "thinking of moving", "thinking about moving", "dream of moving",
                  "dreaming of moving", "want to move out", "cant wait to move",
+                 # telling the landlord is the notice letter, and it was answered with the van
+                 # timeline: "when should i tell my landlord im moving out"
+                 "tell my landlord", "tell the landlord", "landlord", "landlady",
+                 "letting agent", "notice period", "give notice",
                  "can't wait to move", "one day",
                  # A move that has hurt them is a body question: "i helped my mate move house
                  # now my back is killing me" was given the six-to-eight-week van timeline.
@@ -1544,7 +2041,20 @@ ENTRIES = [
                  "how do i tell", "how to tell", "how do i explain", "what do i say",
                  "tell the kids", "tell my kids", "tell the children", "tell my children",
                  "tell my son", "tell my daughter", "break the news", "explain to my",
-                 "how do i break")),
+                 "how do i break",
+                 # A move with children in it is the telling, not the timeline: "how do i organise
+                 # a move with kids" was answered "tell them as soon as it is certain" on main,
+                 # and the phrase "organise a move" added to the key above took it back to the
+                 # van and the council. The children's card is the better answer to that line.
+                 "with kids", "with children", "with a baby", "with a toddler", "with a child",
+                 "my kids", "my children", "my son", "my daughter", "pregnant", "my baby",
+                 "toddler", "toddlers", "kids", "children",
+                 # Moving in with someone is about money and habits, not a van: "how do i prepare
+                 # to move in with my partner" answered "agree the boring things before the
+                 # boxes" on main, and the wider move key took it.
+                 "with my partner", "with a partner", "move in with", "moving in with",
+                 "moved in with", "move into his", "move into her", "my girlfriend",
+                 "my boyfriend", "my partner")),
 
     # --- a birthday nobody has written down ---------------------------------------
     # A date question about a birthday is not a party: "when is my mums birthday" was told the
@@ -1562,6 +2072,20 @@ ENTRIES = [
                  "gift", "gifts", "buy", "plan", "planning", "many", "venue", "cake", "food",
                  "guest", "guests", "surprise", "ideas", "organise"),
           bias=1),
+
+    # --- a landmark birthday said as an age --------------------------------------
+    # "my mum is 70 next week what can i do" names the person, the age and the day, and none of
+    # the words the do's own row is keyed on ("70th", "birthday", "for her birthday"), so it was
+    # answered "I'm not sure about that one, sorry". The age is the subject here and the guard is
+    # what keeps it to a person: an age said of a boiler or a car is not a do, and a line with no
+    # ask in it is somebody telling you about their week.
+    entry("party-milestone",
+          (_MILESTONE_SAID,
+           ("do", "doing", "what", "how", "should", "could", "can we", "ideas", "any",
+            "anything", "something", "plan", "planning", "organise", "help", "sort", "get",
+            "make", "give")),
+          _party_plan, ask=PLAN_ASK, guard=_a_milestone_said_as_an_age, bias=1,
+          avoid=("years old", "year old", "miles", "years", "kg", "degrees")),
 
     # --- a party ----------------------------------------------------------------
     entry("party-grownup",
@@ -1688,11 +2212,12 @@ ENTRIES = [
                  "game", "games", "board game", "board games", "party game", "party games",
                  "what should we play", "something to play", "quiz", "games night"),
           bias=1,
-          # A birthday that has gone is not a party still to plan: "i forgot my mums birthday,
-          # what do i do" was answered with the guest count and the buffet budget, and what it
-          # asks is how to put it right. The date question keeps its own stand-down, so the two
-          # are one guard rather than one kwarg each.
-          guard=lambda u: _not_a_deed_of_their_own(u) and _not_a_date_question(u)),
+          # Two stand-downs weigh on this row, and an `entry` takes one `guard=`, so they are one
+          # guard. A birthday that has gone is not a party still to plan: "i forgot my mums
+          # birthday, what do i do" was answered with the guest count and the buffet budget, and
+          # what it asks is how to put it right. A present for the person the day belongs to is
+          # not a party either, and the date question is asked by both of them.
+          guard=lambda u: _not_a_gift_or_a_date(u) and _not_a_deed_of_their_own(u)),
     entry("party-kids",
           # The second group is the planning and the first is the party, and neither "how many"
           # nor "kids"/"children" belongs in the second: with those three words there, "how many
@@ -1717,7 +2242,16 @@ ENTRIES = [
                  # card" was two hours and age-plus-one guests, because this list had none of
                  # them. A card, a message or wishes is not a party to plan.
                  "card", "cards", "message", "messages", "wishes", "what to write",
-                 "what should i write", "what do i write", "write in", "message in")),
+                 "what should i write", "what do i write", "write in", "message in",
+                 # What dish to carry to somebody else's party is the buffet row's question,
+                 # not the party plan's: "about ten kids are coming, what food should i bring"
+                 # was told the age-plus-one guest rule, which then took the follow-up "and
+                 # some games" with it ("Same answer, and it covers this: two hours and about
+                 # age-plus-one guests ...") instead of the games card.
+                 "what food should i bring", "what food should i take", "what food can i bring",
+                 "what food can i take", "what food do i bring", "what food to bring",
+                 "bring a dish", "dish to bring", "food to bring", "what should i bring",
+                 "what can i bring", "anything i can bring")),
 
     # --- a wedding --------------------------------------------------------------
     entry("wedding-plan",
@@ -1727,13 +2261,26 @@ ENTRIES = [
             # the same subject said with "get married", "we are getting married" and the
             # notice itself, which people name with no other word in the line
             "get married", "married", "we are getting married", "give notice",
-            "notice of marriage", "notice to marry", "wedding day"),
+            "notice of marriage", "notice to marry", "wedding day",
+            # the bookings and the venue name the wedding without the word: "how far ahead
+            # should we book the venue" and "when should we book the photographer" reached
+            # nothing at all, because neither says wedding
+            # not the bare "the venue": "i booked the venue for the wedding" is the plan ack,
+            # not a request for the guest list, so only the booking ask opens the row
+            "book the venue", "book a venue", "the wedding venue",
+            "book the photographer", "book a photographer"),
            # "how much does a register office wedding cost" is not here on purpose: the
            # ceremony fee is the registry, council and certificate answer, and this row's money
            # paragraph talks about guest lists, so a bare cost word left it answering a question
            # about a room with a rule about headcounts
            ("plan", "planning", "budget", "guest list", "guests", "afford", "cheap",
             "start", "organise", "venue", "save",
+            # the ask for the order: "we are getting married in june what should i sort first"
+            # and "what should i sort first for a wedding" asked for the order of the steps and
+            # the row had no word for it - the first got a search hedge and the second the
+            # booking-a-room card for a trip.
+            "first", "sort", "sort first", "sort out first", "pick", "pick first", "order",
+            "prioritise", "priorities", "before what",
             # "im getting married what do i need to do" asks for the paper trail, which is the
             # thing people miss: give notice, the registrar, the witnesses
             "what do i need", "need to do", "whats needed", "what's needed", "paperwork",
@@ -1748,8 +2295,28 @@ ENTRIES = [
             "how do i get married", "how do we get married", "how to get married",
             "how do you get married", "how do i marry", "how do we marry",
             "how do i arrange", "how do we arrange", "what do i do", "what do we do",
-            "what do i need to do", "where do i start", "how does it work")),
-          _wedding_plan, ask=PLAN_ASK + _WEDDING_ASK,
+            "what do i need to do", "where do i start", "how does it work",
+            # the count and the calendar: "how many guests for a wedding" reached the hotel row
+            # on "for a wedding" and "book", and "how many guests should we have" reached the
+            # buffet card, because neither shape was in this row's key at all
+            "how many guests", "how many people", "how many should we invite",
+            "how many to invite", "number of guests", "how big", "size of the wedding",
+            "far ahead", "how early", "how long before", "lead time", "how soon",
+            "when should we book", "when to book", "book the venue", "book a venue",
+            "book the photographer", "book a photographer", "book the registrar",
+            # "how far ahead should we book the venue" and "when should we book the
+            # photographer" name the wedding by its bookings and never say the word
+            "book the venue", "book a venue", "the wedding venue",
+            "the photographer", "a photographer")),
+          _wedding_plan,
+          # No "book" or "booking" here: an ask is a gate read through the forms, so those two
+          # words let "i booked the venue for the wedding" past the gate, and the guest list took
+          # a line the plan ack answers. "how far ahead should we book" asks with "how".
+          ask=PLAN_ASK + _WEDDING_ASK + ("how many", "how far", "how long", "how soon", "how big",
+                                         "when", "count"),
+          # a nudge, because the count and the calendar tie with a page about hotel rooms and a
+          # card about cooking for a crowd: a wedding plan is the answer to a wedding question
+          bias=1,
           # a price question is a price question: "how much does a register office wedding
           # cost" belongs to the fees row (notice, ceremony, certificate), and this row's money
           # answer is about the guest list, so it stands down rather than answering a question
@@ -1760,8 +2327,106 @@ ENTRIES = [
                  # 60% of the bill, where the outfit is clothing's question.
                  "wear", "wearing", "outfit", "outfits", "dress", "dresses", "jumpsuit",
                  "jumpsuits", "hat", "hats", "fascinator", "shoes", "heels", "tie",
-                 "colour", "color", "dress code", "black tie")),
+                 "colour", "color", "dress code", "black tie",
+                 # and "give notice" is also what a tenant does: "how do i give notice to my
+                 # letting agent" and "can i give notice by text to my landlord" were both told
+                 # to go to the register office 29 days before the wedding. A landlord, a
+                 # tenancy or a letting agent in the line is not this row's.
+                 "landlord", "landlords", "landlady", "letting agent", "letting agents",
+                 "tenancy", "tenancies", "tenants", "my flat", "my lease", "the flat",
+                 "rent", "notice period", "evict", "deposit",
+                 # what is already booked is the plan ack's, and the ask gate above is what
+                 # keeps it there: these are only the odd shapes that carry an ask word of
+                 # their own ("when is the venue booked" is a question, but not this one's)
+                 "already booked", "havnt booked", "havent booked", "got the venue",
+                 "venue booked")),
 
+    # Food for a wedding is the one event meal with no card of its own: the party rows answer
+    # "what food for a birthday party" and "how much food for 30 guests", occasions.py answers a
+    # christening, and both of those stand down on the word wedding - so "what food for a barn
+    # wedding", "we are having a barn wedding what food" and "how do i cater a wedding for 60
+    # people" were a shrug or a search hedge, and "wedding food ideas for 60 guests" was answered
+    # with how much to spend on a present. The wedding plan card is about guests, venue and
+    # paperwork, so the food is its own answer.
+    entry("wedding-food",
+          (("wedding", "weddings", "wedding breakfast", "wedding reception", "reception",
+            "getting married", "we are getting married", "marrying", "barn wedding",
+            "wedding day", "big day", "the wedding", "our wedding", "my wedding",
+            "for a wedding", "a wedding"),
+           ("food", "menu", "menus", "cater", "caters", "catering", "caterer", "caterers",
+            "buffet", "meal", "meals", "eat", "eating", "feed", "feeding", "supper", "dinner",
+            "breakfast", "hog roast", "barbecue", "bbq", "canapes", "finger food", "serve",
+            "serving", "cook", "cooking", "drinks", "what should we eat", "what do we eat",
+            "sit down", "sit-down", "plated")),
+          "Decide the shape before the menu: a sit-down meal is about £35 to £60 a head catered "
+          "and a buffet or hog roast about £20 to £35, while doing it yourselves lands near £10 "
+          "to £15 a head and costs you the day. Work back from the number of guests - 60 people "
+          "is a caterer's job unless you have a big kitchen and willing help - and ask the venue "
+          "first, because many barns and halls either insist on their own list or charge corkage "
+          "and a kitchen fee. Book six to nine months ahead for a summer Saturday, put dietary "
+          "needs on the reply card, and plan evening food if the day runs past nine: something "
+          "hot and cheap at 9pm saves a long hungry evening.",
+          # the ask is a gate, so every shape of asking the food has to be in it: "do we need a
+          # caterer for a wedding" has no other ask word and reached the hotel row
+          ask=PLAN_ASK + ("food", "menu", "cater", "caterer", "caterers", "catering", "buffet",
+                          "eat", "feeds", "feed", "serve", "serving", "need", "needs",
+                          "what do we", "what should we", "guests"),
+          # the present, the paperwork and the outfit are other cards
+          avoid=("gift", "gifts", "present", "presents", "notice", "registrar",
+                 "register office", "witness", "witnesses", "wear", "wearing", "outfit",
+                 "dress code", "speech", "photographer", "flowers", "music", "playlist",
+                 "band", "dj", "first dance", "honeymoon", "thank you card"),
+          # the hotel row keys "a wedding" too ("book the room early for a wedding"), so the food
+          # card has to outrank it on a line that names both: "we need to cater for a wedding"
+          bias=2),
+    # The order of the day, which people ask as "what time should we say on the invite": the
+    # hours pool answered it ("the opening hours are the first thing a venue changes") because
+    # nothing else did, and a wedding day has no opening hours - it has a ceremony time, drinks,
+    # a meal and a first dance, in that order.
+    entry("wedding-timings",
+          (("wedding", "weddings", "wedding day", "ceremony", "reception", "wedding breakfast",
+            "getting married", "we are getting married", "big day", "marrying",
+            # the invite carries the event, so a line that asks what to put on it has said the
+            # wedding without the word: "what time should we say on the invite" was a hedge
+            "the invite", "the invitation", "on the invite", "on the invitation",
+            "what time on the invite", "order of the day"),
+           ("what time", "when should", "what time should", "order of the day", "timetable",
+            "timeline", "schedule", "run order", "running order", "how early",
+            # a bare "invite" is the guest list, not the timetable: "how many people should we
+            # invite to a wedding" was answered with the ceremony time. Only the invite as the
+            # thing the time is written on counts, and that is in the first part of the key.
+            # "how long" is the day's length, not any duration: "how long ago was that", said
+            # after a chat about a wedding, was answered with the order of the day
+            "how long does the day", "how long does it last", "how long is the ceremony",
+            "how long do we need", "how long should the day",
+            # the long day said without the word wedding next to it: "how long does the
+            # wedding day last" carries only "day" and "last" outside the wedding word
+            "long does the day", "how long is the day", "day last", "whole day", "day go on",
+            "how long do guests", "how long are guests", "long does a wedding",
+            "long is a wedding", "wedding last", "how long the day",
+            "what time do people",
+            "what time do you", "what time is usual", "usual time", "start time", "what hour")),
+          "The time on the invite is the ceremony time, not the time to arrive: guests should be "
+          "there 20 to 30 minutes before, so say the ceremony time and let the venue tell people "
+          "when to turn up. A ceremony runs about 30 minutes, then drinks and photographs for an "
+          "hour to ninety minutes while the room is turned round, then the meal - which takes "
+          "about two hours with speeches after it. Evening guests usually come from 7pm, and the "
+          "first dance follows the evening food. Work backwards from the meal, because caterers "
+          "want the room by a set time, and leave 20 minutes of slack: a late registrar cannot "
+          "be made up.",
+          ask=PLAN_ASK + ("what time", "when", "order", "timetable", "timeline", "schedule",
+                          "run order", "running order", "usual"),
+          avoid=("gift", "gifts", "present", "presents", "notice", "registrar",
+                 "register office", "witness", "witnesses", "wear", "wearing", "outfit",
+                 "dress code", "speech", "honeymoon", "food", "menu", "catering", "buffet",
+                 "venue", "cost", "how much",
+                 # a duration from the past is not a timetable: "how long ago was that"
+                 "ago", "how long ago", "how old", "already been",
+                 # nor is a room to sleep in: "when should i book a hotel for a wedding" is a
+                 # booking question that names the wedding, not the order of the day
+                 "hotel", "hotels", "guesthouse", "guest house", "b&b", "a room", "rooms",
+                 "flight", "flights", "travel", "parking", "taxi"),
+          bias=1),
     # --- building work ----------------------------------------------------------
     entry("renovation-plan",
           # the room on its own is enough for this row when the rest of the line is the work:
@@ -1886,6 +2551,42 @@ ENTRIES = [
                  "instalments", "on finance", "payment plan"),
           bias=1),
 
+    # One piece of the baby gear is chosen far more carefully than the rest: the pram is pushed
+    # every day for two years and has to fit a boot. "what should i look for in a pram" had no
+    # ask word the baby-gear row demands and was a hedge, and the whole-gear price list is not the
+    # answer to a line about one piece of it.
+    entry("pram-buy",
+          (("pram", "prams", "pushchair", "pushchairs", "buggy", "buggies", "travel system",
+            "travel systems", "stroller", "strollers"),
+           ("buy", "buying", "bought", "which", "what", "best", "choose", "choosing",
+            "look for", "look out for", "worth", "recommend", "new", "second hand",
+            "secondhand", "second-hand", "cheap", "price", "cost", "get", "need",
+            # a comparison of two of the same thing is this question: "is a bigger pram better"
+            # was a search hedge beside a row that answers which pram to buy
+            "better", "worse", "bigger", "smaller")),
+          "Lay it flat first: a newborn needs a carrycot or a seat that goes properly flat, and "
+          "after that the fold and the boot decide it - fold it one-handed in the shop and lift it "
+          "into your own boot before you pay. Check the brake holds on a slope with the child in "
+          "it, that the handle suits your height, and that the wheels are big enough for the "
+          "pavement you actually walk on. A new one is \u00a3150 to \u00a3400 and a good second-hand "
+          "pram is \u00a360 to \u00a3150, which is the better buy; the car seat is the one piece worth "
+          "buying new, or with a history you know.",
+          # how to fold, clean or fix one is its own question, and a pram on a bus or in an
+          # airport is not a purchase either
+          avoid=("fold", "folding", "folded", "stuck", "clean", "cleaning", "wash", "washing",
+                 "stain", "stains", "smell", "smells", "mould", "mold", "repair", "fix",
+                 "bus", "plane", "airport", "safe to", "car seat", "isofix", "wont sleep",
+                 "sleep", "reflux", "colic",
+                 # a choice between two pieces of baby gear is the cost card's question, and it
+                 # answers it by comparing them: "which is better, a pram or a carrier" was
+                 # answered with the pram alone
+                 "carrier", "carriers", "sling", "slings", "or a carrier", "or a sling",
+                 # and "where can i buy a pram" asks for a shop, which is not what this row
+                 # is, so the price card beside it answers rather than a near miss
+                 "where can i", "where to buy", "where do i buy", "which shop",
+                 "cheapest place", "shop"),
+          bias=2),
+
     # --- a holiday --------------------------------------------------------------
     entry("holiday-countdown",
           (("holiday", "trip", "flight", "flights", "fly to", "flying to", "flying out",
@@ -1919,6 +2620,15 @@ ENTRIES = [
             # i clear my desk" were a punt and the posture answer, and neither is a clear-out
             "clutter", "clear the clutter", "clear clutter", "messy house", "tidy my house",
             "tidy up my house", "clear my desk", "clear a room", "clear the room",
+            # the whole home said with its plain verb. "tidy my house" was here and its neighbours
+            # were not, so "how do i tidy my flat", "how do i clean the house", "how do i clean my
+            # whole house" and five more like them were a hedge. A house, a flat and a home are
+            # the same job, so the verb phrases are the same whichever word names the home.
+            "tidy my flat", "tidy the flat", "tidy my home", "tidy the house",
+            "tidy my whole house", "tidy the whole house",
+            # ("clean my house" and its neighbours cannot be keyed here: this row's avoid list
+            # carries "cleaning" and "clean the" as word families, because a cleaning question is
+            # cleaning.py's. A whole home to clean is a row in that module instead.)
             "too much stuff", "clear the house",
             # the same job in the words people use for it: "what should i get rid of" was the
             # search hedge, "where do i start with the mess" the other hedge, and "i have got
@@ -2000,11 +2710,18 @@ ENTRIES = [
                  # bedroom" was three bags on the floor, because "get rid of" and a room are
                  # both this row's words. The cleaning has its own answers, and a clear-out
                  # question never says dust, hoover, mop or wipe.
+                 # the mess a flatmate leaves is a conversation with them, not a clear-out:
+                 # "what should i say to my flatmate about the mess" was three bags on the floor
+                 "flatmate", "flatmates", "housemate", "housemates", "roommate", "roommates",
+                 "house share", "houseshare", "lodger",
                  "dust", "dusty", "dusting", "cobweb", "cobwebs", "hoover", "hoovering",
                  "vacuum", "vacuuming", "wipe", "wiping", "mop", "mopping", "polish",
                  "cleaning", "clean the", "scrub", "scrubbing", "limescale",
-                 # a removal is a pack, not a clear-out
-                 "to move", "moving", "moved house", "house move", "removal", "removals",
+                 # a removal is a pack, not a clear-out. "a move" is not: "how do i declutter
+                 # before a move" is the clear-out with a deadline, and a bare "moving" here
+                 # matched it by stem and left the line with no answer at all
+                 "to move", "moving house", "moving home", "moving flat", "moving out",
+                 "moved house", "house move", "removal", "removals",
                  "pack up", "packing", "care home", "residential home", "nursing home",
                  # "how do i stop junk email" and "too much junk email" are the inbox's, and
                  # "junk" is in this row's gate: an inbox is cleared out by a filter, not in
@@ -2019,7 +2736,13 @@ ENTRIES = [
           (("weekend", "weekends", "day off", "days off", "saturday", "sunday", "free day",
             "bank holiday weekend", "bank holiday", "next weekend", "this weekend",
             "this evening", "tonight", "today", "around here", "near here", "near me",
-            "in town", "in the area"),
+            "in town", "in the area",
+            # A day is a day: "what shall we do tomorrow" and "any ideas for tomorrow" were a
+            # search hedge on main while the same ask about today has this answer. The words are
+            # the day's, not the weekend's, and the guards below still decide whether the line is
+            # a free block waiting to be filled.
+            "tomorrow", "tomorrow morning", "tomorrow afternoon", "tomorrow evening",
+            "tomorrow night"),
            ("what", "anything", "ideas", "idea", "things to do", "something to do", "do this",
             "suggest", "recommend", "bored", "plan", "plans", "shall i", "can i do",
             "what can i do", "what should i do", "what can we do", "what shall we do",
@@ -2059,6 +2782,10 @@ ENTRIES = [
                  # read in `_a_free_weekend`.
                  "what should i take", "what should i bring", "what to take", "what to bring",
                  "take with", "bring with", "take to a", "bring to",
+                 # "what do i need to bring tomorrow" is a packing question, not a day to fill,
+                 # and the day word alone brought it to this row for a plan of two things out
+                 # of the house.
+                 "need to bring", "need to take", "need to pack", "must bring", "to bring tomorrow",
                  # and a bag for it: "what should i pack for a weekend in rome" named a weekend
                  # and the bare "what", so a packing question was told to put two things in the
                  # diary by Friday. The pack words say which question it is on their own.
@@ -2106,6 +2833,97 @@ ENTRIES = [
           # a dinner party with a number in it is this answer, not a list of things to cook
           bias=1),
 
+    # --- the last hour before people arrive -------------------------------------
+    entry("late-guests",
+          # The subject is somebody coming, and the key word of the two is the notice: "we have
+          # guests in an hour and nothing is ready" was an echo, "people arrive in twenty minutes
+          # and nothing is ready" was "I'm listening", and "im hosting dinner and im not ready"
+          # was the same, because no row in the domain is about the hour before rather than the
+          # weeks before. The hosting card next door plans a meal; this one is the order to do
+          # things in when there is no time to plan at all.
+          (("guests", "guest", "guests coming", "guest coming", "guests are coming",
+            "people coming", "people are coming", "people over", "people round",
+            "people arriving", "people turning up", "friends coming", "friends are coming",
+            "friends over", "friends round", "friends arriving", "friends turning up",
+            "family coming", "family over", "company coming", "company over", "visitors",
+            "visitors coming", "someone coming over", "people for dinner", "guests for dinner",
+            "people coming for dinner", "hosting dinner", "having people over",
+            "having friends over", "having guests", "party tonight", "people here at",
+            # they are already here, or nearly: "people are here and i have nothing in" was an
+            # echo and "somebody is at the door already" was "I'm listening"
+            "people are here", "guests are here", "theyre here", "they are here",
+            "people are at the door", "someone at the door", "somebody at the door",
+            "friend dropping", "friend popping", "dropping round", "popping round",
+            "dropping by", "popping in", "coming round", "coming over",
+            # who is coming is as often a person as the word "guests": "someone just texted
+            # theyre 20 minutes away" and "the in laws are on their way" are the same hour
+            "someone", "somebody", "in laws", "in-laws", "mother in law", "father in law",
+            "parents", "mum", "dad", "sister", "brother", "aunt", "uncle", "cousin",
+            "grandparents", "neighbours"),
+           ("in an hour", "in half an hour", "in a hour", "in 20 minutes", "in twenty minutes",
+            "in 30 minutes", "in thirty minutes", "in 10 minutes", "in ten minutes",
+            "in 15 minutes", "in fifteen minutes", "in 45 minutes", "in two hours",
+            "in a couple of hours", "in a bit", "in 40 minutes", "this evening", "tonight",
+            "nothing is ready", "nothing ready", "nothing prepared", "nothing made",
+            "nothing in", "not ready", "im not ready", "i'm not ready", "not prepared",
+            "havent started", "haven't started", "havent even started", "havent cooked",
+            "last minute", "at short notice", "short notice", "unexpected", "unannounced",
+            "turned up", "turning up", "arrived early", "arriving early", "early",
+            "just told me", "just rang", "just called", "just texted", "surprise visit",
+            "on their way", "on his way", "on her way", "on the way", "minutes away",
+            "20 minutes away", "ten minutes away", "five minutes away",
+            # "guests coming at 7 and i only have pasta" is the same hour, said as a time and as
+            # an almost-empty kitchen rather than as "in an hour" and "nothing is ready"
+            "at 6", "at 7", "at 8", "at 6pm", "at 7pm", "at 8pm", "at six", "at seven", "at eight",
+            "at the door", "at my door", "already here", "later", "this afternoon",
+            "only have", "only got", "nothing in", "nothing much in", "no food in")),
+          "Do the three things they will actually notice, in this order: clear the floor into one "
+          "basket and shut the doors on the rest, put out glasses and something to nibble, and "
+          "cook one thing from what you already have - pasta, an oven tray of whatever vegetables "
+          "and sausages are in, or bread, cheese and something cold from the fridge. Buy only the "
+          "missing bit on the way home, and don't start a clean nobody will see: a drink in their "
+          "hand and food within half an hour is the whole of it.",
+          # what to cook for them is the cooking domain's question, and a messy house is the
+          # cleaning domain's: this card is the order of work, not the menu or the scrubbing
+          avoid=("what should i cook", "what can i cook", "what to cook", "what can i make",
+                 "what to make", "recipe", "recipes", "what should i wear", "what to wear",
+                 # a menu is the cooking domain's question however little notice there is:
+                 # "last minute guests what do i cook" and "having people over for dinner
+                 # tonight" both want the one-oven-dish answer next door, and "people coming
+                 # for dinner in 20 minutes" wants the twenty-minute list, not the tidying order
+                 "cook", "cooking", "cooked", "menu", "roast", "for dinner", "dinner party",
+                 "dinner tonight", "meal", "meals", "food for", "feed", "what do i cook",
+                 "mess", "messy", "clean", "cleaning", "tidy", "tidy up", "hoover", "vacuum",
+                 "dust", "dishes", "washing up", "disaster", "shambles", "dirty", "filthy",
+                 # a guest who stays for days is the hosting card's question
+                 "stay with us", "staying with us", "for the weekend", "for a week",
+                 "next week", "next month", "in a few weeks", "in two weeks", "tomorrow",
+                 # a parent who keeps turning up unannounced is a boundary question, not an
+                 # hour-before question: "my mum keeps turning up unannounced" was handed the
+                 # clear-the-floor order instead of how to say it kindly once
+                 "keeps turning up", "keeps coming over", "keeps coming round",
+                 "keeps dropping in", "keeps dropping by", "keeps popping in",
+                 "turning up unannounced", "unannounced", "uninvited", "without asking",
+                 "every weekend", "all the time", "every day", "again and again",
+                 "boundary", "boundaries", "how do i tell", "how do i ask",
+                 "without warning", "without telling me", "out of the blue",
+                 # "what should i watch tonight with my mum" is a film question: a bare "mum" in
+                 # the first group and "tonight" in the second was enough for this row, and the
+                 # person sat down to watch something and got the clear-the-floor order. Who is
+                 # coming is only the subject when something is happening, so anything being
+                 # watched or played is the entertainment domain's line.
+                 "watch", "watching", "watch with", "what to watch", "something to watch",
+                 "watch tonight", "film", "films", "movie", "movies", "box set", "box sets",
+                 "series", "telly", "netflix", "prime", "disney", "iplayer", "streaming",
+                 "episode", "episodes", "listen to", "listen with", "play with", "a game",
+                 "board game", "board games", "cards",
+                 "whenever she likes", "whenever he likes", "whenever they like",
+                 "turns up without", "turned up without"),
+          # the hosting card plans a meal for a number of people, and "friends are coming over in
+          # an hour" was read as a visit of days ("give them the best bed"), so this row outbids
+          # the bed-making card on a line that names the hour
+          bias=10),
+
     # --- Christmas --------------------------------------------------------------
     entry("christmas-plan",
           (("christmas", "xmas", "christmas day", "christmas dinner", "boxing day"),
@@ -2130,7 +2948,16 @@ ENTRIES = [
           # the journey line in the composer names the route planner instead, so this card keeps
           # the planning asks and stands down on a duration or a distance.
           avoid=("how long is the drive", "how long would the drive", "how long does the drive",
-                 "how far is", "how many miles", "how long does it take to drive")),
+                 "how far is", "how many miles", "how long does it take to drive",
+                 # a light on the dashboard is a fault, not a plan: "driving to cornwall in
+                 # august and the car has a warning light on, what should i check" was answered
+                 # with how to plan the driving days, on "driving to" and "check".
+                 "warning light", "warning lights", "engine light", "dashboard", "mot",
+                 # a bare "service" is a motorway stop, and "where are the good service
+                 # stations" is this row's own line: the car being serviced is a phrase.
+                 "car service", "full service", "needs a service", "due a service",
+                 "due for a service", "service the car", "serviced", "servicing",
+                 "breakdown", "battery light", "oil light")),
 
     # --- the week ---------------------------------------------------------------
     entry("week-plan",
@@ -2177,6 +3004,11 @@ ENTRIES = [
                  "moving house", "kitchen bin",
                  "left out", "all night", "overnight", "out of the fridge", "is it ok",
                  "two hours", "bin it", "gone bad",
+                 # which food to eat first out of the fridge is the fridge order's question, and
+                 # "what goes off first in the fridge" was being told to write four meals down
+                 "goes off first", "go off first", "eat first", "use first", "use up first",
+                 "which shelf", "top shelf", "bottom shelf", "middle shelf", "salad drawer",
+                 "crisper", "fridge order", "where in the fridge", "what goes where",
                  # "gone off" with a person's possessive is an appetite, not a shopping habit:
                  # "my sister has gone off her food" was told to write the week's four meals
                  # down before shopping, and the appetite row answers it.

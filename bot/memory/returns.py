@@ -255,11 +255,18 @@ def as_the_same_answer(reply, text, short=None):
         # that matches words hands back, because "paint" is in the line and "emulsion" is not.
         short = _the_sentence_with_the_amount(reply) or short
     short = same_again._short(short or same_again.unframed(reply) or str(reply or ""))
-    if thing.lower() in short.lower():
+    # The lead-in may only name what the answer names, and the answer decides how much of the
+    # line's phrase is a name: "back to the scratching post help" names "the scratching post".
+    # The dictionary is the whole answer, not only the sentence handed back: a "how much" ask
+    # takes the amount sentence, which can say "emulsion" and never "paint" while the card's
+    # opening names the paint. Naming the person's own word back is what the lead-in is for.
+    named = same_again.the_name_the_answer_says(short, thing, card=reply)
+    if not named or named.lower() in short.lower():
         # The answer already names the thing, so the lead-in does not name it again: "Same for
-        # lisbon: In Lisbon: ..." says the same word twice in nine.
+        # lisbon: In Lisbon: ..." says the same word twice in nine. And where the answer names
+        # none of the thing, there is nothing the lead-in could name.
         return same_again.AGAIN[0].format(reply=short)
-    return same_again.DETAIL_AGAIN[1].format(detail=thing, reply=short)
+    return same_again.DETAIL_AGAIN[1].format(detail=named, reply=short)
 
 
 def a_bare_return(text, memory=None):

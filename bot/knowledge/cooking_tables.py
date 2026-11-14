@@ -3167,5 +3167,116 @@ RECIPES = (
       "calories", "healthy", "how many", "goes with", "with what", "how long",
       "how many minutes")),
 
+    # The dish the table did not hold. A name is how a lot of people ask for a method - the row
+    # above reads a bare name as the ask, and these are the names that reached nothing at all:
+    # carbonara, paella, tacos, nachos, falafel, shakshuka, dhal, katsu curry, pad thai, biryani,
+    # burger, pork chops and a full english all came back "I'm listening" or "Got it".
+    (("carbonara",),
+     ("carbonara",),
+     "About 20 minutes start to finish. Boil 200g of spaghetti and, while it cooks, fry 150g of "
+     "chopped pancetta or streaky bacon until the fat runs, then take the pan off the heat. Beat "
+     "3 eggs with 60g of grated pecorino or parmesan and plenty of black pepper, toss the drained "
+     "pasta through the bacon, then stir the egg in off the heat so it turns into a glossy sauce "
+     "rather than scrambled egg - the heat of the pasta is enough to cook it.",
+     ("vegetarian", "vegan", "jar", "shop", "ready meal", "calories", "healthy", "ham")),
+    (("paella", "chicken paella", "seafood paella"),
+     ("paella",),
+     "About 40 minutes start to finish. Soften a chopped onion and a red pepper in olive oil in a "
+     "wide pan, stir in 2 chopped garlic cloves, a teaspoon of smoked paprika and 300g of paella "
+     "or bomba rice for a minute, then add 900ml of hot stock and your chicken or prawns and "
+     "simmer 18 minutes without stirring. Rest it 5 minutes off the heat under a tea towel: the "
+     "crust on the bottom is the point, and stirring it is what stops it forming.",
+     ("vegetarian", "vegan", "rice for", "which rice", "what rice", "basmati", "saffron", "shop",
+      "frozen", "calories", "healthy", "keep")),
+    (("tacos", "taco"),
+     ("tacos", "taco"),
+     "About 20 minutes start to finish. Warm corn or wheat tortillas in a dry pan for 20 seconds "
+     "a side and keep them in a tea towel, then fill them with something already cooked and cut "
+     "small - spiced mince, shredded chicken, black beans, fried fish or roast vegetables - with "
+     "raw onion, coriander and a squeeze of lime. Two fillings and something sharp is a better "
+     "taco than four that all taste the same.",
+     ("shells", "kit", "shop", "frozen", "calories", "healthy", "seasoning")),
+    (("nachos",),
+     ("nachos",),
+     "About 15 minutes start to finish. Spread a bag of tortilla chips in a single layer in a "
+     "roasting tin, scatter over grated cheddar and sliced jalapenos and bake at 200C (180C fan) "
+     "for 8 to 10 minutes, then put the cold things on after it comes out - salsa, soured cream, "
+     "guacamole, coriander. Everything added before baking goes soggy, and a single layer is what "
+     "stops half the chips being bare.",
+     ("shop", "frozen", "calories", "healthy", "microwave", "cinema")),
+    (("falafel",),
+     ("falafel",),
+     "About 30 minutes plus an overnight soak. Soak 250g of dried chickpeas in plenty of water "
+     "overnight - tinned ones are already cooked and the mix falls apart - then blitz them with a "
+     "small onion, 2 garlic cloves, a big handful of parsley and coriander, a teaspoon of cumin "
+     "and a good pinch of salt. Shape walnut-sized balls and fry in 2cm of oil at 180C for 3 to 4 "
+     "minutes until dark gold, or flatten them into patties and shallow fry.",
+     ("mix", "wet", "watery", "shop", "buy", "calories", "healthy", "good for you", "bake")),
+    (("shakshuka",),
+     ("shakshuka",),
+     "About 25 minutes start to finish. Soften a sliced onion and a red pepper in oil for 8 "
+     "minutes, add 2 garlic cloves, a teaspoon of cumin and a pinch of chilli, then a tin of "
+     "tomatoes and simmer 10 minutes until thick. Make wells in the sauce, crack in 4 eggs, cover "
+     "and cook 5 to 7 minutes, until the whites are set and the yolks still run; feta scattered "
+     "over at the end is the usual finish.",
+     ("shop", "calories", "healthy", "recipe for four")),
+    (("dhal", "dal", "daal", "lentil dhal", "tarka dhal"),
+     ("dhal", "dal", "daal"),
+     "About 35 minutes start to finish. Simmer 200g of red lentils with 700ml water, a chopped "
+     "onion, 2 garlic cloves, a teaspoon of turmeric and salt for 25 minutes, stirring now and "
+     "then, until it is soft and thick. Fry a teaspoon each of cumin and mustard seeds in ghee or "
+     "oil with a pinch of chilli and stir that through at the end - that last frying is what makes "
+     "it taste like dhal rather than lentils.",
+     ("healthy", "good for you", "calories", "no lentils", "shop", "buy", "wet", "watery")),
+    (("katsu curry", "chicken katsu", "katsu"),
+     ("katsu curry", "chicken katsu", "katsu"),
+     "About 40 minutes start to finish. Fry a chopped onion and a carrot for 8 minutes, stir in 2 "
+     "tablespoons of mild curry powder and one of plain flour, then add 500ml of stock and simmer "
+     "15 minutes; blend it smooth with a splash of soy sauce and a teaspoon of honey. Serve it "
+     "with rice and breaded chicken or tofu, and make the sauce a bit looser than you think, "
+     "because it thickens as it stands.",
+     ("shop", "frozen", "takeaway", "wagamama", "calories", "healthy", "how many")),
+    (("pad thai",),
+     ("pad thai",),
+     "About 20 minutes start to finish. Soak 200g of flat rice noodles in hot water for 10 "
+     "minutes, then stir-fry prawns or tofu in a very hot wok, push them aside and scramble 2 eggs "
+     "in the space, and add the drained noodles with 2 tablespoons of tamarind or lime juice, 2 of "
+     "fish sauce and 1 of sugar. Toss for a minute with beansprouts and peanuts; the pan must be "
+     "hot or the noodles steam instead of frying.",
+     ("shop", "takeaway", "calories", "healthy", "how many")),
+    (("biryani", "chicken biryani", "lamb biryani"),
+     ("biryani",),
+     "About 1 hour 20 minutes start to finish. Brown 500g of lamb or chicken with a chopped onion, "
+     "2 garlic cloves, a tablespoon of garam masala and a cup of yoghurt, then simmer 25 minutes. "
+     "Part-cook 300g of basmati for 5 minutes, layer it over the meat with saffron milk and fried "
+     "onions, and steam it covered on the lowest heat for 20 minutes - the layering and the steam "
+     "are what make it a biryani rather than rice with meat on top.",
+     ("dry", "watery", "rice for", "which rice", "what rice", "healthy", "calories", "shop")),
+    (("burger", "burgers", "homemade burger", "beefburger"),
+     ("burger", "burgers"),
+     "About 20 minutes start to finish. Shape 500g of minced beef into four patties with nothing "
+     "but salt and pepper - work it as little as you can - and cook them in a very hot dry pan 2 "
+     "to 3 minutes a side, pressing once. Rest them a minute, then build with cheese, lettuce, "
+     "tomato and something sharp like pickles or mustard; salt inside the mix draws the water out "
+     "and makes them dry.",
+     ("healthy", "calories", "fattening", "make you fat", "shop", "buy", "frozen", "mcdonalds",
+      "restaurant", "bun", "vegan", "vegetarian")),
+    (("pork chops", "pork chop"),
+     ("pork chops", "pork chop"),
+     "About 20 minutes start to finish. Take the chops out of the fridge 20 minutes ahead, pat "
+     "them dry and season well, then cook in a hot pan 3 to 4 minutes a side and rest 5 minutes. "
+     "Cooked through means 65 to 70C at the centre, and a thick chop is better finished 5 minutes "
+     "in a 200C oven than blackened in the pan.",
+     ("how long", "how many minutes", "calories", "healthy", "shop", "buy", "slow cooker",
+      "casserole", "apple sauce")),
+    (("full english", "full english breakfast", "fry up", "cooked breakfast"),
+     ("full english", "full english breakfast", "fry up", "cooked breakfast"),
+     "About 30 minutes start to finish. Grill the sausages and bacon for 10 minutes and keep them "
+     "warm while you fry the black pudding, mushrooms and tomatoes, and do the eggs last in the "
+     "same pan. Beans warmed in a small pan and toast done at the end, so nothing is standing cold "
+     "- and if you are feeding more than two, the oven on low is the only way to land it all at "
+     "once.",
+     ("hotel", "cafe", "calories", "healthy", "menu", "vegetarian", "vegan")),
+
 )
 

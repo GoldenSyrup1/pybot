@@ -234,6 +234,246 @@ def _bruise_reply(memory, reading):
             "unchanged. Bin it only when the bruise is wet and sour-smelling or there is mould, "
             "because a soft bruise is the way in for rot.")
 
+# A pip, a stone and a seed are three ways of saying the same thing, and the fruit that carries
+# one is the subject of two different questions: whether it will grow, and whether it is safe to
+# eat. The two rows below share this list so the growing one answers apple to avocado.
+PIPS_AND_STONES = ("pip", "pips", "pippin", "pippins", "seed", "seeds", "stone", "stones",
+                   "kernel", "kernels", "nut", "pit", "pits")
+
+# The fruit people actually try this with: the pips in a supermarket apple, the stone from a
+# peach, the seed in a lemon, and the avocado stone on three cocktail sticks over a glass.
+GROWN_FROM_A_PIP = ("apple", "apples", "pear", "pears", "plum", "plums", "peach", "peaches",
+                    "nectarine", "nectarines", "cherry", "cherries", "apricot", "apricots",
+                    "damson", "damsons", "avocado", "avocados", "lemon", "lemons", "lime",
+                    "limes", "orange", "oranges", "clementine", "clementines", "satsuma",
+                    "satsumas", "tangerine", "tangerines", "grapefruit", "grapefruits",
+                    "fig", "figs", "olive", "olives", "pomegranate", "pomegranates",
+                    "mango", "mangoes", "apple tree", "fruit tree", "cherry tree",
+                    "peach tree", "lemon tree", "orange tree", "plum tree", "pear tree")
+
+# The seed in a supermarket vegetable is the same question as the pip in an apple - will it grow -
+# and the answer is a different one: a tomato seed is worth saving, because the fruit may be a
+# hybrid but it still comes up, and the jelly round it has to be fermented off first.
+# Only the tomato: garden.py already has a sowing-and-spacing answer for peppers, chillies,
+# courgettes and the rest ("how do i grow peppers from seeds" and "can i grow chillies from
+# supermarket seeds" both got a good one on main), and this row answered them with the tomato
+# ferment. The tomato is the one with a seed worth saving and no answer of its own.
+SHOP_SEED_VEG = ("tomato", "tomatoes", "cherry tomato", "cherry tomatoes", "beefsteak tomato")
+
+# The pips worth a health answer are the stone fruit's: an apple pip and an apricot kernel hold
+# amygdalin, which releases cyanide. A pumpkin seed and a watermelon seed are food you can buy by
+# the bag, so they are not in this list and that question keeps whatever it found before.
+STONE_FRUIT_PIPS = ("apple", "apples", "pear", "pears", "cherry", "cherries", "plum", "plums",
+                    "peach", "peaches", "apricot", "apricots", "nectarine", "nectarines",
+                    "damson", "damsons", "bitter almond", "almond", "almonds", "fruit pip",
+                    "fruit pips", "apple pip", "apple pips", "apple seed", "apple seeds")
+
+# The words that say the seed is coming out of a tomato you bought, which is the ferment question:
+# "seeds in a tomato" and "seeds from a shop tomato" are in here, and "sow tomato seeds" is not.
+SEED_SOURCE = ("shop", "shops", "supermarket", "supermarkets", "store", "stores", "store bought",
+               "store-bought", "from a tomato", "from the tomato", "from tomatoes", "in a tomato",
+               "in the tomato", "in tomatoes", "seeds in", "seeds from", "seed from", "seed in",
+               "saved seed", "save seed", "save the seed", "saving seed", "save", "saves",
+               "saving", "saved", "harvest", "harvesting", "harvested", "keep the seed",
+               "keeping seed", "kept seed", "collected", "collect the seed", "left over",
+               "leftover", "last year", "next year", "from my own", "from our own")
+
+PLANT_WORDS = ("plant", "plants", "planted", "planting", "grow", "grows", "growing", "grew",
+               "sow", "sows", "sowing", "sprout", "sprouts", "sprouting", "germinate",
+               "germinating", "propagate", "seedling", "seedlings", "sapling", "saplings",
+               "from seed", "from a seed", "from a pip", "from pips", "from a stone",
+               "from stones", "from a kernel", "will it grow", "can it grow",
+               # saving the seed is the same job a year early: "how do i save tomato seeds" was
+               # answered with the pollination lesson, which is not what a saver needs
+               "save", "saves", "saving", "saved", "keep the seed", "keeping seed",
+               "harvest", "harvesting", "collect the seed", "collecting seed", "store seed",
+               "store the seed", "next year")
+
+EAT_WORDS = ("eat", "eats", "eating", "eaten", "swallow", "swallowed", "swallowing",
+             "chew", "chewed", "chewing", "poison", "poisonous", "toxic", "dangerous",
+             "harmful", "hurt me", "bad for me", "deadly", "cyanide", "safe to", "safe",
+             "should i eat", "can i eat", "is it ok to eat", "is it okay to eat",
+             # The dose question is the same question as the safety one, and it was reaching the
+             # growing row: "how many apple pips would kill you" was answered with how a pip
+             # grows, because no word in that line ("how many", "would", "kill") is a growing
+             # word and none of them was an eating word either.
+             "kill", "kills", "killed", "die", "died", "dying", "fatal", "how many would",
+             "would kill", "would die", "make me ill", "make me sick", "how many are safe",
+             "how many kernels", "how many pips", "how many seeds")
+
+
+# A fruit is not another fruit: the row answers with the one the line names, so a fig, a mango and
+# a pomegranate get their own sentence instead of falling through to the apple. Each is the honest
+# answer - it grows, but the wait is years and a warm one, and a cutting is what people do.
+TENDER_FRUIT = (
+    (("fig", "figs"), (
+        "A fig seed does come up in two or three weeks in warmth, but almost nobody grows figs "
+        "from seed: the seedling is a lottery, it takes four to six years to fruit, and it may "
+        "never fruit at all in a cool climate. Take a cutting instead - a 15cm piece of last "
+        "year's wood in late winter, pushed into free-draining compost, roots in about six "
+        "weeks. Figs also fruit best with their roots fenced in, which is why they do so well in "
+        "a pot against a sunny wall.")),
+    (("pomegranate", "pomegranates"), (
+        "A pomegranate seed does grow, and it comes fairly true to the fruit it came from, but it "
+        "is a Mediterranean tree: five years or more to the first fruit, a hot sheltered wall, and "
+        "in a cool summer the fruit can stay hard and sour. Sow it fresh in spring at about 21C. "
+        "Cuttings are quicker and are how the named varieties are sold, and a bought plant fruits "
+        "in two or three years.")),
+    (("mango", "mangoes", "mangos"), (
+        "A mango stone will sprout on a windowsill - take the stone out of its hairy husk, stand "
+        "it on its edge in damp compost with the top third showing, and it comes up in two or "
+        "three weeks - but it is a tropical tree. It wants 25C and more, it grows into something "
+        "far too large for a room, and it will not fruit in a temperate house. It is a good plant "
+        "to grow for the leaves, not for fruit.")),
+)
+
+# Which citrus the line named, so the answer says "a grapefruit seed" and not "a lemon".
+CITRUS_NAMES = ("grapefruit", "grapefruits", "lemon", "lemons", "lime", "limes", "orange",
+                "oranges", "clementine", "clementines", "satsuma", "satsumas", "tangerine",
+                "tangerines", "citrus")
+
+
+def _the_fruit(line, words):
+    """The first fruit word in the line, as one bare noun: "a grapefruit", "a fig"."""
+    for word in words:
+        if _holds(line, word):
+            return word[:-1] if word.endswith("s") and not word.endswith("ss") else word
+    return "citrus"
+
+
+def _growing_from_a_pip(memory, understood):
+    """Whether a pip, stone or seed will grow, which depends on which fruit it came from.
+
+    The honest answer for an apple or a peach is that it will grow but not come true: the pip is
+    a cross, so the fruit is a surprise and the wait is years. A lemon or an orange from a
+    supermarket seed is much better odds, and an avocado stone grows easily and never fruits on a
+    windowsill. The one sentence all of them share is the way to a named variety: buy a grafted
+    tree.
+    """
+    line = _said(understood or {})
+    if any(_holds(line, word) for word in ("avocado", "avocados")):
+        return ("An avocado stone sprouts easily and almost never gives you avocados: push three "
+                "cocktail sticks into the fat end and sit it over a glass so the base is just in "
+                "the water, and roots show in four to six weeks. Pot it in free-draining compost "
+                "when the shoot is 15cm, keep it in bright light and pinch the top out to make it "
+                "bushy. It is a handsome houseplant that wants a bigger pot each year; fruit "
+                "needs a mature tree, two of them for cross-pollination, and a warm climate.")
+    if any(_holds(line, word) for word in SHOP_SEED_VEG):
+        # A tomato seed is two questions: where the seed came from (a shop tomato, a jar of saved
+        # seed) and how to sow it. The sowing one is garden.py's, with the month, the depth and the
+        # spacing - "how do i sow tomato seeds", "how deep do i sow tomato seeds" and "when do i
+        # plant tomato seeds" were all answered here with the ferment, which is the wrong half.
+        if not any(_holds(line, word) for word in SEED_SOURCE):
+            return None
+        lead = ("Yes, and it is worth doing: " if any(
+            _holds(line, word) for word in ("can i", "could i", "is it possible", "will it",
+                                            "would it", "does it"))
+                else "Save the seed first: ")
+        return (lead +
+                "scoop the seeds and their jelly into a glass, add a little water and leave them "
+                "three or four days until a film of mould sits on top - that ferment kills the "
+                "germination inhibitor in the jelly - then rinse them, dry them on paper and sow "
+                "them indoors from late February at 18-21C, about 6mm deep. A supermarket tomato "
+                "is often a hybrid, so the fruit may come smaller or uneven, but it grows and it "
+                "fruits, and dry seed in a paper envelope still comes up three or four years "
+                "later.")
+    if any(_holds(line, word) for word in CITRUS):
+        return (f"A {_the_fruit(line, CITRUS_NAMES)} seed from the fruit bowl does grow, and comes closer to the "
+                "parent than an apple pip does, but it is slow: expect five to fifteen years "
+                "before fruit, and a plant that wants a sunny windowsill in winter and a spot "
+                "outside in summer. Sow it fresh, before the seed dries out, in moist seed "
+                "compost at about 21C, and pot it on as it grows. A named variety comes as a "
+                "grafted tree, which fruits in two or three years and is what most people want.")
+    for words, said in TENDER_FRUIT:
+        if any(_holds(line, word) for word in words):
+            return said
+    if any(_holds(line, word) for word in ("peach", "peaches", "nectarine", "nectarines",
+                                           "plum", "plums", "cherry", "cherries", "apricot",
+                                           "apricots", "damson", "damsons", "olive", "olives")):
+        return ("A stone will grow, but it needs a winter first: clean the flesh off, mix the stone "
+                "with damp compost in a sealed bag and keep it in the fridge for six to ten "
+                "weeks, then pot it and wait - plums and peaches come up in a couple of months "
+                "after that. Expect four to eight years before fruit, and the fruit will not be "
+                "the variety you ate, because a stone fruit is cross-pollinated. For fruit you "
+                "can count on, buy a bare-root tree from November to March and plant it where it "
+                "gets sun.")
+    if not any(_holds(line, word) for word in ("apple", "apples", "pear", "pears", "apple tree",
+                                               "pear tree", "fruit tree", "fruit pip",
+                                               "fruit pips")):
+        # a fruit this row knows nothing about is another row's question, not the apple's
+        return None
+    return ("An apple or pear pip does grow, but it will not give you the apple you ate: pips are "
+            "crossed with whatever tree pollinated the flower, so the fruit is a lottery, often "
+            "hard and sour, and it takes five to ten years to find out. If you want to try, keep "
+            "the pips damp in the fridge for six to eight weeks - they need cold to break "
+            "dormancy - then sow them in compost on a windowsill, where they come up in three "
+            "to four weeks, and pot them on. For eating "
+            "apples, buy a named variety: a bare-root tree planted between November and March "
+            "fruits in three or four years and tastes of something.")
+
+
+# Apricot kernels and bitter almonds are the one pip that is not a curiosity: a bitter kernel
+# carries around forty times the amygdalin of an apple pip, and a handful has poisoned people. A
+# line that names them gets the kernel answer and never the apple one, which said "you would have
+# to chew a cupful at once" - true of an apple and dangerously wrong of a kernel.
+KERNEL_FRUIT = ("apricot kernel", "apricot kernels", "bitter kernel", "bitter kernels",
+                "bitter apricot", "bitter almonds", "bitter almond", "apricot seeds",
+                "apricot seed", "kernels", "kernel")
+
+
+def _a_pip_to_eat(memory, understood):
+    """Whether the pips in the fruit are dangerous, which is a dose question, not a yes or no."""
+    line = _said(understood or {})
+    if any(_holds(line, word) for word in KERNEL_FRUIT):
+        return ("Careful with these ones: a bitter apricot kernel holds about forty times the "
+                "amygdalin of an apple pip, and amygdalin releases cyanide when it is chewed. One "
+                "or two do most adults no harm; around ten to twenty bitter kernels have caused "
+                "poisoning and deaths, and a child needs far fewer, so a child should have none "
+                "at all. Bitter almonds are the same thing under another name, and the 'vitamin "
+                "B17' sold as a cancer cure is laetrile, which is the same cyanide story and does "
+                "not treat cancer. If someone has eaten a handful, ring 999 - headache, dizziness, "
+                "vomiting, a flushed face or confusion after eating them is an emergency - and "
+                "ring 111 if they feel well but you are unsure. Sweet kernels from a labelled "
+                "packet are much lower, but an unlabelled bag is not worth the risk.")
+    # "how many pips in an apple" is a count, and "how many pips would kill you" is not: the
+    # counting answer was given to every how-many line, including a dose question about a child.
+    # So the count needs the seed word and the container: in, inside, does ... have, are there.
+    if (re.search(r"\bhow many\b", line)
+            and any(_holds(line, word) for word in ("pip", "pips", "seed", "seeds", "stone",
+                                                    "stones", "kernel", "kernels"))
+            and re.search(r"\b(?:in|inside|does|has|have|are there)\b", line)):
+        # counting the pips in an apple is neither a dose nor a growing question, and the only
+        # answer either row had was about cyanide or compost
+        if _holds(line, "apple") or _holds(line, "apples"):
+            return ("Usually five to ten, in two rows in the core: an apple has five seed "
+                    "chambers and each holds one or two pips. A big apple has more pips than a "
+                    "small one, and a pippin is simply an apple grown from a pip. None of them "
+                    "will grow into the apple you ate, because the tree they came from was "
+                    "pollinated by another one nearby.")
+        if _holds(line, "lemon") or _holds(line, "lemons") or _holds(line, "lime") or \
+                _holds(line, "limes") or _holds(line, "orange") or _holds(line, "oranges"):
+            return ("A lemon or a lime has about eight to ten seeds, an orange about the same, "
+                    "and they sit in the segments rather than in a core. A citrus seed is more "
+                    "likely to grow than an apple pip, and it still takes a few years and a "
+                    "sunny windowsill to become a plant worth keeping.")
+    if any(_holds(line, word) for word in ("dog", "dogs", "puppy", "cat", "cats", "kitten",
+                                           "pet", "pets", "bird", "birds", "parrot")):
+        # named as a list rather than as "an apple pip", because the line may be about a cherry
+        # stone and the card has to answer the fruit it was asked about
+        return ("The pips and stones of apples, pears, cherries, plums, peaches and apricots are "
+                "worse for a dog or a cat than for you: they hold amygdalin, which releases "
+                "cyanide when one is crushed and chewed, and a small animal needs much less than "
+                "a person does. A couple swallowed whole usually pass straight through, but call "
+                "the vet if a pet has chewed a handful, and keep the cores and stones out of the "
+                "bowl you put down.")
+    return ("Fine, in the amounts anyone eats by accident: the pips and kernels of apples, pears, "
+            "cherries, plums, peaches and apricots hold amygdalin, which releases a little cyanide "
+            "when the pip is crushed and chewed - but you would have to chew a cupful at once to "
+            "be in trouble. A pip swallowed whole comes out the other end intact, so a child who "
+            "ate two or three is not an emergency; watch for a sore tummy and ring 111 if you are "
+            "worried. The flesh is the part to eat, and the pips are best left in the core.")
+
+
 ENTRIES = [
     # How much juice one fruit gives is a yield question, not a method one: "how much juice is in
     # one lemon" was reaching the squeezing method, and then the sugar-in-juice fact, and neither
@@ -409,5 +649,54 @@ ENTRIES = [
           # the skin question for the same fruit is the row above, and "can i eat a bruised pear"
           # was landing on it: a line that names a bruise is about the bruise.
           bias=4),
+    # "can i plant apple pips" was answered with the case for eating apple skin, because "apple"
+    # and "can i" are both in that row's key and nothing in this file knew that a pip is something
+    # you sow. The growing row and the eating row are two different questions about the same seed,
+    # so each has the seed as a key word and a different third key: the verb at the front decides.
+    entry("grow-from-a-pip",
+          (GROWN_FROM_A_PIP + SHOP_SEED_VEG, PIPS_AND_STONES, PLANT_WORDS),
+          _growing_from_a_pip,
+          # a pip already in a pot is a plant-care question, and a stone in a fruit is the
+          # knife row's: "how do i stone a peach" asks for the method, not for a tree
+          avoid=("how do i stone", "how to stone", "destone", "de-stone", "get the stone out",
+                 "take the stone out", "remove the stone", "without the pips", "pips out",
+                 "seeds out", "deseed", "de-seed", "recipe", "recipes", "cake", "cakes",
+                 "chutney", "jam", "pie", "crumble", "smoothie", "juice", "juicing",
+                 "eat", "eating", "eaten", "poison", "poisonous", "toxic", "cyanide",
+                 "kill", "die", "fatal", "how many would", "harm", "harmful", "safe",
+                 "dangerous", "ill", "sick", "hospital",
+                 # a fruit that is hard or sour is a ripeness question, and the stone is how the
+                 # hardness is said: "my avocado is hard as a stone" was answered with how a
+                 # stone grows, because "avocado" and "stone" are both key words here
+                 "hard", "hard as", "as hard as", "rock hard", "still hard", "unripe",
+                 "not ripe", "ripe", "ripen", "ripening", "soft", "soften", "softer", "squishy",
+                 "tasteless", "no taste", "sour", "bland", "watery",
+                 "healthy", "calories", "price", "cost", "how much does", "buy", "buying",
+                 "sainsbury", "tesco", "asda", "aldi", "lidl", "waitrose",
+                 "support", "supporting", "stake", "stakes", "prune", "pruning", "blight",
+                 "yellow leaves", "water them", "watering", "feed", "feeding", "fertiliser",
+                 "personal independence payment", "benefit", "benefits", "claim",
+                 "dla", "esa", "universal credit"),
+          ask=PIPS_AND_STONES),
+    entry("pips-to-eat",
+          (STONE_FRUIT_PIPS, PIPS_AND_STONES, EAT_WORDS),
+          _a_pip_to_eat,
+          # the pip in a fruit you are cooking is not the pip you swallow, and the growing
+          # question is the row above: the verb decides which one the line asked
+          avoid=("plant", "plants", "planted", "planting", "grow", "grows", "growing",
+                 "grew", "sow", "sowing", "sprout", "sprouting", "seedling", "sapling",
+                 "from seed", "from a pip", "from a stone", "tree", "trees", "garden",
+                 "allotment", "compost", "pot them", "pot it", "germinate",
+                 "how do i stone", "how to stone", "destone", "de-stone", "get the stone out",
+                 "take the stone out", "remove the stone", "deseed", "de-seed",
+                 "recipe", "cake", "chutney", "jam", "pie", "crumble", "smoothie",
+                 "personal independence payment", "benefit", "benefits", "claim",
+                 "dla", "esa", "universal credit",
+                 # a mouth that tingles at raw fruit is the oral allergy answer, and "can i eat
+                 # apples cooked if they itch raw" is that question: it names an apple and an eat
+                 # and no pip at all, and the fruit-and-eat pair alone was enough to reach here
+                 "itch", "itches", "itching", "itchy", "tingle", "tingles", "tingling",
+                 "rash", "rashes", "hives", "sore mouth"),
+          ask=PIPS_AND_STONES + EAT_WORDS),
 ]
 

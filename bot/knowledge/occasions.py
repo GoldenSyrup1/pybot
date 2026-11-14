@@ -13,6 +13,7 @@ is not food, so both are left to whatever answers them now.
 """
 import re
 
+from bot.knowledge.geography import crosses_a_border
 from bot.knowledge.lookup import entry
 
 # A domain says which topics it can answer, the same attribute name a reply module declares.
@@ -37,7 +38,12 @@ BRING_ASKS = ("what can i bring", "what should i bring", "what do i bring", "wha
               "what can i bake", "what should i bake", "what to bake", "should i bake",
               "what can i cook", "what should i cook", "what do i cook", "what to cook",
               "shall i cook", "should i cook",
-              "food for", "food to", "what food", "which food")
+              "food for", "food to", "what food", "which food",
+              # the ask with no question word in it: "can i bring food into the library" and
+              # "im bringing some food to a do tonight" ask the same thing as "what food should
+              # i bring", and the guard below keeps the border rules out of it
+              "bring food", "bringing food", "bring some food", "bring a plate",
+              "bring something to eat", "take food", "taking food")
 
 # One row per occasion: the names people give it, then what to turn up with.
 BRING_DISH = (
@@ -113,11 +119,21 @@ BRING_GUESTS = ("take my friend", "bring my friend", "my friend to", "my friend 
                 "take my dad", "bring my dad", "take my father", "bring my father",
                 "take my parents", "bring my parents")
 
+# A trip has its own card - the picnic, the hike, the camping kit list - and a bowl of pasta
+# salad is not what you carry round a beach or up a hill. "what food should i take to the beach"
+# was the picnic card until this row started answering every bring ask, which is what a reviewer
+# caught: the words are the journey, not the destination, so "can i bring food to the beach" is
+# still somebody asking what to carry, just not what this row carries.
+_TRIP = ("beach", "the beach", "road trip", "the park", "park", "walk in the woods", "the woods",
+         "mountain", "mountains", "hike", "hiking", "rambling", "long walk", "walk", "camping",
+         "campsite", "campervan", "caravan", "day out", "day trip", "journey", "for the journey",
+         "car journey", "train journey", "wild swim", "on the river", "up a hill")
+
 BRING_NOT_FOOD = (("my dog", "the dog", "our dog", "my cat", "the cat", "my baby",
                    "the baby", "our baby", "my kids", "my children", "my son", "my daughter",
                    "wheelchair", "buggy", "pushchair", "pram", "car seat",
                    "my phone", "my laptop", "my camera")
-                  + BRING_GUESTS)
+                  + BRING_GUESTS + _TRIP)
 
 _NOT_A_DISH = ("how much", "how many", "how often", "how long")
 
@@ -139,6 +155,12 @@ _HOST_OWN = ("im hosting", "i'm hosting", "we're hosting", "were hosting", "im h
 # the wake", "what can i make for a bake sale").
 _MAKE_ASKS = ("shall i make", "should i make", "shall i cook", "should i cook",
               "can i make", "should i bake", "shall i bake")
+# ... and the same ask with the food word in front and the person in the "for": "what food should
+# i cook for ten kids" is the host's question, and so is "what to cook for 20 people".
+_COOKING_ASKS = _MAKE_ASKS + ("can i cook", "to cook for", "to make for", "to bake for",
+                              "should i cook for", "what should i cook", "what can i cook",
+                              "what to cook", "what should i make", "what can i make",
+                              "what to make")
 _SPREAD_WORDS = ("tea", "spread", "buffet", "lunch", "dinner", "supper", "brunch")
 
 
@@ -181,7 +203,14 @@ def what_to_bring(memory, understood):
     # dinner" is a place, and the "for dinner" in it is the evening, not a dish for a host.
     if str(understood.get("wants") or "") == "place":
         return None
-
+    asker = any(phrase in clean for phrase in BRING_ASKS)
+    # The dish below is what you carry to somebody else's table; it is not what you cook. "what
+    # food should i cook for ten kids" and "what food should i cook for a kids party" are the
+    # host's questions - the fish fingers, the cheap party food, the one big oven dish - and this
+    # row answered them with the guest's pasta salad, because "what food" is one of its asks. A
+    # make word with no bring or take in the line is the host's, and the cooking rows answer it.
+    if any(phrase in clean for phrase in _COOKING_ASKS) and not carry:
+        return None
     for names, hint in BRING_DISH:
         for name in names:
             if name in BRING_HOST_NAMES and not carry:
@@ -191,10 +220,48 @@ def what_to_bring(memory, understood):
                 if all(_same(words[start + offset], parts[offset])
                        for offset in range(len(parts))):
                     return hint
+    # No occasion named, and the line asks what to bring or make: the dish to carry is the same
+    # answer as for any of them. A food word is in the key, so the ask has to be a bring-or-make
+    # ask here, and a present or a border rule is another row's line.
+    if (asker and not crosses_a_border(clean)
+            and not any(phrase in clean for phrase in _NOT_A_DISH_TO_CARRY + _TRIP)):
+        if any(_same(word, food) for word in words for food in GENERIC_FOOD):
+            return _ANY_DISH
     return None
 
 
-OCCASION_NAMES = tuple(name for names, _hint in BRING_DISH for name in names)
+# The ask with no occasion in it: "what food should i bring", "what food should i bring into the
+# library". Most people never name the do at all, and the dish to carry is the same answer whether
+# it is a barbecue, a buffet or somebody else's kitchen - so the food words are in the key, and
+# the hint below answers a line that asks what to bring and names no occasion.
+GENERIC_FOOD = ("food", "foods", "dish", "dishes", "plate", "plates", "something to eat")
+
+# A food word alone is not this row's line: it still has to be a bring-or-make ask (BRING_ASKS
+# above), it must not be a present, and it must not be a rule about a border - "can i bring food
+# into the eu" is the customs row's, and "what food should i bring to a job interview" is nobody's.
+# A border is not this row's line, and neither is a present or a journey: the border reading is
+# shared with travel.py's customs row (`geography.crosses_a_border`), so the two rows cannot
+# disagree about "can i bring food into brazil" - one of them had it as an import rule and the
+# other as a dish to carry. What is left here is the places and questions that are not a do.
+_NOT_A_DISH_TO_CARRY = ("birthday", "birthdays", "housewarming", "house warming", "engagement",
+                        "baby shower", "wedding", "christening present", "present", "presents",
+                        "gift", "gifts", "interview", "work", "office", "fridge", "freezer",
+                        "on the plane", "on a plane", "flight",
+                        "through security", "hand luggage", "cabin bag",
+                        # a place that does its own food, and a journey with a rule of its own:
+                        # "can i bring my own food to a restaurant" and "can i take food on a
+                        # ferry" were a dish to carry, which is not what either one asks
+                        "restaurant", "restaurants", "cafe", "cafes", "the pub", "takeaway",
+                        "ferry", "on the ferry", "on a ferry", "on the train", "on a train",
+                        "on the coach", "on the bus")
+
+_ANY_DISH = ("Take something that needs nothing from anyone else's kitchen: a big bowl of pasta "
+             "salad, a tray of sausages or a quiche, cheese and crackers, or a traybake cut into "
+             "squares. Nothing with cream in it if it will sit out, and take it in a dish you do "
+             "not need back. If the host says not to bring anything, take a bottle or something "
+             "for after - and ask what is already coming so you are not the third pasta bake.")
+
+OCCASION_NAMES = tuple(name for names, _hint in BRING_DISH for name in names) + GENERIC_FOOD
 
 ENTRIES = [
     entry("bring-dish", (BRING_WORDS, OCCASION_NAMES), what_to_bring, ask=BRING_ASKS,

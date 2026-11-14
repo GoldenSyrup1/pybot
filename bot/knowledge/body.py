@@ -47,11 +47,22 @@ _WORKSHOP_NOUNS = (
     "wood", "wooden", "plank", "planks", "planking", "joist", "joists", "batten", "battens",
     "floorboard", "floorboards", "skirting", "moulding", "molding", "fence", "fencing", "gate",
     "shed", "decking", "worktop", "shelf", "shelves", "shelving", "cabinet", "wardrobe",
-    "wall", "walls", "brick", "bricks", "plasterboard", "stud wall", "picture hook",
+    "wall", "walls", "brick", "bricks", "plasterboard", "stud wall",
+    # the words a fixing is asked about with, not only the words the fixing is done in: a shelf
+    # on a plasterboard wall, a mirror over a fireplace, a bracket on masonry. "what nails for a
+    # mirror" is the same metal nail as "how do i put a nail in the wall", and without these the
+    # fungal-nail card took it.
+    "stud", "studs", "mirror", "mirrors", "bracket", "brackets", "picture", "pictures",
+    "concrete", "masonry", "tile", "tiles", "block wall", "stone wall", "curtain rail",
+    "curtain pole", "anchor", "anchors", "hollow wall", "cavity wall",
+    "picture hook",
     "picture hooks", "picture frame", "hanging a picture", "hang a picture", "hang the picture",
     "hammer", "hammers", "hammering", "drill", "drills", "drilling", "screw", "screws",
     "screwed", "screwing", "rawlplug", "rawlplugs", "wall plug", "wall plugs", "carpentry",
     "diy", "doorframe", "door frame",
+    # a nail through a tyre is the same piece of metal, and "how do i get a nail out of a tyre"
+    # was reaching the nail-biting and nail-growth rows before it reached the puncture row
+    "tyre", "tyres", "tire", "tires", "wheel", "wheels", "puncture", "punctured",
 )
 _WORKSHOP = re.compile(r"\b(?:" + "|".join(re.escape(word) for word in _WORKSHOP_NOUNS) + r")\b")
 
@@ -288,6 +299,14 @@ HURT = ("hurt", "hurts", "hurting", "ache", "aches", "aching", "achy", "pain", "
         # word at all, so the region table never saw either line.
         "sprain", "sprained", "sprains", "strain", "strained", "strains", "twisted", "tweak",
         "tweaked", "pulled a muscle", "pulled my", "torn", "went over on", "rolled", "pulled", "tore", "ripped",
+        # The injury named as the thing that happened, with no word for pain: "i injured my
+        # shoulder at rugby" and "i've done my shoulder in" both name the part and the injury
+        # and neither says hurt, so the region table never saw the part and both were a
+        # question back ("How long has that been the case?"). "done my" and "did my" are the
+        # way people say it about a part out loud; the region still has to be named, so
+        # "i've done my exercises" is not a shoulder.
+        "injured", "injury", "injuries", "done my", "did my", "done in", "did in",
+        "put my back out", "put my shoulder out", "put my knee out",
         # The other way people say a part is bad today: an opinion of it rather than a pain word.
         # "my back is a joke today" was "That sounds rough", "my knee is in bits" was "Thanks for
         # telling me", "my shoulder is wrecked" was "I'm listening", and "my hip is banjaxed" was
@@ -1208,7 +1227,16 @@ ENTRIES = [
                  "employer", "manager", "contract", "redundancy", "sacked", "promotion",
                  "knitwear", "knitted", "cashmere", "merino", "silk", "silky", "scarf", "scarves",
                  "dress", "dresses", "shirt", "shirts", "blouse", "sweater", "sweaters", "fleece",
-                 "by hand", "hand wash", "hand washing", "hand-wash", "handwash", "hand washed"),
+                 "by hand", "hand wash", "hand washing", "hand-wash", "handwash", "hand washed",
+                 # a hand with a wound on it is a wound question, and the wound cards are the
+                 # ones that answer it: "how long do stitches stay in my hand" was twenty seconds
+                 # of soaping, because "hand" and "how long" are both this row's words. The
+                 # wound nouns only - "justice" to wash hands after cutting raw chicken is still
+                 # a hand question, and so is any other verb "cut" can be.
+                 "stitches", "stitch", "sutures", "suture", "staples", "wound", "wounds",
+                 "gash", "gashes", "scab", "scabs", "bandage", "bandages", "dressing",
+                 "dressings", "plaster cast", "graze", "grazes", "open wound", "cut on my hand",
+                 "cut on the hand", "cut on my finger", "splinter", "ingrown"),
           bias=3),
     entry("dry-scalp",
           (("scalp", "scalp is", "head itches"),
@@ -1247,15 +1275,24 @@ ENTRIES = [
                  "rash", "eczema", "psoriasis", "red", "burning", "sunburn", "sun cream",
                  "sunscreen", "spf", "dog", "cat", "puppy", "baby", "babies", "nappy",
                  "my son", "my daughter", "my child", "my kid", "my kids")),
+    # The row is a part of the body plus the state, the way `dry-skin` is, and not a bare
+    # adjective. It held "greasy" and "shine" on their own, next to the ask words ("how do i",
+    # "stop", "wash"), so "how do i clean a greasy oven" scored exactly as well as "my face is
+    # greasy" and a person cleaning their oven was told to wash their face twice a day with a
+    # foaming cleanser - and so were a hob, greasy trays and a pair of glasses, none of which is
+    # a body. With the part in the key, the state word only counts for a line that says whose
+    # face, skin, nose or chin it is, and every line about a thing reaches the cleaning or the
+    # garment answer. A bare "greasy" still had to answer "how do i stop my face getting greasy":
+    # that line names the face, so it is the part group below that answers it now.
     entry("oily-skin",
-          (("oily skin", "greasy skin", "shiny skin", "my face is oily", "my face gets oily",
-            "oily face", "greasy face", "shine", "t-zone", "t zone",
-            # "how do i stop my face getting greasy" named the state as a verb and a change, and
-            # the row had only the adjective: the same question in the words people use
-            "greasy", "getting greasy", "gets greasy", "getting oily", "gets oily",
-            "oily during the day"),
-           ("skin", "face", "forehead", "nose", "chin", "look after", "help", "stop", "less",
-            "wash", "cleanser", "cleanse", "routine", "what should", "how do i", "how to")),
+          (("skin", "face", "forehead", "nose", "chin", "cheeks", "complexion", "t-zone",
+            "t zone", "oily skin", "greasy skin", "shiny skin", "oily face", "greasy face"),
+           # the state, and only the state: an ask word here ("how do i", "help", "stop") let
+           # the part group score 4 on its own, so "how do i clear my skin" and "how do i stop my
+           # nose running" were both answered with the oily-skin routine
+           ("greasy", "oily", "oil", "shiny", "shine", "gleam", "getting greasy",
+            "gets greasy", "getting oily", "gets oily", "getting shiny", "by lunchtime",
+            "during the day")),
           "Wash twice a day with a gentle foaming cleanser rather than soap, which strips the skin "
           "and leaves it making more oil, then use a light oil-free gel moisturiser - oily skin "
           "still needs one. Do not scrub or wash more than twice; blot the shine at lunchtime "
@@ -1323,6 +1360,181 @@ BACK_WENT = ("put my back out", "put out my back", "put it out", "threw my back 
              "threw it out", "my back went", "back went", "my back has gone", "my back is out",
              "my back went out", "my back gave way", "my back locked", "my back is in spasm",
              "my back went into spasm", "i tweaked my back", "i twisted my back", "my back slipped")
+
+# Two halves of the same "how long": "how long does a dentist appointment take" is the length of
+# the visit, and "how long does it take to get an appointment", "how long is the wait" are the
+# queue. The registering card answered the first with how to find a practice that takes new
+# patients, because "taking" is one of the words that errand is written with, so a person booking
+# time off work was told to ring round practices.
+_THE_VISIT = {"appointment", "appointments", "checkup", "check-up", "check", "visit", "filling",
+              "hygienist", "root canal"}
+_THE_QUEUE = {"wait", "waits", "waiting", "soon", "sooner", "quickly", "book", "booking",
+              "booked", "getting", "seen", "available", "weeks", "days", "months", "list"}
+_REGISTERING_A_DENTIST = (
+    "Look for practices near you that are taking on new patients, then ring rather than "
+    "email: each practice keeps its own list and it opens and closes, and the phone gets "
+    "you a straight answer. Ask on the call whether they take NHS adults and how long the "
+    "first check-up wait is. If nobody near you has room, ring 111 and ask for the urgent "
+    "dental service, which will see you and can tell you who is taking patients.")
+
+
+# The card answers two errands - join a practice, or be told how long being seen takes - and the
+# key was widened so that a visit named by what is being done ("how long does a filling take")
+# reaches it. The wider key also matched a line that only *mentions* one of those nouns: "how long
+# after a filling can i eat" and "how soon can i eat after a filling" were handed "look for
+# practices near you", "it was only a check up last month" was told the length of a check-up, and
+# "Can I wait until my checkup in March?" got the wait for a GP appointment. So the card is asked
+# only for the two errands: a line that asks how long the visit takes, or a line that asks to
+# find or join a practice.
+_A_LENGTH_OF_A_VISIT = re.compile(
+    r"\bhow long (?:does|do|will|would|should)\b[^?.!]*\b(?:take|last|wait)\b"
+    r"|\bhow long (?:is|are|was)\b"
+    r"|\bhow many (?:minutes|hours)\b",
+    re.I)
+# A list said as a fact is a complaint about access, not a question about length: "the dentist
+# waiting list is months what can i do" and "i cant get an nhs dentist appointment the waiting
+# list is two years" both want what to do about it, and they were left with no card at all when
+# the guard only knew the two asks. The list *asked about* ("how long is the waiting list") is
+# still a length, and `_the_dentist_errand` sends that half to the queue.
+_A_LIST_THAT_IS_LONG = re.compile(
+    r"\bwaiting list\b|\bon the list for\b|\blist is (?:months|years|weeks|long|closed)\b",
+    re.I)
+_A_PRACTICE_ERRAND = re.compile(
+    r"\b(?:register|registering|sign up|join|join up|find|finding|accepting|new patients?|"
+    r"taking (?:on )?(?:new )?patients?|need (?:a|an|an nhs|a new) dentist|get a dentist|"
+    r"looking for a dentist|near me|nearby|local dentist|none|no dentist|moved)\b", re.I)
+
+
+# The card answers how long being seen takes. It does not answer how long it takes to *be* one:
+# "how long does it take to become a dentist" carries "how long does ... take" and the word
+# dentist, so this card took it and told the person the length of a check-up. The training is
+# years and it has its own row in `study.py`, so a line about becoming, training, studying or
+# qualifying stands this card down.
+_A_BECOMING_A_DENTIST = re.compile(
+    r"\b(?:become|becoming|train as|training as|study|studying|degree|qualify as|qualifying as|"
+    r"career|became)\b[^?.!]*\b(?:dentist|dentistry|dental school|dental surgeon)\b"
+    r"|\b(?:dentist|dentistry|dental school|dental surgeon)\b[^?.!]*"
+    r"\b(?:training|course|degree|qualify|career|school)\b", re.I)
+
+
+def _an_errand_the_dentist_card_answers(understood):
+    """True when the line asks how long a visit takes, or asks to find or join a practice."""
+    reading = understood if isinstance(understood, dict) else {}
+    said = str(reading.get("clean") or reading.get("text") or "")
+    if _A_BECOMING_A_DENTIST.search(said):
+        return False
+    if _A_PRACTICE_ERRAND.search(said) or _A_LIST_THAT_IS_LONG.search(said):
+        return True
+    return bool(_A_LENGTH_OF_A_VISIT.search(said))
+
+
+# The visit is not one length: a check-up is 15 to 20 minutes, a filling 20 to 30, a root canal
+# 45 minutes to an hour, a clean with the hygienist about 30, and a crown two visits of about an
+# hour. Each is written as what the thing *takes*, not as a label on it - a reply is read a part
+# at a time, and "A filling is a 20 to 30 minute slot" came back to a follow-up as "20 to 30
+# minute.", an attributive with its noun cut off. The part the line named is said first: "how
+# long does a filling take" opens on the filling, not on the check-up that happens to be written
+# before it, because the answer the person asked for belongs in the first sentence.
+_A_CHECK_UP = ("A check-up with a dentist is booked for about 15 to 20 minutes, and a first "
+               "visit to a practice often gets half an hour because they take an X-ray and a "
+               "history.")
+_A_FILLING = "A filling takes 20 to 30 minutes."
+_A_ROOT_CANAL = "A root canal takes 45 minutes to an hour."
+_A_HYGIENIST = "A clean with the hygienist takes about 30 minutes."
+_A_CROWN_VISIT = ("A crown is two visits of about an hour each, one to shape the tooth and one "
+                  "to fit it.")
+_AN_IMPLANT = ("An implant is two short visits and a long wait in between: about an hour to "
+               "place it under the gum, three to six months for the bone to take to it, then "
+               "about an hour to fit the crown on top.")
+_THE_BOOKING = ("Say what it is for when you book, and ask for a double appointment if you have "
+                "more than one thing to look at, so the slot fits.")
+_THE_VISIT_IN_ORDER = (_A_CHECK_UP, _A_FILLING, _A_ROOT_CANAL, _A_HYGIENIST, _A_CROWN_VISIT)
+
+
+def _the_lengths_of_the_visit(said, words):
+    """Every length the visit has, with the one the line named in the first sentence."""
+    named = []
+    if words & {"filling", "fillings"}:
+        named.append(_A_FILLING)
+    if words & {"canal"} or "root canal" in said:
+        named.append(_A_ROOT_CANAL)
+    if words & {"hygienist", "hygienist's", "clean", "cleaning"}:
+        named.append(_A_HYGIENIST)
+    if words & {"crown", "crowns"}:
+        named.append(_A_CROWN_VISIT)
+    # An implant is longer than anything else here and is not one appointment, so it is only said
+    # when the line names it - every other visit line keeps the order it had.
+    if words & {"implant", "implants"}:
+        named.append(_AN_IMPLANT)
+    # A crown that was asked about "taking" is the two visits, and that is the only crown length
+    # here; a bare "how long does a crown take" reaches this same arm through `a_crown`.
+    parts = named + [part for part in _THE_VISIT_IN_ORDER if part not in named]
+    return " ".join(parts + [_THE_BOOKING])
+
+
+def _the_dentist_errand(memory, understood):
+    """The length of a dental visit, or the wait for one, when that is what was asked.
+
+    The card is the one that wins "how long ... dentist", and this line has three different
+    questions in it. "How long does a dentist appointment take" is the visit, and it was answered
+    "look for practices taking on new patients" - a hunt for a practice, because "taking" is a
+    word the registering answer is written with. "How long is the wait for a dentist", "how long
+    does it take to get a dentist appointment", "how long until i can see a dentist" and "how
+    soon can i get a dentist appointment" and "how long do dentists take to see you" are the wait,
+    and a wait is what `_book_the_appointment`
+    already knows how to answer in the words of the place named (it answers the GP half of this
+    exactly). "How do i register with a dentist" is neither, and keeps the registering answer.
+    """
+    words = set(_line_words(understood))
+    said = str(understood.get("clean") or understood.get("text") or "").lower()
+    # The subject of the line does not have to be spelled with the word "dentist": "how long does
+    # a filling take", "how long is a check up" and "how many minutes is a hygienist appointment"
+    # never say it, and every one of them was answered with how to find a practice.
+    #
+    # Two kinds of noun ask two different lengths, and the verb says which. An occasion - an
+    # appointment, a check-up, a visit, a hygienist's clean - lasts 15 to 20 minutes: "how long
+    # does an appointment last" and "how long does an appointment take" are the same question. A
+    # thing done to a tooth - a filling, a root canal, a crown - *takes* 20 to 60 minutes but
+    # *lasts* five to fifteen years, so only "take" is the visit there and "last" stays the
+    # durability answer's.
+    occasion = words & {"appointment", "appointments", "checkup", "check-up", "check", "visit",
+                        "hygienist", "hygienist's"}
+    done_to_a_tooth = words & {"filling", "fillings", "crown", "crowns", "canal"} or (
+        "root canal" in said) or ("check up" in said)
+    the_place = words & {"dentist", "dentists", "dental", "orthodontist", "tooth", "teeth",
+                         "practice", "surgery"}
+    how_long = re.search(r"\bhow (?:long|many (?:minutes|hours))\b", said)
+    takes = words & {"take", "takes", "taking"}
+    lasts = words & {"last", "lasts"}
+    # The wait is asked with "see", "to get", "wait", "soon": those are never the visit's length,
+    # and registering is the one errand that is not a visit.
+    the_wait = bool(words & (_THE_QUEUE | {"see", "seen"}) or "to get" in said)
+    registering = bool(words & {"register", "registering", "sign up", "join"})
+    # A thing done to a tooth lasts years and that is a different answer from the visit's: "how
+    # long does a crown last" is not how long the fitting takes, and the line has no "take" in it
+    # to say so. The filling half of this is the lifespan card's; the crown half is here.
+    a_crown = bool(words & {"crown", "crowns"})
+    if a_crown and lasts and not takes and not the_wait and not registering:
+        return (
+            "A crown lasts ten to fifteen years on average, and some go much longer. What wears "
+            "it out is usually the tooth and the gum under it rather than the crown itself, so "
+            "keep cleaning round the edge where it meets the gum, and tell the dentist if it "
+            "starts to feel loose or the gum bleeds when you floss.")
+    a_visit = ((occasion and (how_long or takes or lasts))
+               or (done_to_a_tooth and (takes or re.search(r"how many (?:minutes|hours)", said)))
+               or (the_place and how_long and (takes or lasts)))
+    if a_visit and not the_wait and not registering:
+        return _the_lengths_of_the_visit(said, words)
+    # A wait is a question the appointment card already answers, in the words of the place named:
+    # one answer, in one place, for every wording that asks how long until you are seen.
+    # The list said as a fact is the access errand: they know the wait is long and are asking
+    # what to do about it, so the registering answer is the one, not the length of the queue.
+    if _A_LIST_THAT_IS_LONG.search(said) and not how_long:
+        return _REGISTERING_A_DENTIST
+    if words & (_THE_QUEUE | {"see", "seen"}) or "to get" in said:
+        return _book_the_appointment(memory, understood)
+    return _REGISTERING_A_DENTIST
+
 
 ENTRIES = [
     entry("back-went",
@@ -1439,16 +1651,39 @@ ENTRIES = [
     # errand: nobody in pain is asking how to join a practice. The key is the errand, and the
     # pain words stand this entry down so the dentist-on-the-day answer keeps those lines.
     entry("register-dentist",
-          (("dentist", "dental practice", "dental surgery", "nhs dentist", "orthodontist"),
+          (("dentist", "dental practice", "dental surgery", "nhs dentist", "orthodontist",
+            # the card is the one that holds the three times - the visit's length, the wait,
+            # and the answer that registering keeps - so every shape that asks for one has to
+            # reach it. A visit is named by what is being done: "how long does a filling take"
+            # was going to a paint card, "how many minutes is a dentist appointment" to a
+            # pay-rate card, and "how long does a dentist appointment last" to nothing at all.
+            # A word that means the appointment itself is not added here: "appointment" is a key
+            # in half this domain, and another entry's key weight is read from how rare its words
+            # are in the domain, so a broad word here quietly took a point off the booking card
+            # ("can i get an emergency dentist appointment" moved to the weekend-toothache card).
+            # The visit is named by what is being done, or by the word doctor's line already has.
+            "filling", "fillings", "root canal", "hygienist", "check up", "check-up",
+            "checkup",
+            # A crown is the one thing done to a tooth with two visits in it, and the card that
+            # holds the times did not know the word: "how long does a crown take" went to a
+            # card about rates. The guard keeps the paint and the moulding out (see
+            # `_an_errand_the_dentist_card_answers`), which is why the word can be here.
+            "crown", "crowns",
+            # "how long does a dental appointment last" says dental and not dentist, and a bare
+            # "appointment" here moved the booking card's weight (see above), so the adjective is
+            # the word that has to be there
+            "dental"),
            ("register", "sign up", "join", "find", "accepting", "new patients", "new patient",
             "taking patients", "patients", "taking", "on the list", "no dentist", "need a dentist",
             "looking for", "get one", "get a dentist", "near me", "nearby", "local", "none",
-            "waiting")),
-          "Look for practices near you that are taking on new patients, then ring rather than "
-          "email: each practice keeps its own list and it opens and closes, and the phone gets "
-          "you a straight answer. Ask on the call whether they take NHS adults and how long the "
-          "first check-up wait is. If nobody near you has room, ring 111 and ask for the urgent "
-          "dental service, which will see you and can tell you who is taking patients.",
+            "waiting",
+            # and the ask that wants a length: "how long does a dentist appointment last",
+            # "how long does an appointment at the dentist take", "how many minutes is a check
+            # up", "how soon can i get seen". `_the_dentist_errand` reads which half it is.
+            "how long", "how soon", "how many minutes", "last", "lasts", "take", "takes",
+            "wait", "waits")),
+          _the_dentist_errand,
+          guard=_an_errand_the_dentist_card_answers,
           avoid=("toothache", "tooth", "teeth", "pain", "hurts", "hurting", "agony", "bleeding",
                  "abscess", "swollen", "broken", "chipped", "knocked out", "emergency", "today",
                  "child", "children", "kid", "kids", "baby", "toddler", "in pain", "wisdom",
@@ -1478,7 +1713,30 @@ ENTRIES = [
           avoid=("appointment", "appointments", "refer", "referral", "sick note", "fit note",
                  "ignored", "dismissed", "sent me away", "waiting list", "results", "test"),
           bias=2),
+
+
+# Becoming a dentist is years, and the visit card answered it with the length of a check-up
+# because the line holds "how long does ... take" and the word dentist. The card now stands down
+# (see `_A_BECOMING_A_DENTIST`), and this row is the answer underneath it, in the domain that owns
+# the word: the person asked how long the training is, not how long the chair takes.
 ] + ENTRIES
+
+ENTRIES.append(entry(
+    "a-dentist-career-length",
+    (("become a dentist", "becoming a dentist", "be a dentist", "train as a dentist",
+      "training as a dentist", "study dentistry", "studying dentistry", "dentistry degree",
+      "dental school"),
+     ("how long", "how many years", "years", "long does it take", "long does it")),
+    "Five years at dental school, then a year of dental foundation training in a practice "
+    "before you can work on your own, so six years from starting to being paid as a dentist. "
+    "The entry grades are the thing that decides it: A-level chemistry and biology are wanted by "
+    "most schools, and the UCAT test plus an interview come before any offer.",
+    # the visit, the pain and the booking are the other cards in this domain
+    avoid=("toothache", "tooth", "teeth", "pain", "hurts", "emergency", "check up", "check-up",
+           "filling", "crown", "root canal", "hygienist's", "appointment", "cost", "much",
+           "how much", "salary", "paid", "pay", "worth it", "nhs"),
+    bias=3))
+
 
 # The other half of an everyday ache: which painkiller, and can I take it with the other one.
 # Every one of these lines reached the pharmacist deflection ("a pharmacist or your GP can answer
@@ -1725,6 +1983,40 @@ def _book_the_appointment(memory, understood):
 # Nobody forgets that they want the appointment; what they ask is how to get one this week.
 # Two words of the appointment are not enough on their own - "i have a dentist appointment at 3"
 # is a fact - so the booking verb has to be there too.
+# "should i see a doctor" is a decision, and the booking script is the answer to a person who
+# has already decided: the steps to being seen, "ring when the lines open". The part entries and
+# the decision rule answer the decision, and where they stand down - the ache a day or two after
+# new work steps out of the rule on purpose - the person still got "ring at 8am" for a question
+# they had not answered. So the booking card answers only a line that is about the booking: an
+# ask and nothing about how to get one is the decision question.
+_DECISION_ASK = re.compile(
+    r"\b(?:should|shall|do|would|could)\s+i\b[^.?!]*\b(?:see|go|get|be seen|have it|"
+    r"have this|bother|worry)\b|\bis it worth\b|\bworth (?:seeing|going|getting|a trip)\b|"
+    r"\bdo i need to\b|\bneed i\b")
+_THE_BOOKING_WORDS = frozenset((
+    "book", "books", "booking", "booked", "appointment", "appointments", "register",
+    "registering", "registration", "online", "app", "phone", "ring", "call", "surgery",
+    "practice", "clinic", "cancellation", "cancellations", "slot", "slots", "reception",
+    "receptionist", "walk in", "111"))
+
+
+_A_RETURN_TO = ("back to", "back at", "going back", "go back", "went back", "come back",
+                "coming back", "got back")
+
+
+def _a_decision_is_not_a_booking(understood):
+    """False for "should i see a doctor", True for "should i book an appointment"."""
+    clean = ((understood or {}).get("clean") or "").lower()
+    if not _DECISION_ASK.search(clean):
+        return True
+    # "back to my knee, should i see a doctor" is a return to a part after another subject, and
+    # the decision rows are fenced out of it by SEE_DOCTOR_AVOID, so the booking card is still
+    # the one that answers it.
+    if any(phrase in clean for phrase in _A_RETURN_TO):
+        return True
+    return bool(set(re.findall(r"[a-z']+", clean)) & _THE_BOOKING_WORDS)
+
+
 ENTRIES.append(entry(
     "book-an-appointment",
     (("appointment", "appointments", "doctor", "dentist", "gp", "surgery",
@@ -1739,7 +2031,7 @@ ENTRIES.append(entry(
      ("book", "booking", "make", "made", "get", "arrange", "appointment", "see",
       "any appointments", "never has", "no appointments", "nothing available", "fully booked",
       "cant get in", "can't get in", "none left", "all booked")),
-    _book_the_appointment,
+    _book_the_appointment, guard=_a_decision_is_not_a_booking,
     # a real request for time off, an emergency and someone already at the surgery are other
     # lines: this one is about getting seen
     # registering with a surgery is its own job - proof of address, an online form or the
@@ -1992,7 +2284,32 @@ ASKING_ABOUT_A_PART = ("what should i do about", "what should i do for",
                        "anything i can do about", "anything i can do for",
                        "is there anything for", "is there anything i can do",
                        "what helps", "what helps with", "what helps a", "what helps my",
+                       # "what is wrong with my knee" is the ask above in the commonest words
+                       # people use for it: the frame names the part and asks what the matter
+                       # with it is, and every other way of putting that phrase was here. Five
+                       # of five joints put this way met the search hedge while the part's own
+                       # card was in the tree.
+                       "what is wrong with", "whats wrong with", "what's wrong with",
+                       "what could be wrong with", "what might be wrong with",
+                       "whats the matter with", "what is the matter with",
+                       "whats going on with", "what is going on with",
                        "whats good for", "what is good for",
+                       # The plainest way anybody asks about a part: "what is wrong with my knee",
+                       # "any idea whats wrong with my back", "what have i done to my shoulder".
+                       # The rule above already said a part named in a question about it is the
+                       # same complaint as a part that hurts, but the list only had the "what
+                       # should i do about it" shapes, so the ask that names the *problem* rather
+                       # than the *action* fell through to the search hedge
+                       # (close-pipe's census, #uncertainty). "is it broken" and "have i broken"
+                       # join them: a part with a break in the question is still that part's card.
+                       "whats wrong with", "what is wrong with", "what could be wrong with",
+                       "what might be wrong with", "what do you think is wrong with",
+                       "any idea whats wrong with", "any idea what is wrong with",
+                       "what have i done to", "what did i do to my", "whats up with my",
+                       "is something wrong with my", "should i worry about my",
+                       "how bad is my", "is it broken", "is it fractured", "is it dislocated",
+                       "have i broken", "have i fractured", "did i break", "did i fracture",
+                       "is it torn", "have i torn", "is it snapped",
                        "remedy for", "any tips for", "any advice for",
                        "how do i ease", "how do i relieve",
                        # "best exercises for a bad back" and "exercises for back pain" were a
@@ -2204,11 +2521,74 @@ def _a_region_guard(name):
 
     return _the_part_is_the_persons_and_not_a_standing_trouble
 
+# A part is bad because of what it stops the person doing, which is how a lot of people say it:
+# "my back is keeping me awake", "its my back thats keeping me up", "my knee is stopping me
+# walking". None of those says "hurt", so the strain table - a part plus a hurt word - answered a
+# question back ("is there anything you'd like a hand with") or a shrug, while "my back hurts" had
+# the answer. The consequence is the pain said by what it costs, so it counts as the hurt word.
+#
+# The verb is the shape, not a list of parts or of what people cannot do, so it holds for every
+# part the table knows: "keeping me up", "keeps me awake", "wont let me sleep", "stopping me
+# walking", "keeping me off my feet". A line with no part in it is not this row's line - the
+# shape is one signal, so "the noise is keeping me up" still needs a body before it answers.
+_KEPT_AWAKE = re.compile(
+    r"\b(?:keeps?|kept|keeping|stops?|stopped|stopping|prevents?|prevented|preventing|held|holding)"
+    r"\s+me\s+(?:up\b|awake\b|off\s+my\s+feet\b|from\s+\w+ing\b|from\s+sleep\b|"
+    r"sleeping\b|walking\b|standing\b|sitting\b|driving\b|working\b|"
+    r"lying\b|sleep\b)"
+    # "wont let me" is the other way people say it, and it has to stay narrow: the same words
+    # are how a line about permission reads - "my dad wont let me go out", "my boss wont let me
+    # leave early", "my husband wont let me leave the house and he grabbed my arm" - and those
+    # are the safety rows, whose answer must not be a strain card. Only the verbs a body stops
+    # you doing are here; "go", "leave", "have", "see" and "work" are not.
+    r"|\b(?:wont|won t|wouldnt|would not|doesnt|does not|will not|didnt|did not)"
+    r"\s+let\s+me\s+(?:sleep|sleeping|nap|rest|lie\s+down|lie\s+still|lie\s+flat|"
+    r"sit\s+down|stand\s+up|walk|drive|get\s+up|get\s+out\s+of\s+bed|roll\s+over)\b"
+)
 
-ENTRIES += [entry(f"sore-{name}", (parts, HURT + ASKING_ABOUT_A_PART + ASKED_AGAIN), reply,
+
+# The shape above says what the part costs, so the line still has to name a part: the shape is
+# one signal, and on its own "the noise is keeping me up" answered with the knee's drill, because
+# a row whose part word is missing is not a part that belongs to a thing either, so its guard had
+# nothing to say against it. The parts are read off the table this row comes from, so a part added
+# there is covered without a list to keep in step.
+_A_PART_IN_THE_TABLE = re.compile(
+    r"\b(?:%s)\b" % "|".join(sorted({re.escape(p)
+                                     for _n, parts, _r in REGIONS for p in parts},
+                                    key=len, reverse=True)))
+
+
+def _a_part_keeps_me_from_something(words):
+    """True when the line says a part is stopping the person doing something."""
+    line = (words or "").lower()
+    return bool(_KEPT_AWAKE.search(line) and _A_PART_IN_THE_TABLE.search(line))
+
+# A break said of a part - "is my rib fractured", "have i cracked a rib", "is my tailbone broken" -
+# is a knock card's line wherever that card has a test to offer. For the parts it has no test for
+# (a rib, a tailbone, a groin) the part's own row is the answer, so the break words join *those*
+# rows only. "is my wrist broken" therefore keeps the knock card's four-steps test and "is my rib
+# fractured" stops being the search hedge.
+BREAK_SAID = ("broken", "broke", "fractured", "fracture", "cracked", "crack", "snapped")
+# The region rows the knock card has no test for, by name. A rib, a tailbone and a groin have no
+# "stand on it" test and no row of their own on the knock card (`BROKEN_PARTS`, below), so their
+# break question is their own row's. A back or a neck is not here on purpose: a broken back or
+# neck is an ambulance, not a strain card, and the honest hedge is the better answer until the
+# safety cases own that line.
+A_PART_NO_KNOCK_TEST = ("ribs", "tailbone", "groin")
+
+
+def _the_breaks_it_says(name):
+    """The break words for a row whose part the knock card has no test for; else nothing."""
+    return BREAK_SAID if name in A_PART_NO_KNOCK_TEST else ()
+
+
+ENTRIES += [entry(f"sore-{name}",
+                  (parts, HURT + ASKING_ABOUT_A_PART + ASKED_AGAIN + _the_breaks_it_says(name)),
+                  reply,
                   avoid=AVOID + EXTRA_AVOID.get(name, ()),
                   bias=REGION_BIAS.get(name, 0),
-                  guard=_a_region_guard(name))
+                  guard=_a_region_guard(name),
+                  shape=(_a_part_keeps_me_from_something,))
             for name, parts, reply in REGIONS]
 
 # A hurt limb that belongs to somebody else is still a first aid question, and until this row
@@ -2392,7 +2772,11 @@ _BACK_AFTER_A_VERB = re.compile(
     r"get|gets|getting|got|give|gives|"
     r"giving|gave|given|takes?|took|taken|brings?|brought|sends?|sent|pays?|paid|calls?|"
     r"called|sits?|sat|cuts?|holds?|held|puts?|stepped|steps?|looks?|looked|turns?|turned|"
-    r"fights?|fought|throws?|threw|pulls?|pulled|comes?|coming)\s+"
+    r"fights?|fought|throws?|threw|pulls?|pulled|comes?|coming|"
+    # "we moved back to bristol last year" is a returning and the only back in the line, and the
+    # place it names is not one `_BACK_BEFORE_A_PLACE` knows: without the verb the reading called
+    # it a body and the line was given a back strain it never mentioned.
+    r"mov(?:e|es|ed|ing)|relocat(?:e|es|ed|ing))\s+"
     r"(?:(?:it|them|him|her|me|us|you|one)\s+)?back\b")
 
 
@@ -2410,12 +2794,24 @@ _BACK_BEFORE_A_PLACE = re.compile(
     r"(?:work|school|home|college|uni|university|office|nursery|holidays?|shift|shifts|"
     r"placement|term|nights?|days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b")
 
+# A homecoming needs no preposition: "back home" and "back in with my parents" are a place, and
+# the pattern above wants "back at/to/in/on" before the place, so "moving back home next week" and
+# "im moving back in with my parents" were read as a back of the body - a paragraph about a tendon
+# for somebody who was talking about a suitcase. The words after the place keep a back the line
+# owns out of it, the same way the determiner rule above does.
+_BACK_HOME = re.compile(
+    r"(?<!\bmy )(?<!\bhis )(?<!\bher )(?<!\byour )(?<!\btheir )(?<!\bour )(?<!\bthe )"
+    r"(?<!\bthis )(?<!\bthat )(?<!\ba )(?<!\ban )"
+    r"\bback\s+(?:home|in\s+with|with\s+(?:my|her|his|our|the)\s+(?:parents|mum|dad|mother|"
+    r"father|family|folks)|to\s+(?:my|her|his|our)\s+(?:parents|mum|dad|mother|father|home))\b")
+
 
 def _back_is_a_direction(understood):
     """True when every back the line says is a particle or a returning, not a part of the body."""
     text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
     said = len(re.findall(r"\bback\b", text))
-    seen = len(_BACK_AFTER_A_VERB.findall(text)) + len(_BACK_BEFORE_A_PLACE.findall(text))
+    seen = (len(_BACK_AFTER_A_VERB.findall(text)) + len(_BACK_BEFORE_A_PLACE.findall(text))
+            + len(_BACK_HOME.findall(text)))
     return bool(said) and seen >= said
 
 
@@ -2491,7 +2887,16 @@ DECIDE_ASK = ("see someone", "see a doctor", "see the doctor", "see a gp", "see 
               "get it looked at", "get it seen", "should i get it checked", "worth getting checked",
               "checked out", "get it checked", "get my checked",
               "should i go to the doctor", "do i need to get it checked", "worth going to the",
-              "should i be worried", "is it worth going")
+              "should i be worried", "is it worth going",
+              # The plainest way people ask it, which none of the frames above cover: "is it
+              # worth getting my knee looked at" got "Nothing on my side can look, sorry" where
+              # "is it worth seeing someone" got the go-by-how-long answer, and "should i bother
+              # going about my shoulder" got a dilemma answer about what you would lose either
+              # way. A part being looked at is the same decision, and a hedge word in front of a
+              # decision does not change it, so "bother" and "any point" belong here too.
+              "get it looked at", "get my", "looked at", "looked over", "get it seen to",
+              "should i bother", "bother going", "bother seeing", "any point in",
+              "worth it to", "worth a visit", "worth a trip", "worth making an appointment")
 
 SEE_DOCTOR_AVOID = (
     # a lump or a gland is the lump card's own line: "should i see a doctor about a lump on my
@@ -2552,9 +2957,17 @@ EXERCISE_AFTER = ("after the gym", "after gym", "after weights", "after lifting"
                   "next day")
 
 
+# The word that makes it an ache, not the part it is in: `ACHE_WORDS` also holds "back", "knee"
+# and "arm", so "should i see a doctor about my back after the gym" read as the day-after ache and
+# stepped out of the rule for a card that only keys on "sore" - and the person got the booking
+# script instead of either. This is the same word list the sport card's own key uses.
+_SORENESS_WORDS = frozenset(("sore", "soreness", "aching", "achy", "achey", "ache", "aches",
+                             "stiff", "stiffness", "tender", "hurt", "hurts", "hurting"))
+
+
 def _the_day_after_new_exercise(understood):
     """True when the line is the ache a day or two after new work, not an ache on its own."""
-    if not _line_words(understood) & set(ACHE_WORDS):
+    if not _line_words(understood) & _SORENESS_WORDS:
         return False
     clean = str((understood or {}).get("clean") or "").lower()
     return any(phrase in clean for phrase in EXERCISE_AFTER)
@@ -2614,6 +3027,7 @@ could did do does doing doctor doctors each even ever for from get gets getting 
 gps had has have having he her here him his how i if in into is it its just look looked looking me
 more most much must my myself need needed needs no nor not now of off on once one only or other our
 out over own rather really same see seeing seen shall she should so some someone something still
+first anyway
 such sure than that the their them then there these they thing things this those through to too
 under up us very wait waiting was we were what when where whether which while who why will with
 worth worthwhile would yet you your
@@ -2749,7 +3163,11 @@ _A_VERB_TOOK_THE_BACK = re.compile(
     r"hold|holds|held|look|looks|looked|turn|turns|turned|talk|talks|talked|take|takes|took|"
     r"step|steps|stepped|sit|sits|sat|lean|leans|leant|lie|lies|lay|fall|falls|fell|walk|walks|"
     r"walked|move|moves|moved|drive|drives|drove|run|runs|ran|hit|hits|fight|fights|fought|"
-    r"come|comes|came|coming|go|goes|going|went|gone)"
+    r"come|comes|came|coming|go|goes|going|went|gone|"
+    # A garment that has shrunk is stretched back: "my jeans shrank in the wash, can i stretch
+    # them back" reached the bad-back row on "back" + "stretch" and answered a shrunken jumper
+    # with a physio plan for the lower back. The washing has the back, not the person.
+    r"stretch|stretches|stretched|stretching|shrink|shrinks|shrank|shrunk|shrinking)"
     r"\s+(?:(?:me|him|her|us|them|you|it|myself|yourself|himself|herself|themselves)\s+)?back\b"
 )
 # ...unless the line says the part is theirs, or that it hurts, which it always does when the
@@ -2834,6 +3252,9 @@ ENTRIES += [entry("bad-back",
                   # keeps winning over the per-part row that would otherwise answer "strengthen
                   # my back"
                   bias=3,
+                  # the back this row is about is the person's own: a line whose only "back" is
+                  # the verb's particle ("stretch them back", "wash it back") is about the thing
+                  guard=_the_back_is_the_persons,
                   # the day-after-the-gym words are the sore-muscle card's, but "exercises" is
                   # the same stem and it is the commonest way this question is asked, so the
                   # sport words carry that fence here instead
@@ -2922,6 +3343,93 @@ ENTRIES += [entry("bad-" + name, (parts, _BAD_PART_WORDS), _bad_part_reply,
                   + ("pregnant", "pregnancy", "expecting", "weeks pregnant",
                      "months pregnant"))
             for name, parts, _reply in REGIONS if name not in ("back", "knee")]
+
+# The part of the body nobody has hurt yet is the part nobody has an answer for. "how do i protect
+# my back" was the offer to draft something together, "how do i look after my knees" the same, and
+# the same shape of line about a shoulder, a hip or an ankle reached nothing at all. Every one of
+# them is the strength-and-use question the part rows already answer, asked a day earlier: what
+# keeps the part quiet is the same thing that keeps it from going, and the per-part drill is
+# already the table below. So the row is the *ask* (protect, look after, take care of, keep
+# strong) plus the part, and the answer is the drill for that part.
+_PROTECT_ASK = ("protect", "protects", "protecting", "protection",
+                "look after", "looking after", "looks after",
+                "take care of", "taking care of", "takes care of", "care for", "caring for",
+                "keep strong", "keep it strong", "keep them strong", "keep healthy",
+                "keep it healthy", "keep supple", "keep flexible",
+                "avoid injury", "avoid injuring", "prevent injury", "prevent a strain")
+_ALL_PART_WORDS = tuple(w for _name, spelled, _r in REGIONS for w in spelled)
+
+
+# The row above is the day before the trouble, and the cards for a desk, a run and a pair of shoes
+# are the day of it: "how do i protect my wrists at a desk" is the posture card's line, "how do i
+# save my knees when running" the running one. So this row takes only a line that names nothing
+# except the part and the wish to keep it well - a part with a desk, a sport or a shoe in the line
+# beside it belongs to the card that knows that thing.
+_PROTECT_FILLERS = frozenset("""
+    a an the and or of to for in on at with my your me it them i we you
+    how do does did can could should would whats what is are be been
+    best way ways good better keep keeps keeping well healthy strong stronger
+    supple flexible care careful carefully properly safely help home
+""".split())
+_PROTECT_ALLOWED = _PROTECT_FILLERS | set(_ALL_PART_WORDS) | set(
+    w for phrase in _PROTECT_ASK for w in phrase.split())
+
+
+def _the_ask_names_nothing_else(understood):
+    """True when the line is only the wish and the part, with no desk, sport or shoe in it."""
+    said = (understood or {}).get("clean") or (understood or {}).get("text") or ""
+    if not isinstance(said, str):
+        return False
+    words = set(re.findall(r"[a-z']+", said.lower().replace("\u2019", "'")))
+    return all(_in_the_allow_list(w) for w in words)
+
+
+def _in_the_allow_list(word):
+    """True when the word is the allow list's own, or that word with a plural or -ing on it."""
+    if word in _PROTECT_ALLOWED:
+        return True
+    for tail in ("ing", "es", "s", "ed", "d"):
+        stem = word[:-len(tail)] if word.endswith(tail) else ""
+        if len(stem) >= 3 and stem in _PROTECT_ALLOWED:
+            return True
+    return False
+
+
+def _protect_reply(memory, understood):
+    part = (_part_named(_line_words(understood), understood)
+            or _part_named(_words(understood), understood) or "joint")
+    article = "An" if part[:1] in "aeiou" else "A"
+    drill = _WEEKS_DRILL.get(part, "two short sessions a week of the movement you want to keep, "
+                                    "stopping short of pain")
+    if part in _CARRIES_WEIGHT:
+        instead = ("Swimming, cycling and a flat walk are the kind ones on the other days. Warm "
+                   "up before a big job, keep the load close to you when you lift, and change "
+                   "position every half hour rather than holding one.")
+    else:
+        instead = ("Keep it moving every day rather than resting it, and keep it in the middle of "
+                   "where it moves - not locked straight, not at the end of its range.")
+    return (article + " " + part + " is protected by the muscle round it and by how you use it "
+            "more than by anything you wear or avoid: " + drill + ". " + instead)
+
+
+ENTRIES += [entry("protect-a-part", (_PROTECT_ASK, _ALL_PART_WORDS), _protect_reply,
+                  guard=_the_ask_names_nothing_else,
+                  # a part that is already bad is the part's own card's, not the day-before-it
+                  # question this row answers
+                  avoid=STANDING + EXERCISE_DAY + WEEKS + _GONE_BACK +
+                  ("injury", "injured", "hurt", "hurts", "hurting", "pain", "painful", "ache",
+                   "aches", "aching", "sore", "swollen", "swelling",
+                   # a burn, a bite and the sun are their own answers
+                   "sun", "sunburn", "sunburnt", "burn", "burnt", "burned", "suncream",
+                   "sun cream", "sunscreen", "bites", "bitten", "graze", "gravel",
+                   "burn", "sting", "stung",
+                   # the eyes and the hearing are not joints, and their own answers hold them
+                   "eyes", "eye", "hearing", "ears", "ear", "teeth", "tooth", "gums",
+                   # the foot already has a card about looking after it: "how do i look after my
+                   # feet" was answered with shoes, mileage and the heel that hurts first thing,
+                   # and that is a better answer than this one
+                   "feet", "foot", "heel", "toes", "toe", "plantar",
+                   "pregnant", "pregnancy", "expecting"))]
 
 # "exercises for bad knees" and "what exercise can i do with a bad knee" both reached nothing -
 # one a "say more" echo and the other a sympathy line - while the same question about a back has had
@@ -3087,7 +3595,12 @@ ENTRIES += [
                  # fever" was answered with the treat-the-child-not-the-number card, which talks
                  # about a baby of three months and a rash. The allergy season has its own entry
                  # (science.hayfever), so a line that says hay fever is not this one's.
-                 "hay fever", "hayfever", "hay-fever", "pollen", "allergy season")),
+                 "hay fever", "hayfever", "hay-fever", "pollen", "allergy season",
+                 # An illness with a name has its own card, and its timeline is part of it:
+                 # "how long does glandular fever last" and "what is scarlet fever" were taking
+                 # this row's what-a-fever-is answer off the single word "fever".
+                 "glandular fever", "glandular", "scarlet fever", "scarlet",
+                 "rheumatic fever", "dengue", "typhoid", "malaria")),
     entry("take-a-temperature",
           (("thermometer", "thermometers", "temperature", "temps"),
            ("take", "takes", "taking", "read", "reading", "use", "using", "best way",
@@ -3542,7 +4055,11 @@ ENTRIES += [
                  "manicure", "pedicure", "hammer", "hangnail", "fungal", "infection",
                  "black", "bruised", "bruise", "purple", "dark", "slammed", "slam", "dropped",
                  "knocked", "knock", "stubbed", "smashed", "football", "door", "trapped",
-                 "my dog", "my cat", "my baby", "my toddler", "my child")),
+                 "my dog", "my cat", "my baby", "my toddler", "my child"),
+          # "how do i stop wood splitting when i nail it" holds "nail" and "splitting", and the
+          # answer to it is a pilot hole, not growth. The guard is the same one the health and
+          # routines rows use: a workshop noun in the line means the nail is a piece of metal.
+          guard=_the_nail_is_a_persons),
 ]
 
 # The region table answers "my back hurts" for everyone; the lines it gets wrong are the person
@@ -4136,6 +4653,14 @@ _A_PART_NAMED = (
     "metal plate", "screw", "screws")
 
 
+# A leg is a bone until the line says whose it is: "how long should i rest a leg of lamb" is the
+# joint on the board, and this row answered it with the cast and the X-ray. A meat word anywhere in
+# the line is the kitchen reading, however the rest of it is worded.
+_A_JOINT_OF_MEAT = re.compile(
+    r"\b(?:lamb|beef|pork|chicken|turkey|duck|goose|brisket|gammon|veal|venison|meat|steak|"
+    r"joint of|of lamb|of beef|of pork|roast)\b")
+
+
 def _not_a_break_from_work(understood):
     """False when the line's "break" is a rest, so the healing row keeps its bones.
 
@@ -4144,10 +4669,12 @@ def _not_a_break_from_work(understood):
     A line that names a part - a wrist, a leg, a bone, a fracture - is a bone question whatever
     else it says, and a line that says whose break it is, with no part in it, is a rest.
     """
+    said = str((understood or {}).get("text") or "").lower()
+    if _A_JOINT_OF_MEAT.search(said):
+        return False
     words = set(str(word).lower() for word in ((understood or {}).get("words") or ()))
     if words & set(_A_PART_NAMED):
         return True
-    said = str((understood or {}).get("text") or "").lower()
     if _A_HEALING_WORD.search(said):
         return True
     return not _A_REST_NOT_A_BONE.search(said)
@@ -4247,6 +4774,21 @@ _ON_A_BODY = ("ice it", "ice that", "ice my", "ice the", "icing it", "put ice", 
               "heat better than ice", "hot better than cold", "better than ice", "than ice",
               "better than heat", "than heat", "heat vs ice", "ice vs heat", "heat versus",
               "ice versus", "heat or cold", "cold or heat", "ice or hot", "heat and ice")
+# The noun that follows "heat the", "ice my" and the rest of the phrases above, and the nouns that
+# make it a house, a kitchen or a garden instead of a body. "heat the room", "heat the house",
+# "ice the cake" and "heat the bath water" are all lines this row used to answer with a compress.
+_HEAT_OR_ICE_THE_THING = re.compile(
+    r"\b(?:heat|heating|ice|icing|hot|cold)\s+(?:the|my|our|that|this|a|an)\s+([a-z']+)")
+_A_THING_THAT_IS_NOT_A_BODY = frozenset((
+    "room", "rooms", "house", "houses", "home", "flat", "kitchen", "bedroom", "bathroom", "hall",
+    "hallway", "lounge", "garage", "shed", "office", "conservatory", "loft", "attic", "cellar",
+    "caravan", "car", "van", "bed", "bath", "shower", "pool", "greenhouse", "oven", "pan", "pot",
+    "kettle", "mug", "cup", "bottle", "thermos", "cake", "buns", "bread", "milk", "wine", "beer",
+    "water", "radiator", "radiators", "boiler", "heating", "thermostat", "air", "whole house",
+    "place", "window", "windows", "door", "towel", "towel rail", "dehumidifier", "humidifier",
+    "washing machine", "dryer", "tumble", "dishwasher", "microwave", "fridge", "freezer"))
+
+
 _NOT_ON_A_BODY = ("cook", "cooks", "cooked", "cooking", "boil", "boils", "boiled", "boiling",
                   "oven", "bake", "baked", "baking", "recipe", "roast", "roasted", "fry",
                   "fried", "frying", "steam", "steamed", "steaming", "microwave", "defrost",
@@ -4276,6 +4818,14 @@ def _a_place_you_would_ice(understood):
     line = " " + " ".join(str(reading.get("clean") or reading.get("text") or "").lower().split()) + " "
     if any(" " + word + " " in line for word in _NOT_ON_A_BODY):
         return False
+    # "heat the", "ice my" and the rest say what the heat or the ice is going on, so the noun after
+    # them decides who answers: "is it cheaper to run a dehumidifier or heat the room" was this
+    # card, because `heat the` is in the list above and a room is not a body. Only a body word or
+    # something you put on one keeps the line, and the phrase being there at all is what is being
+    # overruled - a room, a house or an appliance is never a compress.
+    for thing in _HEAT_OR_ICE_THE_THING.findall(line):
+        if thing in _A_THING_THAT_IS_NOT_A_BODY and thing not in ACHE_WORDS:
+            return False
     # The compress is only this row's when it is being put on something. "should i ice it" and
     # "should i use heat or ice" are this row; "should i pull away in second gear on ice" and
     # "what should i do about black ice" are the road, and it was answering those too.
@@ -4333,7 +4883,17 @@ ENTRIES.append(entry(
            # was the bruise card and this row would have taken it. A hot bath and sore muscles
            # after exercise are the ache card's, which says more than this one can.
            "bruise", "bruises", "bruised", "hot bath", "bath", "sore muscles", "aching muscles",
-           "dog", "cat", "baby", "pregnant", "pregnancy")))
+           "dog", "cat", "baby", "pregnant", "pregnancy",
+           # a bill is a cost question, and "is it cheaper to run a dehumidifier or heat the
+           # house" reached this card through "or heat" and was told to ice a sprain. The other
+           # side of the comparison is a machine or the house, never a body.
+           "cheaper", "cheap", "cost", "costs", "expensive", "electricity", "energy", "bill",
+           "bills", "tariff", "dehumidifier", "kilowatt", "kwh", "per hour", "running cost",
+           # the phrases, not the bare word "heating": an avoid word is read loosely enough to
+           # cover the words it is made of, so "heating" here stood this row down on "or heat"
+           "central heating", "heating on", "gas heating", "electric heating", "heat the house",
+           "heating the house", "heating bill", "heating the flat", "radiator", "radiators",
+           "boiler", "heat pump")))
 # `pulled-muscle` in health.py answers a pulled muscle in general ("two to three weeks"), and it
 # stands down on a calf and a groin because those two are a clot and a hernia until proven
 # otherwise. The muscle people actually name is the one where the number is the whole question and
@@ -4425,6 +4985,49 @@ ENTRIES.append(entry(
            "downsize", "can i swim", "how do i clean", "how do i look after")))
 
 
+# "how long should a tampon stay in" was a shrug, and once another row stood down it came back
+# from a wound row about closing a cut - the timer question answered by whatever card happened to
+# hold the verb "stay in". A tampon is worn for a stretch and taken out, so the number is the
+# answer, and one warning rides on top of it.
+_TAMPON_WORD = re.compile(r"\btampons?\b")
+_NOT_A_TAMPON_LINE = re.compile(
+    r"\b(bins?|bin it|dispose|disposal|throw (?:it|them) away|flush\w*|down the loo|"
+    r"wrapper|applicator|recycl\w*|compost\w*|landfill)\b")
+
+
+def _a_tampon_worn_too_long(understood):
+    """True when the line is about wearing a tampon, and not about getting rid of one.
+
+    "can i use a tampon while pregnant" is answered here too - the reply ends with pads rather
+    than tampons during pregnancy - so pregnancy does not stand the row down. What does stand it
+    down is a line about the bin, the loo or the wrapper: the rubbish row owns those.
+    """
+    reading = understood if isinstance(understood, dict) else {}
+    said = " ".join([str(reading.get("clean") or ""),
+                     " ".join(str(word) for word in (reading.get("words") or ()))])
+    return bool(_TAMPON_WORD.search(said)) and not _NOT_A_TAMPON_LINE.search(said)
+
+
+ENTRIES.append(entry(
+    "tampon-how-long",
+    (("tampon", "tampons"),
+     ("how long", "how often", "leave", "leaves", "stay in", "stays in", "staying in",
+      "keep in", "keeps in", "keeping it in", "in for", "overnight", "sleep", "slept",
+      "all night", "asleep", "fell asleep", "hours", "long can", "long should",
+      "when should", "forgot", "forget", "change", "changed", "changing", "safe", "okay",
+      "ok", "can i", "should i", "wear", "wearing", "use", "using", "put one in")),
+    "Change a tampon every four to six hours and never leave one in for more than eight, so "
+    "take it out before bed rather than sleep through with the same one. Use the lowest "
+    "absorbency that still lasts four hours, wash your hands before and after, and if one has "
+    "been in longer than that take it out now and watch for a fever, a rash like sunburn, "
+    "vomiting, dizziness or a sore throat: that is toxic shock syndrome, which is rare but "
+    "serious, so ring 111 for advice. Contact lenses and retainers have their own limits, and "
+    "pads rather than tampons are the answer during pregnancy and for the first weeks after a "
+    "baby.",
+    guard=_a_tampon_worn_too_long,
+    bias=1))
+
+
 # "how long does a walk in centre take" is not a question about walking: the line carries "how
 # long" and "walk", and the pace card answered it with the pace of a mile - then, once that card
 # stood down, with a search hedge. Nobody can put a number on a queue before the person gets
@@ -4448,3 +5051,55 @@ ENTRIES.append(entry(
     # the walking ones
     avoid=("how do i get", "parking", "postcode", "address", "where is", "nearest",
            "walk up", "walk to", "how far", "open on christmas", "phone number")))
+
+
+# Coming off a bike, a horse, a ladder or a trampoline had no card of its own: "i came off my
+# bike", "i fell off my bike", "she came off her horse" and "he came off his motorbike" got no
+# answer at all, and "the cyclist came off his bike and is holding his arm" got the card that tells
+# you to scrub a mark off your hands with a nail brush. A fall is the commonest injury people bring
+# to the bot, and what helps is the same whether you were on two wheels or on a ladder.
+#
+# The second group is the thing fallen off plus the words for hurting, so "orders fell off" and
+# "the paint came off the door" stay where they are, and the mechanical half of a bike is kept out
+# by name: "the chain came off" is a repair, not a fall.
+_OFF_A_THING = ("came off", "fell off", "fell from", "come off", "fall off", "went over the",
+                "over the handlebars", "came a cropper")
+_FALL_AVOID = ("chain", "chains", "derailleur", "gears", "gearset", "brake", "brakes", "pedal",
+               "pedals", "wheel", "wheels", "tyre", "tyres", "tire", "tires", "saddle", "sprocket",
+               "cassette", "handlebar", "mudguard", "rack", "pannier", "battery",
+               "motor", "throttle", "exhaust", "spark plug", "clutch", "pill", "medication",
+               "my meds", "wagon", "a lorry", "the back of a lorry", "radar", "the list",
+               "diet", "my food", "the challenge", "bandwagon", "sales", "orders", "shares", "price",
+               "prices", "paint", "button", "handle", "sticker", "label", "wallpaper", "tiles",
+               "the map", "nearly fell", "nearly came",
+               # a fall that says what it cost is the injury card's line, not this one: "my son
+               # fell off his bike and hurt his arm" is first aid for a hurt limb, and this row
+               # took the two tests that guard it.
+               "hurt", "hurts", "hurting", "sore", "ache", "aches", "aching", "pain", "painful",
+               "broken", "break", "fracture", "swelling", "swollen", "can't move", "cant move")
+
+ENTRIES.append(entry(
+    "came-off-a-thing",
+    (_OFF_A_THING,
+     ("bike", "bikes", "bicycle", "cycle", "horse", "pony", "scooter", "motorbike", "motorcycle",
+      "moped", "ladder", "trampoline", "skateboard", "skates", "skis", "sled", "sledge",
+      "roof", "wall", "stairs", "steps", "horse", "quad", "go kart", "swing", "climbing frame",
+      "bruise", "bruised", "graze", "grazed", "gashed", "landed", "hit", "banged", "knocked",
+      "arm", "wrist", "elbow", "shoulder", "collarbone", "knee", "hip", "ankle", "hand", "head",
+      "ribs", "walk", "weight")),
+    "Coming off is a fall, so check the head first: a bang that knocked them out, made them sick, "
+    "left them confused or gave them a bad headache is A&E the same day, and so is anything they "
+    "cannot remember. Most falls land on a hand or a shoulder, and a wrist that cannot take weight "
+    "or an arm that cannot be lifted across the chest is worth an X-ray today - the collarbone is "
+    "the break people miss. Grazes want cool running water, a dressing and no scrubbing. Ice a "
+    "bruise for 20 minutes at a time with a cloth round it, take paracetamol or ibuprofen if you "
+    "can, and expect it to be stiffer tomorrow than today. A helmet that took the hit is finished, "
+    "even with no crack you can see.",
+    # not the body table's AVOID: it carries FALL ("fall", "banged", "knocked", "bump") to keep the
+    # part rows off a fall, and a fall card that inherits it stands down on its own subject - the
+    # first draft answered "i came off my bike" and not "i fell off my bike".
+    avoid=_FALL_AVOID,
+    # The lowest bias on purpose: a card that names what the fall cost answers first ("my son fell
+    # off his bike and hurt his arm" is the hurt limb, not the head), and this one fills the fall
+    # that nothing else answers.
+    bias=0))

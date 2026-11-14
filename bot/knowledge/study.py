@@ -16,7 +16,7 @@ import re
 import unicodedata
 
 from . import quantity
-from .lookup import entry
+from .lookup import A_WHAT_TO_WEAR, entry
 from ..understanding.normalize import BASE as ENGLISH_WORDS
 from .wording import NERVES_BODY, nerves_opening
 
@@ -395,6 +395,40 @@ _ENGLISH_FURNITURE = frozenset((
     "please", "so", "my", "your", "his", "her", "their", "our", "there", "here", "s"))
 
 
+# The essay-ending row keys "ending", which the normaliser folds to "end", and its co-word list
+# holds "how" and "what" - the two commonest ways of asking anything. So every line with the word
+# "end" in it was offered the last paragraph of an essay: "what do i ask them at the end" (an
+# interview), "how do i end a chat at a party". The avoid list above collects those one at a time
+# and can never catch up. The row is right about an essay ending and every way of asking for one
+# either names something written or names the conclusion outright, so it asks for one of the two
+# rather than carrying a list of what it is not about.
+_SOMETHING_WRITTEN = (
+    "essay", "essays", "dissertation", "coursework", "assignment", "assignments", "report",
+    "reports", "paragraph", "paragraphs", "write", "writing", "written", "thesis", "paper",
+    "papers", "project", "projects", "chapter", "chapters", "story", "stories", "mark", "marks",
+    "grade", "grades", "tutor", "teacher", "lecturer", "uni", "university", "college", "gcse",
+    "a level", "a-level", "aqa", "edexcel", "english", "history", "politics", "sociology",
+    "psychology", "biology", "geography", "question", "questions", "title",
+    # a spoken ending is the one thing here that is not written, and it has no answer of its own
+    # yet: standing the row down for "how do i end a speech" leaves the person with a stall, so
+    # the row keeps it
+    "speech", "speeches", "talk", "talks",
+)
+_A_CONCLUSION_SAID = ("conclusion", "conclusions", "conclude", "sum up", "summarise", "summarize",
+                      "last paragraph", "final paragraph", "wrap up")
+
+
+def _the_ending_is_written(understood):
+    """True when the line is about the end of something written, not the end of anything."""
+    clean = " ".join(str(understood.get("clean") or understood.get("text") or "").split()).lower()
+    if not clean:
+        return False
+    for word in _A_CONCLUSION_SAID + _SOMETHING_WRITTEN:
+        if re.search(r"(?<![a-z0-9])" + re.escape(word) + r"(?![a-z0-9])", clean):
+            return True
+    return False
+
+
 def _a_translation_is_asked(understood):
     """True when the line asks for the meaning of a foreign word, not when it uses an English one."""
     clean = str(understood.get("clean") or understood.get("text") or "").lower()
@@ -589,6 +623,52 @@ _A_DEGREE_OF_HEAT = ("heat", "warm", "hot", "cold", "weather", "celsius", "centi
                      "washing machine", "angle", "bend", "slope", "latitude",
                      "gas mark", "convert", "conversion", "degrees c", "degrees f")
 
+# A number and "degrees" together is usually the weather: "wedding in italy and 35 degrees, what do
+# i wear" was answered with what a degree passes at, and so was "his room is about 20 degrees" in
+# the middle of a baby-sleep chat. A spelled number counts too, because the line is read twice and
+# "about twenty degrees" is the same line as "about 20 degrees".
+# A class of degree is written with a figure too, and it is not a reading: "is a 2:1 degree good"
+# and "is a 2 2 degree bad" stood the pass-mark row down and got a punt instead, because the 1 and
+# the 2 are digits in front of "degree". A figure glued to a colon or to another figure is a class,
+# so the temperature needs a figure that stands on its own (khaki-key's read on #12922).
+_TEMPERATURE_DEGREES = re.compile(
+    r"(?<![\w:.\d])(?<!\d\s)(?:[1-9]|[1-3][0-9]|40)\s*(?:degrees?\b|deg\b|°)")
+_NUMBER_WORDS = frozenset((
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
+    "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
+    "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred"))
+
+
+def _a_number_word(words):
+    for word in words:
+        for part in re.split(r"[-\s]", word):
+            if part in _NUMBER_WORDS:
+                return True
+    return False
+
+
+def _the_degrees_are_heat(understood):
+    """False when "N degrees" is a temperature rather than a qualification.
+
+    A number before "degrees" is a temperature unless the line says something else about
+    studying: "35 degrees in my exam" is a mark, "wedding in italy and 35 degrees" is the
+    weather. The word "degree" itself cannot count as the study word, because the phrase
+    carries it.
+    """
+    text = str(understood.get("clean") or understood.get("text") or "").lower()
+    words = set(understood.get("words") or ())
+    if not ({"degree", "degrees"} & words):
+        return True
+    if not (_TEMPERATURE_DEGREES.search(text) or _a_number_word(words)):
+        return True
+    if (words - {"degree", "degrees"}).intersection(_EXAM_IN_THE_WORDS):
+        return True
+    if re.search(r"\b(?:my|the|a|his|her|their|your)\s+degree\b|\bdegree\s+(?:in|course|exam)\b",
+                 text):
+        return True
+    return False
+
+
 # A line that fails at something, and the words that say the thing is an exam.
 _FAILING = frozenset(("fail", "failed", "failing", "fails", "flunk", "flunked", "flunking"))
 _EXAM_IN_THE_WORDS = frozenset((
@@ -638,6 +718,22 @@ NOT_AN_EXAM = ("blood", "driving", "pregnant", "pregnancy", "swab", "urine", "he
                "changing the subject", "change the subject", "changed the subject",
                "change of subject", "off topic", "on a different subject",
                "onto a different subject")
+
+# A note written *to* somebody is not a note taken in a lecture. This row keys "note" and "write",
+# which is the note-taking question, and it carries a bias of 1, so it took the person's note on a
+# tie: "how do i write a thank you note" was told to leave a wide margin for questions after the
+# lesson, and "how do i write an apology note" the same. Both cards are already written and word
+# the note from what the line names - `thanks-for-hospitality` in wording.py and
+# `apology-fits-the-person` in language.py - so the phrases below only say which note this is. A
+# note to a teacher, a landlord or a boss is the same kind of thing, and "note to my" covers those
+# without touching "notes from my lecture", where "note" is followed by "s".
+NOT_A_PERSONS_NOTE = (
+    "thank you note", "thank-you note", "thankyou note", "thanks note",
+    "apology note", "apologise note", "apologize note", "apologising note", "apologizing note",
+    "sorry note", "condolence note", "sympathy note", "get well note", "welcome note",
+    "short note", "little note", "note saying", "a note to my", "note to my", "note for my",
+    "note to the", "note for the", "note to a", "note for a",
+)
 
 # "Losing track" is a focus phrase and it is also how a person says where their money went:
 # "i keep losing track of what goes out" and "i keep losing track of my spending" were answered
@@ -1375,7 +1471,12 @@ ENTRIES = [
                  "club name", "club names", "call our team", "call the team",
                  "call the quiz", "call our quiz", "call the club", "call our club",
                  "needs a name", "need a name", "name ideas", "name for our",
-                 "names for our")),
+                 "names for our",
+                 # "is forgetting names a sign of dementia" is asking about the illness, not for
+                 # the trick: the memory-assessment card is the answer, and the technique for
+                 # holding a new name is not.
+                 "dementia", "alzheimers", "alzheimer's", "sign of", "symptom", "worried",
+                 "worry", "should i be concerned", "is it normal")),
     entry("memorise-dates",
           (("dates", "timeline", "history"),
            ("remember", "memorise", "memorize", "learn", "keep forgetting")),
@@ -1936,7 +2037,7 @@ ENTRIES = [
           "map to come back to, not a transcript. Leave a wide margin for questions after the "
           "lesson and add them the same evening, in five minutes, while it is still fresh. "
           "Handwriting beats typing for remembering, if it is a choice.",
-          avoid=NOT_AN_EXAM, bias=1),
+          avoid=NOT_AN_EXAM + NOT_A_PERSONS_NOTE, bias=1),
     # The subject of this entry is focus itself, so the key names only words of attention: the
     # phone distraction has its own entry in routines.py, and listing "phone" here as well made
     # this one fire on "i cant hear on my phone" as soon as the line carried a second generic word.
@@ -2002,6 +2103,46 @@ ENTRIES = [
           "tables, and speak from the first week — even to yourself in the kitchen. One lesson or "
           "one conversation partner a week is what makes the rest work.",
           avoid=NOT_AN_EXAM, bias=1),
+    # Which one to learn had no card at all. Every language entry here said how to practise or
+    # how long it runs for, and "which language should i learn" reached the practise one - so the
+    # person asking for a pick was told "Split your time in three: a few minutes going over
+    # yesterday's phrases out loud", an answer to a question they had not asked yet.
+    #
+    # The key is the asking itself, written out, and there is only one group of it: a line that
+    # says "which language should i learn" in any of the ordinary ways is a pick, and a line that
+    # says "how do i learn french quickly" or "what language do they speak in brazil" is not.
+    # "what language" alone would take the second of those, so the phrase carries the should/learn
+    # with it.
+    entry("pick-a-language",
+          (("which language should", "what language should", "language should i",
+            "languages should i", "what language to", "which language to", "what language do i",
+            "which language do i", "best language to", "easiest language to",
+            "hardest language to", "good language to", "useful language to",
+            "most useful language", "language worth", "languages worth",
+            "which language is", "what language is", "pick a language", "choose a language",
+            "which language first", "what language first", "easiest language",
+            "hardest language", "best language"),
+           ("learn", "learning", "learnt", "study", "studying", "pick", "picking", "choose",
+            "choosing", "start", "starting", "first", "worth", "recommend",
+            "english speaker", "english speakers")),
+          "Pick by what you will actually use it for, not by which is easiest on paper: the "
+          "language of the country you visit, or of the family you are marrying into, beats any "
+          "ranking. With no reason to choose, Spanish is the usual bet - about 500 million "
+          "speakers, spelling that matches the sound, and a lot of cheap material - and if you "
+          "already have French or Italian, the other one of the pair is the cheapest start of "
+          "all. The clock is the real cost: about 600 to 750 hours of class for Spanish, French "
+          "or Italian, but roughly 2,200 for Arabic, Chinese, Japanese or Korean.",
+          # a phrase, a translation, an exam, a course and a place where the language is spoken
+          # all name one without asking which to learn
+          avoid=NOT_AN_EXAM + ("say", "says", "saying", "pronounce", "translate", "translation",
+                               "phrase", "phrases", "speak", "speaks", "speaking", "spoken",
+                               "in spanish", "in french", "in italian", "in german",
+                               "in welsh", "in irish", "in gaelic", "in portuguese",
+                               "sign language", "duolingo", "app", "apps", "lesson", "lessons",
+                               "class", "classes", "course", "courses", "gcse", "a level",
+                               "a-level", "degree", "university", "abroad", "moving to",
+                               "live in", "holiday", "my child", "my son", "my daughter"),
+          bias=2),
     # The other half of the language question, and the one with a number in it: "how long does
     # it take to learn Spanish" and "how long until I'm fluent" were both shrugs, because every
     # language entry here says how to practise and none of them says how long it runs for. The
@@ -2223,7 +2364,10 @@ ENTRIES = [
           + ("how long before", "how long until", "how far ahead", "how early",
              "weeks before", "months before", "days before", "how long do i need",
              "how long does it take to revise", "how long should i revise for the exam"),
-          bias=1),
+          # "how many hours of revision a day for gcses" and "how many hours should i revise a
+          # day" tied with the row for the hours in a winter day on "hours" and "day", and lost
+          # on registry order. The line names revising, so this row is the one that answers it.
+          bias=2),
     # "how much homework should a 10 year old get" reached nothing on main: family.kids-homework
     # wants the word "help" or "struggling", and study-how-long wants "long". The amount is a
     # homework question, so it lives here rather than in one more copy of the routine.
@@ -2337,7 +2481,7 @@ ENTRIES = [
                  # and a baby, a toddler or a child is up at 5am for its own reason: that is a
                  # night waking, not the person's own morning routine
                  "baby", "babies", "toddler", "toddlers", "child", "children", "kid", "kids",
-                 "son", "daughter",
+                 "son", "daughter", "year old", "year olds", "year-old", "yr old", "yrs old",
                  # a line that asks WHEN is the study-time entry's, not the alarm's: "is it
                  # better to study in the morning or evening" is a comparison of two times, and
                  # it was answered with the alarm across the room. The comparison words are in
@@ -2946,8 +3090,16 @@ ENTRIES = [
           "evidence that got you there, then the wider point or what should happen next. Four or "
           "five sentences is enough, with no new evidence and no new quotation - if a fact belongs "
           "in the conclusion, it belongs in the body first.",
+          # the ending of anything not written is not the last paragraph of an essay; see the
+          # note on _the_ending_is_written above
+          guard=_the_ending_is_written,
           # a conclusion you reached about a decision is not an essay paragraph
           avoid=("i came to the conclusion", "came to the conclusion", "test", "experiment",
+                 # "Ending" folds to "end", the commonest verb in the other world: "how did the
+                 # first world war end in 1918" and "how did the second world war end" came back
+                 # as the last-paragraph tip. An ending in history is not an ending in an essay.
+                 "war", "wars", "battle", "battles", "revolution", "armistice", "trench",
+                 "trenches", "empire", "1914", "1918", "1939", "1945",
                  # "ending" folds to "end", so this row took any "how do i end ..." line that
                  # had one of "how", "what" or "should" in it: "how do i end a chat at a party"
                  # was told how to write the last paragraph of an essay. An ending that is a
@@ -3076,14 +3228,21 @@ ENTRIES = [
                  "royal mail", "envelope", "envelopes", "signed for", "recorded delivery",
                  "first class stamp", "second class stamp", "first class post",
                  "second class post", "train ticket", "plane ticket", "flight", "seat",
-                 "carriage", "railcard"),
+                 "carriage", "railcard")
+                 # a line that asks what to wear only says "degrees" as the weather it is dressing
+                 # for: "its 35 degrees, what should i wear to a wedding" was the pass-mark card,
+                 # and 35 is a heat wave, not a mark.
+                 + A_WHAT_TO_WEAR,
           # a bare "what is a pass mark" ties level with the GCSE answer, which is the right one
           # for a school result: the degree answer asks the university word and wins the tie.
           bias=1,
           # "the lamb is 2.2 kilos not 2" is a slow roast with the joint weighed, and the "2.2"
           # of a degree class was the whole of the match. A figure with a unit on it is an
           # amount, not a class, so this row stands down and the cooking card answers the line.
-          guard=lambda understood: not quantity.a_figure_with_a_unit(understood)),
+          # a figure with a unit on it is a measurement, not a degree: "wedding in italy and 35
+          # degrees, what do i wear" was answered with what a degree passes at.
+          guard=lambda understood: (not quantity.a_figure_with_a_unit(understood)
+                                    and _the_degrees_are_heat(understood))),
 
     entry("course-choice",
           (("which course", "what course", "course to study", "choose a course", "pick a course",
@@ -3240,6 +3399,40 @@ ENTRIES = [
                  "nurse", "nursing", "teacher", "teaching", "vet", "veterinary", "doctor",
                  "lawyer", "solicitor", "midwife", "electrician", "to be a"),
           bias=1),
+    # A parent saying their child wants to leave at 16 was acknowledged back at them ("Noted: your
+    # son wants to leave school at 16") while the one thing that decides the answer went unsaid:
+    # in England they have to stay in education or training until 18, and that can be a college
+    # course, an apprenticeship or a job with training in the week rather than school.
+    entry("leaving-school-at-16",
+          (("leave school", "leaves school", "left school", "leaving school", "quit school",
+            "quitting school", "drop out of school", "dropping out of school", "not stay on",
+            "stay on at school", "stay at school", "sixth form", "college instead"),
+           ("16", "sixteen", "at 16", "year 11", "year 12", "after gcses", "after gcse",
+            "wont go", "won't go", "doesnt want", "refuses", "refusing", "should i let",
+            "let him", "let her", "is it ok", "is it legal", "allowed", "have to", "must",
+            "law")),
+          "In England they can leave school at 16 but not stop learning: education or training "
+          "has to continue until 18, and a college course, an apprenticeship or a job with "
+          "accredited training in the week all count, so it does not have to be more school. "
+          "The realistic routes are A levels at a sixth form, a level 2 or 3 vocational course "
+          "(BTEC, T level, NVQ) at college, or an apprenticeship, which is a paid job with the "
+          "training built in and usually one day a week at college. Visit one college open day "
+          "together before deciding, and ask about a level 2 course if the GCSEs are shaky, "
+          "because that is a stepping stone to level 3 rather than a dead end.",
+          # the ways a parent brings it up: as a question ("can my daughter leave school at
+          # 16"), or as a statement of what the child wants, which is the same question
+          ask=("can they", "can my", "is it", "should", "do they have to", "have to", "what are",
+               "what can", "options", "instead", "wants to", "want to", "doesnt want",
+               "does not want", "wont", "refuses", "leave", "leaving", "quit", "drop out"),
+          # a parent states it before asking: "my son wants to leave school at 16" was noted back
+          # at them, so the stated line reads this row
+          report=True,
+          # a grade, a college application and the age-16 birthday are their own answers
+          avoid=("what grades", "grades do i need", "how do i apply", "apply for college",
+                 "apply to college", "ucas", "university", "uni", "a level results",
+                 "gcse results", "results day", "birthday", "16th", "driving", "licence",
+                 "license", "moped", "cigarettes", "alcohol", "consent", "minimum wage",
+                 "national insurance")),
     entry("strict-teacher",
           (("strict teacher", "strict", "harsh teacher", "mean teacher", "unfair teacher",
             "teacher hates me", "teacher doesnt like me", "teacher doesn't like me",
@@ -3937,6 +4130,16 @@ JOB_LENGTHS = (
      "pays while you train.",
      "A return-to-practice course of a few months supervised in a maternity unit, rather than the "
      "degree again, if you have let your registration lapse."),
+    # "how long does it take to become a dentist" was the check-up card answering with the
+    # length of a visit, because the line holds "how long does ... take" and the word dentist.
+    # Becoming one is five years at dental school and then a training year, which is a different
+    # question with a different answer.
+    (("dentist", "dentistry", "dental school", "dental surgeon"),
+     "Five years at dental school, then a year of dental foundation training in a practice "
+     "before you can work on your own, so six years from starting to being paid as a dentist.",
+     "A return-to-practice or the overseas registration exam rather than the degree again: "
+     "around a year of study and supervised practice, and the General Dental Council says which "
+     "route your qualification needs."),
     (("doctor", "medicine", "medical school", "surgeon"),
      "Five years at medical school, then two foundation years in a hospital before you can apply "
      "for specialty training, which runs from three to eight years depending on the field.",

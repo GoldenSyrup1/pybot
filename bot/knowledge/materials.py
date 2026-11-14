@@ -20,7 +20,7 @@ turns before when the line has none.
 """
 import re
 
-from .lookup import entry
+from .lookup import a_sanding_job, entry
 
 ANSWERS = ("home-and-diy", "garden-and-plants", "maths-and-numbers")
 
@@ -50,7 +50,7 @@ _LOOSE = (
       "stones", "slate", "bark", "bark chippings", "woodchip", "wood chips", "mulch", "aggregate"),
      50, 10,
      "A 850kg bulk bag of {thing} covers about 10 square metres at 50mm, and a 25kg bag "
-     "about 0.7",
+     "about 0.3 square metres",
      "Put a weed membrane down first if you do not want to hoe it, and keep 20mm below the "
      "damp course on a wall so the rain can drain away."),
     (("topsoil", "soil", "loam"), 100, 7,
@@ -60,7 +60,7 @@ _LOOSE = (
      "fill to slightly proud of the level you want."),
     (("compost", "multipurpose compost", "manure", "composted manure"), 50, 12,
      "A 60 litre bag of {thing} covers about 1 square metre at 50mm, and a 145 litre bag "
-     "about 2.5",
+     "about 2.5 square metres",
      "For a raised bed, fill the top 300mm with compost and the rest with rougher soil or "
      "rubble at the bottom; a bed one metre by two at 300mm deep takes about 6 bags of 60 "
      "litres."),
@@ -125,15 +125,53 @@ def _sizes(value):
     return ("%.1f" % value).rstrip("0").rstrip(".")
 
 
+_A_NUMBER = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven",
+             8: "eight", 9: "nine"}
+_A_FRACTION = {0.25: "a quarter", 0.5: "a half", 0.75: "three quarters"}
+
+
+def _a_bag_count(bags, word):
+    """How many bags to buy, said the way a person would: "about half a bulk bag".
+
+    A count was said as a decimal, so a small job was told "4.5 square metres at 50mm needs
+    about 0.5 bulk bags of gravel" - a bag you cannot buy, and a half with an s on it. The
+    quarters are the ones people say: a quarter, half, three quarters, and one and a half.
+    """
+    quarters = round(bags * 4) / 4.0
+    whole = int(quarters)
+    part = round(quarters - whole, 2)
+    if quarters < 0.25:
+        return "about a tenth of a %s" % word
+    if quarters < 1:
+        if part == 0.25:
+            return "about a quarter of a %s" % word
+        if part == 0.75:
+            return "about three quarters of a %s" % word
+        return "about half a %s" % word
+    if quarters >= 9.5:
+        return "about %d %ss" % (round(bags) if bags < 20 else round(bags, -1), word)
+    if part == 0.75:
+        # nobody orders three quarters of a bag: the next whole one is the same errand
+        whole, part = whole + 1, 0
+        if whole == 1:
+            return "about one %s" % word
+        return "about %s %ss" % (_A_NUMBER[whole], word)
+    if part:
+        return "about %s and %s %ss" % (_A_NUMBER[whole], _A_FRACTION[part], word)
+    if whole == 1:
+        return "about one %s" % word
+    return "about %s %ss" % (_A_NUMBER[whole], word)
+
+
 def _count(value):
-    """How a person would say the number: "about two and a half", not "2.5"."""
+    """How a person would say a number of things: "about two and a half", not "2.5"."""
     if value >= 20:
         return "about %d" % round(value, -1)
     if value >= 4:
         return "about %d" % round(value)
     halves = round(value * 2) / 2
     if halves == int(halves):
-        word = {1: "one", 2: "two", 3: "three"}.get(int(halves))
+        word = _A_NUMBER.get(int(halves))
         if word:
             return "about %s" % word
     return "about %s" % (("%.1f" % halves).rstrip("0").rstrip("."))
@@ -165,12 +203,10 @@ def _loose_reply(name, understood):
     per_bag = covers * (depth / float(asked))
     if area:
         bags = area / per_bag
-        count = _count(bags)
         word = _BAG_WORD.get(thing, "bulk bag")
-        return ("%s square metres at %dmm needs %s %s%s of %s. %s, and it is worth a tenth more "
+        return ("%s square metres at %dmm needs %s of %s. %s, and it is worth a tenth more "
                 "than the sums say. %s" % (
-                    _sizes(area), asked, count, word, "" if count == "about one" else "s",
-                    thing, lead, extra))
+                    _sizes(area), asked, _a_bag_count(bags, word), thing, lead, extra))
     return ("%s. Measure the area and work out the volume at the depth you want, then divide by "
             "what a bag holds, and order a tenth more than the sums say - a bag never spreads as "
             "far as the label claims. %s" % (lead, extra))
@@ -319,6 +355,15 @@ def _not_a_persons_weight(understood):
     return not _A_PERSONS_WEIGHT.search(text)
 
 
+# Sanding is the verb, not the bag: "how long do i need to leave filler before sanding" bought a
+# 25kg bag of sand because the key word "sand" is read through its endings. The words cannot go in
+# the avoid list (that reads them through their endings too, and stands down every real bag of
+# sand), so the job is read off the line by `lookup.a_sanding_job` and the row stands aside for it.
+# The paint, filler and paper rows have the answer.
+def _not_a_sanding_job(understood):
+    """Whether the line is about buying sand rather than sanding something down."""
+    return not a_sanding_job(understood)
+
 ENTRIES = [
     entry("how-much-gravel", (("gravel", "shingle", "chippings", "pea gravel", "pea shingle",
                                "pebbles", "bark", "bark chippings", "woodchip", "mulch",
@@ -340,7 +385,7 @@ ENTRIES = [
           bias=2),
     entry("how-much-sand", (("sand", "play sand", "sharp sand"), _ASKS_MATERIAL),
           lambda memory, understood: _loose_reply("sand", understood),
-          ask=_ASKS_MATERIAL, avoid=_MATERIAL_AVOID, bias=2),
+          ask=_ASKS_MATERIAL, avoid=_MATERIAL_AVOID, bias=2, guard=_not_a_sanding_job),
     # "How much does a bulk bag of gravel weigh" was a price hedge on main ("Prices move too
     # fast for me to know"), because the ask words are the ones the price rows read and the
     # gravel row stands down for "weigh" (the diet fence). A bag's weight is a fact about the

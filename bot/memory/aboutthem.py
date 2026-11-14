@@ -11,6 +11,7 @@ could not see their family: the pronoun becomes "a 5 year old". Only a child, an
 store holds the age: an adult's sleep, water and bedtime are the figures the adult entries already
 give, so there is nothing to write out and no answer to change.
 """
+import datetime
 import re
 
 from . import topics
@@ -119,3 +120,135 @@ def with_the_age(text, memory):
         written = said[:found.start()] + "a " + how_old + said[found.end():]
     written = " ".join(written.split())
     return written if written != said else ""
+
+# An age asked for further ahead: "how old will he be next year", "how old will my son be in 2030",
+# "what age will she be in two years". The store keeps one age at one day, so the ask is arithmetic
+# on what it keeps rather than a fact to look up, and no entry can answer it: the words reach the
+# store's own "you haven't said" card, which is about the chat rather than about the child.
+AHEAD_ASK = re.compile(r"\b(?:how\s+old|what\s+age)\s+(?:will|would|is|does)\b", re.I)
+AHEAD_TIME = re.compile(
+    r"\bnext\s+(?P<next>year|summer|birthday)\b"
+    r"|\bthis\s+time\s+next\s+year\b"
+    r"|\bin\s+(?P<years>\d{1,2}|a|one|two|three|four|five|six|seven|eight|nine|ten)\s+years?\b"
+    r"|\bin\s+(?P<year>(?:19|20)\d\d)\b", re.I)
+COUNT = {word: number for number, word in enumerate(
+    ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+     "eleven", "twelve"), 0)}
+KIN = re.compile(r"\bmy\s+(?:little\s+|big\s+|eldest\s+|youngest\s+)?"
+                 r"(?P<who>son|daughter|boy|girl|child|kid|lad|little one)\b", re.I)
+
+# The word the ask uses for a child, and the words the store may have filed that child under: "my
+# little girl is 2" is filed as "girl", and the ask a turn later says "my daughter".
+KIN_SAME = {"son": ("son", "boy"), "boy": ("boy", "son"), "lad": ("lad", "boy", "son"),
+            "daughter": ("daughter", "girl"), "girl": ("girl", "daughter"),
+            "child": ("child", "kid", "son", "daughter", "boy", "girl"),
+            "kid": ("kid", "child", "son", "daughter", "boy", "girl"),
+            "little one": ("little one", "child", "kid", "son", "daughter", "boy", "girl")}
+
+
+def an_age_ahead(text, memory):
+    """The age the child will be at a day further ahead, said back, or None.
+
+    Only for a child whose age the store keeps in whole years: a baby kept in months is a length
+    the arithmetic here would get wrong, so its ask is left to whoever knows more.
+    """
+    said = " ".join(str(text or "").split())
+    if not said or not AHEAD_ASK.search(said):
+        return None
+    when = AHEAD_TIME.search(said)
+    if not when:
+        return None
+    age, words = _the_one_asked_about(said, memory)
+    if age is None:
+        return None
+    years = _the_years_ahead(when)
+    if years is None or years < 0:
+        return None
+    day = _the_day_named(when, years)
+    if not day:
+        return None
+    subject = _the_subject(words)
+    verb = (" " if words.startswith("your ") else "") + _the_future(words)
+    return "%s%s %s %s." % (subject, verb, _an_age_said(age + years), day)
+
+
+def _the_years_ahead(when):
+    """How many years ahead the ask is, or None when the day it names is one to leave alone."""
+    if when.group("next"):
+        # "next birthday" and "next summer" name no length: a birthday is a year, a summer is not.
+        return 1 if when.group("next").lower() == "year" else None
+    if when.group("year"):
+        try:
+            return int(when.group("year")) - datetime.date.today().year
+        except (TypeError, ValueError):
+            return None
+    count = when.group("years")
+    if not count:
+        return None
+    return int(count) if count.isdigit() else COUNT.get(count.lower())
+
+
+def _the_day_named(when, years):
+    """The day the ask names, said the way a person says it: "next year", "in 2030", "in two years"."""
+    if years == 0:
+        return "now" if not when.group("year") else "in %s" % when.group("year")
+    if when.group("year"):
+        return "in %s" % when.group("year")
+    if years == 1:
+        return "next year"
+    return "in %s years" % SPOKEN.get(years, str(years))
+
+
+def _the_one_asked_about(said, memory):
+    """(the age the store keeps, the words the reply uses for that person) or (None, "")."""
+    if not isinstance(memory, dict):
+        return None, ""
+    people = _people(memory)
+    named = KIN.search(said)
+    if named:
+        who_said = named.group("who").lower()
+        fits = KIN_SAME.get(who_said, (who_said,))
+        for entry in people:
+            who = str(entry.get("who") or "").strip().lower()
+            if not who or who not in fits:
+                continue
+            age = entry.get("age")
+            if isinstance(age, int) and 0 < age < CHILD_AGE:
+                return age, "your " + who_said
+        return None, ""
+    found = PRONOUN.search(said)
+    if not found:
+        return None, ""
+    word = (found.group("who") or found.group("own") or found.group("obj") or "").lower()
+    if word in ("she", "her"):
+        fits, said_who = SHE, "she"
+    elif word in ("he", "his", "him"):
+        fits, said_who = HE, "he"
+    else:
+        fits, said_who = SHE | HE, "they"
+    for entry in people:
+        who = str(entry.get("who") or "").strip().lower()
+        if not who or who not in fits:
+            continue
+        age = entry.get("age")
+        if isinstance(age, int) and 0 < age < CHILD_AGE:
+            return age, said_who
+    return None, ""
+
+
+def _an_age_said(age):
+    """An age said the way a person says it: "seven" while a child, "34" after that."""
+    if isinstance(age, int) and 0 < age <= 12:
+        return SPOKEN.get(age, str(age))
+    return str(age)
+
+
+def _the_subject(words):
+    """The words a reply about that person opens with."""
+    words = (words or "").strip()
+    return words[:1].upper() + words[1:] if words else "They"
+
+
+def _the_future(words):
+    """The verb, joined to the person the way a person says it: "He'll be", "Your son will be"."""
+    return "will be" if (words or "").startswith("your ") else "'ll be"

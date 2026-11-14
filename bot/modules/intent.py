@@ -11,11 +11,15 @@ the key exists before any module reads the line. A line that asks for no shape o
 greeting, a feeling, a question about the bot itself - leaves `wants` unset rather than guessing,
 and a module that does not find the key simply reads the line as it did before.
 
+`bot/compose/clause.py` reads the question out of the clause after the comma ("camping, might
+rain, what to pack" is a list, not a verdict) and lifts a reading that the whole line made weak;
+a shape the whole line gave is kept.
+
 The shape is kept in `memory["intent_wants"]` too, so the next line can be read against it: a bare
 follow-up ("and for brown rice?", "what about once it is up in july") is asking the same kind of
 answer about something else, and on its own words it asks for nothing in particular.
 """
-from bot.compose import fit
+from bot.compose import clause, fit, what_it_asks
 
 PRIORITY = 9500
 
@@ -28,7 +32,8 @@ def observe(text, memory):
     if not isinstance(read, dict):
         return
     before = memory.get("intent_wants")
-    want = fit.wants(read, before if isinstance(before, str) else None)
+    want = what_it_asks.the_shape_it_asks(
+        read, clause.shape(read, fit.wants(read, before if isinstance(before, str) else None)))
     # Written every turn, a line with no shape of its own included: two turns later a stale shape
     # would be handed back to a follow-up that leans on the turn in between ("thanks, that helps").
     memory["intent_wants"] = want

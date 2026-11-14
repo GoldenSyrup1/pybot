@@ -79,27 +79,123 @@ _ITEMS = (
      "£9 to £13 for one takeaway main - a curry, a Chinese dish, a large pizza - and £15 to £25 "
      "for a delivery for two once the sides and the fee are on it. Collecting it yourself saves "
      "the £3 to £5 delivery fee."),
+    # One range a row: the verdict beside the person's figure is read off the range, and a second
+    # one in the same card is what it gets compared against when it is the last one named.
+    # A trainer is not a boot: the bare "boots" in this key took "when are football boots
+    # cheapest" and "when are winter boots cheapest" off the calendar rows and gave them the
+    # price of a training shoe. A school shoe is here because it is bought from the same shelf;
+    # football boots, walking boots and wellies are priced by the rows that own them.
+    (("trainers", "a pair of trainers", "running shoes", "sneakers", "school shoes"),
+     "£45 to £85 for a decent pair of everyday trainers, and last season's colour of the same shoe "
+     "is often half price. Proper running shoes start about £70, and school shoes come in cheaper."),
+    (("gym membership", "gym", "leisure centre", "swimming pool", "pool membership"),
+     "A gym is £25 to £45 a month, with a joining fee of about £20 on top. Pay as you go is about "
+     "£8 a visit, which is worth working out against a month of a membership you do not use."),
+    (("cinema ticket", "cinema", "the pictures", "film ticket", "imax ticket"),
+     "£8 to £15 for an adult cinema ticket, and up to £20 in London or for IMAX and a reclining "
+     "seat. Most chains have a cheaper showing on a weekday before five."),
+    (("netflix", "streaming service", "netflix subscription", "disney plus", "prime video",
+      "spotify"),
+     "£5 to £16 a month for a streaming service, depending on the tier: the ad-supported ones are "
+     "at the bottom of that and the ad-free 4K ones at the top. Paying for a year upfront, where "
+     "it is offered, works out about two months free."),
     (("bread and milk", "weekly shop", "food shop", "groceries"),
      "The average household spends about £70 to £80 a week on food shopping, from £40 for one "
      "person cooking from scratch to £150 for a family that buys ready meals."),
 )
 
+# Every name in the table, so a thing added to _ITEMS is asked for by all of its names. The key
+# used to carry a second hand-written list of the same nouns, and a row added to the table without
+# it was silently unreachable ("how much are trainers" reached nothing at all).
+_ITEM_NAMES = tuple(sorted({name for names, _ in _ITEMS for name in names}))
+
+# The price question, and the version of it that has the figure already on the line.
+_ASKED = ("how much is", "how much are", "how much does", "how much do", "how much would",
+          "how much for", "what does", "what do", "price", "prices", "cost", "costs", "cheaper",
+          "cheapest", "going rate", "these days", "nowadays", "average",
+          # "is 150 too much for trainers" asks the same thing with the figure in front of it,
+          # and once this row answers, the composer sets their figure against the range.
+          "too much", "too expensive", "too dear", "overpriced", "over the odds", "about right",
+          "fair price", "reasonable", "expensive", "rip off", "ripped off", "a lot of money")
+
+# A figure is money when it is marked as money ("£15", "15 quid") or when the words after it make
+# it the price of the thing ("15 for", "15 a month", "15 too much"). A bare count is not: "is 2
+# pints too much" is the units question, and the figure there is how much they drink.
+_A_FIGURE = re.compile(
+    r"(?:£|\$|€)\s?\d[\d,]*(?:\.\d+)?"
+    r"|\b\d[\d,]*(?:\.\d+)?\s*(?:k\b|grand\b|quid|pounds?|bucks)"
+    r"|\b\d[\d,]*(?:\.\d+)?\s+(?:for\b|a\b|an\b|per\b|each\b|every\b|too\b|"
+    r"to\s+spend\b|in\s+total\b|all\s+in\b)")
+# The judgement words, which only settle a price when there is a figure to settle.
+_A_JUDGEMENT = re.compile(
+    r"\b(?:too much|too expensive|too dear|overpriced|over the odds|about right|fair price|"
+    r"a fair price|reasonable price|rip off|ripped off|a lot of money|worth it)\b")
+# The words that say the money itself is what is asked about. A judgement with no figure and
+# none of these is not a price: "how much beer is too much" is the units question, while "what is
+# a fair price for a pint" is this row's.
+_MONEY_WORD = re.compile(r"\b(?:price|prices|priced|cost|costs|charge|charges|fee|fees|pay|"
+                         r"pays|paid|quid)\b")
+# A line that judges a price rather than asking for one: the person brings the figure and asks
+# whether it is a lot. "Is 4 pounds a lot for a pint of milk", "is £3 expensive for a chicken",
+# "is 300 pounds a good price for a bike". The figure is money - a currency sign, or pounds, quid
+# or pence after a number - and a word asks for the judgement. Every other card in the store has a
+# subject that the figure is not about, so a card answering the thing itself (what the milk
+# weighs, what a chicken takes in the oven, what a loaf costs to make, whether milk is good for
+# you) reads the subject and never the question. This is the one test they all consult.
+_JUDGING = re.compile(
+    r"(?:\u00a3\s*\d|\b\d+(?:\.\d+)?\s*(?:pounds?|quid|pence|gbp|p\b))"
+    r"[^.?!]*?\b(?:a lot|lot for|too much|expensive|cheap|cheaper|cheapest|dear|dearer|"
+    r"overpriced|rip.?off|worth it|worth the|worth buying|reasonable|a fair price|fair price|fair|"
+    r"good price|bad price|good buy|bad buy|good value|poor value|a bargain|a steal|"
+    # The judgement does not need the word "price" to be about the money: "is 8 pounds ok for a
+    # cinema ticket", "is 4 pounds fair for a chicken", "is 12 pounds alright" are the same ask as
+    # "a lot", and reading only the emphatic words left these to whichever card named the subject
+    # - so "is 4 pounds ok for a chicken" answered with the minutes the bird takes in the oven.
+    r"ok|okay|alright|all right|acceptable|about right|sensible|"
+    r"good deal|bad deal|worth the money)\b",
+    re.I)
+
+
+def a_price_is_judged(text):
+    """True when the line brings a figure in money and asks whether it is a lot.
+
+    The cards that answer the subject itself stand down on this, because the question is about
+    the money: the verdict is put against the range the same thing sells at, which is what the
+    person's figure is being compared with.
+
+        a_price_is_judged("is 3 pounds a lot for a chicken")   -> True
+        a_price_is_judged("is 3 pounds a lot for a chicken") -> True
+        a_price_is_judged("how long do i roast a 4 pound chicken")  -> False
+        a_price_is_judged("how much is a chicken")                  -> False
+    """
+    text = " ".join(str(text or "").lower().split())
+    return bool(_JUDGING.search(text))
+
+
+
+# "what does" and "what is" are the frame of every other question about an item - "what does oat
+# milk taste like", "what is a flat white" - so they cannot be price words here. They were, and the
+# row took every taste question on its own table: a question frame is not the question.
 _PRICE = re.compile(
-    r"\b(?:how much (?:is|are|does|do|would)|what (?:does|do|is|are)|price|prices|cost|costs|"
+    r"\b(?:how much (?:is|are|does|do|would)|price|prices|cost|costs|"
     r"cheaper|cheapest|expensive|going rate|these days|nowadays|average)\b")
 # A price is not a quantity, a method or a limit: "how much milk goes in a cake", "how much does a
 # pint of milk weigh", "how much beer is safe" are three other questions.
 _NOT_A_PRICE = re.compile(
     r"\b(?:weigh|weighs|grams?|g\b|ml\b|millilitres?|litres?|cups?|tablespoons?|teaspoons?|"
     r"recipe|recipes|in a cake|for a cake|per person|serves?|servings?|calories|units?|"
-    r"too much|safe|limit|how many|should i drink|drink a week|a day|make|making|grow|"
-    r"keep|keeps|last|lasts|freeze|store|storing|goes in|do i need|is in)\b")
+    r"safe|limit|how many|should i drink|drink a week|a day|make|making|grow|"
+    r"keep|keeps|last|lasts|freeze|store|storing|goes in|do i need|is in|"
+    # "how much does a loaf of bread need to rise" was a price of a loaf: the words that make
+    # bread ask about the water in it, not about the shelf.
+    r"rise|rises|rising|dough|yeast|knead|prove|proofing)\b")
 # "how much is a pint of milk" is this row; "how much is my water bill" is a bill and belongs to
 # the row that reads the meter.
 _NOT_AN_ITEM = re.compile(
     r"\b(?:bill|bills|meter|tariff|standing charge|contract|insurance|premium|tax|rent|"
     r"mortgage|salary|wage|wages|pension|fine|postage|delivery|shipping|vets?|"
-    r"prescription|ticket|flight|hotel|rental|deposit|lesson|course|subscription|"
+    r"prescription|train ticket|bus ticket|plane ticket|flight ticket|concert ticket|"
+    r"rail fare|flight|hotel|rental|deposit|lesson|course|subscription|"
     r"mobile|broadband|energy|gas|electric|electricity|water bill|council|"
     # a stamp is a thing on a shelf with a price on it. A parcel, a letter and the post office
     # counter are the posting question, and that row already answers them.
@@ -126,11 +222,13 @@ def _the_text(reading):
 def _a_price_was_asked(reading, memory=None):
     """True when the line asks what an everyday thing costs, and nothing else about it."""
     text = _the_text(reading)
-    if not text or not _PRICE.search(text):
+    if not text or _NOT_AN_ITEM.search(text) or _NOT_A_PRICE.search(text):
         return False
-    if _NOT_A_PRICE.search(text) or _NOT_AN_ITEM.search(text):
+    judged = bool(_A_JUDGEMENT.search(text))
+    figured = bool(_A_FIGURE.search(text))
+    if judged and not figured and not _MONEY_WORD.search(text):
         return False
-    return True
+    return bool(_PRICE.search(text) or (judged and figured))
 
 
 def _the_item_reply(memory, reading):
@@ -160,21 +258,14 @@ def _the_item_reply(memory, reading):
 
 ENTRIES = [
     entry("everyday-prices",
-          (("how much is", "how much are", "how much does", "how much do", "price", "prices",
-            "cost", "costs", "cheaper", "going rate", "these days", "nowadays"),
-           ("a pint", "beer", "lager", "cider", "wine", "prosecco", "milk", "loaf", "bread",
-            "eggs", "coffee", "latte", "flat white", "cup of tea", "tea", "cigarettes", "fags",
-            "food shop", "weekly shop", "groceries", "strawberries", "berries", "punnet",
-            "fish and chips", "fish supper", "chippy", "takeaway", "pizza", "kebab",
-            "lentils", "lentil", "chickpeas", "potatoes", "potato", "spuds", "chicken",
-            "stamp", "stamps")),
+          (_ASKED, _ITEM_NAMES),
           _the_item_reply,
           # The rows that were answering these lines name the same things for other questions, so
           # this one has to win when it is willing to answer and stand down when it is not.
           bias=3,
           guard=_a_price_was_asked,
           # a drink's units, a wine pairing, a shop's own offer and a bill are four other cards
-          avoid=("units", "how many units", "safe", "limit", "too much", "cut down", "reduce",
+          avoid=("units", "how many units", "safe", "limit", "cut down", "reduce",
                  "calories", "goes with", "pair", "pairing", "match", "which wine",
                  "with pizza", "with curry", "with steak", "offer", "offers", "deal", "deals",
                  "supermarket offer", "loyalty", "coupon", "voucher",

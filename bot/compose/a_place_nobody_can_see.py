@@ -240,7 +240,8 @@ _ABOUT_THE_BOT = re.compile(r"\b(?:are|is|was|were)\s+(?:you|u|ya|the bot|this b
 _PLACE = re.compile(r"\b(?:area|areas|street|streets|road|roads|neighbourhood|neighborhood|estate|"
                     r"town|city|village|centre|center|park|beach|seafront|suburb|postcode|place|"
                     r"location|block|here|there|abroad|hotel|hostel|flat|house|home|station|"
-                    r"walkway|alley|underpass|path|route|car park)\b")
+                    r"walkway|alley|underpass|path|route|car park|sea|lake|river|coast|"
+                    r"seaside|harbour|harbor)\b")
 _SAFE = re.compile(r"\b(?:safe|safety|rough|dodgy|crime|mugged|sketchy|dangers?)\b")
 _FEELING = re.compile(r"\b(?:feel|feels|feeling|felt)\b|\blike this\b|\babout myself\b|"
                       r"\bfor me to\b")
@@ -275,7 +276,26 @@ _RAISING = re.compile(r"\b(?:bring (?:up|ing up)|raise|raising|grow(?:ing)? up|s
 _SIGHT = re.compile(r"\b(?:old town|town cent(?:re|er)|city cent(?:re|er)|market|attractions?|"
                     r"museum|gallery|castle|cathedral|zoo|theme park|water park)\b")
 _TRIP = re.compile(r"\b(?:holiday|holidays|trip|resort|resorts|beach|town|city|village|island|"
-                   r"abroad|seaside|centre|center|market|attraction|museum|zoo|park)\b")
+                   r"abroad|seaside|centre|center|market|attraction|museum|zoo|park|cruise|cruises|"
+                   r"ferry|flight|flights|long haul|day out|days out|weekend away)\b")
+# A place the line names by name - "is benidorm ok with a toddler", "is centre parcs good for a
+# four year old" - is a place with no place word in it. The capital is the only mark a name leaves
+# in a typed line, and it is a mark the place words cannot give: the first word of a sentence is
+# capitalised too, so the name has to be a capitalised word that is not the first one.
+_NAMED = re.compile(r"\S\s+(?:the\s+|a\s+|an\s+)?[A-Z][a-z]{2,}")
+# What a line is about, when it is not about somewhere to go: the trip criteria below are about the
+# flight, the heat and the walk from the room, and a line whose subject is a sport, a body, money or
+# a machine is not a trip however many children are in it. "is rugby safe for kids" was answered
+# with "the flight or the drive, the heat, and how far the beach is" - a holiday nobody in the line
+# had mentioned (@clean-salmon). The understanding engine already says what the line is about, so
+# this is a list of topics, not of words.
+# The topics that do make a child line a trip, so a place read as travel keeps the criteria even
+# when its name is typed in lower case ("is benidorm safe for kids").
+_TRAVEL_TOPICS = frozenset(("geography-and-travel", "travel", "holidays", "places"))
+_NOT_A_PLACE_TOPICS = frozenset((
+    "sport", "fitness", "health", "body", "eating", "food-and-drink", "money", "work",
+    "technology", "pets", "law", "driving", "school-and-study", "hobbies", "home-and-garden",
+    "beauty", "clothes"))
 _SIGHT_CRITERIA = ("how much walking there is, whether it goes up or down, and how busy it gets "
                    "at the time you would go")
 _SIGHT_WHERE = ("The place's own page has the access and the opening times, and a map app shows "
@@ -321,7 +341,7 @@ def _the_thing(said):
     return thing[:1].upper() + thing[1:]
 
 
-def _pool(said):
+def _pool(said, named=False, other_subject=False, travel=False):
     """The pool for the kind of thing being judged, with the criteria and place that go with it.
 
     `(None, None, None)` when the line names a kind nothing here can speak to, so the hedge it had
@@ -329,7 +349,10 @@ def _pool(said):
 
     Order is the reading: the most specific kind wins, and a class in the line ("for kids", "with a
     toddler", "on a budget") beats the verb it is asked with, so "is benidorm safe for kids" gets
-    the child's criteria and not the crime map (@spare-leopard, #10238).
+    the child's criteria and not the crime map (@spare-leopard, #10238). `named` says the line has
+    a capitalised name in it, which is how a place is named when no place word is used, and
+    `other_subject` says the understanding engine read the line as being about something that is
+    not a place at all, which no number of children turns into a trip.
     """
     if _SAFE.search(said) and _SAFE_OBJECT.search(said) and not _HOME.search(said):
         return SAFE_OBJECT, _SAFE_OBJECT_CRITERIA, _SAFE_OBJECT_WHERE
@@ -350,7 +373,23 @@ def _pool(said):
     # A child in the line makes it a trip with children, unless the line is about the home they
     # would live in: "is it a good area for families" asked about a flat wants the walk and the
     # noise, not the flight and the beach.
-    if _WITH_CHILDREN.search(said) and not (_HOME.search(said) and not _TRIP.search(said)):
+    # A child on its own does not make a trip: "is rugby safe for kids" is a question about rugby,
+    # and it was answered with "the flight or the drive, the heat, and how far the beach is" - a
+    # holiday nobody in the line had mentioned (@clean-salmon). The child is read as a trip only
+    # when the line has somewhere to go in it: a place word, a trip word, or a place named by name.
+    # Safety with no place word is the same fault from the other side - "is rugby safe" is not a
+    # street - so the child does not carry it either, and whatever the line had is left standing:
+    # an honest "I don't know", or the entry that does answer it.
+    somewhere = bool(_PLACE.search(said) or _TRIP.search(said) or named or travel)
+    # A safety question about a thing with no place in it is not a trip, and the child in it does
+    # not make it one: "is gymnastics safe for toddlers" and "is rugby safe for kids" were both
+    # told about the flight, the heat and the walk to the beach. The thing has to be somewhere to
+    # go - a place word, a trip word, a name, or a line the understanding engine read as travel -
+    # and a line that names no thing at all ("is it ok with a toddler") keeps the criteria it had.
+    if (_WITH_CHILDREN.search(said) and (somewhere or not _SAFE.search(said))
+            and not (other_subject and not somewhere)
+            and not (_SAFE.search(said) and _the_thing(said) and not somewhere)
+            and not (_HOME.search(said) and not _TRIP.search(said))):
         return WITH_CHILDREN, _CHILD_CRITERIA, _CHILD_WHERE
     # Safety is about a place. A job, a marriage, a file and an account are not streets.
     if _SAFE.search(said) and not _PLACE.search(said):
@@ -398,16 +437,34 @@ def reads_as_a_hedge(reply):
     return any(said.startswith(opener) for opener in HEDGE_OPENERS)
 
 
-def pool_for(text):
+def _the_topics(memory):
+    """The topics the understanding engine read the line as being about."""
+    if not isinstance(memory, dict):
+        return set()
+    understood = memory.get("understood") or {}
+    if not isinstance(understood, dict):
+        return set()
+    topics = set(understood.get("topics") or ())
+    if understood.get("topic"):
+        topics.add(understood["topic"])
+    return topics
+
+
+def pool_for(text, memory=None):
     """The pool of replies for a judgement ask on a thing the bot cannot see, or None.
 
     The caller picks from the pool with the memory in hand (`pick` needs the turns), so this
     returns every phrasing for the kind of thing the line names.
     """
-    said = re.sub(r"\s+", " ", str(text or "").lower().replace("\u2019", "'")).strip()
+    raw = re.sub(r"\s+", " ", str(text or "").replace("\u2019", "'")).strip()
+    said = raw.lower()
     if not reads_as_a_verdict_ask(said):
         return None
-    pool, criteria, where = _pool(said)
+    # The capitals are read off the line as it was typed: a place named by name has no place word.
+    topics = _the_topics(memory)
+    pool, criteria, where = _pool(said, named=bool(_NAMED.search(raw)),
+                                 other_subject=bool(topics & _NOT_A_PLACE_TOPICS),
+                                 travel=bool(topics & _TRAVEL_TOPICS))
     if pool is None:
         return None
     if pool is OTHER and not _the_thing(said):
@@ -433,7 +490,7 @@ def answer_for(text, memory=None, reply=""):
     """
     if not reads_as_a_hedge(reply):
         return None
-    pool = pool_for(text)
+    pool = pool_for(text, memory)
     if not pool:
         return None
     return pick(pool, memory if isinstance(memory, dict) else {}, text)

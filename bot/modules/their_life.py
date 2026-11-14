@@ -18,10 +18,14 @@ brother.", "Noted: you're 34." - the `FRAMES` receipt in bot/memory/ack.py, whic
 and has nothing to say about it).
 
 What a friend does with any of these is take the fact in and ask the one thing about it. That is
-all this module does, for the four shapes of ordinary life that turn up this way - where they
-live, the animals in the house, the brothers and sisters they have, and how old they are - so a
-person who mentions their dog is not answered about their back, and a person who mentions their
-sister is not handed their own sentence back.
+all this module does, for the five shapes of ordinary life that turn up this way - where they
+live, the animals in the house, the brothers and sisters they have, how old they are, and a
+plain detail about somebody else in their life - so a person who mentions their dog is not
+answered about their back, and a person who mentions their sister is not handed their own
+sentence back. The last of those is the same fault one person out: "my mum is 71" and "my wife
+works three days a week" were said back as "Noted: your mum is 71." by the composer, which knows
+the fact and has nothing to say about it, and a question about the person who was mentioned is
+what a friend asks.
 
 What a friend does with "we live near the park" is take the fact in and ask the one thing about
 it. That is all this module does, for the two shapes of ordinary life that turn up this way -
@@ -152,6 +156,101 @@ _AGE_LINES = (
     "{Age} - a good age to be, or not?",
 )
 
+# Somebody else in their life, with one plain detail about them: "my wife works three days a week",
+# "my brother works nights", "my cousin works in a bank", "my aunt has three kids". Said on
+# its own, the composer files the fact and nods it back ("Noted: your aunt has three kids."),
+# which is the reply that would fit any sentence at all. The same rule as the four shapes above
+# applies one person out: take the fact in and ask the one thing about the person.
+#
+# Only a whole line, and only a detail this reader knows: the rest of the line is one of a few
+# plain shapes, so "my mum is 71 and she keeps falling", "my sister is pregnant" and "my wife
+# works three days a week and i do four" keep the reading they have. The days and the place are
+# already read for the person themselves ("my brother is a chef", "my gran lives in spain"), so
+# what is added here is the detail that was being filed and nodded back.
+_RELATION = (
+    r"mother\s+in\s+law|father\s+in\s+law|son\s+in\s+law|daughter\s+in\s+law|"
+    r"sister\s+in\s+law|brother\s+in\s+law|"
+    r"step\s?mum|stepmum|step\s?dad|stepdad|step\s?daughter|stepdaughter|step\s?son|"
+    r"stepson|"
+    r"mum|mom|mother|mam|dad|father|gran|granny|grandma|nan|nana|grandad|grandpa|grandfather|"
+    r"sister|brother|son|daughter|aunt|auntie|uncle|cousin|niece|nephew|wife|husband|partner|"
+    r"boyfriend|girlfriend|grandson|granddaughter|grandchild"
+)
+
+_SOMEONE = re.compile(r"^(?P<who>my|our)\s+(?P<rel>" + _RELATION + r")\s+(?P<rest>[a-z0-9 ']+)$")
+
+# Where they work: "works in a bank", "works at tesco", "works for the council".
+_SOMEONE_WORK = re.compile(
+    r"^works?\s+(?:in|at|for)\s+(?:a|an|the)?\s*(?P<place>[a-z][a-z' ]{1,24})$")
+
+# The hours they work, when the hours are the whole detail: "works nights", "works three days a
+# week". The question is about the hours, because that is what the person said.
+_SOMEONE_HOURS = re.compile(
+    r"^works?\s+(?P<hours>nights?|days?|night\s+shifts?|shifts|weekends?|evenings?|weekdays|"
+    r"part\s+time|full\s+time|(?:two|three|four|five|six)\s+days\s+a\s+week|"
+    r"long\s+hours|away\s+a\s+lot)$")
+
+# How old they are: "is 71", "is 40 years old". A number with a measure after it is something
+# else, and the person's own age is read separately ("im 34").
+_SOMEONE_AGE = re.compile(
+    r"^is\s+(?P<age>\d{1,2})(?:\s*(?:years?\s+old|yrs?\s+old|y/?o|yo|now|today))?$")
+
+# A child's age is not asked here: the composer already has an age-aware pool for a grown child,
+# a school child and a toddler ("12 is a good age. What is he into at the moment?"), and that is a
+# better answer than a flat question. The age bands live there, so this reader stands down.
+_AGE_READ_ELSEWHERE = frozenset((
+    "son", "daughter", "kid", "kids", "child", "children", "boy", "girl", "eldest", "youngest",
+    "grandson", "granddaughter", "grandchild", "grandchildren", "grandkids",
+    "stepson", "stepdaughter", "step son", "step daughter", "son in law", "daughter in law",
+    "niece", "nephew",
+))
+
+# The children they have, as a count: "has three kids", "has two boys".
+_SOMEONE_KIDS = re.compile(
+    r"^has\s+(?P<num>\d+|one|two|three|four|five|six|seven|eight)\s+"
+    r"(?P<kids>kids|children|child|boys?|girls?|sons?|daughters?|twins?)$")
+
+# The pronoun for the person mentioned, used only as an object ("do you see much of her?"), so a
+# template never has to agree with it: "them" for the ones that can be either.
+_HER = frozenset((
+    "mum", "mom", "mother", "mam", "gran", "granny", "grandma", "nan", "nana", "sister",
+    "daughter", "aunt", "auntie", "niece", "wife", "girlfriend", "stepmum", "step mum",
+    "stepdaughter", "step daughter", "mother in law", "daughter in law", "sister in law",
+    "granddaughter",
+))
+_HIM = frozenset((
+    "dad", "father", "grandad", "grandpa", "grandfather", "brother", "son", "uncle", "nephew",
+    "husband", "boyfriend", "stepdad", "step dad", "stepson", "step son", "father in law",
+    "son in law", "brother in law", "grandson",
+))
+
+_SOMEONE_WORK_LINES = (
+    "A {Place}, then. What's that like for {them}?",
+    "{Place} - is that new for {them}?",
+    "A {Place}, then. Do you hear much about it from {them}?",
+)
+
+_SOMEONE_HOURS_LINES = (
+    "{Hours} - does that leave much time for {them}?",
+    "{Hours}, then. What's that like for {them}?",
+    "{Hours} - does it suit {them}?",
+)
+
+_SOMEONE_AGE_LINES = (
+    "{Age} - do you see {them} much?",
+    "{Age}, then. Do you get to see {them} often?",
+    "{Age} - how often do you get to see {them}?",
+)
+
+_SOMEONE_KIDS_LINES = (
+    "{Num} kids - how old are they?",
+    "{Num} kids, then. Do they live near you?",
+    "{Num} kids - what are they into?",
+)
+
+_NUMBER_WORD = {"1": "One", "2": "Two", "3": "Three", "4": "Four", "5": "Five", "6": "Six",
+                "7": "Seven", "8": "Eight"}
+
 _MORE_THAN_ONE = frozenset(("two", "three", "four", "five", "six"))
 
 
@@ -196,7 +295,50 @@ def _a_fact_about_their_life(said):
         num = (pet.group("num") or "").strip()
         kind = "two_pets" if _more_than_one(num) else "pet"
         return kind + ":" + num + ":" + pet.group("pet")
+    someone = _SOMEONE.match(said)
+    if someone:
+        detail = _a_detail_about_someone(someone.group("rel"), someone.group("rest"))
+        if detail:
+            return "someone:" + someone.group("rel") + ":" + detail
     return None
+
+
+def _a_detail_about_someone(rel, rest):
+    """The plain detail said about somebody in their life, or None.
+
+    Three shapes, each written out as the detail the person named: "work:a bank", "hours:nights",
+    "age:71", "kids:three". Anything else about them is not this reader's - a symptom, a plan, a
+    judgement, a line with something else after the detail, and the animals or the place they live
+    in (tests/test_the_shape_of_their_life.py keeps those out of this reader). A child's age is not
+    asked here either: the composer's age bands answer it better (_AGE_READ_ELSEWHERE).
+    """
+    said = (rest or "").strip()
+    if not said:
+        return None
+    worked = _SOMEONE_WORK.match(said)
+    if worked and not _STORY.search(worked.group("place")):
+        return "work:" + worked.group("place").strip()
+    hours = _SOMEONE_HOURS.match(said)
+    if hours:
+        return "hours:" + hours.group("hours").strip()
+    age = _SOMEONE_AGE.match(said)
+    if age and 1 <= int(age.group("age")) <= 99:
+        if (rel or "").strip() not in _AGE_READ_ELSEWHERE:
+            return "age:" + str(int(age.group("age")))
+    kids = _SOMEONE_KIDS.match(said)
+    if kids:
+        return "kids:" + kids.group("num").strip()
+    return None
+
+
+def _their_pronoun(rel):
+    """Somebody in their life as an object: "my mum" -> "her", "my cousin" -> "them"."""
+    said = re.sub(r"\s+", " ", (rel or "").strip())
+    if said in _HER:
+        return "her"
+    if said in _HIM:
+        return "him"
+    return "them"
 
 
 def _where_words(said):
@@ -212,7 +354,7 @@ def respond(text, memory):
     if not found:
         return None
     kind, _, rest = found.partition(":")
-    if kind in ("siblings", "age"):
+    if kind in ("siblings", "age", "someone"):
         num, animal = rest, ""
     elif kind in ("pet", "two_pets"):
         num, animal = rest.split(":", 1)
@@ -255,12 +397,35 @@ def _the_fact(kind, num, animal, said, memory):
         return line.replace("{Age}", num).replace("{Next}", str(int(num) + 1))
     if kind == "place":
         return _pick(_PLACES, memory).replace("{Where}", _where_words(said))
+    if kind == "someone":
+        rel, _, detail = num.partition(":")
+        return _the_someone_line(rel, detail, memory)
     if kind == "two_pets":
         line = _pick(_PETS, memory)
         count = _NUMBER_WORDS.get(num, "The")
         return line.replace("{Pets}", count + " " + _plural(animal))
     line = _pick(_ONE_PET, memory)
     return line.replace("{Pet}", ("An " if animal[:1] in "aeiou" else "A ") + animal)
+
+
+def _the_someone_line(rel, detail, memory):
+    """The question about the person who was mentioned: "my mum is 71" -> "71 - do you see much
+    of her?"."""
+    kind, _, said = detail.partition(":")
+    them = _their_pronoun(rel)
+    if kind == "work":
+        line = _pick(_SOMEONE_WORK_LINES, memory)
+        place = said.capitalize() if line.startswith("{Place}") else said
+        return line.replace("{Place}", place).replace("{them}", them)
+    if kind == "hours":
+        line = _pick(_SOMEONE_HOURS_LINES, memory)
+        return line.replace("{Hours}", said.capitalize()).replace("{them}", them)
+    if kind == "age":
+        line = _pick(_SOMEONE_AGE_LINES, memory)
+        return line.replace("{Age}", said).replace("{them}", them)
+    line = _pick(_SOMEONE_KIDS_LINES, memory)
+    num = _NUMBER_WORD.get(said, said.capitalize())
+    return line.replace("{Num}", num)
 
 
 def _plural(word):

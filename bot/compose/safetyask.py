@@ -93,12 +93,17 @@ A_SAFETY_TEST_LINES = (
 A_RULING_ALREADY = ("off at the wall", "unplug", "don't use it", "do not use it",
                     "stop using it", "turn it off", "switch it off", "ring 999", "call 999",
                     "get out")
+# The ruling said again, and nothing else in it. Every one of these opened on the night - "Not
+# tonight, no", "that does not change overnight" - because the question this reading was written
+# for is the overnight one. The rule is read on every safety question, though, and a person who
+# asked "is it safe to keep using it" at ten in the morning was told "Not tonight, no. A thing
+# that has been switched off for a fault...": a night they had not mentioned, and a thing switched
+# off that they had not switched off. The ruling is the whole of it, so the ruling is the whole of
+# the reply.
 A_SAFETY_ALREADY_RULED = (
-    "No, and that does not change overnight: it stays off until somebody has looked at it.",
-    "Not tonight, no. A thing that has been switched off for a fault stays off until it has "
-    "been checked, whatever the time is.",
-    "Same answer as before: off, and not used again until somebody has looked at it. A night's "
-    "wait does not change that.",
+    "No - the answer above still stands: it stays off until somebody has looked at it.",
+    "Same answer as before: not used again until it has been checked.",
+    "That has not changed: off, and looked at before it goes back on.",
 )
 
 
@@ -119,7 +124,7 @@ def reply_for(clean, memory):
     card = _the_answers_have_this(text, memory)
     if card and (thing in card.lower() or not _a_shrug(card)):
         return None
-    if _the_bot_already_ruled(memory):
+    if the_bot_already_ruled(memory):
         return A_SAFETY_ALREADY_RULED
     return tuple(line.format(thing="the " + thing) for line in A_SAFETY_TEST_LINES)
 
@@ -170,10 +175,27 @@ def _the_thing_on_the_table(clean, memory):
     return ""
 
 
-def _the_bot_already_ruled(memory):
-    """Whether the bot's own last reply told the person to stop using the thing."""
+# The harm the ruling was for, which is what makes an answer a ruling rather than a step. Every
+# how-to says "unplug it first" and many say "switch it off at the wall", so the stopping word on
+# its own is not enough: the answer has to say what the stopping is for. "unplug it and wipe the
+# screen with a damp microfibre" is a step, and the doubt after it is about the step; "Stop using
+# it and replace it ... can shock you or start a fire" is a ruling.
+A_DANGER_SAID = re.compile(
+    r"\b(?:fires?|flames?|smoke|shocks?|shocking|electrocut\w*|burns?|burnt|scorch\w*|"
+    r"unsafe|kills?|fatal|explodes?|explosion|catch(?:es)? fire)\b")
+
+
+def the_bot_already_ruled(memory):
+    """Whether the bot's own last reply told the person to stop using the thing, and why not to.
+
+    Read by the verdict reading too, so an answer that ruled a thing unsafe is not followed by an
+    all-clear ("Ordinary on its own, yes") about the same thing. The harm has to be in the same
+    answer: a how-to says "unplug it first" of everything in the house.
+    """
     said = str(last_bot(memory) or "").lower()
-    return any(phrase in said for phrase in A_RULING_ALREADY)
+    if not any(phrase in said for phrase in A_RULING_ALREADY):
+        return False
+    return bool(A_DANGER_SAID.search(said))
 
 
 def _the_answers_have_this(clean, memory):

@@ -95,7 +95,12 @@ NOT_A_SHORTAGE = ("broken", "broke", "not working",
                   # the oven". Phrase by phrase because a bare "fridge" or "freezer" fences the
                   # card's own questions ("no fridge in the new flat", "we have no freezer").
                   "out of the fridge", "out of the freezer", "out of the oven", "out of the pan",
-                  "out of the window", "out of the cupboard")
+                  "out of the window", "out of the cupboard",
+                  # a person's temperature is not a kitchen tool that is missing: "how do i take
+                  # my temperature without a thermometer" was answered with the meat-doneness
+                  # test - press the thickest part with a finger - because a thermometer is in
+                  # the table of kit. A fever is the health rows' line, and they name the number.
+                  "temperature", "temperatures", "fever", "feverish", "feverishness")
 
 # One line per tool: the thing that is missing, then what to use instead. The words after the
 # colon answer the job the tool does, so the same line covers every dish the tool is used for.

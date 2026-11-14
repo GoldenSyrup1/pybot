@@ -28,6 +28,19 @@ What it refuses, because other readings own those turns:
     readings answer;
   - a question ("why do i hate mondays"), which asks for a reason rather than stating a taste.
 
+Two things the reading has to get right, because the frame carries the words:
+
+  - the way they have it is not part of the thing. "i like my coffee strong" is a taste in
+    coffee, and "Your coffee strong - I can see why" is not English. The manner comes off the
+    thing and back into the reply as its own word ("Strong, then. What is it about your coffee
+    that you like?"). A possessive is not enough on its own: "my new bike" and "my little
+    garden" are the thing itself, so only a last word that names a way of being ("strong",
+    "weak", "runny", "well done") comes off, and never across a linking word;
+  - a taste said about the bot is a compliment. "i like your hair" is not the person telling
+    you about their own hair - the reply turns "my" round into "your", so a "your" already in
+    the line was said about the bot, and asking what they like about their own hair is the
+    wrong friend. It is answered as the compliment it is.
+
 It runs inside the greeting module, so it only ever speaks for lines nothing else wanted
 (README.md, "Interface"): a module with its own answer still takes the turn.
 """
@@ -96,6 +109,23 @@ _A_STANCE = re.compile(
     r"can'?t\s+stand|cannot\s+stand|can\s+not\s+stand|couldn'?t\s+stand|"
     r"(?:am\s+)?not\s+a\s+(?:big\s+)?fan\s+of|"
     r"don'?t\s+(?:really\s+)?like|do\s+not\s+(?:really\s+)?like|never\s+liked)\s+"
+    r"(?P<thing>.+)$",
+    re.I)
+# The same stance with the subject dropped, which is how people say it out loud: "not too keen on
+# the new place", "not 2 keen on it", "never liked the rain", "cant stand mondays". The opening
+# word is what makes it safe to read without a subject - "not", "never", "cant" - so a line that
+# opens on a bare "like" ("like i said") is not caught here, and the verb is read the same way the
+# first-person one is, so the animal, the doing and the thing of theirs keep their own answers.
+_A_STANCE_NO_SUBJECT = re.compile(
+    r"^(?P<verb>not\s+(?:2|too|that|very|terribly|overly|really|a\s+bit|a\s+lot|much\s+of\s+a|"
+    r"a\s+big)?\s*(?:keen|fussed|bothered)\s+(?:on|about|with)|"
+    r"never\s+(?:been\s+)?(?:that|too|very|really|overly)\s+keen\s+(?:on|about|with)|"
+    r"not\s+(?:really\s+|usually\s+)?(?:much\s+of\s+)?(?:a\s+)?"
+    r"(?:(?:big|huge|massive|great|the\s+biggest)\s+)?fan\s+of|"
+    r"never\s+(?:been\s+)?(?:really\s+|actually\s+)?(?:a\s+)?(?:big\s+|huge\s+)?fan\s+of|"
+    r"never\s+(?:really\s+|actually\s+)?liked|"
+    r"can'?t\s+stand|cannot\s+stand|can\s+not\s+stand|couldn'?t\s+stand|can'?t\s+stick|"
+    r"do\s+not\s+(?:really\s+)?like|don'?t\s+(?:really\s+)?like)\s+"
     r"(?P<thing>.+)$",
     re.I)
 # "im dreading monday", "i dread the drive in".
@@ -179,6 +209,32 @@ A_DREAD = (
     "Fair enough - nobody looks forward to {thing}. What is the worst of it going to be?",
     "{thing}, yeah. What would make it easier?",
 )
+# The thing and the way they have it, said together: "i like my coffee strong", "i dont like my
+# tea weak". The manner is a word about the thing, not part of its name, so the frames here give
+# it back to the person ("Strong, then") instead of gluing it to the noun.
+A_LIKE_MANNER = (
+    "{manner}, then. What is it about {thing} that you like?",
+    "{thing}, {manner} - that is the only way. What is the best of it?",
+    "Good - {manner} it is. What do you like most about it?",
+    "{thing}, {manner} - that is the right answer. What got you that way?",
+)
+A_DISLIKE_MANNER = (
+    "{manner} - no wonder. What is it about {thing} that gets you?",
+    "{thing}, {manner} - I am with you. What is the worst bit of it?",
+    "Fair enough - nobody wants {thing} {manner}. What do you have instead?",
+)
+# A taste said about the bot itself: "i like your hair", "i love your voice". The bot is being
+# paid a compliment, not told about a thing the person owns, so the reply takes it and asks
+# about the taste rather than handing "your hair" back as if it were theirs.
+A_THE_BOT_LIKED = (
+    "That is kind - thank you. What is it about it you like?",
+    "Ha - thanks. What do you like most about it?",
+    "Thank you - nice of you to say. What is it that works for you?",
+)
+A_THE_BOT_DISLIKED = (
+    "Fair enough - point taken. What would land better?",
+    "Sorry about that. How would you put it instead?",
+)
 A_WAIT = (
     "{thing} cannot come soon enough. What have you got planned?",
     "Not long now. What are you looking forward to most about {thing}?",
@@ -187,7 +243,69 @@ A_WAIT = (
 _BY_KIND = {"dislike": A_DISLIKE, "like": A_LIKE, "like_own": A_LIKE_OWN,
             "like_pet": A_LIKE_PET, "dislike_pet": A_DISLIKE_PET,
             "like_doing": A_LIKE_DOING, "dislike_doing": A_DISLIKE_DOING,
+            "like_manner": A_LIKE_MANNER, "dislike_manner": A_DISLIKE_MANNER,
+            "the_bot_liked": A_THE_BOT_LIKED, "the_bot_disliked": A_THE_BOT_DISLIKED,
             "dread": A_DREAD, "wait": A_WAIT}
+
+# A taste about the bot is said with "your": the same word the reply would use for the person's
+# own thing, which is why it is read before the possessive is turned round.
+_THE_BOTS = re.compile(r"^(?:your|you|ur|yours|yourself)\b", re.I)
+
+# The way they have it, not a part of the thing. Only a word that names how a thing is - how it
+# tastes, how it is cooked, how it fits - comes off the end of an object that opens on a
+# possessive; a noun ("my new bike") or a longer phrase ("my cup of tea") stays as it was said.
+_MANNER_WORDS = frozenset((
+    "strong", "weak", "runny", "firm", "hard", "soft", "milky", "creamy", "sweet", "hot",
+    "cold", "warm", "tepid", "flat", "fizzy", "sparkling", "thick", "thin", "crispy", "crunchy",
+    "smooth", "black", "plain", "spicy", "mild", "salty", "sour", "bitter", "dry", "ripe",
+    "rare", "tender", "tough", "loud", "quiet", "bright", "pale", "bold", "baggy", "tight",
+    "loose", "short", "long", "heavy", "light", "soggy", "mushy", "lumpy", "gritty", "chewy",
+    "rubbery", "juicy", "burnt", "raw", "fluffy", "dense", "chunky", "frothy", "sharp",
+    "stodgy", "greasy",
+))
+# "well done" is two words, and it is the only manner here said that way.
+_A_MANNER_PHRASE = re.compile(r"\b(?:well done|well-done|medium rare|over easy)\b", re.I)
+# Words that make the rest of the object a phrase rather than a manner: "my cup of tea strong"
+# is a typo, and "my eggs and bacon" does not want its last word taken off it.
+_A_LINKING_WORD = frozenset(("of", "in", "with", "and", "on", "for", "at", "to", "from",
+                             "that", "when", "but", "as", "by", "into", "over", "under"))
+
+
+def _split_manner(thing):
+    """(the thing, the way they have it): "my tea weak" is ("my tea", "weak").
+
+    A manner comes off only when the object opens on the person's possessive, the last word is
+    one that says how a thing is, and nothing between them links the two into a single phrase.
+    """
+    words = thing.split()
+    if (len(words) == 2 and words[-1].lower() in _MANNER_WORDS
+            and words[0].lower() not in ("my", "our", "the", "a", "an", "your", "his", "her",
+                                         "their", "it", "that", "this")):
+        # "i like coffee strong": the same line without the possessive, and the same split. The
+        # noun comes first here, which is how it is said after the verb, so the last word is the
+        # manner and not a part of the thing's name.
+        return words[0], words[-1].lower()
+    if len(words) < 3 or words[0].lower() not in ("my", "our"):
+        return thing, ""
+    said = " ".join(words[1:])
+    phrase = _A_MANNER_PHRASE.search(said)
+    if phrase:
+        head = said[:said.lower().index(phrase.group(0))].strip()
+        if head and not any(word.lower() in _A_LINKING_WORD for word in head.split()):
+            return words[0] + " " + head, phrase.group(0).lower()
+        return thing, ""
+    last = words[-1].lower().strip(".,!;:")
+    if last not in _MANNER_WORDS:
+        return thing, ""
+    if any(word.lower().strip(".,!;:") in _A_LINKING_WORD for word in words[1:-1]):
+        return thing, ""
+    return " ".join(words[:-1]), last
+
+
+def _a_manner_kind(kind):
+    """The pool for a thing and a manner said together; the kind's own pool otherwise."""
+    return {"like": "like_manner", "like_own": "like_manner",
+            "dislike": "dislike_manner"}.get(kind, kind)
 
 # A thing the person owns or lives with, said with the possessive: it takes the plain pool. The
 # possessive is the person's, so the reply turns it round - "my flat" is "your flat" to the bot.
@@ -318,6 +436,20 @@ _TAIL_FILLER = re.compile(
     re.I)
 
 
+# "this cold weather", "that film", "these shoes": a pointing word in front of a noun is the
+# noun, and the frame carries it the same way ("This cold weather - I'm with you on that"). Alone
+# it is the pronoun the fence is for ("i hate this", "i cant stand that"), and "this one" points
+# at something the bot cannot see.
+_DEMONSTRATIVE = frozenset(("this", "that", "these", "those"))
+
+
+def _a_pointed_at_thing(thing):
+    """True for a pointing word that has the thing it points at after it."""
+    words = (thing or "").lower().split()
+    return (len(words) > 1 and words[0] in _DEMONSTRATIVE
+            and words[1] not in ("one", "ones", "sort", "kind", "type"))
+
+
 def _the_thing(raw):
     """The words after the verb as they were said, or "" when they cannot carry a reply."""
     thing = " ".join(str(raw or "").split()).strip(" .!,;:")
@@ -325,29 +457,56 @@ def _the_thing(raw):
     # The first word decides. A thing that *starts* with a pronoun names nothing the reply can
     # carry: "i hate it here" became "What is it about it here you would happily never do again?",
     # because "it here" is not the pronoun itself.
-    if not thing or len(thing.split()) > 5 or thing.lower().split()[0] in _A_PRONOUN:
+    if not thing or len(thing.split()) > 5:
+        return ""
+    if thing.lower().split()[0] in _A_PRONOUN and not _a_pointed_at_thing(thing):
         return ""
     if _A_DEED.match(thing) or _A_SECOND_CLAUSE.search(thing):
         return ""
     if _NOT_A_THING.match(thing):
         return ""
-    return thing
+    # The manner is said about the thing, not part of its name: "my coffee strong" is a taste in
+    # coffee. `_the_manner` reads it off the same words for `reply_for` to give back to them.
+    return _split_manner(thing)[0]
+
+
+def _the_manner(raw):
+    """The way they have it, when the object names a thing and a manner: "my tea weak" -> "weak"."""
+    thing = " ".join(str(raw or "").split()).strip(" .!,;:")
+    thing = _TAIL_FILLER.sub("", thing).strip(" .!,;:")
+    if not thing or len(thing.split()) > 5:
+        return ""
+    return _split_manner(thing)[1]
 
 
 def reads_as_a_taste(text):
     """(kind, thing) for a line that only states a like or a dislike, else None.
 
     `kind` is one of "dislike", "like", "dread", "wait"; `thing` is the words after the verb, or
-    "" when the line reads as a taste but names nothing a reply can carry.
+    "" when the line reads as a taste but names nothing a reply can carry. `_read` is the same
+    reading with the manner kept, which is what `reply_for` needs.
     """
+    read = _read(text)
+    return (read[0], read[1]) if read else None
+
+
+def _read(text):
+    """(kind, thing, manner) for a line that only states a like or a dislike, else None."""
     said = _clean(text)
     if not said or "?" in said:
+        return None
+    # "i love my fiance", "i love my kids", "i love my parents": the love reading has a pool that
+    # asks about the person with "they", and the taste reader would call the person a thing
+    # ("Your fiance - fair enough. What is it about it that you like?"). Only the love lines stand
+    # it down; "i like my parents" keeps whatever answers it today.
+    if fallback._loves_someone(said):
         return None
     if (_A_PERSON.search(said) or _A_SOMEONE.search(said) or _ABOUT_ME.search(said)
             or _A_PERSON_DESCRIBED.search(said) or _A_SYMPTOM.search(said)
             or _ABOUT_WORK.search(said) or _TWO_STANCES.search(said)):
         return None
-    for pattern, kind in ((_A_STANCE, None), (_A_DREAD, "dread"), (_A_WAIT, "wait")):
+    for pattern, kind in ((_A_STANCE, None), (_A_STANCE_NO_SUBJECT, None),
+                          (_A_DREAD, "dread"), (_A_WAIT, "wait")):
         match = pattern.match(said)
         if not match:
             continue
@@ -360,24 +519,46 @@ def reads_as_a_taste(text):
             # The line asks something as well as stating the taste ("i hate broccoli what can i
             # have instead"): the question is the turn, and another reading answers questions.
             return None
+        raw = " ".join(match.group("thing").split()).strip(" .!,;:")
+        if _THE_BOTS.match(raw):
+            # "i like your hair" is a compliment paid to the bot. The bot has no hair to be
+            # asked about, and the reply's own "your" would hand the person their own hair back.
+            if kind:
+                return ("the_bot_liked" if kind == "wait" else "the_bot_disliked"), "", ""
+            verb = " ".join(match.group("verb").lower().split())
+            return (("the_bot_liked" if verb in _LIKE_VERBS else "the_bot_disliked"), "", "")
+        manner = _the_manner(raw)
         if kind:
-            return kind, _the_thing(match.group("thing"))
+            return kind, _the_thing(raw), ""
+        if pattern is _A_STANCE_NO_SUBJECT:
+            # There is no subject to read the verb against: every opener in this pattern is a
+            # dislike, and the words after it go the way they go after "i dont like".
+            read = _the_stance(_the_thing(raw), False)
+            if not read:
+                return None
+            return (_a_manner_kind(read[0]) if manner else read[0]), read[1], manner
         verb = " ".join(match.group("verb").lower().split())
         subject = " ".join(match.group("subj").lower().split())
         if subject in ("im", "i'm") and verb in ("like", "liking"):
             # "im like this every morning" is a state, not a taste: nobody says "i am like" to
             # mean they are fond of something, and the state readings answer it.
             return None
+        thing = _the_thing(raw)
         if verb in _DISLIKE_VERBS:
-            return _the_stance(_the_thing(match.group("thing")), False) or None
-        if verb in _LIKE_VERBS:
-            thing = _the_thing(match.group("thing"))
+            read = _the_stance(thing, False)
+        elif verb in _LIKE_VERBS:
             if verb == "prefer" and re.search(r"\bto\b", thing):
                 # "i prefer tea to coffee" compares two things, so a question about how long they
                 # have been into one of them is not the reply. The receipt answers it better.
                 return None
-            return _the_stance(thing, True) or None
-        return None
+            read = _the_stance(thing, True)
+        else:
+            return None
+        if not read:
+            return None
+        # The manner takes a pool of its own only when there is one: "i like my coffee" is the
+        # plain pool, and the manner frames are for a line that named both.
+        return (_a_manner_kind(read[0]) if manner else read[0]), read[1], manner
     return None
 
 
@@ -421,16 +602,18 @@ def _at_the_front(thing):
 
 def reply_for(text, memory=None):
     """The reply for a stated like or dislike, or None when the line is not one."""
-    read = reads_as_a_taste(text)
+    read = _read(text)
     if not read:
         return None
-    kind, thing = read
+    kind, thing, manner = read
     thing = _as_a_name(_as_yours(thing))
     # A template that opens on the thing starts a sentence with it, and one that carries it
     # mid-line reads "What is it about The rain...", which is how a form letter reads.
     options = [
         line.format(thing=_at_the_front(thing) if line.startswith("{thing}")
-                    else _in_a_sentence(thing))
+                    else _in_a_sentence(thing),
+                    manner=_at_the_front(manner) if line.startswith("{manner}")
+                    else manner)
         for line in _BY_KIND[kind]
     ]
     return fallback._choose(options, memory or {}, _clean(text), seed_text=_clean(text))

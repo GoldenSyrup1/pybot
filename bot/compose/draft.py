@@ -716,3 +716,49 @@ def drafter(memory, line, words=None):
         # anybody sends when they quit. The short line stands on its own.
         return f"{hello}, {body}."
     return f"{hello}, {body}. {sign}."
+
+
+# An illustrative example inside a stock answer has to be in the asker's world. The email-shape
+# card ends with a sample subject line, and the one line it had was "Invoice 2144 - payment due",
+# so a person asking how to email their child's teacher, their landlord, their plumber or their
+# GP was told to write "Invoice 2144 - payment due" - an answer about a different life, which is
+# the worst reply the bot gives. The card is still right about the shape of an email; only the
+# example changes, and only the example, so nothing else in the answer moves.
+#
+# The reader takes the first world the line names. A person can name two ("email my landlord
+# about the deposit"), so the order is by how much the example has to fit: the trade that is
+# coming to the house, the school, the surgery, the landlord, work, and the money question that
+# the card's own example was written for. Nothing named leaves the invoice, which is how the card
+# answered before and is right for a business letter.
+SUBJECT_EXAMPLES = (
+    (re.compile(r"\b(?:plumber|electrician|boiler|leak|radiator|roofer|builder|joiner|"
+                r"damp|drain|washing machine|fridge|oven|heating|handyman)\b", re.I),
+     "Leak under the kitchen sink - when can you come?"),
+    (re.compile(r"\b(?:teacher|school|headteacher|head|nursery|childminder|tutor|"
+                r"college|university|lecturer|professor|year \d+|form|class)\b", re.I),
+     "Year 6 trip - a question about the form"),
+    (re.compile(r"\b(?:gp|doctor|surgery|dentist|hospital|clinic|prescription|appointment|"
+                r"nurse|consultant)\b", re.I),
+     "Repeat prescription - could you check this for me"),
+    (re.compile(r"\b(?:landlord|landlady|letting|lettings|agent|housing|council|tenant)\b", re.I),
+     "Boiler still not working - flat 3"),
+    (re.compile(r"\b(?:boss|manager|employer|hr|work|workplace|office|team|colleague|"
+                r"shift|rota)\b", re.I),
+     "A quick question about Thursday"),
+    (re.compile(r"\b(?:invoice|payment|paid|pay|bill|overdue|refund|quote|estimate|"
+                r"customer|client|supplier)\b", re.I),
+     "Invoice 2144 - payment due"),
+)
+
+
+def example_subject(understood):
+    """The sample subject line for the email-shape card, in the world the line names."""
+    line = ""
+    if isinstance(understood, dict):
+        line = str(understood.get("clean") or understood.get("text") or "")
+    else:
+        line = str(understood or "")
+    for pattern, example in SUBJECT_EXAMPLES:
+        if pattern.search(line):
+            return example
+    return "Invoice 2144 - payment due"

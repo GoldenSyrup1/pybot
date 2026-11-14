@@ -13,6 +13,8 @@ where one-off rows go - this is a table of them. It answers the cooking topic an
 word "sauce", so the herb itself, the fruit itself and the cranberry juice are somebody else's
 question.
 """
+import re
+
 from .lookup import entry as _entry
 
 ANSWERS = ("cooking", "food-and-drink")
@@ -30,6 +32,11 @@ _ASKING = ("sauce", "sauces", "make", "makes", "making", "made", "recipe", "reci
            "what", "whats", "need", "want", "christmas", "turkey", "roast", "lamb", "beef",
            "pork", "goose", "ham", "dinner", "homemade", "from scratch", "jar", "bought",
            "ahead", "make it ahead", "ahead of time", "in advance", "the day before",
+           # the keeping question is this table's too, and each row answers it in its own words:
+           # a sauce named after a fruit keeps like a sauce, not like the fruit. A reviewer found
+           # the words gone and the sauce answering with the food it is made of.
+           "keep", "keeps", "keeping", "kept", "last", "lasts", "freeze", "freezes", "freezer",
+           "freezing", "frozen", "defrost", "fridge", "refrigerate", "how long",
            "how much", "sugar", "vinegar", "hot", "mild", "quick", "easy", "best", "good",
            "nice", "serve", "served", "with", "goes")
 # The fault and the keeping are somebody else's rows: a lumpy apple sauce has a remedy, a thin
@@ -40,9 +47,86 @@ _ASKING = ("sauce", "sauces", "make", "makes", "making", "made", "recipe", "reci
 _NOT_A_RECIPE = ("lumpy", "lumps", "lump", "thick", "thicker", "thicken", "thickened",
                  "thickening", "runny", "thin", "watery", "sweet", "sweeter", "too sweet",
                  "sharp", "sour", "bitter", "salty", "bland", "separated", "split", "curdled",
-                 "grainy", "gelatinous", "freeze", "freezer", "freezing", "frozen",
-                 "defrost", "keep", "keeps", "keeping", "kept", "last", "lasts", "fridge",
-                 "refrigerate", "how long", "out of date", "use by", "gone off", "mouldy")
+                 "grainy", "gelatinous", "out of date", "use by", "gone off", "mouldy")
+
+# How long a sauce keeps is the row's other question, and it is answered from the row: ask the
+# fruit's or the bread's keeping card instead and a jar of cranberry sauce is "dried fruit, 6
+# months in a sealed jar". The fault words above stay stood down - the generic fault cards are
+# written for a sauce too.
+_KEEPING = re.compile(
+    r"\b(?:keep|keeps|keeping|kept|last|lasts|lasting|freeze|freezes|freezer|freezing|frozen|"
+    r"defrost|fridge|refrigerated|refrigerate|how long|how many days|till|until)\b", re.I)
+
+# A keeping word in the line settles it: "how long does cranberry sauce keep" and "can i keep
+# bread sauce in the fridge until friday" are both keeping questions, and the second one has an
+# "until" in it that must not turn it into a step.
+_A_KEEPING_WORD = re.compile(
+    r"\b(?:keep|keeps|keeping|kept|last|lasts|lasting|freeze|freezes|freezer|freezing|frozen|"
+    r"defrost|fridge|refrigerated|refrigerate)\b", re.I)
+
+# "How long" and "until" on their own do not make a keeping question. "How long do i simmer the
+# cranberry sauce", "how long does bread sauce take to make", "stir the cranberry sauce until
+# the sugar dissolves" and "add the milk to the bread sauce until smooth" are all asking for the
+# method - and it holds the time, "Simmer ... for 10 minutes" - so this table must answer them
+# with the recipe rather than stand down for it. A reviewer caught the keeping paragraph taking
+# four of these; a first fix stood the row down instead and lost the recipe to a general card,
+# which is the same fault one step along. Two shapes are a step or a time:
+#   - an "until"/"till" clause, which introduces a step and never a keeping question;
+#   - a how-long with a cooking verb in it.
+# A keeping word anywhere in the line is read as keeping first, so "can i keep bread sauce in
+# the fridge until friday" still gets the sauce's two days.
+_A_COOKING_TIME = re.compile(
+    r"\b(?:how long|how many minutes)\b[^.?!]{0,45}?"
+    r"\b(?:cook|cooks|cooking|simmer|simmering|boil|boiling|bake|baking|roast|roasting|"
+    r"microwave|microwaving|reheat|reheating|stir|stirring|reduce|reducing|whisk|whisking|"
+    r"take|takes|leave|on the stove|on the hob|in the oven|stove|hob|oven)\b"
+    r"|\b(?:simmer|simmering|cook|cooking|boil|boiling|bake|baking|roast|roasting|stir|"
+    r"stirring|reduce|reducing|whisk|whisking)\b[^.?!]{0,30}?\buntil\b", re.I)
+
+# An "until" clause is a step - "add the milk to the bread sauce until smooth", "cook the apple
+# sauce until it is soft" - and the verb in front of it is not always one of the cooking verbs
+# above. The method in this row is what holds the step, so an until-clause line gets the recipe.
+# A keeping word anywhere in the line still settles it first, which keeps "can i keep bread
+# sauce in the fridge until friday" a keeping question.
+_AN_UNTIL = re.compile(r"\b(?:till|until)\b", re.I)
+
+# "How long does mint sauce need to sit" is the standing time, and the method in this row has it
+# ("leave it 20 minutes"): a how-long with a standing or resting verb in it is a step's length,
+# not a shelf life, and the keeping paragraph answered it with a month in the fridge.
+_A_STEP_LENGTH = re.compile(
+    r"\b(?:how long|how many minutes|how many hours)\b[^.?!]{0,40}?"
+    r"\b(?:sit|sits|sitting|rest|rests|resting|stand|stands|standing|set|sets|setting|"
+    r"soak|soaks|soaking|marinate|marinating|chill|chilling|before (?:you )?serv|"
+    r"before use|to cool)\b", re.I)
+
+# One keeping answer per sauce, in the sauce's own words rather than the fruit's or the bread's.
+_KEEPS = {
+    "bread sauce": (
+        "Bread sauce is best the day it is made. It keeps 2 days covered in the fridge, and it "
+        "reheats gently with a splash of milk in a pan rather than in the microwave, which makes "
+        "the crumbs grainy. It does not freeze well: the sauce splits and the breadcrumbs go "
+        "gritty, so make it fresh and reheat what is left."),
+    "cranberry sauce": (
+        "In a clean jar with a lid the sauce keeps 2 weeks in the fridge, and it freezes for 3 "
+        "months in small tubs. Thaw it overnight, because the set loosens a little and a stir "
+        "brings it back; it keeps a week once a jar has been opened."),
+    "mint sauce": (
+        "Mint sauce keeps about a month in a sealed jar in the fridge, and it does not freeze: "
+        "the mint goes black and limp and the vinegar takes over. Make it in small amounts and "
+        "stir in fresh mint if it has been sitting a while."),
+    "apple sauce": (
+        "Apple sauce keeps 4 to 5 days in a covered dish in the fridge and freezes for 3 months "
+        "in bags or tubs. Thaw it overnight and stir it, because it can look watery once it "
+        "defrosts - a spoon of butter or a quick beat brings it back."),
+    "horseradish sauce": (
+        "Fresh horseradish sauce keeps 3 or 4 days in the fridge, and it does not freeze well: "
+        "the cream splits and the heat fades. A jarred one lasts months in the fridge once "
+        "opened."),
+    "brandy butter": (
+        "Brandy butter keeps 2 weeks covered in the fridge and freezes for 3 months - roll it in "
+        "a log and slice it cold. Let it soften a few minutes at the table but do not leave it "
+        "out of the fridge for long."),
+}
 
 # Some sauces are asked for by their own name with no "sauce" on the line - "how do i make toum",
 # "how do i make hollandaise" - and the shared gate would stand down on both. Their gate is the
@@ -171,6 +255,36 @@ _MADE_IN_THE_PAN = ("peppercorn sauce", "mushroom sauce")
 
 
 
+def _keeps(reply, keeping):
+    """The sauce's own keeping answer when the line asks how long it lasts, else the recipe."""
+    def answer(memory, reading):
+        line = ""
+        if isinstance(reading, dict):
+            line = str(reading.get("norm_text") or reading.get("clean") or
+                       reading.get("text") or "")
+        if _A_KEEPING_WORD.search(line):
+            # the keeping question, answered here when the sauce has its own answer and stood
+            # down otherwise: an answer to a different question reads as confidence and the
+            # person never learns their sauce went off.
+            return keeping or None
+        if _AN_UNTIL.search(line) or _A_STEP_LENGTH.search(line):
+            # a step or a step's length, and this row is where the method for it lives
+            return reply(memory, reading) if callable(reply) else reply
+        if _A_COOKING_TIME.search(line):
+            # a how-long-to-cook line is the timing rows' question: this table's keeping answer
+            # would be a confident reply about the wrong thing, and its recipe is not a time.
+            return None
+        if keeping and _KEEPING.search(line):
+            return keeping
+        if not keeping and _KEEPING.search(line):
+            # a keeping question this row has no keeping answer for - "how long does hollandaise
+            # keep" - is the shrug's or another row's, not the recipe's: an answer to a different
+            # question reads as confidence and the person never learns their sauce went off.
+            return None
+        return reply(memory, reading) if callable(reply) else reply
+    return answer
+
+
 def _rows():
     entries = []
     for number, row in enumerate(_SAUCES):
@@ -179,7 +293,7 @@ def _rows():
         entries.append(_entry(
             "sauce-" + names[0].replace(" ", "-"),
             (names, _ASKING),
-            reply,
+            _keeps(reply, _KEEPS.get(names[0], "")),
             ask=gate,
             # the sauce is the subject, so a line about the meat, the fruit or the herb itself is
             # not read here even when the words of the table are in it. A pan sauce is the

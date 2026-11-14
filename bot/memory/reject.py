@@ -410,6 +410,9 @@ def _options(reply):
         # piece of it is the name of a thing.
         if not (":" in reply and len(options) >= 3 and all(_a_noun_phrase(o) for o in options)):
             return []
+    if _a_list_of_causes(reply, options):
+        # A list of the possible causes of the fault is not a list of things to pick one of.
+        return []
     return options
 
 
@@ -423,6 +426,40 @@ _NOT_A_THING_START = frozenset("""
     he she i is are was were be been being do does did done have has had will would can could
     should may might must not no never always usually often sometimes there here
 """.split())
+
+
+# The words that make the list after them the answer to why rather than a set of things to pick
+# one of. "the boiler pressure keeps dropping" was answered "The pressure falls because water is
+# escaping somewhere: a radiator valve, a joint, or the pressure relief pipe outside", and a person
+# who said "ive tried topping it up" was handed "Right, a joint is the other one worth a go." - a
+# cause of the fault offered as the next thing to try. A list of the possible causes is not an
+# offer, whatever joins its pieces, so the "or" gate alone does not catch it.
+_A_REASON = re.compile(
+    r"(?:\bbecause\b|\bthe reason\b|\bwhich is why\b|\bthat'?s why\b|\bwhy\b|"
+    r"\bsomewhere\b|\bcauses?\b|\bcaused by\b|\bis down to\b|\bcomes down to\b)"
+    r"[^.;!?]{0,70}$", re.I)
+
+
+def _a_list_of_causes(reply, options):
+    """True when the "or" list the options came from is a reason rather than an offer.
+
+    Only the sentence the option sits in is read, and only the words in front of it: a genuine
+    offer explains itself afterwards ("Saturday market, or the library if it rains"), which is the
+    opposite order and stays an offer.
+    """
+    flat = " ".join(str(reply or "").split())
+    for option in options:
+        at = flat.lower().find(str(option).lower())
+        if at < 0:
+            continue
+        before = flat[:at]
+        for stop in (". ", "! ", "? ", "; "):
+            cut = before.rfind(stop)
+            if cut > 0:
+                before = before[cut + len(stop):]
+        if _A_REASON.search(before):
+            return True
+    return False
 
 
 def _a_noun_phrase(option):

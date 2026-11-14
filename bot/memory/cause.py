@@ -45,13 +45,14 @@ from . import topics
 # How they said they were, and the word for it. The lead-ins are the ones people put in front of
 # a state ("im bloody knackered", "feel a bit low") and nothing else about the line is read.
 STATE = re.compile(
-    r"\b(?:i'?m|i am|i feel|i'?ve been|i have been|feel|feeling|been)\s+"
+    r"\b(?:i'?m|i am|i feel|i'?ve been|i have been|i'?ve had|i have had|i had|it'?s been|"
+    r"its been|feel|feeling|been)\s+"
     r"(?:(?:so|very|really|proper|properly|totally|completely|absolutely|a bit|a little|well|"
     r"fairly|quite|pretty|dead|bloody|seriously|still|just|always|knackered|feeling)\s+)*"
     # "im having a rubbish day", "ive been having a rough week": the state is said as a day
     # rather than as an adjective on its own. "im having a baby" reads "baby", which is not a
     # state word, so nothing is joined to it.
-    r"(?:having\s+(?:a|an)\s+)?"
+    r"(?:(?:having|had)\s+)?(?:(?:a|an|the)\s+)?"
     r"([a-z']+(?:\s+up)?)\b", re.I)
 
 # The states that are a way of being and not a thing they are doing. "i'm thinking", "i'm
@@ -62,6 +63,7 @@ tired knackered shattered exhausted drained worn weary stressed stressed-out anx
 nervous low down depressed miserable unhappy sad lonely bored fed up hacked off angry cross
 annoyed upset rubbish awful terrible rough ill sick poorly unwell sore achy achey hurting
 skint broke strapped poor lost stuck overwhelmed snowed swamped
+flat empty numb crap
 """.split())
 
 # A state said as a thing rather than an adjective: "im in a state", "feeling at the end".
@@ -69,6 +71,11 @@ STATE_PHRASES = (
     "in a state", "at the end of my tether", "at the end", "under the weather", "run down",
     "worn out", "fed up", "hacked off", "on my knees", "all over the place", "not sleeping",
     "not been sleeping", "short of money", "hard up", "out of work", "off sick",
+    # A day said as a day: "ive had a rubbish day", "its been a rough week". The state is in the
+    # day and not in an adjective on the person, and without these the low was read as no state
+    # at all, so the reason line after it fell to the floor.
+    "bad day", "rough day", "hard day", "long day", "tough day", "off day",
+    "down day", "flat day", "rubbish week", "bad week", "rough week", "hard week", "long week",
 )
 
 # The bot's last line asked them something. It has to be the bot's own question, not a question
@@ -420,6 +427,22 @@ A_REASON_TOOK = (
 )
 
 
+# The other half of the question a friend asks after "i feel low": "i dont know why". The joined
+# line is the state said out loud with the missing reason on the end, and the readers answer it
+# from the state - but a person whose low has been there a while has often just been given the
+# advice for it, so the answer to the joined line is the answer they have read, word for word.
+# `_without_what_was_just_said` then leaves nothing, and the turn went to the floor's receipt
+# ("Thanks for telling me - I'm here if you want to dig into any of that"), which is the worst
+# line in the conversation: it answers nothing and is said to someone who has just answered the
+# bot's own question. What is left to say is about the missing reason, and these say it.
+A_REASON_NOBODY_HAS = (
+    "There's often no reason you could point at. It's still worth telling me.",
+    "That's alright \u2014 a lot of it arrives without a why.",
+    "You don't have to have the reason for it. Say what it's like and we'll go from there.",
+    "Plenty of it has no cause you could name. It still counts.",
+)
+
+
 # The pools that answer a low that has been sitting there, rather than the thing that caused it.
 # Their lines are written for the mood on its own ("be kind to yourself today"), so one of them
 # answering a line that names a reason is the one shape this module replaces.
@@ -572,8 +595,34 @@ def _the_feeling_without_a_reason(memory):
     # "im exhausted" have a tiredness entry of their own, and joining "i don't know why" to that
     # state must not throw the entry away. The reason is never the subject here ("nothing
     # happened" is not asked), so the entry for lying awake cannot be reached from a mood.
-    return _a_new_answer(_asked(state + ", and i don't know why", memory,
-                                names=("answers", "chat")), memory)
+    answer = _a_new_answer(_asked(state + ", and i don't know why", memory,
+                                  names=("answers", "chat")), memory)
+    if answer:
+        return answer
+    # The joined line was answered with something already said in this chat, so there is no new
+    # answer in it about the state. The line the person is owed is about the reason they cannot
+    # give, and this module is the only one that read that half of it.
+    return _the_reason_nobody_has(memory)
+
+
+def _the_reason_nobody_has(memory):
+    """A line about there being no reason, not the one just said."""
+    said = pick(A_REASON_NOBODY_HAS, memory, "no reason")
+    kept = memory.get("repeated")
+    if isinstance(kept, list) and said in kept:
+        return None
+    last = ""
+    for turn in reversed(_turns(memory)[-3:]):
+        last = str(turn.get("bot") or "").strip()
+        if last:
+            break
+    if last and _flat(said) == _flat(last):
+        # Never the same sentence twice in a row (STYLE.md): the pool is short, so the next line
+        # is the one after this one rather than a repeat.
+        pool = list(A_REASON_NOBODY_HAS)
+        here = pool.index(said) if said in pool else 0
+        said = pool[(here + 1) % len(pool)]
+    return said
 
 
 def _the_knowledge_base_answers_it(thing, memory):

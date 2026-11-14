@@ -29,6 +29,8 @@ A leak keeps its own: a patch of water coming through a ceiling or a wall is the
 question, and "paint" in the line does not make it a decorating one.
 """
 
+import re
+
 from .lookup import a_food_is_being_kept, entry
 
 ANSWERS = ("home-and-diy",)
@@ -74,18 +76,97 @@ A_DIFFERENT_JOB = ("hole", "holes", "crack", "cracks", "cracked", "skim", "skimm
                    "price", "cheap")
 
 
+# The paint, or a surface that is only ever decorated, has to be in the line. The second key group
+# of these rows holds the bare verbs ("stop", "keep", "goes", "getting"), so a row reached through
+# one of those answered lines that are no painting job at all: "the plug socket has stopped working"
+# and "my plug sockets stopped working" were both handed the masking-tape-and-cut-in instructions,
+# because "socket" is one of the shared surfaces this row lists for "how do i paint around sockets".
+# A socket and a light switch are on the list of things to mask, not proof that a brush is out, so
+# on their own they no longer reach the row: the dead socket has an answer of its own.
+_PAINT_WORD = re.compile(
+    r"\b(?:" + "|".join(re.escape(word) for word in sorted(PAINT, key=len, reverse=True)) + r")\b")
+_DECORATED_SURFACE = re.compile(
+    r"\b(?:skirting|skirtings|skirting\ board|skirting\ boards|woodwork|door\ ?frame|door\ ?frames|"
+    r"architrave|architraves|picture\ rail|banister|banisters)\b")
+
+
 def _paint_is_the_subject(understood):
     """True when the line is about paint going on a surface, not paint being kept or bought.
 
     "how do i keep paint from drying out" and "where do i store paint" are keeping questions, and
     a food in the same line ("how do i stop paint getting on the new rug while the cake cools")
-    is another card's.
+    is another card's. A line that names neither the paint nor a surface that is only ever painted
+    is not this row's either, however many of its verbs the key holds.
     """
     if not isinstance(understood, dict):
         return False
     if a_food_is_being_kept(understood):
         return False
-    return True
+    said = " ".join(str(one) for one in (understood.get("words") or ())).lower()
+    if not said:
+        said = str(understood.get("clean") or understood.get("text") or "").lower()
+    return bool(_PAINT_WORD.search(said) or _DECORATED_SURFACE.search(said))
+
+
+# "varnish or sand first" and "do i sand first or fill first" were answered "The step that would
+# spoil the other one goes last, so nothing gets done twice. What are you doing it on?", and "the
+# shelf or the brackets first" with "Work it out rather than guess". A sequence between two named
+# steps is not a preference and it is not the person's to pick: the preparation comes before the
+# finish, and what holds a shelf up comes before the shelf. The two answers below are the same
+# every time, so they are rows.
+#
+# Neither row answers a single-step line: "how do i fill a hole in a wall" and "how do i varnish a
+# table" keep their own cards, and both of those were already right. The line has to name the two
+# steps and ask the order.
+_STEPS = {"fill": "fill", "filling": "fill", "filled": "fill", "filler": "fill",
+          "patch": "fill", "patching": "fill",
+          "sand": "sand", "sanding": "sand", "sanded": "sand", "sandpaper": "sand",
+          "smooth": "sand", "smoothing": "sand",
+          "prime": "finish", "priming": "finish", "primer": "finish", "undercoat": "finish",
+          "varnish": "finish", "varnishing": "finish", "varnished": "finish",
+          "oil": "finish", "oiling": "finish", "wax": "finish", "waxing": "finish",
+          "stain": "finish", "painting": "finish", "paint": "finish", "gloss": "finish",
+          "lacquer": "finish", "coat": "finish", "coats": "finish"}
+_ORDER_WORDS = ("first", "before", "after", "or", "between", "then")
+# A floor, a wall or a car is sanded too, and each has its own card: the order row is about a
+# piece of woodwork being finished.
+_NOT_WOODWORK = ("floor", "floors", "floorboard", "floorboards", "decking", "driveway", "path",
+                 "pavement", "wall", "walls", "ceiling", "ceiling", "plaster", "plasterboard",
+                 "brick", "bricks", "concrete", "paving", "grout", "car", "cars", "rust",
+                 "windscreen", "fence", "gate")
+
+
+# A line that asks which paper or how many coats is a question about the material, not the order:
+# "what grit sandpaper for gloss" was this answer before these words were fenced.
+_ASKS_THE_MATERIAL = ("what grit", "which grit", "what sandpaper", "which sandpaper",
+                      "what paper", "which paper", "what paint", "which paint", "what varnish",
+                      "which varnish", "how many coats", "how long between", "best sandpaper",
+                      "best paper", "how much paint", "how much varnish", "what filler",
+                      "which filler", "what brush", "which brush")
+
+
+def _the_order_of_two_steps(understood):
+    """True when the line names two steps of finishing woodwork and asks which comes first."""
+    # `text`, not `clean`: the understanding engine rebuilds `clean` from the line, and a fence
+    # has to stand on the words the person actually sent.
+    text = str((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
+    if any(word in text for word in _NOT_WOODWORK):
+        return False
+    if any(word in text for word in _ASKS_THE_MATERIAL):
+        return False
+    if not any(word in text for word in _ORDER_WORDS):
+        return False
+    return len({step for word, step in _STEPS.items() if word in text}) >= 2
+
+
+def _a_shelf_and_its_brackets(understood):
+    """True when the line is about fixing a shelf and asks whether the shelf or the brackets first."""
+    text = str((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
+    if "shelf" not in text and "shelves" not in text:
+        return False
+    if "bracket" not in text and "brackets" not in text:
+        return False
+    return any(word in text for word in ("first", "before", "or", "then", "put up", "hang"))
 
 
 ENTRIES = [
@@ -225,4 +306,32 @@ entry("thinning-paint",
                        "become thin", "too thin", "underweight", "varnish a floor", "floorboards",
                        "french polish", "car paint", "car", "cars", "spray"),
       guard=_paint_is_the_subject),
+# The two preparation rows, last in the file so they cannot take a fault line off a row above: a
+# fault ("paint keeps dripping") is the thing going wrong, and an order question is the thing to
+# do next, and no line in the deck asks both.
+entry("prep-before-finish",
+      (("sand", "sanding", "sanded", "sandpaper", "sand down", "smooth", "fill", "filling",
+        "filled", "filler", "patch", "patching"),
+       ("varnish", "varnishing", "varnished", "oil", "oiling", "wax", "waxing", "stain",
+        "painting", "paint", "gloss", "lacquer", "prime", "priming", "primer", "undercoat",
+        "coat", "coats", "first", "before", "after", "between")),
+      "Fill first, then sand, then finish: push the filler into the dents and holes, leave it a "
+      "little proud, and sand it back level with the wood once it is hard. Then sand the whole "
+      "surface - 120 grit on a block for paint or varnish, 80 to 100 on a filler patch - wipe "
+      "the dust off with a tack cloth, and put the first coat on. Sand lightly between coats "
+      "with 180 to 240 grit and wipe the dust off again, because that is what makes the last "
+      "coat sit flat; leave the final coat alone. On a wall you only need to sand between coats "
+      "if there is a run or a bit of grit.",
+      guard=_the_order_of_two_steps,
+      bias=1),
+entry("brackets-then-the-shelf",
+      (("shelf", "shelves", "bracket", "brackets", "shelf bracket", "floating shelf"),
+       ("first", "before", "or", "then", "put up", "hang", "fix", "fixing")),
+      "The brackets go up first. Hold the shelf where you want it, mark the holes through the "
+      "brackets with a pencil, take the shelf down, and fix the brackets to the wall with a "
+      "fixing that suits it: a wall plug in brick or block, a screw into a stud, or a "
+      "hollow-wall anchor in plasterboard with nothing behind it. Then screw the shelf to the "
+      "brackets and check it with a spirit level along the shelf itself, not along one bracket.",
+      guard=_a_shelf_and_its_brackets,
+      bias=1),
 ]

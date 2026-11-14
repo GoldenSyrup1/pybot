@@ -21,6 +21,9 @@ exactly as the caller would have cut it.
 """
 
 
+import re
+
+
 def left_open(said):
     """True when `said` opens a quotation it does not close.
 
@@ -50,8 +53,29 @@ def closed(said, rest, whole=""):
     return str(whole or said).strip()
 
 
+# A full stop inside a name, a title or an abbreviation is not the end of a sentence. The scary
+# shelf reads "and *Inside No. 9* for half-hour creepers", and the sentence that answers "how long
+# did i want it" was cut at "No." - the person was handed "9* for half-hour creepers." The word
+# before the stop is short and capitalised, and the part after it opens on a figure, which no
+# sentence in these rows does: "Volume. 2" is a name, "Ring 111. 2 hours later" is not read here.
+NAME_END = re.compile(r"\b(?:no|nos|vol|vols|ch|pt|pp|fig|e\.g|i\.e|etc|vs|dr|mr|mrs|ms|prof|st|"
+                      r"al|inc|ltd|co|dept|tel|ref)\.$", re.I)
+OPENS_ON_A_FIGURE = re.compile(r"^[\d*\u00a3$\u20ac]")
+
+
+def a_name(text, start, end):
+    """True when the full stop ending `text[start:end]` is part of a name rather than a sentence."""
+    before = str(text[start:end]).strip()
+    if not before.endswith("."):
+        return False
+    if not NAME_END.search(before):
+        return False
+    after = str(text[end:]).lstrip()
+    return bool(OPENS_ON_A_FIGURE.match(after))
+
+
 def sentences(text, splitter):
-    """`splitter`'s sentences, with a quotation kept in one piece.
+    """`splitter`'s sentences, with a quotation or a name kept in one piece.
 
     The sentence splitters in this package cut at a full stop and a space, which is right for a
     paragraph of advice and wrong inside a quoted letter: "...nothing has been done. Please let
@@ -61,7 +85,17 @@ def sentences(text, splitter):
     quotation belongs with the parts after it until the quote closes, so it is only a sentence
     when the quote in it is finished.
     """
-    parts = [part.strip() for part in splitter.split(str(text or "")) if part.strip()]
+    text = str(text or "")
+    if not hasattr(splitter, "finditer"):
+        return [part.strip() for part in splitter.split(text) if str(part).strip()]
+    parts, start = [], 0
+    for end in splitter.finditer(text):
+        if a_name(text, start, end.start()):
+            continue
+        parts.append(text[start:end.start()].strip())
+        start = end.end()
+    parts.append(text[start:].strip())
+    parts = [part for part in parts if part]
     out = []
     for part in parts:
         if out and left_open(out[-1]):

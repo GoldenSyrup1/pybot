@@ -53,6 +53,25 @@ def _names_pattern(names):
     return "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
 
 
+# A potato that tastes floury is not a fault and it is not a cooking question: it is the variety,
+# which is the same thing this card answers when the line says "which". "my potatoes taste floury",
+# "floury potatoes" and "is floury better for roast potatoes" had no card at all - the first and
+# the third got the raw-flour sauce card and the calories card - so the words are read here.
+_A_FLOURY_OR_WAXY = re.compile(r"\b(?:floury|waxy|fluffy)\b", re.IGNORECASE)
+
+
+def _potato_kind_is_named(understood):
+    """True when the line asks which sort of potato, by the chooser or by the sort's own word."""
+    if _chooser(("potato", "potatoes", "spud", "spuds", "new potatoes"))(understood):
+        return True
+    if not isinstance(understood, dict):
+        return False
+    said = str(understood.get("text") or understood.get("clean") or "")
+    if not said:
+        said = " ".join(str(word) for word in understood.get("words") or ())
+    return bool(_A_FLOURY_OR_WAXY.search(said)) and bool(re.search(r"\bpotato", said, re.I))
+
+
 def _chooser(names):
     """A guard: the choosing word has to be about *this* ingredient.
 
@@ -295,7 +314,7 @@ _CHOOSE_WORDS = ("which", "what", "what sort", "what kind", "what type", "best f
 ENTRIES = (
     entry("pick-potato",
           (("potato", "potatoes", "spud", "spuds", "new potatoes"),
-           _CHOOSE_WORDS),
+           _CHOOSE_WORDS + ("floury", "waxy", "fluffy")),
           _pick(_POTATO,
                 "Floury potatoes (Maris Piper, King Edward, Rooster) for roast, mash and chips, "
                 "waxy ones (Charlotte, Jersey Royal, Nicola) for salads and boiling whole. The "
@@ -303,7 +322,7 @@ ENTRIES = (
           avoid=("how long", "minutes", "temperature", "calories", "per person", "recipe",
                  "reheat", "freeze", "leftover", "left over", "grow", "growing", "chit",
                  "sprout", "green", "peel"),
-          guard=_chooser(("potato", "potatoes", "spud", "spuds", "new potatoes")),
+          guard=_potato_kind_is_named,
           bias=2),
     entry("pick-apple",
           (("apple", "apples"), _CHOOSE_WORDS),
@@ -346,7 +365,12 @@ ENTRIES = (
                  # phone" was told basmati for curry and jasmine for Thai (@ivory-magnet, #9232
                  # family). Rice varieties are never about a device that got wet.
                  "phone", "phones", "iphone", "mobile", "laptop", "tablet", "camera",
-                 "device", "wet phone", "water damage", "dropped", "dropped it"),
+                 "device", "wet phone", "water damage", "dropped", "dropped it",
+                 # which rice is this row's question; rice against another carb is the
+                 # comparison row's: "is rice or pasta better for you" was told which rice goes
+                 # with curry, and it had asked which of the two to eat
+                 "or pasta", "or potatoes", "or potato", "or bread", "or noodles", "or couscous",
+                 "better for you", "healthier", "healthiest"),
           guard=_chooser(("rice", "basmati", "jasmine rice", "risotto rice", "pudding rice")),
           bias=2),
     entry("pick-mushroom",

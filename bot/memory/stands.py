@@ -222,6 +222,308 @@ def the_figure_asked_about(text, memory):
     return value, unit, phrase, _the_reason_behind(memory, value, unit)
 
 
+# --- "does that change the time?" -------------------------------------------------------------
+
+# A change the person has just made ("actually its a veggie one, no mince") and then a question
+# about whether it moves something of the answer they were given. The line names no figure and no
+# thing: the time it asks about is the one in the chat's own answer, so the readers that want a
+# figure in the line all pass on it and the knowledge base reaches for something else entirely.
+CHANGE_ASK = re.compile(
+    r"\b(?:does|do|will|would|should|did)\b[^.?!]{0,24}?"
+    r"\b(?:change|affect|alter|make (?:a|any) difference to|matter (?:to|for)|impact)\b", re.I)
+# The thing the change might move, and the units an answer gives it in. Only attributes with a
+# figure in the chat's answer are answered here: "does that change the plan" has no figure to
+# hand back, and guessing is worse than the hedge it already gets.
+ATTRIBUTES = {
+    "time": ("minute", "hour", "day", "week", "month"),
+    "long": ("minute", "hour", "day", "week", "month"),
+    "temperature": ("degree",),
+    "heat": ("degree",),
+}
+ATTRIBUTE_WORDS = re.compile(
+    r"\b(?:the|my|our|its)\s+(" + "|".join(ATTRIBUTES) + r"|cooking time|oven time|time)\b",
+    re.I)
+# A line about a machine's clock is a setting, not the chat's answer: "does that change the time on
+# the boiler" is asking how to set a timer.
+A_SETTING = re.compile(r"\b(?:boiler|thermostat|programmer|clock|timer|heating|timer\s+on)\b", re.I)
+# The figure in the chat's own answer, with its unit: "35 to 40 minutes in the oven", "180C". A time
+# written in two parts is one figure and is read as one ("1 hour 40 minutes"), because the minutes
+# alone are the tail of it and not the answer.
+# "1 hour 40 for a 2kg bird" says the minutes without the word: the compound arm takes it, as
+# long as what follows is not a weight or a measure ("1 hour 250g" is not a time and a half).
+FIGURED = re.compile(
+    r"\b(\d[\d,.]*(?:\s*(?:to|or|-)\s*\d[\d,.]*)?)\s*(hours?|hrs?)\s+(\d[\d,.]*)\s*"
+    r"(minutes?|mins?)?\b(?!\s*(?:g|kg|ml|cl|lb|lbs|oz|cm|degrees?)\b)"
+    r"|\b(\d[\d,.]*(?:\s*(?:to|or|-)\s*\d[\d,.]*)?)\s*"
+    r"(minutes?|mins?|hours?|hrs?|days?|weeks?|months?|degrees?|C\b|\u00b0C)", re.I)
+UNIT_FAMILY = {"minute": "time", "min": "time", "hour": "time", "hr": "time", "day": "time",
+               "week": "time", "month": "time", "degree": "temperature", "c": "temperature",
+               "°c": "temperature"}
+
+CHANGE_REPLIES = {
+    "time": (
+        "No - {figure} was the time and it stays that. What changed is what goes in it, not how "
+        "long it takes.",
+        "That does not move it: {figure}, same as before.",
+        "Same time - {figure}. The swap changes what is in it, not how long it is in for.",
+        "The time holds: {figure}. It is the dish that sets it, not the filling.",
+        "No change there - {figure}, and that is the figure to cook to.",
+    ),
+    # The heat is not the time, and a sentence about minutes after "does that change the
+    # temperature" reads as the bot not hearing the question.
+    "temperature": (
+        "The heat holds: {figure}, same as before.",
+        "No change to the heat - {figure}, and that is the oven to cook it at.",
+        "Same heat - {figure}. The swap changes what goes in the dish, not the oven.",
+        "That does not move it: {figure}, the heat it was already to be cooked at.",
+    ),
+}
+
+
+# Where the swap did move the figure, the reply says so and gives the new one. "That does not move
+# it" is a claim, and handed back beside a figure the swap's own answer introduced it is false.
+CHANGE_REPLIES_MOVED = {
+    "time": (
+        "That moves it: {figure} now, not the time from before.",
+        "It does - {figure} for this version.",
+        "Yes - {figure}. The swap changes how long it takes.",
+        "It does move it: {figure}, so cook to that instead.",
+    ),
+    "temperature": (
+        "The heat moves too: {figure} for this version.",
+        "It does - {figure} now, not the oven from before.",
+        "Yes, the heat changes: {figure}.",
+    ),
+}
+
+
+def _in_minutes(number, unit):
+    """A time figure as a number of minutes, so "1 hour 40 minutes" beats "20 minutes"."""
+    value = _number(number)
+    if value is None:
+        return 0.0
+    unit = unit.lower().rstrip("s")
+    if unit in ("hour", "hr"):
+        return value * 60
+    if unit == "day":
+        return value * 1440
+    if unit == "week":
+        return value * 10080
+    if unit == "month":
+        return value * 43200
+    return value
+
+
+def _the_best(candidates, family):
+    """The figure to hand back: the whole time rather than a rate, and the first temperature."""
+    if not candidates:
+        return ""
+    if family == "temperature":
+        return candidates[0][2]
+    # "About 20 minutes per 500g plus 20 minutes at 190C, so a 2kg bird takes roughly 1 hour 40
+    # minutes": the answer gives the rate first and the total last, and the total is the figure
+    # the person is asking whether it still holds.
+    best = max(candidates, key=lambda found: _in_minutes(found[0].split()[0], found[1]))
+    return best[2]
+
+
+def _figures_in_answer(said, family):
+    """The figures one answer gives for this attribute, as [(value, unit, as said)]."""
+    candidates = []
+    for match in FIGURED.finditer(str(said or "")):
+        if match.group(1):
+            whole = (f"{match.group(1)} {match.group(2).lower()} {match.group(3)} "
+                     f"{(match.group(4) or 'minutes').lower()}")
+            minutes = (_in_minutes(match.group(1), "hour")
+                       + _in_minutes(match.group(3), "minute"))
+            if family != "time":
+                continue
+            candidates.append((str(minutes), "minute", whole))
+            continue
+        unit = match.group(6).lower().rstrip("s")
+        if UNIT_FAMILY.get(unit) != family:
+            continue
+        figure = f"{match.group(5)} {match.group(6).lower()}"
+        if unit in ("c", "\u00b0c"):
+            figure = f"{match.group(5)}C"
+        candidates.append((match.group(5), match.group(6).lower(), figure))
+    return candidates
+
+
+def _the_same_figure(one, other):
+    """True when two figures are the same one: "12 to 15 minutes" and "12-15 minutes"."""
+    return re.sub(r"\D", "", str(one or "")) == re.sub(r"\D", "", str(other or ""))
+
+
+# The words that are about the answer rather than about what is in the dish. Two answers share a
+# subject word when they are about the same thing ("rice" then "brown rice"), and the swap's figure
+# is then this dish's; with nothing in common the second answer is a card about something else.
+NOT_THE_SUBJECT = frozenset("""minute minutes hour hours second seconds day days week weeks
+    month months degree degrees oven ovens tray tins pan pans tin dish dishes cook cooking cooked
+    bake baked roast roasted about until when then they this that with from your yours each every
+    before after while total same time times heat high medium low fan""".split())
+
+
+def _subjects(said):
+    return {word for word in re.findall(r"[a-z]{4,}", str(said or "").lower())
+            if word not in NOT_THE_SUBJECT}
+
+
+def _about_the_same_thing(one, other):
+    """True when two answers are about the same thing, so a figure in the second is this dish's."""
+    return bool(_subjects(one) & _subjects(other))
+
+
+# A different way of cooking is not a swap of one thing for another: a slow cooker chicken at 6 to
+# 8 hours is the same bird and a different time, and "that does not move it" about it is false.
+# Nothing here knows the new method's time, so the reader stays out of the way.
+A_METHOD_CHANGE = re.compile(
+    r"\b(?:slow cooker|crock ?pot|pressure cooker|instant pot|air ?fryer|microwave|steam\w*|"
+    r"sous ?vide|barbecue|bbq|grill\w*|poach\w*|deep[- ]?fr(?:y|ied|ying)|boil\w*|"
+    r"on the hob|in the oven instead|oven instead)\b", re.I)
+
+
+def _a_figure_for(memory, family):
+    """(figure, moved) - the figure to hand back, and whether the swap moved it.
+
+    The swap is the last thing the person said, so the newest answer is the answer to it, and the
+    one before is the answer that set the plan going. Where they give the same figure, or the
+    answer to the swap gives none, the plan's figure holds. Where they give different figures about
+    the same thing - "im making rice" then "im using brown rice instead", 10 to 12 minutes against
+    25 to 30 - the swap did move it, and handing back the new figure while saying "same as before"
+    would have a person cook raw rice. Where the second answer is a card about something else ("im
+    roasting a chicken" / "theres no foil" answered with a dhal) its figure is not this dish's, and
+    the reader says nothing rather than guess.
+    """
+    if not isinstance(memory, dict):
+        return "", False
+    turns = memory.get("turns")
+    if not isinstance(turns, list):
+        return "", False
+    answers = [str(turn.get("bot") or "") for turn in turns[-2:] if isinstance(turn, dict)]
+    if not answers:
+        return "", False
+    plan = _the_best(_figures_in_answer(answers[0], family), family)
+    swapped = (_the_best(_figures_in_answer(answers[1], family), family)
+               if len(answers) > 1 else "")
+    if not swapped:
+        return plan, False
+    if not plan:
+        # Nothing was said before the swap, so the only figure in reach is the one the swap's own
+        # answer gives, and it is the plan now.
+        return swapped, True
+    if _the_same_figure(swapped, plan):
+        return plan, False
+    if _about_the_same_thing(answers[0], answers[1]):
+        return swapped, True
+    said = str(turns[-1].get("user") or "") if isinstance(turns[-1], dict) else ""
+    if A_METHOD_CHANGE.search(said):
+        return "", False
+    # The answer to the swap is about something else and gives no figure for this dish: the figure
+    # the plan was given still stands, and it is the chat's own.
+    return plan, False
+
+
+# A change of size or quantity is not a swap: a bigger lasagne for six takes longer than one for
+# four, and "that does not move it" would then be wrong. The change is one of the last few lines.
+# There has to be a swap to ask about, and only a swap: "my sister is coming with her two kids so
+# its eleven now" is a change of size, and a leg of lamb for eleven takes longer. The words below
+# are the ones a substitution is made of - the thing swapped out, or the thing swapped in.
+A_CHANGE = re.compile(
+    r"\b(?:instead|rather than|without|swap\w*|switch\w*|replace\w*|substitut\w*|veggie|"
+    r"vegetarian|vegan|gluten|dairy|free from|omitted|skipped|cut out|left out|leave out|"
+    r"made it with|no [a-z]+)\b", re.I)
+
+
+def _a_change_was_made(memory):
+    """True when one of the last few lines of theirs swaps something for something else."""
+    if not isinstance(memory, dict):
+        return False
+    said = [str(turn.get("user") or "") for turn in (memory.get("turns") or [])
+            if isinstance(turn, dict)]
+    return any(A_CHANGE.search(line) for line in said[-3:])
+
+
+QUANTITY = (r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|"
+            r"twenty|thirty|\d+)")
+WHOSE = r"(?:of us|people|guests?|kids?|portions?|slices|servings?|adults?|children)"
+A_SIZE_CHANGE = re.compile(
+    r"\b(?:bigger|larger|smaller|double|doubled|halve|halved|batch|twice as|half as)\b"
+    # "more"/"extra"/"less" and a bare "for" are not a size on their own: "i swapped the mince for
+    # mushrooms" is the commonest way to say a swap, and it was standing the reader down.
+    r"|\b(?:more|extra|less|fewer)\s+" + WHOSE + r"\b"
+    r"|\bfor\s+" + QUANTITY + r"\b"
+    r"|\bfor\s+(?:\w+\s+)?" + WHOSE + r"\b"
+    r"|\b(?:feed|feeding|cooking for)\s+(?:" + QUANTITY + r"|" + WHOSE + r")\b"
+    r"|\b" + QUANTITY + r"\s*" + WHOSE + r"\b"
+    r"|\b(?:there will be|there are|its|it's|so its|so it's|now)\s+(?:one|two|three|four|five|"
+    r"six|seven|eight|nine|ten|eleven|twelve|twenty|\d+)\b", re.I)
+
+
+def _a_change_of_size(memory):
+    """True when the change the person just made was a size or a quantity."""
+    if not isinstance(memory, dict):
+        return False
+    said = [str(turn.get("user") or "") for turn in (memory.get("turns") or [])
+            if isinstance(turn, dict)]
+    return any(A_SIZE_CHANGE.search(line) for line in said[-3:])
+
+
+def the_change_asked_about(text, memory):
+    """(attribute, figure, moved) when the line asks whether a change moves a figure, else None.
+
+    Narrow on purpose: the line has to ask with does/will/would, has to name the attribute with
+    "the"/"my" in front of it, has to be about nothing else, and the chat has to hold a figure for
+    that attribute in one of its own answers. A line about a machine's clock is a setting.
+    """
+    line = " ".join(str(text or "").lower().replace("\u2019", "'").split())
+    if not line or len(line.split()) > MOST_WORDS + 3:
+        return None
+    if not CHANGE_ASK.search(line) or A_SETTING.search(line):
+        return None
+    if _a_change_of_size(memory) or not _a_change_was_made(memory):
+        return None
+    named = ATTRIBUTE_WORDS.search(line)
+    if not named:
+        return None
+    word = named.group(1).lower()
+    if word in ("time", "cooking time", "oven time", "long"):
+        attribute, family = "time", "time"
+    elif word in ("temperature", "heat"):
+        attribute, family = "temperature", "temperature"
+    else:
+        return None
+    # Every other word has to name nothing: "does that change the time for a chicken" asks about a
+    # chicken, and the answer is that chicken's time, not this chat's.
+    rest = line[:named.start(1)] + " " + line[named.end(1):]
+    for word_ in rest.split():
+        word_ = word_.strip(".,!?;:")
+        if not word_ or word_ in NOTHING_NAMED or word_ in ("that", "this", "it", "which"):
+            continue
+        if word_ in ("change", "changed", "changes", "affect", "affects", "alter", "alters",
+                     "impact", "matter", "difference", "make", "makes", "made", "a", "an",
+                     "any", "to", "for", "the", "on", "of", "in", "with", "much", "long",
+                     "time", "cooking", "oven"):
+            continue
+        return None
+    figure, moved = _a_figure_for(memory, family)
+    if not figure:
+        return None
+    return attribute, figure, moved
+
+
+def change_reply(text, memory):
+    """The reply to "does that change the time?" - the chat's own figure, handed back."""
+    found = the_change_asked_about(text, memory)
+    if not found:
+        return None
+    attribute, figure, moved = found
+    line = " ".join(str(text or "").lower().split())
+    pools = CHANGE_REPLIES_MOVED if moved else CHANGE_REPLIES
+    pool = pools.get(attribute) or pools["time"]
+    return pick(pool, memory, line).format(figure=figure)
+
+
 def reply_for(text, memory):
     """The reply to a yes/no about a figure the bot gave, or None for every other line."""
     found = the_figure_asked_about(text, memory)

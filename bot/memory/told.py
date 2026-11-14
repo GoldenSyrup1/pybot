@@ -24,7 +24,7 @@ import re
 
 from ..compose import pick
 from ..understanding import breeds as breed_words
-from . import others, user
+from . import history, others, user
 from . import you as say_it_back
 from . import facts as extract
 from . import recall
@@ -33,9 +33,16 @@ from . import recall
 # "tell me if i told you about ..." is not this shape. The opener is the question and the rest is
 # the thing, so a line that carries a statement after it ("have i told you my name is sam") is
 # left alone: that is news, not a question about the chat.
+#
+# Only the past and the perfect open a question about what was said. A present "do i / does he"
+# with one of these verbs is somebody deciding what to do next: "do i say yes", "do i tell her",
+# "do i mention it to my boss" are the person asking for help with a decision, and they were read
+# as a lookup and answered with their own words quoted back ("There's nothing on yes in what I
+# keep", "I don't have "her about the money" in my notes"). Nothing has been said yet in those
+# lines, so there is nothing to look up.
 TOLD_ABOUT = re.compile(
     r"^\W*(?:and\s+|also\s+|so\s+|but\s+|ok(?:ay)?\s+|wait\s+|quick\s+)?"
-    r"(?:have|has|did|do|does)\s+(?:i|we)\s+(?:ever\s+|already\s+)?"
+    r"(?:have|has|had|did)\s+(?:i|we)\s+(?:ever\s+|already\s+)?"
     r"(?:told|tell|mentioned|mention|said|say|talked|talk)\s+(?:you\s+)?"
     r"(?P<about>about\s+|of\s+)?(?P<what>[^?]+?)\s*\??$", re.I)
 # The same ask said as a question about the bot's memory rather than about what was said: "do you
@@ -599,15 +606,12 @@ def _a_claim_about_the_chat(text):
 
 
 def _an_earlier_line(memory, text):
-    """Whether the chat holds a line of theirs other than this one."""
-    mine = " ".join(str(text or "").split()).lower()
-    for row in ((memory or {}).get("turns") or []):
-        if not isinstance(row, dict):
-            continue
-        line = " ".join(str(row.get("user") or "").split())
-        if line and line.lower() != mine:
-            return True
-    return False
+    """Whether the chat holds a line of theirs other than this one.
+
+    One check for the whole bot (bot/memory/history.py): a reader that counts turns for itself
+    here would disagree with the recall readers about what counts as an earlier turn.
+    """
+    return history.an_earlier_turn(memory, text)
 
 
 def callback(text, memory, facts=None, plain=None, claims=None):
@@ -773,7 +777,11 @@ def _a_clause_is_named(line):
 
 def _the_thing_the_chat_is_on(memory):
     """The phrase the chat is on, from the store's own reader, or "" when it names nothing."""
-    from ..modules.memory_store import _the_thing_the_chat_is_on as about
+    # The reader lives in the store, not in the module: `bot/modules/memory_store.py` has no
+    # such name, so this import raised every time the proof path was reached and the turn fell
+    # back to the composer's hedge - the person asked what they had told the bot and got "A quick
+    # search online will get you a solid answer". Read from the file that defines it.
+    from .store_replies import _the_thing_the_chat_is_on as about
     return about(memory) or ""
 
 
@@ -831,6 +839,11 @@ REPORTED = re.compile(r"^\s*(?:and\s+|also\s+)?(?:i|we)\s+(?:did\s+)?(?:say|said
                       r".+)$", re.I)
 
 
+# The echo of a line that was itself a telling: "you told me about your mum", "you said to me ...".
+# The frame goes on a line that states a fact; on one of these it is the telling twice.
+TELLING_ALREADY = re.compile(r"^you (?:told me|said to me|mentioned to me)\b")
+
+
 def _quote(line, memory):
     """Their own line, said back to them, when no fact of the store says it better.
 
@@ -858,6 +871,11 @@ def _quote(line, memory):
     said = said[0].lower() + said[1:]
     # A whole sentence ends with a full stop, the way every other store reply does.
     said += "."
+    # A line that begins "i told you ..." is a receipt already: the store's frame on top of it made
+    # "You told me you told me about your mum", the bot saying the telling twice. What they told is
+    # said back without the frame, because the echo carries who told whom on its own.
+    if TELLING_ALREADY.match(said):
+        return said[0].upper() + said[1:]
     return pick(["You said " + said,
                  "You told me " + said,
                  "You did say " + said], memory)

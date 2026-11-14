@@ -212,15 +212,21 @@ def _a_person_in_the_store(memory, who):
     return who in [str(person).lower() for person in (user(memory).get("people") or [])]
 
 
+# "about" and "on" are the same preposition in this ask: "what have you got on my mum" is "what do
+# you know about my mum" said the way people say it, and it was answered with the search hedge
+# while the store held her age. "have" and "had" are the same asking verb as "got" - "what do you
+# have on my kids" asks for the same facts.
 ABOUT_PERSON_ASK = re.compile(
     r"\b(?:what|anything|everything|much)\b[^?]{0,30}?\b(?:know|knows|remember|learnt|learned|"
-    r"told|tell|said|say|mention|mentioned|got)\b[^?]{0,20}?\babout\s+(?:" + _ABOUT_WHO + r")|"
+    r"told|tell|said|say|mention|mentioned|got|have|has|had)\b[^?]{0,20}?\b(?:about|on)\s+(?:"
+    + _ABOUT_WHO + r")|"
     r"\btell me (?:a bit |a little |more |anything )?(?:more )?about\s+(?:" + _ABOUT_WHO + r")|"
     # The same ask with the asking word after the verb, which is how people say it: "do you know
     # anything about my mum", "did i tell you much about my son". Read as none of these, the line
     # fell to the search hedge while "what do you know about my mum" got the whole person back.
     r"\b(?:do|did|can|could)\s+(?:you|i)\s+(?:ever\s+|already\s+)?(?:know|remember|recall|tell|"
-    r"told|mention|mentioned|say|said|hear|heard)\b[^?]{0,30}?\babout\s+(?:" + _ABOUT_WHO + r")",
+    r"told|mention|mentioned|say|said|hear|heard)\b[^?]{0,30}?\b(?:about|on)\s+(?:"
+    + _ABOUT_WHO + r")",
     re.I)
 
 
@@ -297,6 +303,12 @@ def _age_is_about_a_person(low, memory):
     store has nothing to recall about it. The person has to be what the ask asks, so the answer is
     left to the modules that know the world; the store's own recall asks are untouched.
     """
+    if _the_place_end(low)[1]:
+        # "how old is the eldest", "how old is the little one": a child named by their place in
+        # the family is a person the chat can have been told an age for, and without this the ask
+        # was left to the modules that know the world - a question about contracts answered the
+        # one about the eldest.
+        return True
     ask = AGE_ASK.search(low)
     if not ask:
         return True
@@ -447,6 +459,35 @@ THEIR_TASTE_INTO = re.compile(
     r"(?:(?:my|our)\s+(?P<who>[a-z][a-z'\u2019-]*)|(?P<pronoun>she|he|they))\s+"
     r"(?:into|keen on|mad about|a fan of|big on|fussed on)\b", re.I)
 
+# The dislike asked for the other way round. Every pattern above puts the taste verb after the
+# person ("what does he like"), and a person who wants to know what somebody cannot stand says it
+# with the "not" in front of the person, often with a word before that:
+#     what food doesnt he like
+#     what doesnt she like
+#     what else doesnt he like
+#     what wont she eat
+#     whats he not keen on
+# Without a reader here all five were answered with something else entirely - the kitchen's
+# fussy-eater card for a son who does not like cheese, the last answer said again, a search hedge
+# about a father who is not keen on spicy food. The dislike the chat already gave is a fact the
+# store holds, so it is said back exactly as it is for the other way round. Only a bare ask counts
+# (the line ends at the verb), so "what doesnt he like about school" is still somebody else's.
+THEIR_TASTE_NOT = re.compile(
+    r"\bwhat(?:\s+[a-z']+){0,2}?\s+"
+    r"(?:doesn'?t|doesn|does\s+not|don'?t|do\s+not|won'?t|will\s+not|can'?t|cannot|never)\s+"
+    r"(?:(?:my|our)\s+(?P<who>[a-z][a-z'\u2019-]*)|(?P<pronoun>she|he|they))\s+"
+    r"(?:really\s+|actually\s+|even\s+|ever\s+)?"
+    r"(?:like|love|eat|drink|have|stand|touch|want|be\s+keen\s+on)\b"
+    r"(?:\s+(?:eating|drinking|at\s+all|really|then|now|though))*\W*$", re.I)
+
+# "whats he not keen on", "what is she not a fan of": the taste is put as a negative the person
+# carries, in the same words the "into" reader above knows.
+THEIR_TASTE_NOT_INTO = re.compile(
+    r"\bwhat(?:'s|s|\s+is|\s+was)?(?:\s+[a-z']+)?\s+"
+    r"(?:(?:my|our)\s+(?P<who>[a-z][a-z'\u2019-]*)|(?P<pronoun>she|he|they))\s+"
+    r"(?:not|isn'?t|is\s+not)\s+"
+    r"(?:into|keen\s+on|mad\s+about|a\s+fan\s+of|big\s+on|fussed\s+on)\b\W*$", re.I)
+
 
 THEIR_TASTE_A_YES_NO = re.compile(
     r"\b(?:does|do|did)\s+"
@@ -471,8 +512,17 @@ def _their_taste(memory, low):
             said = match
             break
     if said is None:
+        # The same fact asked for with the "not" in front of the person: the answer is what is on
+        # their dislike list, and that is what the reader below does with "not like".
+        for pattern in (THEIR_TASTE_NOT, THEIR_TASTE_NOT_INTO):
+            match = pattern.search(low)
+            if match:
+                said = match
+                how = "not like"
+                break
+    if said is None:
         return None
-    how = (said.groupdict().get("how") or "").lower()
+    how = how or (said.groupdict().get("how") or "").lower()
     thing = (said.groupdict().get("thing") or "").strip().lower()
     who = (said.groupdict().get("who") or "").lower()
     pronoun = (said.groupdict().get("pronoun") or "").lower()
@@ -966,6 +1016,14 @@ SEVERAL_PEOPLE_NAMED = re.compile(
     r"|\b(?P<bare>" + PEOPLE_MANY + r")\b", re.I)
 
 
+# "a sister and a brother" is several people in two singular words, and neither word is in
+# PEOPLE_MANY: the store files one person per word, so the plural an ask leans on is the pair
+# itself. The words are the ones the store files a person under.
+TWO_OF_KIN = re.compile(
+    r"\b(?:my|our|the|a|an)\s+(?P<a>" + "|".join(sorted(extract.KIN_WORDS)) + r")\s+and\s+"
+    r"(?:my|our|the|a|an)?\s*(?P<b>" + "|".join(sorted(extract.KIN_WORDS)) + r")\b", re.I)
+
+
 def _the_several_named_before(memory):
     """The newest earlier line that named more than one person: (word, names, line).
 
@@ -975,9 +1033,16 @@ def _the_several_named_before(memory):
     drops the people named beside them.
     """
     for line in reversed(history.the_lines_before(memory)):
+        # The line has to be one that named them, not one that asked about them: "what are my
+        # parents called" has the group word in it and no name at all, and reading a question as
+        # the line that named the people answered "You told me about your parents, but not their
+        # names" one turn after both names had been given.
+        if not history.is_their_news(line):
+            continue
         found = SEVERAL_PEOPLE_NAMED.search(line)
         names = _the_names_from(_the_names_tail(line))
-        if not found and not names:
+        pair = TWO_OF_KIN.search(line) if not found else None
+        if not found and not pair and not names:
             continue
         word = ((found.group("counted") or found.group("group") or found.group("bare"))
                 if found else "").lower()
@@ -985,6 +1050,10 @@ def _the_several_named_before(memory):
         # kids" is nobody else's, so the answer says the line's own phrase instead of guessing
         # whose they are.
         phrase = " ".join(found.group(0).split()) if found else ""
+        if pair:
+            one, other = pair.group("a").lower(), pair.group("b").lower()
+            word = one + " and " + other
+            phrase = "your " + one + " and your " + other
         return word, names, phrase
     return "", [], ""
 
@@ -1067,10 +1136,15 @@ def _the_names_of_the_group(memory, low):
         # person a line happened to file beside the people it named. "my sister sarah has two
         # boys" files the sister, and "whats their names again" said "Your sister is called
         # Sarah." - one person, and not the one asked about.
-        known = [entry for entry in known
-                 if _more_than_one(entry.get("who"))
-                 or len([one for one in (entry.get("names") or []) if str(one).strip()]) > 1
-                 or int(entry.get("count") or 1) > 1]
+        # Two entries are two people, whatever each one is called: "my mum is called janet and my
+        # dad is called brian" files both, and reading each entry on its own dropped the pair and
+        # answered "Your dad is called Brian." The filter is for the one entry a line about
+        # several people leaves behind - "my sister sarah has two boys" files the sister alone.
+        if len(known) < 2:
+            known = [entry for entry in known
+                     if _more_than_one(entry.get("who"))
+                     or len([one for one in (entry.get("names") or []) if str(one).strip()]) > 1
+                     or int(entry.get("count") or 1) > 1]
     said = []
     for entry in known[:4]:
         who = str(entry.get("who") or "").strip()
@@ -1088,7 +1162,20 @@ def _the_names_of_the_group(memory, low):
         if not word:
             # The people a plural pronoun points at are in an earlier turn or nowhere: the chat
             # itself is the only place to look, and it answers this or nothing.
-            return _the_names_of_them_all(memory)
+            forgotten = _the_names_of_them_all(memory)
+            if forgotten:
+                return forgotten
+            # The chat holds more than one person and a name on none of them: the group is the
+            # people it holds, and the honest line is about all of them. Falling through to the
+            # reader that answers about one person said "You haven't told me your brother's name"
+            # to a question about a sister and a brother, and with nothing to name at all it said
+            # "You haven't told me a name for your  yet".
+            group = next((str(entry.get("who") or "").strip() for entry in known
+                          if _more_than_one(entry.get("who"))), "")
+            if group:
+                return pick(["You haven't told me a name for your " + group + " yet - what are "
+                             "they called?", "I've got your " + group + " but no names for them - "
+                             "what are they called?"], memory)
         if _the_group_was_said(word, memory):
             # The line that named them is in the chat and the readers did not file it: saying
             # "you haven't told me a name for your kids" denies what was just typed, and the
@@ -1102,6 +1189,10 @@ def _the_names_of_the_group(memory, low):
             # moving, where the denial denies and the search hedge says nothing about them.
             return pick(["What are your " + word + " called? I'll keep their names.",
                          "Tell me what your " + word + " are called and I'll keep it."], memory)
+        if not word:
+            # Nothing to name: the line came this far with no group word, and "a name for your
+            # yet" is not a sentence. The readers below can still answer it, so this one declines.
+            return None
         return pick(["You haven't told me a name for your " + word + " yet.",
                      "I don't have a name for your " + word + " yet."], memory)
     # Two people filed under the same word are one sentence: "my kids are tom 8 and ada 5" files
@@ -1419,6 +1510,11 @@ def _ages_reply(memory, low, text=""):
             told.append((who_said, str(months) + " months", turns, None, held))
     # The plural names the same person ("how old are my sons" is the son filed above); a possessive
     # in front of another noun is not the person at all.
+    if not _named_person(low, memory):
+        # A child named by their place in the family, which the store files under other words.
+        placed = _the_place_word_filed(memory, low)
+        if placed:
+            return placed
     who = _named_person(low, memory)
     # The ask's own word decides the number. `_named_person` answers with the word the store files
     # the person under ("daughter"), so "how old are my daughters" came back as "Your daughter is
@@ -1537,6 +1633,93 @@ def _ages_reply(memory, low, text=""):
     return "You haven't told me how old your " + who + (" are." if who.endswith("s") else " is.")
 
 
+# The words for a child's place in the family are not one word each: "the little one", "the baby"
+# and "the youngest" name the same child, and so do "the eldest" and "the oldest". Asked in a word
+# the store holds nothing under, the answer was a shrug - or, worse, advice about the world - about
+# a child the chat had been told an age for one line before. So a place word in the ask is read as
+# the person on file at the same end of the family, and only when exactly one of them is there.
+_THE_YOUNGER_END = frozenset(("youngest", "littlest", "baby", "toddler", "newborn", "little one",
+                              "wee one", "little lad", "little girl", "little boy", "small one",
+                              "younger one"))
+_THE_OLDER_END = frozenset(("eldest", "oldest", "elder", "big one", "older one", "biggest"))
+_A_PLACE_ASK = re.compile(
+    r"\b(?:the|my|our|your)\s+(?P<who>"
+    + "|".join(sorted(_THE_YOUNGER_END | _THE_OLDER_END, key=len, reverse=True)) + r")\b", re.I)
+
+
+# The words that can follow a place word and leave it naming a person: the end of the line, the
+# punctuation, or one of the little words a spoken line puts after it ("the little one now", "the
+# eldest though"). Anything else is a noun - "the oldest person in the world", "the baby food" -
+# and the place word there is an adjective, not somebody's place in the family.
+_THE_PLACE_STANDS_ALONE = frozenset((
+    "now", "then", "there", "too", "though", "anyway", "please", "is", "was", "were", "are",
+    "again", "still", "yet", "today", "nowadays", "here", "of", "in", "at", "on", "and", "or",
+    "got", "has", "have", "had", "will", "would", "should", "can", "could", "might", "must",
+    "turns", "turned", "just", "only", "already", "actually", "really"))
+
+
+def _the_place_end(low):
+    """"young", "old" or "" - the end of the family the ask's place word names, and the word.
+
+    The place word has to be the whole of the noun phrase, so an adjective use ("the oldest
+    person in the world", "the little dog") is not somebody's place in their family.
+    """
+    asked = _A_PLACE_ASK.search(str(low or ""))
+    if not asked:
+        return "", ""
+    after = str(low)[asked.end():]
+    after = re.split(r"[.,;:!?]", after, maxsplit=1)[0].strip()
+    next_word = after.split()[0].lower() if after else ""
+    if next_word and next_word not in _THE_PLACE_STANDS_ALONE:
+        return "", ""
+    word = " ".join(asked.group("who").lower().split())
+    return ("young" if word in _THE_YOUNGER_END else "old"), word
+
+
+def _the_child_ages_on_file(memory):
+    """The ages the chat holds for children of theirs, oldest first as (word, age, turns)."""
+    found = []
+    for entry in others(memory):
+        if not isinstance(entry, dict):
+            continue
+        who = str(entry.get("who") or "").lower()
+        if CHILD_OF.get(who, who.rstrip("s")) not in CHILD and who not in CHILD:
+            continue
+        turns = str(entry.get("turns") or "")
+        if isinstance(entry.get("age"), int):
+            found.append((who, entry["age"], turns))
+        for age in entry.get("ages") or []:
+            if isinstance(age, int):
+                found.append((who, age, turns))
+    return found
+
+
+def _the_place_word_filed(memory, low):
+    """How old the child at the end of the family the ask names is, or "" when that end is empty.
+
+    A child named by their place is the same child however the place is said: "the little one",
+    "the baby" and "the youngest" are one end of the family, "the eldest" and "the oldest" the
+    other. Asked in a word the store has nothing filed under, the answer used to be a shrug - and
+    usually advice about the world, which is a confident answer to a question nobody asked - about
+    a child the chat had been told an age for one line before. So the end the ask names is read
+    against every age on file for a child of theirs, and the youngest or the eldest of them is the
+    answer. With no age at that end, the honest line is that the chat was never told.
+    """
+    end, word = _the_place_end(low)
+    if not end:
+        return ""
+    if not word:
+        return ""
+    ages = _the_child_ages_on_file(memory)
+    if not ages:
+        return ""
+    ages.sort(key=lambda one: one[1])
+    who, age, turns = ages[0] if end == "young" else ages[-1]
+    if age in [one[1] for one in ages[:-1] if end == "old"]:
+        return ""
+    return _one_age(word, age, turns)
+
+
 PET_ASK = re.compile(r"\b(?:my|our|the)\s+(" + PET_WORDS + r")s?\b", re.I)
 
 
@@ -1550,6 +1733,29 @@ def _pet_ages(memory):
     """The animals the store holds an age for."""
     return [pet for pet in (user(memory).get("pets") or [])
             if isinstance(pet, dict) and isinstance(pet.get("age"), int)]
+
+
+def the_pronoun_said_with_a_name(memory, age):
+    """The age a pronoun answer is about, said with the animal's name, or None.
+
+    A pronoun is never a name. "we rehomed a greyhound in march" / "shes two" / "what age is she
+    again" was answered "She is 2.", which would fit any animal in any chat and gave back only the
+    words the person had just typed. The one rule, for every animal and every way of asking, is:
+    the age the store holds for the animal it has been told about is said with that animal in it
+    ("Your greyhound is 2.").
+
+    The name has to be earned, not guessed. A pronoun in a chat with two animals is the reason the
+    guess goes wrong - a rabbit's "hes one" answered "Max is 4." - so the animal is only named when
+    the age about to be said is the age the store filed for it, and for exactly one animal. When
+    nothing matches, there is no name to give and the pronoun path keeps the line it had, because
+    a pronoun is the right answer when the chat holds nothing to name.
+    """
+    if not isinstance(age, int):
+        return None
+    aged = [pet for pet in _pet_ages(memory) if pet.get("age") == age]
+    if len(aged) != 1:
+        return None
+    return _pet_ages_sentence([aged[0]])
 
 
 def _pet_age_reply(memory, low):

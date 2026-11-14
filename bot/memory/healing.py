@@ -286,6 +286,11 @@ def vetted(text, memory, reply, step_of=None):
     return vetted_reply
 
 
+# The lead-ins `topics.said_again` puts in front of an answer already on the screen. The card is
+# still the same card behind one of them.
+_REPEAT_LEAD = re.compile(r"^(?:same as before|as i said|same again)\s*[:,]?\s*", re.I)
+
+
 def _the_same_as_the_card(said, card):
     """Whether the reply is the card the person already has, said again.
 
@@ -298,7 +303,12 @@ def _the_same_as_the_card(said, card):
     card = str(card or "").strip().lower()
     if len(said) < 20 or len(card) < 40:
         return False
-    return said[:40] in card or card[:40] in said
+    # The whole of one is the whole of the other, possibly behind a repeat frame ("Same as
+    # before: Most shoulder pain...") or cut to the part the line asks for ("...a few times a
+    # day", the rest of the card still above it). A new card that quotes a sentence of the old one
+    # it replaces is neither, and keeps the timeline it was just given.
+    body = _REPEAT_LEAD.sub("", said)
+    return body in card or card in body
 
 
 def _the_healing_line(said, timeline, card, memory, step=""):

@@ -10,7 +10,7 @@ step.
 import re
 
 from ..understanding.topics import the_bin_is_on_a_machine
-from .lookup import entry
+from .lookup import entry, not_a_sleepy_body
 
 ANSWERS = ("technology",)
 
@@ -42,6 +42,14 @@ _A_DAMAGE_IN_THE_LINE = re.compile(
 _A_PHONE_WORD = re.compile(
     r"\b(?:phone|phones|iphone|iphones|mobile|mobiles|handset|smartphone|android|screen|"
     r"screens|display|protector)\b", re.I)
+# What people call a handset, in one place. A row about a phone fault has to know a brand as
+# well as the word "phone": "my samsung wont turn on" and "how can i restart my pixel" reached
+# nothing at all, and every one of those lines is the same question. Kept to the makes sold in
+# numbers here, because a key word is only worth having if people type it.
+PHONE_KINDS = ("phone", "iphone", "android", "handset", "smartphone", "mobile",
+               "samsung", "galaxy", "pixel", "huawei", "xiaomi", "redmi", "nokia",
+               "motorola", "oneplus", "oppo")
+
 _GLASS_IN_SOMETHING_ELSE = re.compile(
     r"\b(?:window|windows|pane|panes|oven|oven door|mirror|mirrors|windscreen|windshield|"
     r"car|fridge|freezer|table|tables|shelf|shelves|bottle|jar|vase|picture frame|shower|"
@@ -56,6 +64,18 @@ def _the_line(understood):
     if not said:
         said = " ".join(str(one) for one in understood.get("words") or ())
     return " ".join(str(said).lower().split())
+
+
+def _not_a_charging_ask(understood):
+    """A laptop on the charger is the charging row's question, not the sleep choice.
+
+    `sleep-or-shutdown` keys laptop and overnight, so "is it safe to leave my laptop charging
+    overnight" was told when to shut the machine down before the laptop's own row could answer.
+    """
+    said = _the_line(understood)
+    if "charg" not in said:
+        return True
+    return not re.search(r"\b(?:laptop|macbook|notebook)\b", said)
 
 
 _A_SCRATCH_IN_THE_LINE = re.compile(
@@ -101,6 +121,26 @@ def _platform_named(reading):
     if PLATFORM_WINDOWS.search(said):
         return "windows"
     return ""
+
+
+# A part of a computer is the computer's part. The fan and the hard drive are the two things in a
+# laptop that make a noise, so this row's subject names them - and a bare "fan" is the room fan, a
+# desk fan, the one over the hob. "my fan clicks" was answered here with "back the files up first"
+# and "stop using it", which is alarming advice about a house fan, and the room fans the row's
+# avoid list names ("desk fan", "room fan", "ceiling fan") are only the forms people type in full.
+# So the fan is read as this row's only when the line names a computer as well.
+COMPUTER_WORDS = re.compile(r"\b(?:laptop|laptops|computer|computers|pc|pcs|macbook|mac book|"
+                            r"macbooks|desktop|desktops|hard drive|hard disk|workstation)\b", re.I)
+FAN_WORDS = re.compile(r"\b(?:fan|fans)\b", re.I)
+
+
+def _a_fan_is_the_computers(reading):
+    """True when a fan the line names is a computer's, the only fan this row can answer for."""
+    said = (reading or {}).get("text") or (reading or {}).get("clean") or ""
+    said = " ".join(str(said).lower().split())
+    if not FAN_WORDS.search(said):
+        return True
+    return bool(COMPUTER_WORDS.search(said))
 
 
 def _mac_first(mac_steps, windows_steps, reading):
@@ -457,6 +497,25 @@ def _router_place(memory, understood):
         return ("Yes, if it is in a cupboard, behind the TV, on the floor or at the far end of "
                 "the flat, and it is worth the five minutes. " + _ROUTER_WHERE)
     return _ROUTER_WHERE
+
+
+# A "booster" is a jab far more often than it is a wifi part: with "get" in the row's ask group
+# it took "should i get a covid booster", and with no wifi word in it a bare "would a booster
+# help" means the repeater only because the line before was about the wifi. So the row reads the
+# line, then the line it follows, for the thing it is about.
+_WIFI_WORD = re.compile(
+    r"\b(wifi|wi fi|wireless|router|broadband|internet|signal|reception|coverage|network|"
+    r"mesh|extender|repeater|hotspot|ethernet|dead spot|stream)\w*")
+
+
+def _wifi_is_what_it_is_about(understood):
+    """A wifi part has a wifi word in the line, or in the line it follows."""
+    line = " ".join(str(word) for word in ((understood or {}).get("words") or ()))
+    if _WIFI_WORD.search(line):
+        return True
+    lean = (understood or {}).get("leans_on") or {}
+    return bool(_WIFI_WORD.search(" ".join(str(word) for word in lean.get("words") or ())))
+
 
 
 def _wifi_password_reply(memory, understood):
@@ -880,6 +939,35 @@ _PREVENTION = re.compile(r"\b(protect|protecting|protection|prevent|preventing|g
                          r"shatterproof|saver)\b|\b(stop|keep|prevent)\b[^.]{0,30}\bcrack")
 
 
+# The case is the one part of a phone that costs a few pounds and breaks instead of the glass, so
+# a break in the case is not a break in the phone: "the case on my phone is cracked" was told to
+# put a protector on the crack, and "my phone case is cracked" got a small-talk nod. The phone
+# words are already this row's subject, so a case is only read here when it is named.
+_THE_PHONE_CASE = re.compile(
+    r"\b(?:case|cases|cover|covers|bumper|pouch|sleeve|wallet case|flip case|folio|"
+    r"phone skin|casing)\b", re.I)
+
+
+# "how long does a renewal take" is a duration, and the only renewal this row knows is a
+# subscription, which has no processing time. The passport, licence and insurance renewal rows
+# answer the duration; this row answers the cancelling, so it stands down on a duration ask that
+# has nothing to cancel in it.
+_A_DURATION_ASK = re.compile(
+    r"\bhow long\b|\bhow many (?:days|weeks|months)\b|\bhow quickly\b|\bhow fast\b|"
+    r"\bwhat date\b|\bwhen does\b", re.I)
+_SOMETHING_TO_CANCEL = re.compile(
+    r"\b(?:cancel|cancelling|canceling|cancelled|canceled|stop|stopping|get rid|refund|"
+    r"charged|charge|trial|paying|paid)\b", re.I)
+
+
+def _a_renewal_that_takes_time(reading):
+    """False when the line asks how long a renewal takes and names nothing to cancel."""
+    said = " " + str((reading or {}).get("clean") or (reading or {}).get("text") or "").lower() + " "
+    if _A_DURATION_ASK.search(said) and not _SOMETHING_TO_CANCEL.search(said):
+        return False
+    return True
+
+
 def _the_phone_screen(memory, reading):
     """A phone screen: one that is already cracked, or one the person wants kept whole.
 
@@ -889,6 +977,16 @@ def _the_phone_screen(memory, reading):
     and the same few pounds, so it is one row, and the line says which half of it is being asked.
     """
     said = " " + str((reading or {}).get("clean") or "").lower() + " "
+    # A break in the case, not in the glass: take it off and look at the phone under it, then
+    # replace the case, which is the cheap part. Nothing here says the screen is cracked.
+    if _THE_PHONE_CASE.search(said) and _A_BREAK_IN_THE_LINE.search(said):
+        return ("A cracked case is the cheap part going first, which is what it is for: take it "
+                "off and look at the corners and the screen under it, because a case that took a "
+                "fall is telling you the phone landed on its edge. Replace it - £8 to £25 buys "
+                "one with a raised lip round the screen and a rigid back, and a soft silicone "
+                "one cushions a drop better than a hard shell. If the phone itself is bent, or "
+                "the screen has a mark that was not there before, get it looked at before the "
+                "crack in the case hides something worse.")
     if not _PREVENTION.search(said):
         return ("Put a screen protector and a case on it now, so the crack does not spread or cut "
                 "your finger, and back the phone up before you book a repair. A local repair shop "
@@ -957,7 +1055,14 @@ PAID_SERVICES = ("amazon", "paypal", "ebay", "netflix", "spotify",
                  "amazon prime", "prime video", "prime membership", "disney+", "disney plus",
                  "now tv", "apple music", "apple tv", "youtube premium", "audible",
                  "kindle unlimited", "icloud", "google one", "dropbox", "adobe",
-                 "microsoft 365", "office 365")
+                 "microsoft 365", "office 365",
+                 # Software sold by the year is the same shape: "should i pay for antivirus"
+                 # reached three rungs of credit and a personal loan on the words "pay for", and
+                 # the answer is that Windows and Android ship with it. The names sit here so the
+                 # cancel row gets them too ("how do i cancel my norton").
+                 "antivirus", "anti virus", "anti-virus", "virus protection", "security software",
+                 "virus checker", "norton", "mcafee", "malwarebytes", "nordvpn", "expressvpn",
+                 "1password", "lastpass")
 
 # A filter is in a washing machine, a dishwasher, a tumble dryer and an extractor hood as well as
 # in a vacuum, and the follow-up that names one says only "filter": "my washing machine smells" /
@@ -1082,12 +1187,21 @@ _A_HARD_DISK = re.compile(r"\b(?:hard drive|hard disk|hard disc|external drive|e
                           r"hard|ssd|drive|disk)\b", re.I)
 _FORMAT_ASKS = ("format", "formats", "formatting", "reformat", "wipe", "wiping", "wiped",
                 "erase", "erasing", "erased")
+# The formatting has already happened and it was not what the person wanted: the question left is
+# the files, so this row says nothing and the recovery row a little further down takes the turn.
+# A line asking how to format, or whether a format is safe, has no such word and keeps this answer.
+_FORMATTED_BY_MISTAKE = re.compile(
+    r"\b(?:by mistake|by accident|accidentally|oops|wrongly|shouldn'?t have|shouldnt have|"
+    r"didn'?t mean to|didnt mean to|meant to (?:keep|save)|lost (?:all )?(?:my )?(?:photos|files|"
+    r"pictures|data)|every photo)", re.I)
 
 
 def _format_a_drive(memory, understood):
     """A stick or card wants exFAT; a disk being sold wants the files over-written, not just
     the index taken out. A whole machine wiped clean is the factory-reset row's question."""
     clean = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if _FORMATTED_BY_MISTAKE.search(clean):
+        return ""
     if not _A_STICK_OR_CARD.search(clean) and _A_HARD_DISK.search(clean):
         return ("Back everything up first, because a format wipes the disk: then on Windows "
                 "right-click the drive in File Explorer and choose Format (NTFS unless it is "
@@ -1119,6 +1233,63 @@ def _the_bin_is_the_one_on_the_computer(understood):
     return the_bin_is_on_a_machine(understood)
 
 
+
+
+# One word, three things a "bar" can be: a pressure on a gauge, the signal on a phone, or the bar
+# you hold on a bicycle. A row may claim it only when the line says which, so this is the signal's
+# side of that test - the words that say a phone, or the count that only a signal is said in.
+_A_SIGNAL_WORDS = frozenset(("signal", "signals", "reception", "coverage", "network", "phone",
+                             "phones", "mobile", "sim", "4g", "5g", "data", "call", "calls"))
+_A_COUNTED_BAR = re.compile(r"\b(?:one|two|no|zero|single|any)\s+bars?\b")
+
+
+def _a_signal_reading(understood):
+    """False for a bare "bar" that is not a phone signal."""
+    reading = understood or {}
+    text = str(reading.get("clean") or reading.get("text") or "").lower()
+    words = set(str(one).lower() for one in (reading.get("words") or ()))
+    if words & _A_SIGNAL_WORDS:
+        return True
+    return _A_COUNTED_BAR.search(text) is not None
+
+
+# A file deleted by mistake has two answers, and which one the person gets depends on where the
+# file lived. In a folder there is a bin and a version history behind it; on a stick, a card or an
+# external drive there is neither, and every write to the drive covers the space the file was in -
+# so the answer there is to stop writing to it and let a tool read it.
+NOWHERE_TO_KEEP_STILL = re.compile(
+    r"\b(?:usb|usb stick|usb drive|memory stick|flash drive|pen drive|stick|sd card|memory card|"
+    r"micro sd|external drive|external hard|hard drive|hard disk|disk|disc|drive|card)\b", re.I)
+IN_A_FOLDER = re.compile(r"\b(?:word|excel|doc|docx|spreadsheet|essay|report|homework|"
+                         r"presentation|powerpoint|folder|onedrive|google drive|dropbox)\b", re.I)
+
+RECOVER_IN_A_BIN = (
+    "Check the Recycle Bin on Windows or the Bin on a Mac first, and in Word or Excel open "
+    "File > Info > Manage Document > Recover Unsaved Documents, which holds copies for a few "
+    "days even when you never saved. If the file lived in OneDrive or Google Drive, right-"
+    "click it and open Version history, or look in the drive's own bin: both keep deleted "
+    "files for 30 days.")
+
+RECOVER_ON_A_DRIVE = (
+    "Stop using the {thing} now, and do not save anything else to it: a deleted file is still "
+    "there under the space a new one would take, and every file you add can cover it. Plug it into "
+    "a computer and run a recovery tool that only reads the {thing} - Recuva on Windows, or "
+    "PhotoRec on any system, both free - and run the deep scan, because a quick one misses the "
+    "older files. If it was pulled out without ejecting, the files may be there and the index "
+    "damaged, so run the computer's own check (chkdsk on Windows, First Aid on a Mac) before you "
+    "give up: that fixes the view of the file, not the file itself.")
+A_CARD = re.compile(r"\b(?:sd card|memory card|micro sd|card|cards)\b", re.I)
+A_DRIVE = re.compile(r"\b(?:external drive|external hard|hard drive|hard disk|disk|disc|drive)\b",
+                     re.I)
+
+
+def _recover_deleted(memory, understood):
+    """The bin and the version history, or - on a stick or a card - stop writing to the drive."""
+    clean = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if NOWHERE_TO_KEEP_STILL.search(clean) and not IN_A_FOLDER.search(clean):
+        thing = "card" if A_CARD.search(clean) else "drive" if A_DRIVE.search(clean) else "stick"
+        return RECOVER_ON_A_DRIVE.format(thing=thing)
+    return RECOVER_IN_A_BIN
 ENTRIES = [
     # --- letters that are not on the key -------------------------------------
     # "how do i type an accent" had no answer at all, and "accents on a laptop keyboard" got
@@ -1184,6 +1355,15 @@ ENTRIES = [
                  "bicycles", "motorbike", "motorcycle", "scooter", "moped", "e-bike", "ebike",
                  "call", "calls", "signal", "wifi", "wi-fi", "network", "screen", "cracked",
                  "storage", "space", "photos", "cost", "price", "repair", "hot", "heat",
+                 # A price asked about a drain is not a phone running flat: "how much does a
+                 # drain company charge" has "charge" and "drain" in it and was answered with
+                 # "Check Settings > Battery for the app using the most".
+                 "how much", "quote", "quotes", "callout", "call out", "what does", "what do",
+                 # a drain under the house is a plumber's question, and the company that clears it
+                 # is too: "what does a drain company charge" was answered with "Check Settings >
+                 # Battery for the app using the most".
+                 "company", "companies", "unblock", "blocked", "blockage", "pipe", "pipes",
+                 "sewer", "plumber", "plumbing", "downpipe", "gully", "manhole",
                  # a watch battery that dies is a coin cell in the watch-battery row, not an app
                  # in the background: "the battery in my watch keeps dying" got "Check Settings >
                  # Battery for the app using the most".
@@ -1202,6 +1382,11 @@ ENTRIES = [
                  # the drain: "should i charge my phone overnight" has no drain word in it
                  "should i charge", "can i charge", "should i leave", "can i leave",
                  "is it bad", "is it ok", "is it okay", "ok to charge", "okay to charge",
+                 # a safety ask about the habit is the habit row, not the drain tips
+                 "is it safe", "safe to leave", "safe to charge", "safe to keep",
+                 "fine to leave", "ok to leave",
+                 "is charging overnight bad", "charging overnight bad",
+                 "is overnight charging bad", "is charging all night bad",
                  "is that ok", "is that okay", "is this ok", "is this okay",
                  # a phone that was left on all night and is flat now wants the flat-phone card,
                  # not the drain advice: it is the state now, not the habit
@@ -1233,14 +1418,23 @@ ENTRIES = [
           # the figure is on a laptop: "my laptop battery drains fast, how do i keep it healthy"
           # was answered with the iPhone and Android buttons.
           avoid=("laptop", "macbook", "mac book", "notebook", "chromebook", "computer",
-                 "desktop", "pc")),
+                 "desktop", "pc",
+                 # a car battery is not a phone's: "keep a car battery healthy" was answered
+                 # with the iPhone's Battery Health screen. cars.py has the 12V answer.
+                 "car", "cars", "van", "vehicle", "engine", "under the bonnet", "jump start",
+                 "jump leads", "starter motor", "alternator", "12v", "diesel", "petrol")),
     # The count is its own question: "how many charging cycles does a phone battery have" was
     # reaching the e-bike battery, which has nothing to say about a phone and gave the turn up.
     entry("phone-battery-cycles",
           (("battery", "phone", "iphone", "android", "handset", "tablet", "charge cycle",
             "charging cycle", "battery cycle"),
            ("charging cycle", "charging cycles", "charge cycle", "charge cycles", "cycles",
-            "cycle count", "how many cycles", "cycle")),
+            "cycle count", "how many cycles", "cycle",
+            # "charges" is the same count in the words people use, and the bare plural is not a
+            # key: it met "how long does a phone take to charge" and gave the count where the
+            # charging-time row belongs. The ask shapes carry the count on their own.
+            "how many charges", "how many charges does", "number of charges",
+            "how many times")),
           "A charge cycle is a whole 0 to 100% of use rather than one plug-in, so two top-ups "
           "from 50% add up to one, and a phone battery is rated for about 500 of them before it "
           "falls to 80% of its original capacity - roughly two years of charging once a day. "
@@ -1334,7 +1528,13 @@ ENTRIES = [
           bias=1,
           # a battery that loses its charge is never asking about the habit
           avoid=("loses charge", "losing charge", "drops charge", "dropping charge",
-                 "keeps losing", "hold charge", "holds charge")),
+                 "keeps losing", "hold charge", "holds charge",
+                 # the row's answer is about a phone, and its keys are "overnight" and
+                 # "charge": a laptop on the mains was told "Leaving a modern phone on the
+                 # charger overnight is fine". The laptop's own row has that answer. A tablet is
+                 # named here neither: there is no tablet row for the overnight ask, and standing
+                 # this row down for "tablet" left the medicine card as the only tablet answer.
+                 "laptop", "macbook", "notebook")),
     entry("phone-hot", (("phone", "iphone", "android", "handset"), ("hot", "overheating",
                                                                    "overheat", "warm", "heat",
                                                                    "boiling")),
@@ -1754,7 +1954,11 @@ ENTRIES = [
           "breaks: try the charger in another socket and check the light on the brick comes on. If "
           "the laptop only runs when plugged in, the battery has failed; a new one is £40 to £80 and "
           "a shop fits it in an hour.",
-          avoid=("slow", "hot", "overheating", "battery health", "buy", "worth", "repair")),
+          avoid=("slow", "hot", "overheating", "battery health", "buy", "worth", "repair",
+                 # "is it safe to leave my laptop charging overnight" is the habit, not a
+                 # laptop that will not take a charge
+                 "safe to leave", "safe to charge", "leave it charging", "leave it on charge",
+                 "leave my laptop charging", "leave my laptop on charge")),
     entry("phone-wont-turn-on", (("wont turn on", "won't turn on", "wont switch on",
                                   "won't switch on", "wont start", "dead", "black screen",
                                   "screen is black", "screen went black", "screen has gone black",
@@ -1788,8 +1992,25 @@ ENTRIES = [
                                   "phone has died on me", "handset has died", "handset died",
                                   "it has died", "it died on me",
                                   "screen is blank", "screen has gone blank", "screen is frozen",
-                                  "screen has frozen", "frozen screen"),
-                                 ("phone", "iphone", "android", "screen", "handset")),
+                                  "screen has frozen", "frozen screen",
+                                  # A phone that is on but has stopped answering gets the same
+                                  # power-button sequence, and this row's answer is the one written
+                                  # for a handset - the no-power card next door talks about a
+                                  # laptop's charger and power board.
+                                  "frozen", "has frozen", "froze", "is frozen", "locked up",
+                                  "unresponsive", "not responding", "stopped responding",
+                                  "nothing works",
+                                  # A restart asked for, in any wording at all. "how do i
+                                  # restart my phone", "restarting my iphone", "i need to reboot my
+                                  # phone" and "does a restart fix it" had no answer, because the
+                                  # device rows below only knew the words for a dead handset. The
+                                  # second group of this key still needs a phone word, so the
+                                  # general verb can live here; the phone that restarts on its own
+                                  # is the switching-off row's, and the avoid list below holds that
+                                  # reading off.
+                                  "restart", "restarts", "restarting", "reboot", "reboots",
+                                  "rebooting", "soft reset", "a restart"),
+                                 PHONE_KINDS + ("screen",)),
           "Charge it for half an hour on a cable you know works, then hold the power button for ten "
           "seconds: on an iPhone, press volume up, volume down, then hold the side button until the "
           "Apple logo shows. If nothing happens at all, try a different charger and leave it an hour "
@@ -1819,7 +2040,14 @@ ENTRIES = [
                  "by four", "by noon", "by midday", "by lunchtime", "by the afternoon",
                  "by the morning", "every afternoon", "every day", "each day", "drains",
                  "draining", "runs out", "run out", "doesnt last", "doesn't last",
-                 "lasts all day", "all day")),
+                 "lasts all day", "all day",
+                 # A phone that restarts on its own is a battery or a heat fault, and
+                 # "charge it for half an hour, then hold the power button" is not the answer to
+                 # a handset that is plainly coming on by itself. Those lines are the
+                 # switching-off row's, so the self-restart is fenced here.
+                 "itself", "by itself", "on its own", "randomly", "turns itself off",
+                 "turns itself on", "turned itself off", "switches itself off", "shuts itself",
+                 "keeps turning off", "keeps switching off")),
 
     # --- phone repairs and moving on ----------------------------------------
     # The first group is the thing and the second is what happened to it or what the person is
@@ -1836,6 +2064,11 @@ ENTRIES = [
     # with its fault attached - "phone cracked", "cracked phone" - and a line that names the
     # phone and nothing about its glass stays the question it was.
     entry("phone-cracked-screen", (("screen", "display", "glass",
+                                    # the case is named the way people name it, so a break in
+                                    # it reaches the row that knows it is the cheap part
+                                    "phone case", "phone cases", "mobile case", "phone cover",
+                                    "phone covers", "case on my phone", "case for my phone",
+                                    "bumper case",
                                     "phone screen", "iphone screen", "mobile screen",
                                     "phone glass", "phone cracked", "cracked phone",
                                     "phone smashed", "smashed phone", "phone is cracked",
@@ -2114,7 +2347,16 @@ ENTRIES = [
           # phone that is still in their hand. "can i take my phone in the pool" got that card.
           avoid=("can i take", "can i bring", "can i use", "can i get it wet", "is it safe",
                  "is it ok to", "ok to take", "safe to take", "should i take", "shall i take",
-                 "will it be ok", "will it survive")),
+                 "will it be ok", "will it survive"),
+          # "will it be alright" after "i dropped my phone in the sink" is answered by the card
+          # above, which the person is looking at: every sentence of it has been said. This is
+          # the verdict written as a line of its own for that follow-up, and it is the honest
+          # one - a wet phone that stays off usually comes back, and the data usually survives
+          # even when the phone does not.
+          outcomes=(("survives",
+                     "Usually yes, if it stays off while it dries: most phones that get wet come "
+                     "back once they have had their day and a half in the air, and the photos and "
+                     "messages can be taken off even when the phone will not start."),)),
 
     # Everything else with a battery in it, in the same water: earbuds through the wash, a watch
     # in the sink, a tablet in the bath. The phone and the laptop have their own answers, and
@@ -2158,7 +2400,15 @@ ENTRIES = [
                  "cleaning", "clean it", "wipe", "wiping", "dust", "dusty", "crumb", "crumbs",
                  "sticky", "battery life", "battery drains", "how long does the battery",
                  "strap", "band", "review", "worth it", "should i buy", "which one",
-                 "price", "how much", "instructions", "manual", "connect to wifi")),
+                 "price", "how much", "instructions", "manual", "connect to wifi"),
+          # "will they be alright" after "i washed my airpods" asks about the buds the card above
+          # is drying, and the answer is the card's own last sentence, written for the ask: a
+          # device that stayed off while it dried usually comes back, and the ones that do not
+          # are the ones charged while wet.
+          outcomes=(("survives",
+                     "Usually, yes: an earbud, a watch or a remote that stayed off while it dried "
+                     "for two days works again more often than not, and the ones that never come "
+                     "back are usually the ones that were charged while still damp."),)),
     # --- laptops and computers ----------------------------------------------
     # A machine that turns itself off is nearly always heat; one that keeps asking to restart has
     # an update waiting. "Only when it has been on a while" and "only with teams open" are the
@@ -2291,17 +2541,34 @@ ENTRIES = [
           # "shares" itself cannot be an avoid word: the verb "share" blooms into it, so it
           # would stand this answer down for every line it is for. Held as phrases instead.
           avoid=("screen", "wifi", "wi-fi", "password", "hotspot", "stocks and shares",
-                 "in shares", "buy shares", "sell shares", "investing", "invest in"),
+                 "in shares", "buy shares", "sell shares", "investing", "invest in",
+                 # "how do i let someone see where i am" is sharing a location, and "someone"
+                 # in this row's key caught it: the answer it got was how to share a Drive
+                 # folder. A line about where a person is belongs to the phone rows.
+                 "where i am", "where im", "where i'm", "my location", "live location",
+                 "location sharing", "my whereabouts", "whereabouts", "share my location"),
           ask=("how", "help", "want", "need", "can i", "do i")),
 
-    entry("laptop-not-responding", (("laptop", "computer", "pc", "mac", "macbook"),
-                                    ("not responding", "frozen", "froze", "freezes up", "hangs",
-                                     "hung up", "won't respond", "completely stuck", "cursor",
-                                     "black screen", "locked up")),
+    entry("laptop-not-responding", (("laptop", "computer", "pc", "mac", "macbook",
+                                     # a frozen kindle, tablet or chromebook is the same machine
+                                     # with the same answer: force it off and start it again. The
+                                     # card said "laptop" and so its key only reached laptops, and
+                                     # the no-power card took every other device by default.
+                                     "tablet", "ipad", "kindle", "e reader", "e-reader", "ereader",
+                                     "chromebook", "surface", "desktop"),
+                                    ("not responding", "frozen", "froze", "has frozen",
+                                     "freezes up", "hangs", "hung up", "won't respond",
+                                     "wont respond", "not responding to anything", "completely stuck",
+                                     "cursor", "black screen", "locked up", "unresponsive",
+                                     "nothing works", "stopped responding", "stuck",
+                                     "freezing")),
           "Hold the power button for ten seconds to force it off, wait a few seconds and start it "
           "again; you lose unsaved work but nothing else. If it happens often, check free disk space "
           "and start it without the extras (Safe Mode) to see whether an update or a startup app is "
-          "the cause."),
+          "the cause.",
+          # a phone that has frozen is the phone turn-on row's, which starts with the charge and the
+          # volume-up, volume-down sequence rather than a laptop's power button
+          avoid=("phone", "iphone", "android", "handset", "mobile")),
     entry("laptop-slow", (("laptop", "computer", "pc", "macbook"),
                           ("slow", "sluggish", "laggy", "slow down", "got slow", "getting slow",
                            "faster", "speed up", "speed it up", "quicker", "snappier",
@@ -2750,12 +3017,49 @@ ENTRIES = [
           "whether the problem is the broadband or the wifi. If it is the wifi, move closer, use "
           "5GHz, and check how many devices are streaming; if the cabled speed is also low, it is "
           "your provider and worth a call."),
+    # How fast a connection to buy was a shrug. The answer is a count of screens rather than a
+    # number in the abstract, so the same reply fits "is fibre worth it" and "how fast should my
+    # broadband be". `fibre` also means the stuff in food, so the food lines stand it down.
+    # The id says what the row is for: consumer.py already owns `broadband-speed` for a
+    # line that tests a connection slower than advertised, and two rows with one id is a
+    # duplicate the deck test refuses.
+    entry("broadband-speed-to-buy",
+          # Bare "fibre" is not enough to be the connection: "is fibre worth it" is as likely a
+          # diet question, and a bare key handed a diet reader a card about Mbps. Every entry
+          # below says the connection in the phrase.
+          (("broadband", "full fibre", "fibre broadband", "fiber broadband", "fibre internet",
+            "fiber internet", "fibre line", "fibre connection", "fibre deal", "fibre speeds",
+            "fibre package", "fibre optic broadband", "fttp", "fttc",
+            "internet speed", "connection speed", "bandwidth", "megabits", "mbps", "gigabit",
+            "provider", "isps", "isp"),
+           ("worth", "how fast", "what speed", "how much speed", "how many", "enough", "need",
+            "should i get", "should i buy", "do i need", "better", "faster", "which", "choose",
+            "cheapest", "deal", "switch", "upgrade")),
+          "Count the screens that stream at once: one or two people on HD needs about 40Mbps, a "
+          "house with four people streaming and gaming needs 100-200Mbps, and upload speed matters "
+          "more than download if you are on video calls. Full fibre is worth it when it costs "
+          "roughly what you pay now, because it uploads as fast as it downloads and the line is "
+          # "if nobody works from home" made the next turn a nod: the person's "we both work from
+          # home" looked like a thing already said, and the ack row answered it instead of the
+          # work-from-home card. The words say the same without the phrase.
+          "not shared; a cheaper part-fibre deal is fine if nobody is home all day.",
+          avoid=("eat", "eating", "diet", "dietary", "constipation", "bowel", "digestion",
+                 "digestive", "poo", "stool", "cereal", "beans", "vegetables", "roughage",
+                 "supplement", "ibs", "bloating", "recipe", "cook")),
     entry("wifi-booster", (("booster", "repeater", "extender", "range extender"),
                            ("wifi", "wi fi", "work", "help", "worth", "better", "buy", "get")),
           "A repeater halves the speed it repeats and only helps where the signal is weak but "
           "present, so put it halfway between the router and the dead room, ideally in line of "
           "sight. If the room gets nothing at all, it will repeat nothing, and a mesh system is the "
-          "better buy."),
+          "better buy.",
+          # a booster that is a jab is health, not wifi: "should i get a covid booster" scored on
+          # this row's "booster" and its bare "get", and got the repeater
+          avoid=("covid", "jab", "jabs", "jabbed", "vaccine", "vaccines", "vaccination",
+                 "vaccinations", "immunisation", "immunization", "flu", "tetanus", "shot",
+                 "booster jab", "booster shot", "nhs", "gp", "pharmacy", "immunity"),
+          # ...and a booster named with nothing of the wifi about it, in this line or the one it
+          # follows, is the jab
+          guard=_wifi_is_what_it_is_about),
     entry("wifi-mesh", (("mesh", "mesh system", "mesh network"),
                         ("wifi", "wi fi", "work", "help", "worth", "better", "buy", "get",
                          "house", "home")),
@@ -3461,7 +3765,11 @@ ENTRIES = [
                  "allergies", "hayfever", "hay fever", "pollen", "grief", "bereavement",
                  # A glass eye is a prosthesis, not a screen: that line has its own row.
                  "glass eye", "artificial eye", "false eye", "prosthetic", "prosthetic eye",
-                 "eye socket", "ocularist")),
+                 "eye socket", "ocularist"),
+          # A body short of sleep is not eye strain: "im so tired i cant keep my eyes open" was
+          # told to look 20 feet away every 20 minutes. A screen that tires the eyes still gets
+          # the rule; a person who cannot stay awake does not.
+          guard=not_a_sleepy_body),
     entry("ram-needed", ("ram", ("enough", "much", "need", "how", "8gb", "16gb", "32gb",
                                  "multitasking", "upgrade", "add")),
           ("8GB of RAM is fine for browsing, email and word processing; 16GB is worth it if you "
@@ -3547,7 +3855,7 @@ ENTRIES = [
                  "he checks my phone", "she checks my phone", "he checks his phone",
                  "she checks her phone")),
     entry("laptop-plugged-in", (("laptop", "macbook", "notebook"), ("plugged", "plugged in",
-                                                                   "on charge", "mains",
+                                                                   "on charge", "charging", "mains",
                                                                    "all the time", "overnight",
                                                                    "battery healthy", "battery",
                                                                    # a laptop left running all night
@@ -3829,7 +4137,8 @@ ENTRIES = [
                  # down by the very entry that answers it.
                  "how much", "how many", "a month", "per month", "monthly", "a year",
                  "per year", "cost", "costs", "the price", "price of", "worth it", "cheaper",
-                 "cheapest", "a deal")),
+                 "cheapest", "a deal"),
+          guard=_a_renewal_that_takes_time),
     entry("clear-cache", (("cache", "storage", "space"), ("clear", "empty", "free up", "full",
                                                          "delete", "slow")),
           "Clear the cache rather than the data: on Android it is Settings > Apps > the app > "
@@ -3875,8 +4184,13 @@ ENTRIES = [
                               # "ready" on its own was enough with a child word: "my son cant
                               # wake up to get ready for work" answered with the age a child
                               # should have a phone. "ready for" stays in ask, where it gates.
-                              ("age", "how old", "too young", "safe", "safely", "setup",
-                               "set up", "parental")),
+                              # "set up" is not a key part on its own: with a child word it was
+                              # two parts of three, so "how do i set up a savings account for my
+                              # child" was the age a child should have a phone. Every line that
+                              # needs it also names the phone, which is the second part; the ask
+                              # list below still holds it, so "how do i set up parental controls
+                              # on my son's phone" keeps its gate.
+                              ("age", "how old", "too young", "safe", "safely", "parental")),
           _first_phone,
           # bias=1: the screen-time card in family.py scores the same on "phone" + "year old",
           # and this is the narrower question of the two.
@@ -3985,6 +4299,76 @@ ENTRIES = [
     # What a phone costs is a sum a knowledgeable friend can give: the three bands, and which
     # one is worth the money. The deal rows keep their lines, so "cheapest" and "sim only"
     # stand this one down.
+    # A console for a child is a buying question, and it was answered with what to do after the
+    # console had been bought: "my son wants a games console", "what console should i buy my son"
+    # and "should i get my son an xbox" were the family-settings card, and "is a nintendo switch
+    # good for a 7 year old" was the screen-time limit.
+    entry("which-console-for-a-child",
+          # "console" is in "games console" and "game console", so the plural and the two-word
+          # forms need no listing of their own - and "games machine" was matching "board games
+          # for christmas", which is the board-game card's line.
+          (("console", "xbox", "playstation", "ps5", "ps4",
+            "nintendo", "nintendo switch", "switch oled", "switch lite", "steam deck",
+            "switch"),
+           ("buy", "buying", "get", "getting", "should i", "which", "what", "good for",
+            "worth", "first", "best", "recommend", "better", "wants", "want", "christmas",
+            "birthday", "year old", "year old", "old", "age", "for a", "for my")),
+          "Match it to the age and the room rather than to the adverts. Under about ten, a "
+          "Nintendo Switch is the safe first console: it comes with a game, works handheld or on "
+          "the television, and Nintendo's free parent app sets a daily limit and turns it off at "
+          "bedtime. For a teenager who plays with friends online, an Xbox Series S (about £250) or "
+          "a PS5 is the one to look at, and each needs a paid plan on top - Game Pass Core or PS "
+          "Plus, about £7 to £11 a month - before anyone can play online at all. Whichever you "
+          "pick, set it up as a child account with your email and set the spending limit before "
+          "the first game is opened, because that is what stops the £50 of extras.",
+          bias=3,
+          # the settings and the faults after the console is in the house are other rows, and a
+          # broadband or an energy switch is not a console at all
+          avoid=("parental control", "parental controls", "family settings", "set up", "setting up",
+                 "how do i limit", "screen time", "time limit", "not connecting", "wont connect",
+                 "won't connect", "not working", "wont turn on", "won't turn on", "wifi",
+                 "broadband", "provider", "energy", "tariff", "switch my", "switch to a",
+                 # "switch" is also the verb in every change-your-supplier line: those are
+                 # accounts, banks, heating and networks, never a games console
+                 "switch bank", "switch banks", "switch account", "current account", "bank",
+                 "banks", "network", "sim only", "sim-only", "heating", "boiler", "supplier",
+                 "insurance", "mortgage", "job", "school", "doctor", "dentist", "vet",
+                 "socket", "plug", "light", "lights", "lamp", "engine", "phone", "iphone",
+                 "battery", "settings", "account", "on and off", "off and on"),
+          ),
+    # A phone that still works is not a repair question and not a price question: "is the new
+    # iphone worth it" and "is the iphone 16 worth it" were the repair-or-replace card ("repair it
+    # if the phone is under four years old"), and "should i upgrade to the new iphone", "is it
+    # worth upgrading my phone" and "should i buy the new iphone or wait" were the refurbished-deal
+    # card. All of them ask whether the jump is worth the money, which is a question with an
+    # answer: what the person already has decides it.
+    entry("new-phone-worth-it",
+          # The noun has to be the phone. A bare "upgrade" in this group took "is it worth
+          # upgrading my laptop", "should i upgrade my broadband" and "is it worth upgrading to a
+          # heat pump", every one of which has its own answer.
+          (("iphone", "phone", "smartphone", "handset", "mobile", "android", "galaxy", "pixel",
+            "new phone", "new iphone", "next phone"),
+           ("worth it", "worth", "worth buying", "worth the money", "worth upgrading",
+            "should i upgrade", "should i wait", "wait for", "or wait", "wait another year",
+            "upgrade", "upgrading", "every year", "this year", "next year", "skip",
+            "hold off", "new one", "the new", "latest")),
+          "Three things settle it, and none of them is the model year. If what you have still "
+          "holds a charge to the evening, opens apps without a wait and still gets security "
+          "updates, a new phone buys you a better camera and a nicer screen rather than a faster "
+          "life, so waiting a year costs you nothing. Upgrade when the battery has gone (a service "
+          "is £50 to £90 on most phones), when the updates have stopped, or when the repair costs "
+          "more than the handset is worth. When you do buy, take last year's model outright: it is "
+          "£250 to £400 instead of £800 to £1,200 for the same phone, with three or four years of "
+          "updates still to come.",
+          bias=4,
+          # what the phone costs, where to buy it and what is wrong with it are other rows
+          avoid=("refurbished", "refurb", "second hand", "second-hand", "sim only", "sim-only",
+                 "cheapest", "cheap", "deal", "deals", "how much", "cost", "price", "contract",
+                 "contracts", "tariff", "how do i sell", "sell my", "trade in", "trade-in",
+                 "cracked", "crack", "broken", "not charging", "wont charge", "won't charge",
+                 "battery health", "battery life", "wifi", "virus", "slow", "lost", "stolen",
+                 "insurance", "repair", "replaced the screen", "water", "kid", "kids", "child",
+                 "children", "son", "daughter", "year old", "parental", "screen time")),
     entry("phone-price", (("new phone", "phone", "iphone", "smartphone", "handset", "mobile",
                            "android"),
                           ("how much", "cost", "costs", "price", "prices", "spend",
@@ -4006,9 +4390,18 @@ ENTRIES = [
                  # a phone for a child is the first-phone row's question, at the age they ask
                  "kid", "kids", "child", "children", "son", "daughter", "teenager", "teen",
                  "year old", "school", "parental", "screen time")),
-    entry("laptop-no-power", (("laptop", "macbook", "notebook", "computer", "tablet", "ipad"),
+    # A machine that has stopped answering wants the same first move whether it will not come on
+    # ("my tablet wont turn on") or has frozen with the power on ("my kindle is frozen") or has to
+    # be restarted on purpose ("how do i restart my laptop"): hold the power button down. The
+    # restart words reach here now, and a kindle and an e-reader are the same machine as a laptop
+    # for this question.
+    entry("laptop-no-power", (("laptop", "macbook", "notebook", "computer", "tablet", "ipad",
+                               "kindle", "e reader", "e-reader", "ereader", "chromebook",
+                               "surface", "desktop", "pc"),
                               ("wont turn on", "won't turn on", "wont start", "won't start",
                                "dead", "no power", "nothing happens", "black screen",
+                               "restart", "restarting", "reboot", "rebooting", "soft reset",
+                               "how do i restart", "how to restart",
                                # "my laptop is broken" is the same question with none of the
                                # symptoms named: a machine that has stopped is worth the reset
                                # before anything else, and the bare fault words reach here now
@@ -4024,11 +4417,18 @@ ENTRIES = [
           # "dead, won't even charge" is a charging fault: leave it to that entry, and a part of
           # the machine that has stopped (a keyboard, a fan, a speaker) is not the whole machine
           # failing to come on
+          # "how often should i restart my computer" is a frequency question and the restart-computer
+          # row answers it; a machine that has power and has stopped answering is the force-off row,
+          # which is device-neutral, and a phone is that phone's own rows.
           avoid=("charge", "charging", "charger", "chargers",
                  "keyboard", "keypad", "touchpad", "trackpad", "mouse", "screen", "display",
                  "battery", "fan", "wifi", "wi fi", "wireless", "speaker", "speakers", "sound",
                  "port", "usb", "hinge", "drive", "storage", "webcam", "camera", "microphone",
-                 "slow", "hot", "overheating", "overheats", "loud")),
+                 "slow", "hot", "overheating", "overheats", "loud",
+                 "how often", "often", "every day", "each day", "regularly", "keeps asking",
+                 "asks me", "asking me", "frozen", "froze", "has frozen", "stuck",
+                 "not responding", "unresponsive", "locked up",
+                 "phone", "iphone", "android", "handset", "mobile")),
     entry("laptop-wifi", (("laptop", "macbook", "notebook", "computer", "pc"),
                           ("wifi", "wi fi", "wireless", "network", "internet")),
           "Turn the laptop's wifi off and on again first (the aeroplane-mode key or the wifi icon), "
@@ -4347,7 +4747,10 @@ ENTRIES = [
           "not. If the keys that fail are a block of them, look for a sticky key or a spill; on a "
           "Mac, check System Settings > Keyboard.",
           bias=1,
-          avoid=("clean", "cleaning", "cleaner", "dust", "dusty", "crumbs", "lint", "sticky")),
+          # a door key is not a keyboard: "how do i get a broken key out of a lock" keys "key"
+          # and "broken" here, and the answer is a USB keyboard
+          avoid=("clean", "cleaning", "cleaner", "dust", "dusty", "crumbs", "lint", "sticky",
+                 "lock", "locks", "door", "barrel", "keyhole", "snapped", "broke off", "keyway")),
     entry("clean-keyboard", (("clean", "cleaning", "dust", "crumbs", "dirty", "sticky"),
                              ("keyboard", "keys", "keycaps")),
           "Shut it down and unplug it, tip it over and shake it gently, then use a soft brush or "
@@ -4453,6 +4856,10 @@ ENTRIES = [
           "Brightness. On a laptop that dims when it comes off the charger, look in Settings > "
           "System > Power & battery for Battery saver.",
           avoid=("night", "evening", "dark mode", "mood", "tv", "projector")),
+    # A bar on a phone is the same word as a bar on a bicycle and a bar on a boiler gauge: it is a
+    # signal only when the line says so ("signal", "reception", "network", "coverage", a phone)
+    # or names a weak one ("one bar", "no bars"). Without that, "flat bars or riser bars on a
+    # hybrid" was told to turn on wifi calling, on "flat" reading as a flat and "bars" as signal.
     entry("mobile-signal-home", (("signal", "reception", "bars", "coverage"),
                                   ("home", "house", "indoors", "inside", "flat", "village",
                                    "at home", "poor", "bad", "weak", "rubbish", "terrible",
@@ -4463,6 +4870,7 @@ ENTRIES = [
           "if you can show the problem. A repeater you buy yourself only helps if there is at least "
           "one bar outdoors.",
           bias=1,
+          guard=_a_signal_reading,
           avoid=("wifi", "wi fi", "router", "broadband", "mesh", "booster", "tv", "radio",
                  "bedroom", "living room", "upstairs", "downstairs")),
     entry("free-up-cloud-storage", (("icloud", "cloud storage", "google one", "cloud"),
@@ -4840,6 +5248,7 @@ ENTRIES = [
           "your open windows and wakes in seconds, and it sips power rather than charging the "
           "battery overnight, while a full shutdown clears the memory and installs the updates it "
           "has queued. Either way a restart once a week is what keeps a machine feeling new.",
+          guard=_not_a_charging_ask,
           bias=1,
           # "how do i stop my laptop going to sleep" is the power setting, not the choice
           # between sleeping and shutting down
@@ -4926,7 +5335,10 @@ ENTRIES = [
           # about the choice between sleeping and shutting down is not about the timer.
           avoid=("wakes", "waking", "woke up", "wake up", "turns itself on", "starts itself",
                  "wont stay asleep", "won't stay asleep", "wakes up", "in the night",
-                 "should i shut down", "shut down or sleep", "sleep or shut down")),
+                 "should i shut down", "shut down or sleep", "sleep or shut down"),
+          # A person falling asleep at the machine is not the machine falling asleep: "im falling
+          # asleep at my laptop" was told to change the sleep timer.
+          guard=not_a_sleepy_body),
     entry("laptop-waking-up", (("wakes", "waking", "woke up", "wake up", "turns itself on",
                                 "starts itself", "wont stay asleep", "won't stay asleep",
                                 "drains", "drain", "goes flat", "loses charge", "losing charge"),
@@ -5067,8 +5479,16 @@ ENTRIES = [
           ask=("turn off", "turning off", "switch off", "switching off", "disable", "stop", "off"),
           avoid=("roaming charges", "flight", "abroad", "hotspot", "tether", "plan")),
     entry("phone-switching-off", (("switch", "switches", "switching", "turns itself off",
-                                   "shutting itself down", "restarting itself", "rebooting"),
-                                  ("phone", "iphone", "android", "handset", "itself", "off")),
+                                   "shutting itself down", "restarting itself",
+                                   # A bare "rebooting" here took every line where someone asked
+                                   # to restart their own phone: "i need to reboot my phone" was
+                                   # answered "a phone that turns itself off is nearly always the
+                                   # battery". The card is about a handset that restarts on its
+                                   # own, so the wording that says so is the key.
+                                   "reboots itself", "rebooting itself", "reboots on its own",
+                                   "rebooting on its own", "restarts on its own",
+                                   "restarts by itself", "restarted itself", "restarting by itself"),
+                                  ("phone",) + PHONE_KINDS + ("itself", "off")),
           "A phone that turns itself off is nearly always the battery: at 20% or 30% it reads the "
           "charge wrong and shuts down, so check Battery Health, and a worn battery is £40 to £70 "
           "to replace. If it does it at full charge, take the case off and see whether it happens "
@@ -5315,15 +5735,28 @@ ENTRIES = [
           bias=1,
           avoid=("clean", "dust", "crumbs", "spill", "coffee", "water", "dead", "not working",
                  "stopped", "remote", "piano", "guitar")),
-    entry("turn-off-location", (("location", "location services", "gps", "location sharing"),
+    # The other half of the same ask: "how do i hide where i am", "who can see my location" and
+    # "how do i stop someone seeing where i am" are all questions about who can see, and they name
+    # the place by "where i am" rather than by "location". Without those words they reached the
+    # search hedge, and one of them reached a row that tells a person how to share it.
+    entry("turn-off-location", (("location", "location services", "gps", "location sharing",
+                                "where i am", "where im", "whereabouts", "seeing where i am",
+                                # "how do i keep my location private" is the same ask as hiding
+                                # it, and no key held the word the line uses for it
+                                "location private", "my location private", "location secret"),
                                 ("turn off", "turning off", "switch off", "disable", "stop",
-                                 "off", "hide")),
+                                 "off", "hide", "private", "keeping it private",
+                                 # "who can see my location" is the same ask from the other
+                                 # end, and it was only a hedge: the list of who can see is on
+                                 # the same screen as the switch that stops it
+                                 "who can see", "who else can see", "who sees")),
           "On an iPhone it is Settings > Privacy and Security > Location Services, where you can "
           "turn the whole thing off or set each app to Never or Ask Next Time; on Android open "
           "Settings > Location > App location permissions and set the ones you do not trust to "
           "Don't allow. Leave maps and Find My on, since they are the two you want when a phone is "
           "lost, and remember a phone still knows roughly where it is from the network.",
-          ask=("turn off", "turning off", "switch off", "disable", "stop", "hide", "off"),
+          ask=("turn off", "turning off", "switch off", "disable", "stop", "hide", "off",
+               "private", "who can see", "who else can see", "who sees"),
           avoid=("find my", "where is my phone", "lost my phone", "parcel", "delivery", "order",
                  "train", "flight", "hotel", "parking", "nearest")),
     entry("monitor-turning-off", (("monitor", "second screen", "external screen", "external display"),
@@ -5408,10 +5841,31 @@ ENTRIES = [
                  "click", "clicks", "clicked", "clicking", "links", "link", "scam", "scams",
                  "scammy", "phishing", "fraud", "fraudulent", "stranger", "strangers",
                  "elderly", "dementia", "vulnerable",
+                 # a card about how many emails there are has nothing to say about how they are
+                 # written: "my boss keeps sending sarky emails, how do i reply" is about the tone,
+                 # and the key holds "keep" and "getting", which that line says too.
+                 "sarky", "sarcastic", "sarcasm", "snarky", "snide", "passive aggressive",
+                 "passive-aggressive", "condescending", "patronising", "patronizing",
+                 "cheeky", "narky", "grumpy", "sneering", "belittling", "undermining",
                  # "my emails have stopped coming through" is mail that is not syncing: the key
                  # holds "keep" and "getting", which that line says too
                  "not syncing", "stopped syncing", "stopped coming", "not coming through",
-                 "not arriving", "not updating", "not receiving", "wont sync", "will not sync")),
+                 "not arriving", "not updating", "not receiving", "wont sync", "will not sync",
+                 # Somebody not answering is the same key as a full inbox - the word for mail
+                 # and the word for frequency - and a card about volume is no help to it: "my
+                 # boss keeps ignoring my emails" was told to unsubscribe from newsletters. The
+                 # silence, not the person, is what stands this card down: "my boss sends me too
+                 # many emails" is still a volume question and carries none of these words.
+                 "ignoring my emails", "ignores my emails", "ignoring me", "ignores me",
+                 "ignored my emails", "ignoring my messages", "ignores my messages",
+                 "not replying", "isnt replying", "isn't replying", "stopped replying",
+                 "never replies", "never replied", "hasnt replied", "hasn't replied",
+                 "wont reply", "won't reply", "wont answer", "won't answer", "not answering",
+                 "never answers", "doesnt answer", "doesn't answer", "no reply", "no response",
+                 "getting no reply", "get no reply", "getting no answer", "heard nothing",
+                 "unanswered", "unresponsive", "ghosted", "ghosting", "wont respond",
+                 "won't respond", "doesnt respond", "doesn't respond", "chasing", "chased",
+                 "chase them", "chase him", "chase her")),
 
     # --- the phone's own settings and the bill behind it ---------------------
     entry("phone-bill-too-high", (("phone bill", "mobile bill", "phone contract", "broadband bill",
@@ -5478,7 +5932,13 @@ ENTRIES = [
                  # word is shared, the thing that is swollen is what tells them apart
                  "door", "doors", "back door", "front door", "shed", "cupboard", "frame",
                  "wood", "wooden", "hinge", "ankle", "knee", "wrist", "joint", "gland",
-                 "glands", "leg", "foot", "face", "eye")),
+                 "glands", "leg", "foot", "face", "eye",
+                 # "how do i expand storage on my laptop" was read as a swollen battery, because
+                 # "expand" is in the key for a battery that has expanded: a machine that needs
+                 # more room is the storage rows' question, and it names storage, not swelling.
+                 "storage", "more storage", "space", "no space", "disk", "hard drive",
+                 "ssd", "sd card", "memory", "ram", "photos", "files", "apps", "backup",
+                 "bigger drive", "external drive")),
     entry("mac-antivirus", (("antivirus", "anti virus", "virus protection", "security software",
                              "malware", "virus scanner", "virus", "viruses"),
                              ("mac", "macbook", "imac", "macos", "mac os", "apple")),
@@ -5487,6 +5947,27 @@ ENTRIES = [
           "is already misbehaving, run the free Malwarebytes scan once and delete it again; the paid "
           "suites mostly slow the Mac down.",
           bias=1),
+    # "what is the best free antivirus" reached the shape-only chooser and got a question back
+    # ("What will you use it for most?") - the one reply that helps nobody who asked for a name.
+    # A virus in Windows, Android or a phone has the same short answer, and it is not on a Mac,
+    # a tomato plant or a person, so those words stand this row down.
+    entry("free-antivirus", (("antivirus", "anti virus", "virus protection", "security software",
+                              "virus checker", "malware", "virus scanner", "virus"),
+                             ("best", "recommended", "recommend", "need", "needed", "free",
+                              "worth it", "worth", "which one", "which", "should i get",
+                              "should i use", "do i need", "pay for", "buy", "good")),
+          ("On Windows you do not need to buy one: Microsoft Defender is built in, free and as "
+           "good as the paid suites, and it updates itself. Phone and tablet: Play Protect on "
+           "Android and an iPhone need nothing else. Add a free Malwarebytes scan only if "
+           "something is already misbehaving. Paid antivirus mostly sells pop-ups and a slower "
+           "machine, so keep it updated, install only from the store, and never ring the "
+           "number in a pop-up saying your PC is infected."),
+          bias=1,
+          avoid=("mac", "macbook", "imac", "macos", "mac os", "apple",
+                 # a virus on a plant or in a person is not software
+                 "tomato", "tomatoes", "plant", "plants", "cucumber", "crop", "crops", "tree",
+                 "garden", "flower", "potato", "stomach", "cold", "flu", "cough", "fever",
+                 "sick", "child", "baby", "dog", "cat")),
     entry("clear-browser-history", (("clear", "delete", "wipe", "erase", "empty", "remove",
                                      "get rid of", "turn off", "stop"),
                                     ("history", "cookies", "cache", "browsing data",
@@ -5546,6 +6027,7 @@ ENTRIES = [
           "files off now and stop using it, because those drives go from clicking to dead with no "
           "warning.",
           bias=1,
+          guard=_a_fan_is_the_computers,
           # "the ceiling fan is noisy" is a house fan, not a laptop: the bare word "noise"
           # already matched here, and the room fans are named so they cannot come back.
           avoid=("kettle", "boiler", "car", "van", "washing machine", "fridge", "dishwasher",
@@ -6248,6 +6730,16 @@ ENTRIES = [
                  "a new card", "new card", "first card", "open an account", "bank account",
                  "stolen", "fraud", "scam", "blocked", "declined", "interest", "overdraft",
                  "balance", "loan", "credit score",
+                 # The kitchen tap is not a way to pay. The row keys "tap" for "my phone wont
+                 # tap", so "the tap is not working" and "the tap doesnt work" were told to check
+                 # the phone's screen and its case. A tap with water in it is the plumber's tap,
+                 # and the phrase is what tells the two apart without taking "tap" out of the key.
+                 # phrases about the fitting, never the bare "tap": "the tap to pay doesnt work"
+                 # is still this row's line, and "the tap is not working" is the plumber's
+                 "kitchen tap", "bathroom tap", "hot tap", "cold tap", "mixer tap",
+                 "tap is", "tap drips", "tap leaks", "tap water", "running tap",
+                 "tap doesnt", "tap doesn't", "tap stopped", "tap wont", "tap won't",
+                 "faucet", "shower", "loo", "toilet", "cistern", "radiator", "sink", "bath",
                  # "should i pay off my credit card or save" was getting the add-to-wallet
                  # answer, because the row keys "pay" and "card" and the question is about the
                  # debt: paying a card off is money.py's `overpay` row
@@ -6411,7 +6903,23 @@ ENTRIES = [
                  # a slider to replace and a zip that will not do up are the fastener too:
                  # "how do i put a new slider on a zip" was answered with how to open a zip file
                  "slider", "zip slider", "new zip", "replace the zip", "replace a zip",
-                 "skirt", "wardrobe", "quilt", "duvet cover", "fly of my jeans"),
+                 "skirt", "wardrobe", "quilt", "duvet cover", "fly of my jeans",
+                 # "how do i unjam my zip" reached this row through `zip` and `how`, and the
+                 # clothing row was not asked, because its fault words are "stuck" and
+                 # "jammed" and the line says neither. A zip that will not move is the
+                 # fastener whatever verb the person chose, so the verbs leave this row.
+                 "unjam", "unjamming", "unstick", "unsticking", "jammed", "jams",
+                 "un-jam",
+                 # a needle is not an archive: "how do i sew a zip in" and "how do i stop a zip
+                 # coming undone" were both answered with how to unpack a .zip file, because a
+                 # bare "how" and a bare "zip" were enough for this row
+                 "sew", "sewing", "sewn", "stitch", "stitching", "unpick", "baste", "tack",
+                 "zip foot", "fabric", "hem", "seam", "needle", "thread", "tailor",
+                 "dressmaking", "coming undone", "comes undone", "keeps coming down",
+                 "slides down", "wont stay up", "won't stay up",
+                 # a zip fly is the trouser opening, not a compressed file: "how do i put a zip
+                 # fly in" got the double-click that unpacks a .zip
+                 "zip fly"),
           bias=1),
     # One entry for opening a zip, one for making one: "how do i zip a folder" was answered with
     # the double-click that unpacks it, which is the other job (bronze-whistle, #2434).
@@ -6732,21 +7240,36 @@ ENTRIES = [
           # a water meter, a meter reading for a bill and a faulty boiler are other questions
           avoid=("water", "parking", "taxi", "reading for", "submit", "boiler", "radiator",
                  "landlord", "council tax", "electric car", "charger")),
-    # A file deleted by mistake is the commonest office scare, and the answer is the bin you forgot
-    # about: the desktop bin, and the version history inside the app itself.
+    # A file deleted by mistake is the commonest office scare, and the answer depends on where it
+    # lived: a file in a folder has the bin and the version history behind it, and a file on a
+    # stick or a card has neither - every write to the drive covers the space the file was in, so
+    # the only answer there is to stop using it and let a recovery tool read the drive. The row is
+    # a callable for that reason: the same scare has two answers, and one paragraph cannot say
+    # both.
     entry("recover-deleted-file",
           (("deleted", "delete", "recover", "get back", "restore", "lost", "gone", "disappeared",
             "by accident", "by mistake"),
            ("document", "documents", "file", "files", "word", "doc", "docx", "spreadsheet",
-            "report", "essay", "homework", "presentation", "folder")),
-          "Check the Recycle Bin on Windows or the Bin on a Mac first, and in Word or Excel open "
-          "File > Info > Manage Document > Recover Unsaved Documents, which holds copies for a few "
-          "days even when you never saved. If the file lived in OneDrive or Google Drive, right-"
-          "click it and open Version history, or look in the drive's own bin: both keep deleted "
-          "files for 30 days.",
+            "report", "essay", "homework", "presentation", "folder",
+            # A stick, a card or an external drive is a file's home too, and the bin paragraph is
+            # wrong for it: "how do i recover deleted files from a usb stick" got the how-to-use-a-
+            # stick card, which says to drag files onto it - writing to the drive, which is the one
+            # thing that loses them for good.
+            "usb", "usb stick", "usb drive", "memory stick", "flash drive", "pen drive",
+            "sd card", "memory card", "card", "external drive", "hard drive", "drive",
+            "downloads", "desktop", "laptop", "computer", "pc")),
+          _recover_deleted,
           # a deleted photo has its own answer, and a phone's storage is not this question either
           avoid=("photos", "photo", "pictures", "videos", "images", "storage", "full", "space",
-                 "iphone", "android", "phone", "contact", "contacts", "message", "messages")),
+                 "iphone", "android", "phone", "contact", "contacts", "message", "messages",
+                 # "my tyre has gone flat" then "how far can i drive on it" is a motoring line:
+                 # the "gone" and the "drive" of the two turns together read as a lost file on a
+                 # disk, and a car's drive is not a disk at all. A car question carries one of
+                 # these words and a file question does not.
+                 "tyre", "tyres", "tire", "tires", "car", "cars", "van", "van", "road", "roads",
+                 "motorway", "mph", "how far", "far can i", "petrol", "diesel", "fuel", "engine",
+                 "brake", "brakes", "wheel", "wheels", "journey", "lane", "overtake",
+                 "parking", "mechanic", "garage", "roundabout", "traffic", "rush hour")),
     # "how do i make a spreadsheet" was the search hedge ("That's beyond what I know well"): the
     # sum row below needs one of add/sum/total/formula in the line, and a person starting from
     # nothing says none of them. This is the first sheet, and its own words are the ones people
@@ -6763,6 +7286,14 @@ ENTRIES = [
           "(View > Freeze) so the headings stay put, and save it with a name you will recognise in "
           "six months.",
           avoid=("bed sheet", "sheets for a bed", "paint", "wallpaper", "duvet",
+                 # A bed sheet is a sheet to a person washing it, and "how do i whiten yellowed
+                 # sheets" was this card's, headings and columns and all: a laundry word in the
+                 # line means the linen is meant, and a spreadsheet is never washed, bleached,
+                 # ironed or dried in a tumble dryer.
+                 "wash", "washing", "washed", "whiten", "whitening", "bleach", "bleaching",
+                 "laundry", "yellowed", "yellow", "yellowing", "grey", "gray", "dingy",
+                 "bedding", "linen", "pillowcase", "pillowcases", "bed sheets", "fitted sheet",
+                 "fitted sheets", "iron", "ironing", "tumble", "tumble dry", "dryer", "soiled",
                  # "how do i start watching formula 1" keys on "formula" and "start", and the
                  # sport is not a spreadsheet.
                  "formula 1", "formula one", "f1", "grand prix", "motor racing", "racing",
@@ -7290,144 +7821,54 @@ ENTRIES = [
           # "my usb stick is full" was answered with "I'm listening - say more if it helps"
           avoid=("charge", "charging", "cable", "charger", "socket", "plug socket", "extension",
                  "hdmi", "monitor", "tv", "television", "car", "radio",
-                 "full", "full up", "no space", "free space", "free up", "space", "delete"),
+                 "full", "full up", "no space", "free space", "free up", "space", "delete",
+                 # A file that has gone from a stick is the recovery question, not the how-to-use-
+                 # a-stick one: this card tells a person to drag files onto the drive, which is
+                 # the one thing that makes a deleted file unrecoverable.
+                 "deleted", "recover", "recovery", "recover deleted", "restore",
+                 "lost", "gone", "disappeared", "by accident", "by mistake", "format",
+                 "formatted", "wiped", "erase", "erased"),
           bias=1),
-    # Six everyday jobs where the person names a machine and a job and main answered another
-    # machine: scanning a letter was an X-ray, a stronger upstairs signal was a workout, a keyboard
-    # that types nothing was a benefits appeal, and a phone used as a TV remote was a work-from-home
-    # plan. Each has a first move of its own, so each is a row, keyed on the job rather than the
-    # wording.
-    entry("phone-as-tv-remote", (("phone as a remote", "phone as a tv remote", "phone is a remote",
-                                  "use my phone as a remote", "use my phone as a tv remote",
-                                  "control my tv", "control the tv", "control my telly",
-                                  "control the telly", "tv remote on my phone", "remote app",
-                                  "remote on my phone", "remote for my tv", "remote for the tv"),
-                                 ("phone", "iphone", "android", "mobile", "tv", "telly",
-                                  "television", "use", "app", "control", "remote")),
-          "Most sets have a free app that turns the phone into the remote: SmartThings for a "
-          "Samsung, LG ThinQ for an LG, the Google TV or Android TV Remote app, Roku for a Roku, and "
-          "the Apple TV Remote in Control Centre for an Apple TV. The phone and the TV have to be on "
-          "the same wifi, and the TV has to be on. A set with no app needs an infrared blaster or a "
-          "universal remote instead.",
-          # "how do i control my tv" is only this answer when the phone is the remote
-          ask=("phone", "iphone", "android", "mobile", "app"),
-          # a key fob, a garage door and a car are other answers, and "remote working" is a job
-          avoid=("car", "key fob", "keyfob", "fob", "garage", "gate", "doorbell", "alarm",
-                 "central locking", "working from home", "work from home", "remote working",
-                 "remote job", "hybrid")),
-    entry("keyboard-not-typing", (("keyboard", "keys", "typing"),
-                                  ("not typing", "stopped typing", "wont type", "will not type",
-                                   "keys not working", "keys dont work", "keys don't work",
-                                   "some keys", "a few keys", "one key", "letters are not",
-                                   "letters not", "types the wrong", "typing the wrong",
-                                   "no letters", "nothing happens when i type", "stopped working",
-                                   "not working", "dead")),
-          "Test it outside the app first: press Windows key + R on Windows, or open Spotlight with "
-          "Cmd + Space on a Mac. If the key does nothing there either it is the keyboard, and the "
-          "usual cause is a stuck key or a spill, so unplug it or turn the laptop off and turn it "
-          "upside down to dry. If the on-screen keyboard works, the built-in one has failed and a "
-          "USB keyboard will do until it is fixed. Also check Filter Keys and Num Lock, which make "
-          "the keyboard look broken.",
-          # a foreign layout, an emoji and a language switch are other rows
-          avoid=("language", "layout", "foreign", "accent", "emoji", "emojis", "caps lock", "case",
-                 "symbol", "symbols", "at sign", "apostrophe", "number sign", "money", "benefit",
-                 "appeal", "letters from", "letter from")),
-    entry("laptop-keeps-sleeping", (("laptop", "computer", "macbook", "mac book", "notebook", "pc",
-                                     "screen"),
-                                    ("going to sleep", "goes to sleep", "keeps going to sleep",
-                                     "keeps sleeping", "sleep too soon", "sleeps when",
-                                     "sleep after", "falls asleep", "screen goes off",
-                                     "screen turns off", "locks itself", "lock itself",
-                                     "locking itself", "stop locking", "stop it sleeping",
-                                     "stay awake", "wont stay on", "turns off the screen")),
-          "It is the power setting, not a fault: on Windows, Settings > System > Power & sleep, set "
-          "Screen to never and Sleep to never while it is plugged in; on a Mac, System Settings > "
-          "Lock Screen > Turn display off on power adapter, set it to never. Windows also has a "
-          "separate setting for the lock screen timeout under Personalisation > Lock screen > Screen "
-          "saver, and a laptop on battery will still sleep by design.",
-          # a bedroom that will not sleep is the sleep answer's, and a screen that will not come on
-          # is the black-screen answer's
-          avoid=("i cant sleep", "cannot sleep", "cant sleep", "insomnia", "bedtime", "tired",
-                 "wake up", "night", "baby", "toddler", "black screen", "blank screen", "wont turn on",
-                 "won't turn on", "no picture", "tv", "telly", "television", "monitor", "phone",
-                 "tablet")),
-    # Main's `wifi-dropping` reaches a far room when the line names the wifi, the router or the
-    # internet, and it keeps "signal" in the other half of its key. So "how do i get a stronger
-    # signal upstairs" names no wifi at all and was left to the workout card, which matched a
-    # bare "stronger" and offered squats. The signal is the wifi's question, so this row is the
-    # same answer for the lines where the wifi is only called the signal, and nothing else.
-    entry("wifi-signal-weak", (("signal", "reception"),
-                               ("wifi", "wi-fi", "wireless", "internet", "broadband", "router",
-                                "upstairs", "downstairs", "garden", "shed", "garage", "loft",
-                                "back bedroom", "spare room", "far room", "whole house", "house",
-                                "home", "stronger", "weak", "weakest", "weak signal", "bad signal",
-                                "poor signal", "extend", "extension", "reach", "booster", "mesh",
-                                "dropping", "drops", "keeps cutting")),
-          "Put the router as high and as central as you can, off the floor and out of a cupboard, "
-          "because a wall and a metre of height cost more signal than any gadget buys back. Then "
-          "take the signal to the far end: a mesh system with two units beats a repeater, which "
-          "halves the speed it repeats, and a pair of powerline adapters with a second wifi point "
-          "is the cheapest fix for a solid old house. Test in the room that is bad, not beside "
-          "the router.",
-          # a phone's own bars are the network's, not the wifi's
-          avoid=("mobile signal", "phone signal", "4g", "5g", "mobile data", "three", "ee",
-                 "vodafone", "o2", "no service", "no signal on my phone")),
-    # Four more lines that reached a shrug on main: a laptop on a projector, earbuds that never
-    # appear, a smart bulb that will not join the wifi, and a console that sounds like a jet.
-    entry("projector-connect", (("projector", "projectors", "beamer", "big screen",
-                                 "projector screen"),
-                                ("connect", "plug", "hdmi", "laptop", "computer", "pc", "how",
-                                 "show", "display", "screen", "cable", "wireless")),
-          "Run the HDMI cable from the laptop to the projector, then pick the right input on the "
-          "projector's own menu. On Windows press Windows key + P and choose Duplicate (same picture "
-          "on both) or Extend (a second desktop); on a Mac, System Settings > Displays > Arrange. If "
-          "the laptop screen goes black instead, press Windows key + P again, because the picture is "
-          "going nowhere.",
-          # a television is cast to or cabled on its own rows, and a cinema trip is a different ask
-          avoid=("tv", "telly", "television", "cinema", "film", "movie", "netflix", "car",
-                 "headlights", "bulb", "lamp")),
-    entry("earbuds-not-showing", (("airpods", "air pods", "earbuds", "ear buds", "wireless earbuds",
-                                   "buds", "wireless headphones", "bluetooth headphones"),
-                                  ("not showing", "not appearing", "wont show", "will not show",
-                                   "not listed", "not found", "cant find", "cannot find",
-                                   "not connecting", "wont connect", "will not connect",
-                                   "not pairing", "wont pair", "not working")),
-          "Put them back in the case with the lid open and hold the button on the back (AirPods) or "
-          "the case (most others) until the light flashes, because they only appear in the Bluetooth "
-          "list while they are in pairing mode. If they are still not there, forget the old entry in "
-          "Bluetooth, then hold the case button for 15 seconds to reset them and pair again. One bud "
-          "that will not charge is usually a dirty contact in the case.",
-          # a cable-and-jack question, a car and a television are other rows
-          avoid=("car", "carplay", "android auto", "stereo", "head unit", "tv", "television",
-                 "telly", "sound bar", "soundbar", "wire", "wire", "3.5mm", "jack", "one ear",
-                 "quiet", "volume")),
-    entry("smart-bulb-wont-connect", (("smart bulb", "smart bulbs", "smart light", "smart lights",
-                                       "smart plug", "hue", "philips hue", "led strip"),
-                                      ("wont connect", "will not connect", "not connecting",
-                                       "cant connect", "cannot connect", "wont pair",
-                                       "not working", "offline", "not responding",
-                                       "set up", "setting up", "wont join", "flashing")),
-          "Almost every smart bulb only joins a 2.4GHz wifi network, so give the phone a 2.4GHz one "
-          "while you set it up, and check the router has not got band steering hiding the two names. "
-          "Then reset the bulb (usually five quick off-and-ons at the switch) until it flashes, and "
-          "add it in its own app before anything else. A bulb that drops off every week is usually "
-          "at the edge of the wifi.",
-          # a bulb that will not light at all is the lighting row's, not a wifi one
-          avoid=("not lighting", "wont light", "will not light", "flickering", "flickers",
-                 "blown", "fuse", "fitting", "ceiling", "socket")),
-    entry("console-noisy", (("playstation", "ps5", "ps4", "xbox", "games console", "console",
-                             "nintendo", "switch"),
-                            ("loud", "noisy", "sounds like a jet", "whirring", "fan", "fans",
-                             "roaring", "overheating", "hot", "spinning")),
-          "It is cooling itself: give it 10cm of clear air on every side, take it out of a closed "
-          "cabinet, and stand it as the maker says (upright or flat, never on carpet). Then clear the "
-          "dust from the vents with a vacuum on low or a can of air, held still so the fan is not "
-          "spun. A console that roars within five minutes of a cold start needs its thermal paste "
-          "renewing, which a repair shop does for about £50.",
-          # a console that will not turn on, or whose controls are someone else's problem, is other
-          # rows, and a laptop fan is the laptop's
-          avoid=("wont turn on", "won't turn on", "no power", "parental", "controls", "account",
-                 "laptop", "pc", "computer", "macbook", "fridge", "boiler", "car")),
+    # "how do i format an sd card" then "will it still work in my camera" was the wind-down card
+    # ("Give the day a hard edge and keep it the same one"), because `camera` sits in
+    # format-a-drive's avoid list and the line had nowhere else to go. It is the second half of
+    # the same job: which file system to pick so the thing the card goes into can still read it.
+    # Keyed on the device and the "will it still work" ask, so the drive or the format can come
+    # from the line above, and fenced off from the cards that only pass through these words - a
+    # SIM that moves to a new phone, a Fire Stick on a TV, a TV licence, a camcorder tape.
+    entry("a-drive-still-works",
+          # three parts, and any two of them are enough: the device the card goes into with the
+          # ask is the follow-up ("will it still work in my camera"), and the card with the ask
+          # is the line that names it ("will my sd card still work in my camera"). The device on
+          # its own machine question is kept out by the words below, not by the key.
+          (("camera", "camcorder", "dashcam", "car stereo", "car radio", "sat nav", "satnav",
+            "drone", "printer", "switch", "nintendo", "playstation", "xbox", "tv", "television",
+            "telly", "phone", "tablet", "ipad", "mp3 player"),
+           ("still work", "still works", "will it work", "work in my", "work on my", "read it",
+            "read them", "recognise it", "recognize it", "be read", "readable", "pick it up"),
+           ("sd card", "memory card", "micro sd", "usb stick", "usb drive", "flash drive",
+            "pen drive", "memory stick", "drive", "card", "stick", "format", "formatted",
+            "formatting", "reformatted")),
+          "Usually yes, and what decides it is the file system rather than the card: FAT32 is the "
+          "safe pick for a camera, a dashcam, a car stereo, a printer or a Nintendo card slot, "
+          "because that is all some of them read; exFAT is fine for a phone, a tablet, a TV or a "
+          "recent camera but not for older kit; NTFS is Windows only and most cameras ignore it. "
+          "A card over 32GB will not offer FAT32 on Windows, which needs its own small tool, so "
+          "exFAT is the easy answer there. Put one photo on it and look at it on the device "
+          "before you trust it with the rest.",
+          avoid=("sim", "sim card", "network", "unlocked", "unlock", "contract", "upgrade",
+                 # a device that will not work is a machine question: a cracked screen, a dead
+                 # battery, no ink, a jam are all in this line's words and none of them is a card
+                 "screen", "cracked", "broken", "crack", "drop", "dropped", "water", "wet",
+                 "ink", "toner", "cartridge", "paper", "jam", "jammed", "app", "apps",
+                 "update", "software", "wifi", "password", "account", "slow", "dead",
+                 "charger", "charging", "cable", "lead", "remote", "aerial", "licence",
+                 "license", "switchover", "fire stick", "fire tv", "chromecast", "roku",
+                 "battery", "tape", "disc", "dvd", "blu ray", "by mistake", "by accident",
+                 "lost", "gone", "deleted", "recover", "corrupt", "corrupted", "not recognised",
+                 "not recognized", "size", "space", "how much", "how do i", "how to", "how can i",
+                 "abroad", "another country", "overseas", "voltage", "plug", "socket", "adaptor"),
+          bias=1),
     entry("email-a-photo", (("email a photo", "email photos", "send a photo in an email",
                              "attach a photo", "send photos by email", "photo too big to email"),
                             ("email", "send", "attach", "photo", "photos", "picture", "pictures",
@@ -7588,7 +8029,14 @@ ENTRIES = [
                  # a wipe-down is `clean-keyboard`'s: "should i clean my keyboard with water" asks
                  # how to get the crumbs out, and a machine with drink in it says spilled or soaked
                  "clean", "cleaning", "clean it", "clean my", "wipe", "wiping", "dust", "dusty",
-                 "crumb", "crumbs", "sticky", "dirty", "grubby")),
+                 "crumb", "crumbs", "sticky", "dirty", "grubby"),
+          # "will it survive" after "my laptop got coffee in it" asks about the machine the card
+          # above is drying. The card's own answer is written for the first line, so the verdict
+          # is written here as the line the follow-up gets.
+          outcomes=(("survives",
+                     "It can go either way: switched off and left alone for two days a laptop "
+                     "often starts again, and if it never does a repair shop can usually still "
+                     "take the files off the drive."),)),
     entry("laptop-slow-start", (("laptop", "laptops", "macbook", "mac book", "computer", "pc",
                                  "desktop", "chromebook"),
                                 ("start", "starts", "starting", "turn on", "turns on", "turning on",
@@ -7681,6 +8129,87 @@ ENTRIES = [
 ]
 
 
+# --- the words a person meets on a box, a settings screen and a scam email ----------------
+# Six words that main answered with a card about something else: "what is a modem" got the
+# router's answer, "what is a cookie" a biscuit recipe, "what is ransomware" the general
+# malware card, and the three security ones a how-to instead of what the thing is.
+_DEFINE = ("what", "whats", "what is", "what's", "mean", "means", "meaning", "define",
+           "definition", "explain", "explanation", "stand for", "stands for", "do i need")
+
+_TECH_WORDS = (
+    (("modem", "modems"),
+     "A modem turns the signal on the line coming into your home - fibre, cable or the phone "
+     "socket - into a network connection, and the router is what shares that connection round the "
+     "house. Most home boxes do both jobs in one, which is why people use the two words for the "
+     "same box; the modem is the half that talks to the street.",
+     # a modem that is not working is the broadband fault's question
+     ("my modem", "not working", "flashing", "red light", "restart", "reset", "replace",
+      "how do i")),
+    (("cookie", "cookies"),
+     "A cookie is a small file a website asks your browser to store: the note that keeps you "
+     "signed in, the contents of your basket, or an ID that follows you between pages. It is not "
+     "a program and it cannot read your files - the worst of them is tracking - and clearing them "
+     "signs you out of most sites.",
+     # the biscuit is the kitchen's, and a consent banner is a how-to
+     ("recipe", "bake", "baking", "biscuit", "dough", "oven", "flour", "butter", "chocolate",
+      "sugar", "bake", "tin", "tray", "my cookies", "accept", "banner", "how do i", "should i",
+      "consent", "gdpr")),
+    (("ransomware",),
+     "Ransomware is a kind of malware that scrambles your files and then sells you the key: a "
+     "message appears, the documents and photos will not open, and it wants money, usually in "
+     "cryptocurrency. The one thing that reliably saves you is a backup you were not connected to "
+     "when it struck, and paying often gets nothing back, so unplug the machine and get help "
+     "before you do anything else.",
+     ("my", "i have", "infected", "hit by", "attack", "attacked", "caught", "paid", "pay",
+      "removal", "remove", "fix", "recover", "how do i", "should i", "protect")),
+    (("phishing", "phishing email", "phishing text", "phishing message"),
+     "Phishing is a fake message dressed up as your bank, a courier or HMRC to get you to log in "
+     "or pay: the link goes to a page that looks right and the details go to the thief. The tell "
+     "is the address it really came from and the urgency, so do not use the link - open the "
+     "company's app or type the address yourself - and report it as phishing.",
+     ("i got", "i clicked", "i have", "my", "what should i do", "how do i", "is this",
+      "was it", "am i")),
+    (("password manager", "password managers"),
+     "A password manager is an app that keeps your passwords encrypted behind one master password "
+     "or your face, and fills them in for you: Bitwarden, 1Password, the one built into Chrome, "
+     "Safari and iCloud. It can invent a long random password for every site, which is the point - "
+     "you only ever remember the one that opens the manager.",
+     ("my", "which", "best", "how do i", "should i", "set up", "forgot", "lost", "family",
+      "free", "recommend")),
+    (("cloud storage", "cloud backup", "the cloud"),
+     "Cloud storage is your files kept on someone else's servers and copied to your devices: "
+     "iCloud, Google Drive, OneDrive, Dropbox. It is a copy rather than a backup if it syncs the "
+     "deletion too - keep one copy that is not attached, or the ransomware or the accidental "
+     "delete reaches it as well.",
+     # the cloud as weather, and a specific account's storage full, are other questions
+     ("weather", "sky", "rain", "forecast", "full", "storage full", "upgrade", "plan", "price",
+      "cost", "my", "which", "best", "how do i", "should i")),
+)
+
+TECH_DEFINITION_ASKS = _DEFINE
+
+
+def _tech_word(memory, understood):
+    text = understood.get("clean") or ""
+    words = understood.get("words") or []
+    for keys, reply, avoid in _TECH_WORDS:
+        if not any(key in text or key in words for key in keys):
+            continue
+        if any(word in text or word in words for word in avoid):
+            continue
+        return reply
+    return None
+
+
+ENTRIES.append(entry(
+    "tech-word",
+    (tuple(key for keys, _, _ in _TECH_WORDS for key in keys), TECH_DEFINITION_ASKS),
+    _tech_word,
+    bias=2,
+    avoid=("how do i", "should i", "help me", "what can i do"),
+))
+
+
 # --- how many browser tabs is too many -------------------------------------------------------
 # "how many tabs should i have open" was a search hedge. It is a real question about a real habit,
 # and the answer is not a number from a style guide: each tab costs memory, and what hurts is the
@@ -7768,3 +8297,229 @@ ENTRIES.append(entry(
            "film", "films", "movie", "movies", "cinema", "series", "netflix", "documentary",
            "documentaries", "on tv", "tv series", "box set", "to watch tonight"),
 ))
+
+# A screen is bought, not hung: "what tv should i buy", "which tv should i get", "what size tv
+# for my room" and five ways of asking what monitor to buy were the hanging-a-picture card or a
+# shrug, because a telly is one of that card's subjects and the buying words ("buy", "what size",
+# "which one") are in its ask. The rule is the same for a telly and a monitor: size it to the
+# distance you sit, then spend on the panel. The wall questions keep the fixing card by their own
+# words, so "how high should my monitor be" and "my monitor is too high" stay there.
+ENTRIES.append(entry(
+    "buying-a-screen",
+    (("tv", "telly", "television", "tvs", "televisions", "tv set", "monitor", "monitors"),
+     # the buying or sizing words are the key here rather than the ask, so a telly that will not
+     # switch on and a screen whose height is being set never reach this row
+     ("buy", "buying", "should i buy", "should i get", "which one", "what size", "how big",
+      "how far", "how close", "distance", "worth it", "cheaper", "cheap", "best", "recommend",
+      "replace", "upgrade", "new one", "choose", "working from home",
+      # A screen a person already owns and finds the wrong size is the same question as one
+      # being chosen, and it was not in this key: ``my monitor is too small`` got "Thanks for
+      # telling me", ``my tv is too small`` got "I'm listening", and ``my telly is too small
+      # for the room`` got the storage card ("Go up before you go out: a shelf over the
+      # door"). The key was written in purchase verbs - buy, which one, what size - so the
+      # complaint about the size was no key match at all. These are the size words themselves.
+      "too small", "small", "too big", "bigger", "big", "big enough", "enough", "too far",
+      "far away", "too close", "closer", "inch", "inches", "takes up")),
+    # The size words are words a phone, a garden and a room all use, so they decide nothing on
+    # their own: the key above needs a screen noun as well, which a telly being put somewhere
+    # has and a telly being sized has not. A screen being stored, hidden or hung is the storage
+    # or fixing row's question even with "small" in the line ("how do i store my tv in a small
+    # flat", "how do i hide my tv cables"), and the bias here is above the storage row's so the
+    # sizing answer wins the line when both rows are ticked and neither is avoided: "my telly is
+    # too small for the room" is about the screen, not about the shelf.
+    "Size the screen to the distance you sit, not to the budget: for a 4K set that is about one "
+    "and a half times the diagonal, so 50 inches at roughly 2 metres and 65 at 2.5, and a desk "
+    "monitor sits an arm's length away, which suits 24 to 27 inches. Then spend the money on the "
+    "panel rather than the badge - a mid-range OLED or mini-LED beats the biggest cheap set, and "
+    "a good IPS monitor beats a cheap 4K one. Check the ports you actually need (three HDMI on a "
+    "telly, USB-C and a height-adjustable stand on a monitor), and skip 8K and the shop's "
+    "extended warranty, which a home insurance policy or a credit card often covers already.",
+    bias=3,
+    # a bracket, a wall and a drill are the fixing card's question, a stopped set is repair, and
+    # a screen whose place or settings are being asked about is the posture and settings rows'.
+    # "Best" is in this row's key because "the best tv for the money" is a buying question, and
+    # it is also how a watching question is asked, so the words the programmes card owns stand
+    # this row down: "whats the best tv series on netflix" and "the best thing on telly tonight"
+    # were both being told what size screen to buy. Nothing here may hold one of this row's own
+    # subject words (tv, telly, monitor), or the avoid would take the row's own lines out.
+    avoid=("series", "show", "shows", "film", "films", "movie", "movies", "netflix",
+           "watch", "watching", "tonight", "box set", "documentary", "documentaries",
+           "programme", "programmes", "episode", "episodes", "season", "seasons",
+           "iplayer", "prime video", "disney plus", "whats on", "to watch",
+           "wall", "walls", "bracket", "brackets", "mount", "mounting", "mounted", "hang",
+           "hanging", "drill", "stud", "studs", "plasterboard", "chimney breast", "fixings",
+           "too high", "too low", "how high", "how low", "height", "position",
+           "wont turn on", "won't turn on", "not turning on", "no picture", "screen is black",
+           "flicker", "flickers", "flickering", "fuzzy", "blurry", "cracked", "remote", "aerial",
+           "broke", "broken", "repair", "fault", "faulty",
+           # A telly being put somewhere is the storage row's question, and "small" is in the
+           # line either way: "how do i store my tv in a small flat" was told what size screen
+           # to buy, and "how do i hide my tv cables" reached the sizing card too. The place
+           # words take the row out without touching a screen that is being sized.
+           "store", "storing", "storage", "hide", "hiding", "cables", "cable", "shelf",
+           "shelves"),
+))
+
+
+# --- eight cards that were deleted by mistake ---------------------------------------------
+# `2296cad6` (#13078) rewrote the tail of `ENTRIES` for other work and the last eight entries in
+# it went with that rewrite, so on main `phone-as-tv-remote`, `keyboard-not-typing`,
+# `laptop-keeps-sleeping`, `wifi-signal-weak`, `projector-connect`, `earbuds-not-showing`,
+# `smart-bulb-wont-connect` and `console-noisy` had no card at all: "my games console sounds like
+# a jet" was a nod, "why is my games console so loud" was the search hedge, and a keyboard that
+# types nothing was a shrug. One of them is still named by a row that stayed - `laptop-fan-loud`
+# avoids `console-noisy` for a console's fan - which is the tell that the deletion was not meant.
+#
+# They are restored unchanged rather than reworded, because the fault was the deletion and not
+# the wording. Nothing here was measured against main: a card is one or two chats out of 49,000
+# in a regress sample, so a deletion of this kind does not show up there. The tests name the
+# lines the eight cards exist for.
+
+ENTRIES.append(entry(
+    "phone-as-tv-remote",
+    (("phone as a remote", "phone as a tv remote", "phone is a remote",
+      "use my phone as a remote", "use my phone as a tv remote",
+      "control my tv", "control the tv", "control my telly",
+      "control the telly", "tv remote on my phone", "remote app",
+      "remote on my phone", "remote for my tv", "remote for the tv"),
+     ("phone", "iphone", "android", "mobile", "tv", "telly",
+      "television", "use", "app", "control", "remote")),
+    "Most sets have a free app that turns the phone into the remote: SmartThings for a "
+    "Samsung, LG ThinQ for an LG, the Google TV or Android TV Remote app, Roku for a Roku, and "
+    "the Apple TV Remote in Control Centre for an Apple TV. The phone and the TV have to be on "
+    "the same wifi, and the TV has to be on. A set with no app needs an infrared blaster or a "
+    "universal remote instead.",
+    ask=("phone", "iphone", "android", "mobile", "app"),
+    avoid=("car", "key fob", "keyfob", "fob", "garage", "gate", "doorbell", "alarm",
+     "central locking", "working from home", "work from home", "remote working",
+     "remote job", "hybrid")))
+
+ENTRIES.append(entry(
+    "keyboard-not-typing",
+    (("keyboard", "keys", "typing"),
+     ("not typing", "stopped typing", "wont type", "will not type",
+      "keys not working", "keys dont work", "keys don't work",
+      "some keys", "a few keys", "one key", "letters are not",
+      "letters not", "types the wrong", "typing the wrong",
+      "no letters", "nothing happens when i type", "stopped working",
+      "not working", "dead")),
+    "Test it outside the app first: press Windows key + R on Windows, or open Spotlight with "
+    "Cmd + Space on a Mac. If the key does nothing there either it is the keyboard, and the "
+    "usual cause is a stuck key or a spill, so unplug it or turn the laptop off and turn it "
+    "upside down to dry. If the on-screen keyboard works, the built-in one has failed and a "
+    "USB keyboard will do until it is fixed. Also check Filter Keys and Num Lock, which make "
+    "the keyboard look broken.",
+    avoid=("language", "layout", "foreign", "accent", "emoji", "emojis", "caps lock", "case",
+     "symbol", "symbols", "at sign", "apostrophe", "number sign", "money", "benefit",
+     "appeal", "letters from", "letter from")))
+
+ENTRIES.append(entry(
+    "laptop-keeps-sleeping",
+    (("laptop", "computer", "macbook", "mac book", "notebook", "pc",
+      "screen"),
+     ("going to sleep", "goes to sleep", "keeps going to sleep",
+      "keeps sleeping", "sleep too soon", "sleeps when",
+      "sleep after", "falls asleep", "screen goes off",
+      "screen turns off", "locks itself", "lock itself",
+      "locking itself", "stop locking", "stop it sleeping",
+      "stay awake", "wont stay on", "turns off the screen")),
+    "It is the power setting, not a fault: on Windows, Settings > System > Power & sleep, set "
+    "Screen to never and Sleep to never while it is plugged in; on a Mac, System Settings > "
+    "Lock Screen > Turn display off on power adapter, set it to never. Windows also has a "
+    "separate setting for the lock screen timeout under Personalisation > Lock screen > Screen "
+    "saver, and a laptop on battery will still sleep by design.",
+    avoid=("i cant sleep", "cannot sleep", "cant sleep", "insomnia", "bedtime", "tired",
+     "wake up", "night", "baby", "toddler", "black screen", "blank screen", "wont turn on",
+     "won't turn on", "no picture", "tv", "telly", "television", "monitor", "phone",
+     "tablet"),
+    # "im falling asleep at my laptop" is the person falling asleep, not the machine: this row
+    # answered it with the power setting. `falls asleep` is in its keys because a laptop that
+    # does it is the other fault, so the guard is what tells the two apart.
+    guard=not_a_sleepy_body))
+
+ENTRIES.append(entry(
+    "wifi-signal-weak",
+    (("signal", "reception"),
+     ("wifi", "wi-fi", "wireless", "internet", "broadband", "router",
+      "upstairs", "downstairs", "garden", "shed", "garage", "loft",
+      "back bedroom", "spare room", "far room", "whole house", "house",
+      "home", "stronger", "weak", "weakest", "weak signal", "bad signal",
+      "poor signal", "extend", "extension", "reach", "booster", "mesh",
+      "dropping", "drops", "keeps cutting")),
+    "Put the router as high and as central as you can, off the floor and out of a cupboard, "
+    "because a wall and a metre of height cost more signal than any gadget buys back. Then "
+    "take the signal to the far end: a mesh system with two units beats a repeater, which "
+    "halves the speed it repeats, and a pair of powerline adapters with a second wifi point "
+    "is the cheapest fix for a solid old house. Test in the room that is bad, not beside "
+    "the router.",
+    avoid=("mobile signal", "phone signal", "4g", "5g", "mobile data", "three", "ee",
+     "vodafone", "o2", "no service", "no signal on my phone")))
+
+ENTRIES.append(entry(
+    "projector-connect",
+    (("projector", "projectors", "beamer", "big screen",
+      "projector screen"),
+     ("connect", "plug", "hdmi", "laptop", "computer", "pc", "how",
+      "show", "display", "screen", "cable", "wireless")),
+    "Run the HDMI cable from the laptop to the projector, then pick the right input on the "
+    "projector's own menu. On Windows press Windows key + P and choose Duplicate (same picture "
+    "on both) or Extend (a second desktop); on a Mac, System Settings > Displays > Arrange. If "
+    "the laptop screen goes black instead, press Windows key + P again, because the picture is "
+    "going nowhere.",
+    avoid=("tv", "telly", "television", "cinema", "film", "movie", "netflix", "car",
+     "headlights", "bulb", "lamp")))
+
+ENTRIES.append(entry(
+    "earbuds-not-showing",
+    (("airpods", "air pods", "earbuds", "ear buds", "wireless earbuds",
+      "buds", "wireless headphones", "bluetooth headphones"),
+     ("not showing", "not appearing", "wont show", "will not show",
+      "not listed", "not found", "cant find", "cannot find",
+      "not connecting", "wont connect", "will not connect",
+      "not pairing", "wont pair", "not working")),
+    "Put them back in the case with the lid open and hold the button on the back (AirPods) or "
+    "the case (most others) until the light flashes, because they only appear in the Bluetooth "
+    "list while they are in pairing mode. If they are still not there, forget the old entry in "
+    "Bluetooth, then hold the case button for 15 seconds to reset them and pair again. One bud "
+    "that will not charge is usually a dirty contact in the case.",
+    avoid=("car", "carplay", "android auto", "stereo", "head unit", "tv", "television",
+     "telly", "sound bar", "soundbar", "wire", "wire", "3.5mm", "jack", "one ear",
+     "quiet", "volume")))
+
+ENTRIES.append(entry(
+    "smart-bulb-wont-connect",
+    (("smart bulb", "smart bulbs", "smart light", "smart lights",
+      "smart plug", "hue", "philips hue", "led strip"),
+     ("wont connect", "will not connect", "not connecting",
+      "cant connect", "cannot connect", "wont pair",
+      "not working", "offline", "not responding",
+      "set up", "setting up", "wont join", "flashing",
+      # a bulb that joins and then drops off is the same card, and the reply already answers
+      # the weekly drop-off: "my smart bulbs wont stay connected" was a shrug without these.
+      "stay connected", "keeps dropping", "keep dropping", "keeps disconnecting",
+      "drops out", "drops off", "keeps going offline", "randomly")),
+    "Almost every smart bulb only joins a 2.4GHz wifi network, so give the phone a 2.4GHz one "
+    "while you set it up, and check the router has not got band steering hiding the two names. "
+    "Then reset the bulb (usually five quick off-and-ons at the switch) until it flashes, and "
+    "add it in its own app before anything else. A bulb that drops off every week is usually "
+    "at the edge of the wifi.",
+    avoid=("not lighting", "wont light", "will not light", "flickering", "flickers",
+     "blown", "fuse", "fitting", "ceiling", "socket")))
+
+ENTRIES.append(entry(
+    "console-noisy",
+    (("playstation", "ps5", "ps4", "xbox", "games console", "console",
+      "nintendo", "switch"),
+     ("loud", "noisy", "sounds like a jet", "whirring", "fan", "fans",
+      "roaring", "overheating", "hot", "spinning", "loud fan",
+      # the laptop's fan card has these two, and a console says the same thing: "my playstation
+      # sounds like a plane" was the shrug.
+      "sounds like a plane", "like a plane", "like a plane taking off",
+      "too hot", "gets hot", "getting hot", "hot to touch")),
+    "It is cooling itself: give it 10cm of clear air on every side, take it out of a closed "
+    "cabinet, and stand it as the maker says (upright or flat, never on carpet). Then clear the "
+    "dust from the vents with a vacuum on low or a can of air, held still so the fan is not "
+    "spun. A console that roars within five minutes of a cold start needs its thermal paste "
+    "renewing, which a repair shop does for about £50.",
+    avoid=("wont turn on", "won't turn on", "no power", "parental", "controls", "account",
+     "laptop", "pc", "computer", "macbook", "fridge", "boiler", "car")))

@@ -26,8 +26,18 @@ from . import topics
 from . import quotes as quoted
 
 # The line is this question and nothing else.
-MEAN = re.compile(r"^\s*(?:and\s+|so\s+|but\s+|ok\s+|okay\s+|well\s+|right\s+|sorry\s+|"
-                  r"wait\s+|basically\s+|hmm\s+|um\s+|er\s+|yeah\s+|then\s+)*"
+# People do not type the question bare. They put a word or two in front of it, and often a comma
+# after that word: "sorry, what do you mean", "didnt catch that, what do you mean", "im not sure
+# what you mean". Each of those is the same ask, and each of them was answered with "I'm listening"
+# or with a shrug, because the rule wanted the question from the first character.
+OPENERS = (r"^(?:(?:and|so|but|ok|okay|well|right|sorry|wait|basically|hmm|um|er|uh|ah|oh|yeah|"
+           r"then|no|nope|again|hold\s+on|alright)\b[\s,]+)*"
+           r"(?:(?:i\s*(?:'m|m)\s*)?not\s+sure(?:\s+(?:what|that|if))?[\s,]+|"
+           r"i\s+don(?:'t|t)\s+(?:get|understand|follow)\b[\s,]*(?:it|that|this)?[\s,]*|"
+           r"(?:i\s+)?did(?:n'?t|nt)\s+(?:catch|follow)(?:\s+(?:that|you))?[\s,]+|"
+           r"not\s+following[\s,]+|you\s+lost\s+me[\s,]+)*")
+
+MEAN = re.compile(r"^\s*" + OPENERS +
                   r"(?:"
                   # The helper is the word people leave out when they type quickly, and "what" has
                   # half a dozen spellings: "wot u mean", "wat u mean", "whatcha mean", "whaddya
@@ -56,13 +66,46 @@ MEAN = re.compile(r"^\s*(?:and\s+|so\s+|but\s+|ok\s+|okay\s+|well\s+|right\s+|so
                   # world. It was the search hedge, one word past a form that was read.
                   r"(?:\s+for\s+(?:me|us|him|her|them|my\s+case|my\s+situation|"
                   r"(?:my|our)\s+[\w'\u2019-]+(?:\s+[\w'\u2019-]+)?))?"
+                  # "what does that mean about my phone" is the same question with the thing
+                  # it is asked of in the line: it was beyond the bot's knowledge and got the
+                  # search hedge, though the answer above it was about the phone.
+                  r"(?:\s+about\s+(?:my|our|the|this|that)\s+[\w'\u2019-]+"
+                  r"(?:\s+[\w'\u2019-]+){0,2})?"
                   r"(?:\s+in\s+(?:practice|reality|real\s+terms))?"
                   r"(?:\s+(?:then|though|exactly|precisely))?|"
                   # "meaning what" and "explain what you mean" are the same ask in fewer or
                   # more words, and they were the intake form or the search hedge.
                   r"meaning\s+what|explain\s+(?:what\s+)?(?:you|u)\s+mean|"
-                  r"wdym|mean\s+what\s+exactly"
-                  r")\s*[?.!]*\s*$", re.I)
+                  r"wdym|mean\s+what\s+exactly|"
+                  # "whats the meaning of that" says "meaning" and not "mean", and the one
+                  # word was enough to lose the question: the maths card took it as the mean
+                  # average, and after a battery answer it was a car's red oil light, because
+                  # "mean" is a word in that entry's key. "that means what" is the same ask
+                  # with the words the other way round.
+                  r"(?:what(?:'s|s)?|what\s+is)\s+(?:the\s+)?meaning\s+of\s+(?:that|it|this)|"
+                  r"(?:the\s+)?meaning\s+of\s+(?:that|it|this)|and\s+that\s+means\?|"
+                  r"what\s+is\s+meant\s+by\s+(?:that|it|this)|whats?\s+the\s+meaning|"
+                  r"(?:that|it|this)\s+means\s+what"
+                  r"(?:\s+(?:exactly|then|though|precisely))?|"
+                  # "what you mean" without the helper: "not sure what you mean", "tell me what you
+                  # mean" - the opener in front of it says who is confused, not what about.
+                  r"what\s+(?:you|u|ya)\s+mean|what\s+(?:that|it|this)\s+means?"
+                  r"(?:\s+(?:exactly|then|though|precisely))?"
+                  r")"
+                  # A meaning follow-up with a filler on the end - "what does that mean, then" -
+                  # is the same ask. A yes/no question hung on the end is not: see ASKS_SOMETHING.
+                  r"(?:,\s*(?:then|though|exactly|precisely|really|actually)\b)?"
+                  r"\s*[?.!]*\s*$", re.I)
+
+# The clause after the comma decides whether this is one question or two. "what does that mean,
+# then" is the meaning follow-up with a filler on it. "what does that mean, is she ill" is not:
+# the person is worried about the cat, and the sentence the bot just said is not what they want
+# handed back - they want to know whether the cat is ill, and the yes/no modules answer that. The
+# hand-back read the whole line, so it answered the worry with the opening clause of the allergy
+# card and left the question standing, which is worse than the hedge it replaced.
+ASKS_SOMETHING = re.compile(
+    r",\s*(?:is|are|was|were|am|does|do|did|will|would|can|could|should|shall|has|have)\s+"
+    r"[\w'\u2019-]+(?:\s+[\w'\u2019-]+){0,6}\s*[?.!]*\s*$", re.I)
 
 # The same turn said the other way: they did not follow it, or did not catch it, and want the last
 # thing said again in plainer words. "can you explain that again" was answered with "I don't know
@@ -105,6 +148,14 @@ REPEAT = re.compile(r"^\s*(?:and\s+|so\s+|but\s+|ok\s+|okay\s+|well\s+|right\s+|
                     # read as the repeat, so the whole line missed and got a search hedge.
                     r"sorry\s*,?\s*(?:what|pardon|eh|huh)?\s*\?+|"
                     r"sorry\s*,?\s*(?:what|pardon|eh|huh)\s*[?.!]*|"
+                    # "in english?" is the same lost person: they want the last line put in
+                    # words they can use, and it was the search hedge - as if the bot had said
+                    # nothing to explain. "in plain english", "put it in english" and
+                    # "whats that in english" are the same ask with the courtesy or the pointer
+                    # spelled out.
+                    r"(?:say|explain|put)\s+it\s+in\s+(?:plain\s+)?english(?:\s+please)?|"
+                    r"what(?:'s|s|\s+is)?\s+(?:that|this|it)\s+in\s+(?:plain\s+)?english|"
+                    r"in\s+(?:plain\s+)?english(?:\s+please)?|english\s+please|"
                     r"come\s+again|say\s+what"
                     r")\s*[?.!]*\s*$", re.I)
 
@@ -146,6 +197,80 @@ PERSONAL_LEADS = (
     "For you, that means: {said}",
     "In your case: {said}",
 )
+
+# The same ask said with none of the words the patterns above are built from: "can you put that
+# another way", "in simple terms", "which means what exactly", "break that down", "in what
+# sense", "what does that tell me", "explain like im five". Nobody writes those as a phrase list
+# and nobody should have to: every word in them is either a pointer back at the last line or a
+# word for putting it in other words, and a line made of nothing else cannot be about anything
+# but the last line. So the whole line is read by its words instead of by its shape -
+# everything in it has to be one of these, and it has to hold at least one of the
+# putting-it-plainer words. A line with any other word in it names something (a boiler, a
+# number, a person) and is left to the readings above: "is that real", "are you real" and
+# "what do you say" all miss on purpose.
+FOLLOW_UP_WORDS = frozenset("""what whats which that this it thats those them they
+    mean means meaning meant you u ya your i im sorry ok okay so then and but well just really
+    actually exactly precisely simply plain plainer please can could would will do does did is
+    are was were there here have has had
+    put putting say saying said tell telling explained explaining explain
+    break down again another other way words wording sense terms term practice reality real life
+    english jargon
+    technical simpler simple clearly five like of in on about to for me us him her huh pardon
+    people normal someone folk most""".split())
+PUT_IT_PLAINER = frozenset("""mean means meaning meant explain explained explaining
+    tell telling another sense terms term practice reality english jargon technical plain words
+    plainer simpler simple simply clearly break""".split())
+# A figure in the line is something the person is adding or correcting, not a word for the bot's
+# own words. The reading below keeps only the letters out of the line, so without this
+# "sorry i meant 1.5" was the ask for the last line again - the correction was thrown away and
+# the turn before it handed back: eight lines in the deck correct a figure and not one of them
+# meant "say that again". "explain like im five" does not need the figure: "explain" is the word.
+NOT_LETTERS = re.compile(r"[^a-z'\s]")
+# "tell" only puts the last line another way when the line points at that line first: "what does
+# that tell me" is the ask, and "what do i tell him" and "tell me about it" are about something
+# else - a person to talk to, and an agreement - so the same word is not the same turn.
+TELLS = re.compile(r"\b(?:that|this|it|those|these)\b[^.?!]{0,20}\btell", re.I)
+# A question about the bot itself is not a question about the words it used, however it opens:
+# "i mean what are you exactly" was answered "I said: Nothing to be bored with".
+WHAT_YOU_ARE = re.compile(r"\b(?:what|who)\s+(?:are|r)\s+(?:you|u|ya)\b|\bwhat do you do\b", re.I)
+# A line that ends in one of these is asking what the thing does, how long it takes or what it
+# costs - "is it simple to do" - and that is a question about the thing, not about the words the
+# bot used. The words above cannot tell them apart, so the ending does.
+ASKING_ABOUT_DOING = frozenset("""do does did done work works took take takes costing cost
+    last lasts hurt hurts help helps happen happens matter matters""".split())
+
+
+def _asked_plainly(clean):
+    """True when the whole line is a pointer back at the last line or a word for plainer words.
+
+    Read by the words rather than by the shape: no word in the line can name anything, and at
+    least one of them has to ask for the thing in other words. See `FOLLOW_UP_WORDS`.
+    """
+    said = str(clean or "").lower().replace("\u2019", "'").strip(" ?.!,")
+    if NOT_LETTERS.search(said):
+        return False
+    words = re.findall(r"[a-z']+", said)
+    if not words or len(words) > 9:
+        return False
+    if not set(words) <= FOLLOW_UP_WORDS:
+        return False
+    if not set(words) & PUT_IT_PLAINER:
+        return False
+    if ("tell" in words or "telling" in words) and not TELLS.search(said):
+        return False
+    if WHAT_YOU_ARE.search(said):
+        return False
+    if words[-1] in ASKING_ABOUT_DOING:
+        return False
+    # An ask about how to say something in another language is a different question, and it
+    # always names that language: "how do i say this in french" is not this turn.
+    return True
+# The same ask with the thing it is asked of in the line: "what does that mean about my phone",
+# "what does that mean about the boiler". It is the ask when the thing is what the last turn or
+# two is about, the way "for my pay" is, and a new question when the thing is new - a boiler that
+# nothing has mentioned is a question about boilers, not about the bot's own line.
+ABOUT_MINE = re.compile(r"\babout\s+(?:my|our|the|this|that)\s+"
+                        r"([\w'\u2019-]+(?:\s+[\w'\u2019-]+){0,2})\s*[?.!]*\s*$", re.I)
 # "what does that mean for him" is the same ask about somebody the line already named - a parent
 # asking about their son, or a son about a parent - so the answer is the bot's own sentence as it
 # applies to that person, not "For you", which reads as if the bot had mixed the two of them up.
@@ -597,8 +722,25 @@ def answer_for(text, memory):
     # typed, this reader never saw the question, so a shorthand after a feeling was answered as
     # the reason for it ("Wym - that is the usual one. Is it worse now than it was a month ago?").
     clean = ((memory.get("understood") or {}).get("clean") or text or "").strip()
+    # A slip in the asking is still the asking: "what dos that mean", "what dos that meen" and
+    # "wot do u mean" are the same question as the spelled-out one, and the two patterns below
+    # read the letters as typed. `clean` keeps the slip and the reading's own repair does not
+    # (`understood["plain"]` has "what does that mean"), so a line that misses on `clean` is read
+    # again as the reading repaired it. Without this the slip fell past both readers and reached
+    # the pools under them: after "i have a rash on my arm", `what dos that mean` was answered
+    # "I cannot weigh that one safely, sorry. Ring 111 or your surgery" - a medical hand-off for a
+    # question about the sentence the bot had just said.
+    repaired = ((memory.get("understood") or {}).get("plain") or "").strip()
+    if repaired and repaired != clean and not (MEAN.match(clean) or REPEAT.match(clean)):
+        if MEAN.match(repaired) or REPEAT.match(repaired):
+            clean = repaired
     # Two ways of asking the same thing: what the bot meant, and what it said - "i dont follow"
     # and "can you explain that again" want the line again, in plainer words.
+    # A question hung on the end of a meaning ask is the question: "what does that mean, is she
+    # ill" wants an answer about the cat, not the last sentence again. That turn belongs to the
+    # yes/no reader, so this one passes on it.
+    if MEAN.match(clean) and ASKS_SOMETHING.search(clean):
+        return None
     if MEAN.match(clean):
         leads = LEADS
         what_it_meant = True
@@ -606,7 +748,13 @@ def answer_for(text, memory):
         # the bot just talked about, and a new question when it is not.
         if _their_subject(clean) and not _on_the_table(_their_subject(clean), memory):
             return None
+        about = ABOUT_MINE.search(clean)
+        if about and not _on_the_table(about.group(1), memory):
+            return None
     elif REPEAT.match(clean):
+        leads = REPEAT_LEADS
+        what_it_meant = False
+    elif _asked_plainly(clean):
         leads = REPEAT_LEADS
         what_it_meant = False
     else:
@@ -685,3 +833,13 @@ def answer_for(text, memory):
                            or len(_meant(lines[0][0])) < ANSWERED))):
         return repeat.handed_back(memory, pick(NOTHING_WRITTEN, memory, clean))
     return None
+
+
+def reads_it(text):
+    """Whether the line asks for the last answer again - the one ask that repeats on purpose.
+
+    The hand-back this module writes is the answer just given with a lead in front of it, so the
+    module that owns the turn has to know the repeat was asked for and not a card read out twice.
+    """
+    clean = " ".join(str(text or "").lower().split())
+    return bool(MEAN.match(clean) or REPEAT.match(clean) or _asked_plainly(clean))

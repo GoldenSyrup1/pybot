@@ -76,7 +76,8 @@ from .topics import (KIND_ASK, WHO_SAID, a_detail_of_the_thing_we_hold, about, a
                      return_target, said_again, answer_about, answers_about_another_creature,
                      same_as_before, sized_reply, stem, subject, the_animal_the_subject_is,
                      the_ask_about_the_thing_it_points_at, the_thing_a_detail_belongs_to,
-                     the_thing_it_is, topic_text, written_out)
+                     the_step_back_takes_its_words_back, the_thing_it_is, topic_text,
+                     written_out)
 
 LIST_FACTS = ("places", "allergies", "people", "plans", "condition")
 
@@ -670,8 +671,11 @@ PLAN_VERBS = frozenset("""planning going trying aiming hoping intending looking"
 # ("dentist at 3 on tuesday", "lunch with sam at 1 on friday"). The store keeps those the way
 # they read back, and "You're planning the dentist at 3 on tuesday" says the person is
 # organising one; the appointment itself is "your dentist is at 3 on tuesday".
+# The thing may hold a figure: "party for 8 on saturday" and "tea for 6 on sunday" are a thing of
+# theirs with a count in it, and read as a doing they came back "You're planning to party for 8 on
+# Saturday" - a person setting out to party. A count belongs to the thing.
 APPOINTMENT_PLAN = re.compile(
-    r"^(?:the\s+)?(?P<thing>[a-z][a-z' \-]{1,28}?)\s+(?P<when>at\s+[\w:.]+(?:\s*(?:am|pm))?"
+    r"^(?:the\s+)?(?P<thing>[a-z][a-z0-9' \-]{1,28}?)\s+(?P<when>at\s+[\w:.]+(?:\s*(?:am|pm))?"
     r"(?:\s+on\s+[a-z0-9 \-]+)?|on\s+[a-z0-9 \-]+)$", re.I)
 
 
@@ -835,7 +839,9 @@ def appointment_sentence(text):
     found = APPOINTMENT_PLAN.match(" ".join(str(text or "").split()).strip(" .!?,"))
     if not found:
         return ""
-    thing = found.group("thing").strip()
+    # "sons parents evening" is "son's parents evening": the plan kept the relation without the
+    # "my" that said whose it is, and the "s" on it is still the possessive.
+    thing = _the_possessive_a_relation_means(found.group("thing").strip())
     when = found.group("when").strip()
     if not thing or thing.split()[0].lower() in (
             "i", "im", "i'm", "we", "were", "we're", "my", "our", "to", "it", "its", "he", "she",
@@ -1174,6 +1180,30 @@ def _the_relation_possessive(text):
     return re.sub(r"\b((?:[Mm]y|[Oo]ur)) ([a-z]+s) ([A-Za-z0-9']+)", own, text)
 
 
+def _the_possessive_a_relation_means(phrase):
+    """The possessive a relation means when its determiner is not in the phrase: "sons parents
+    evening" -> "son's parents evening".
+
+    The store keeps a plan as the thing itself, and the "my" that said whose it is stays with
+    the line: "my sons parents evening is on thursday" is kept as "sons parents evening on
+    thursday". Said back whole it is the line that says it ("your son's parents evening is on
+    Thursday"), but a plan said back as a thing of theirs has only its own words to stand on,
+    and "your sons parents evening" reads as a typo.
+
+    The same guards as the determiner's version: a relation the store knows, a thing it could
+    own after it, so "sons are coming" and "sons tonight" keep their plural.
+    """
+    match = re.match(r"([A-Za-z]+s)\s+([A-Za-z0-9']+)", str(phrase or "").strip())
+    if not match:
+        return phrase
+    relation, owned = match.group(1), match.group(2)
+    if relation[:-1].lower() not in facts.RELATIONS or owned.lower() in NOT_OWNED:
+        return phrase
+    if owned.lower() in WHEN_OR_WHERE:
+        return phrase
+    return relation[:-1] + "'s " + phrase.strip()[len(relation):].lstrip()
+
+
 def _with_somebody(text, start):
     """True when the relation is somebody the line says they are with or going to see.
 
@@ -1305,5 +1335,5 @@ __all__ = [
     "remember_answer", "resumed", "return_target", "said", "said_again", "same_as_before",
     "answer_about", "answers_about_another_creature", "the_animal_the_subject_is",
     "sized_reply", "stem", "subject", "the_ask_about_the_thing_it_points_at", "topic_text",
-    "topics", "user", "bare_question", "written_out",
+    "the_step_back_takes_its_words_back", "topics", "user", "bare_question", "written_out",
 ]

@@ -16,10 +16,12 @@ import re
 import string
 
 from . import pets
+from .clothing import not_a_fight_about_clothes
 from ..compose.repair import a_repair_is_open, owns_the_deed
 from .lookup import asks_how_often, entry
+from ..understanding.kinds import a_broken_heart_shape
 from ..understanding.normalize import PERSON_WORDS
-from .wording import TOLD_OFF
+from .wording import TOLD_OFF, screens_are_a_childs
 
 ANSWERS = ("family-and-parenting", "friends-and-relationships")
 
@@ -93,6 +95,46 @@ def _the_child_pronouns(memory, understood):
         if girl and not boy:
             return "she", "her", "hers", "does"
     return "they", "them", "their", "do"
+
+
+# The dummy card is a card about an age, and the age is nearly always in the line: a parent of a
+# four year old was told to keep the dummy for sleep "until about 12 months, because it lowers the
+# risk of cot death" - advice for a baby, said to somebody whose child can argue for it. So the
+# card reads the child's age the way the bedtime card does and answers the band, and the baby
+# band stays exactly as it was because nothing about it was wrong for a baby.
+_DUMMY_BABY = (
+    "Keep a dummy for sleep until about 12 months, because it lowers the risk of cot death, then "
+    "take it away in the day first and leave it for naps and nights only. Between one and two is "
+    "the easiest window - after two and a half the child can argue for it. Pick a quiet week, "
+    "expect two or three rough nights, and never dip it in sugar or honey or hang it on a string "
+    "round the neck.")
+_DUMMY_HABIT = (
+    "At %s a dummy is a habit rather than a need, so plan it rather than spring it: say \"dummies "
+    "are for sleep now\" and take it away in the day first, then the nap one, then the night one, "
+    "a step a week. A %s year old can be in on the plan, so pick the week together, and get the "
+    "dummies out of the house rather than into a drawer. Expect a few rough nights and do not "
+    "give it back mid-week: going back and forth is what makes it last.")
+_DUMMY_OLDER = (
+    "Past five a dummy is only worth acting on if it is pushing the teeth or the speech out of "
+    "line, and that is a dentist's or a speech therapist's call rather than something to fix at "
+    "home. Do not shame the child or turn it into a fight: say it is time, give the date, and "
+    "most children drop it themselves once it is not a secret. If the teeth are moving or the "
+    "speech is unclear, ask the dentist at the next check-up and say how often it is used.")
+
+
+def _the_dummy_answer(memory, understood):
+    """The dummy advice for the age the chat has named, and the baby advice when it has none.
+
+    Read off the conversation, not the turn, because the age and the question are often two
+    turns: "my son is 4 and still has a dummy" then "should i just take it away".
+    """
+    age = _the_child_age_in_the_chat(memory, understood)
+    if age is None or age < 2:
+        return _DUMMY_BABY
+    word = _CHILD_SAID.get(age) or str(age)
+    if age <= 4:
+        return _DUMMY_HABIT % (word, word)
+    return _DUMMY_OLDER
 
 
 def _a_phone_rule_and_an_age(memory, understood):
@@ -358,6 +400,33 @@ def _a_giving_up_on_a_person(understood):
         if any(word in _GIVING_UP_A_PERSON for word in match.group(1).split()):
             return True
     return False
+
+
+# A wake is the gathering after a funeral; "waking" is somebody being awake at night, and the
+# matcher folds the two into one word family - the same collision that made "how long do i brew
+# tea" a funeral tea. `funeral-plan` keys on the bare "wake", so "and whats the plan for the 5am
+# waking" in a chat about a four-year-old who will not sleep was answered "Three decisions first:
+# burial or cremation, where the service will be". The -ing form is never the gathering, so it
+# stands the row down unless the line names the death the gathering is for.
+_WAKING_UP = re.compile(
+    r"\b(?:waking|wakes|woke|woken|wake\s+up|wakes\s+up|waking\s+up|wake\s+me|"
+    r"hard\s+to\s+wake|wont\s+wake|won'?t\s+wake|keep\s+waking|keeps\s+waking)\b", re.I)
+# A death named in the same line is the gathering's own subject, so the row answers as it did:
+# "planning a wake for my mum who died", "a wake after the funeral".
+_A_DEATH = re.compile(
+    r"\b(?:funeral|funerals|burial|cremation|crematorium|cremate\w*|memorial|"
+    r"passed\s+away|died|dies|death|bereave\w*|widow\w*)\b", re.I)
+
+
+def _a_waking_is_not_a_wake(understood):
+    """True unless the line's "wake" is somebody waking up rather than a funeral gathering."""
+    said = understood if isinstance(understood, dict) else {}
+    text = str(said.get("text") or said.get("clean") or "")
+    if not text:
+        text = " ".join(str(one) for one in (said.get("words") or ()))
+    if not _WAKING_UP.search(text):
+        return True
+    return bool(_A_DEATH.search(text))
 
 
 def _the_debt_is_money(understood):
@@ -657,6 +726,26 @@ _AGE_DIGITS = re.compile(
 _AGE_WORD_FORM = re.compile(
     r"\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
     r"fifteen|sixteen|seventeen)\s*(?:-|\s)?\s*(?:year|yr)s?\s*(?:-|\s)?\s*old\b")
+# "my son is 4", "my daughter is nine": the age as people write it when the child is already
+# the subject, which the "year old" shapes above do not catch. Without this, a card that reads
+# the age answered a four year old with the advice for a baby, because the number in the line
+# was never a number as far as the reader was concerned.
+_A_CHILD_OF_AGE = re.compile(
+    r"\b(?:son|daughter|child|boy|girl|kid|baby|toddler|little one|oldest|youngest)\b"
+    r"[^.\d\n]{0,14}?\bis\s+(\d{1,2})\b")
+_A_CHILD_OF_AGE_IN_WORDS = re.compile(
+    r"\b(?:son|daughter|child|boy|girl|kid|baby|toddler|little one|oldest|youngest)\b"
+    r"[^.\d\n]{0,14}?\bis\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
+    r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen)\b")
+# "hes 4", "she is 3": the age in a second clause, once the child is already named. Only read
+# when a child is named in the line and the figure is a child's age, so "my son loves his dad, he
+# is 40" is not read as a forty year old child.
+# plurals and possessives count: "my sons dummy", "the kids are 4 and 6"
+_A_CHILD_NAMED = re.compile(
+    r"\b(?:sons?|daughters?|child|children|childs|boys?|girls?|kids?|baby|babies|toddlers?|"
+    r"little one|oldest|youngest)\b")
+_A_CHILD_IS_AGE = re.compile(
+    r"\b(?:hes|shes|he's|she's|he is|she is|they are)\s+(\d{1,2})\b")
 # a baby in weeks or months is the health visitor's question, not this chart
 _AGE_TOO_YOUNG = re.compile(r"\b(?:week|weeks|month|months)\s*old\b|\bnewborn\b|\bbaby\b")
 # a bedtime in the evening: "is 9pm too late", "8.30 pm", "9 o'clock"
@@ -690,6 +779,69 @@ def _child_age(clean):
     match = _AGE_WORD_FORM.search(clean)
     if match:
         return _AGE_WORDS[match.group(1)]
+    return None
+
+
+# the units that turn a figure after "my son is" into a measurement rather than an age
+_NOT_AN_AGE_AFTER = re.compile(
+    r"\s*(?:stone|st|ft|feet|foot|inch|inches|cm|mm|m\b|kg|kilos?|pounds?|lbs?|"
+    r"months?|weeks?|days?|hours?|mins?|minutes?|miles?|%|percent)")
+
+
+def _any_age_in(clean):
+    """The age the line names in any of the shapes people write it, or None.
+
+    `_child_age` reads the "a 7 year old" shapes; this also reads "my son is 4", which is how
+    the age arrives when the child is already the subject of the line.
+    """
+    age = _child_age(clean)
+    if age is not None:
+        return age
+    match = _A_CHILD_OF_AGE.search(clean) or _A_CHILD_OF_AGE_IN_WORDS.search(clean)
+    if not match and _A_CHILD_NAMED.search(clean):
+        match = _A_CHILD_IS_AGE.search(clean)
+        if match:
+            years = int(match.group(1))
+            if not 1 <= years <= 17:
+                match = None
+            elif _NOT_AN_AGE_AFTER.match(clean, match.end()):
+                return None
+    if not match:
+        return None
+    # "my daughter is 5 stone", "my baby is 9 months": a figure that is followed by what it
+    # measures is not the child's age, and a nine-month-old is not nine.
+    if _NOT_AN_AGE_AFTER.match(clean, match.end()):
+        return None
+    value = match.group(1)
+    if value.isdigit():
+        return int(value)
+    return _AGE_WORDS.get(value)
+
+
+def _the_child_age_in_the_chat(memory, understood):
+    """The child's age, from the line, then from the line it leans on, then from the chat.
+
+    A card that reads the age has to read it off the conversation and not only the turn: "my son
+    is 4 and still has a dummy" then "should i just take it away" puts the age in the first line
+    and the question in the second, and a reader that only looked at the second turn answered
+    the follow-up as if nobody had said how old the child was.
+    """
+    said = []
+    if isinstance(understood, dict):
+        for key in ("text", "clean", "norm_text"):
+            said.append(str(understood.get(key) or ""))
+        leaned = understood.get("leans_on")
+        if isinstance(leaned, dict):
+            said.append(str(leaned.get("text") or ""))
+    for text in said:
+        age = _any_age_in(str(text or "").lower())
+        if age is not None:
+            return age
+    for turn in reversed((memory or {}).get("turns") or []):
+        if isinstance(turn, dict):
+            age = _any_age_in(str(turn.get("user") or turn.get("text") or "").lower())
+            if age is not None:
+                return age
     return None
 
 
@@ -948,9 +1100,20 @@ def a_small_childs_age(words):
     return bool(_SMALL_CHILD_AGE.search(text.lower()))
 
 
+# "picking up at half five" is a nursery or school run, not a waking, and it carries the words of
+# one: the child word in the line, then "up at" inside "picking up at". Nothing about a morning
+# looks like this, so a pickup anywhere in the line stands the card down whatever else is in it.
+_A_PICKUP_NOT_A_WAKING = re.compile(
+    r"\b(?:pick(?:s|ed|ing)?|collect(?:s|ed|ing)?|drop(?:s|ped|ping)?)\s+(?:\w+\s+){0,2}?up\b"
+    r"|\b(?:drop(?:s|ped|ping)?\s+(?:\w+\s+){0,2}?off)\b", re.I)
+
+
 def _not_a_toddler_in_the_morning(understood):
-    """False when the child is a teenager or grown: the walk-them-back card is not theirs."""
+    """False when the child is a teenager or grown, or when the "up" is a pickup: not this card."""
     if _a_teenager_is_named(understood) or _an_adult_child_is_named(understood):
+        return False
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
+    if _A_PICKUP_NOT_A_WAKING.search(said):
         return False
     return True
 
@@ -1000,6 +1163,64 @@ def _not_just_the_age_of_a_relation(understood):
     # "84" and "gran" are the frame; "difficult", "falling", "cope" are not, and those lines are
     # the row's own.
     return any(word for word in rest if not _A_FIGURE_IN_THE_LINE.fullmatch(word))
+
+
+# --- a stretch of time is not a frightened child -------------------------------------------
+# "this week has been a nightmare", "the move has been a nightmare", "work has been a nightmare":
+# the stretch or the job is the subject and no bad dream is being described, so the
+# frightened-child card stands down and the composer's own reply takes the line. The stretch alone
+# is not enough to say that: "my daughter is having nightmares this week" and "our 5 year old has
+# been a nightmare this week" name who the line is about and are the card's own case.
+_A_WEAR_STRETCH = re.compile(
+    r"\b(?:this|that|the|another|last|next|whole|entire)\s+"
+    r"(?:week|month|year|term|fortnight|few weeks|few months)\b"
+    r"|\bof a (?:week|month|year|term|day)\b|\bweeks? of\b", re.I)
+_THE_JOB = re.compile(
+    r"\b(?:at work|work has been|work is being|my job|the job|the office|my inbox|my boss|"
+    r"my team|the traffic|the commute|my shift|the move|moving house|house move|"
+    r"the house move|my deadline)\b", re.I)
+# Who the line is about, so the card knows when a child is still in it. Single words are read as
+# words; "year old" and "little one" only survive as phrases, so both readings are used.
+_A_PERSON_OR_CHILD_WORD = frozenset((
+    "child", "children", "kid", "kids", "kiddo", "toddler", "toddlers", "baby", "babies",
+    "newborn", "son", "sons", "daughter", "daughters", "boy", "boys", "girl", "girls",
+    "teen", "teenager", "teenagers", "he", "she", "him", "her", "his", "hers", "they",
+    "them", "their", "grandson", "granddaughter", "niece", "nephew", "godson",
+    "goddaughter", "mum", "mother", "dad", "father", "partner", "husband", "wife",
+    # A child is often named by their place in the family rather than by a word for a child, and
+    # the stand-down cannot only know the nouns: "my youngest has been having nightmares this week"
+    # lost the card to a store echo until "youngest" was here.
+    "youngest", "oldest", "eldest", "twin", "twins", "stepson", "stepdaughter",
+    "stepchild", "grandchild", "grandchildren", "grandkid", "grandkids", "preschooler",
+    "schoolchild", "sibling", "siblings", "brother", "sister",
+))
+_A_PERSON_OR_CHILD_PHRASE = re.compile(
+    r"\b(?:year old|years old|year-old|little one|little boy|little girl|my son|my daughter|"
+    r"my child|my kid|my kids|my children|the kids|the children|our son|our daughter|"
+    r"our (?:youngest|oldest|eldest)|my (?:youngest|oldest|eldest)|the (?:youngest|oldest|"
+    r"eldest))", re.I)
+
+
+def _not_a_stretch_or_a_job(understood):
+    """False when the line is the wear idiom about a stretch of time or a job, not a bad dream.
+
+    Used as an entry `guard`. "this week has been a nightmare" is about the week; "my daughter is
+    having nightmares this week" is about the daughter, and a child named anywhere in the line
+    keeps the card. Both readings are asked because the words arrive apart: `words` has "year"
+    and "old", never "year old".
+    """
+    if not isinstance(understood, dict):
+        return True
+    words = [str(word).lower().strip(string.punctuation) for word in understood.get("words") or ()]
+    text = " ".join(word for word in words if word)
+    if not text:
+        typed = str(understood.get("text") or understood.get("clean") or "").lower()
+        text = " ".join(typed.split())
+    if any(word in _A_PERSON_OR_CHILD_WORD for word in words):
+        return True
+    if _A_PERSON_OR_CHILD_PHRASE.search(text):
+        return True
+    return not (_A_WEAR_STRETCH.search(text) or _THE_JOB.search(text))
 
 
 # --- the milk half belongs to the age on the line ---------------------------------------
@@ -1295,12 +1516,27 @@ _DATE_AT_HOME = (
 _AT_HOME_WORDS = ("at home", "night in", "staying in", "stay in", "staying home", "indoors",
                   "in the house", "on the sofa", "in front of the telly")
 
+# A first date is two people working out whether they like each other, and the advice for it
+# ("pick something with movement so silences have scenery") is wrong for an evening that already
+# has a date on it. An occasion with a partner is a different evening: one thing worth leaving the
+# house for, agreed beforehand, and no performance.
+_OCCASION_WORDS = ("valentines", "valentine's", "valentines day", "valentine's day", "anniversary",
+                   "birthday", "wedding anniversary")
+
+_DATE_OCCASION = (
+    "Pick one thing you would not do on a normal week - a table you booked, the cinema instead of "
+    "the telly, or a walk somewhere neither of you has been - and let the rest of the evening be "
+    "easy. Agree it beforehand rather than surprising them with a plan they have to be pleased "
+    "about, and leave the phones in a bag once you are there.")
+
 
 def _date_idea(memory, understood):
-    """The idea for a date out, or the one for a night in."""
+    """The idea for a date out, the one for a night in, or the one for an occasion."""
     clean = ((understood or {}).get("clean") or "").lower()
     if any(word in clean for word in _AT_HOME_WORDS):
         return _DATE_AT_HOME
+    if any(word in clean for word in _OCCASION_WORDS):
+        return _DATE_OCCASION
     return _DATE_OUT
 
 
@@ -2122,6 +2358,19 @@ _COOK_ASK = frozenset(("cook", "cooking", "make", "making", "dinner", "tea", "su
                        "suggestion", "feed"))
 
 
+# What a parent adds to the verb: "what if he just refuses dinner", "she still refuses food".
+# The adverb sits between the pronoun and the verb, and a key phrase is not read across a
+# breather ("my phone just died" style relaxations are for avoid lists only, because loosening a
+# key would let a row answer a line it does not fit), so each shape is written out. Without them
+# the fussy-eater row stood down on "what if she just refuses dinner" and, the politeness card
+# having stood down for a child, the turn was a shrug.
+_REFUSAL_WITH_AN_ADVERB = tuple(
+    "%s %s refuses %s" % (who, how, what)
+    for who, poss in (("he", "his"), ("she", "her"))
+    for how in ("just", "still", "now")
+    for what in ("dinner", "%s dinner" % poss, "food", "%s food" % poss, "meals", "the meal"))
+
+
 def _picky_eater(memory, understood):
     """The fussy-eating answer, or None when the line is a dinner with one food ruled out.
 
@@ -2157,6 +2406,38 @@ A_KITCHEN_ASK = ("what should i cook", "what can i cook", "what shall i cook",
                  "what could i make", "what to make", "cook", "cooking", "to cook",
                  "recipe", "recipes", "meal ideas", "meal idea", "dinner ideas",
                  "food ideas", "feed")
+# A meal named as the reason for the visit is the kitchen's question too, whether or not the
+# person thought to say "cook": "my mum is coming over on sunday for dinner" got "Make up the best
+# bed and plan one shared outing a day ... Agree meal times on the first evening", which is a
+# week's hosting and tells them nothing about the one meal they are cooking. The kitchen already
+# answers the same visit when the meal is bare ("im cooking for my in laws on sunday"), so the
+# visiting rows stand down for the meal and the dish cards take the turn.
+# The rate of a visit, as opposed to the visit itself. The row below keys both, because "my mum
+# comes round every day" and "my mum is coming over" are the same visit; only the first is a
+# complaint, and the meal question turned on the difference. It is one list used twice: the key
+# reads both halves, and the guard stands the row down for a plain visit to eat.
+A_VISIT_WEARS = ("space", "back off", "too much", "constantly", "every day",
+                 # "rings" is the parent phoning you, so it needs its object: a bare "rings" is
+                 # also "ring my mum", which is your call to make, not hers.
+                 "rings me", "ringing me", "rings all the time", "rings constantly",
+                 "keeps ringing", "phones me", "calls me", "calls constantly", "boundaries",
+                 "boundary", "distance", "overbearing", "smothering",
+                 "turns up", "turning up",
+                 # a want with a frequency behind it is a complaint, and it was falling between
+                 # the two rows: "my mum wants to visit every weekend" came back as an echo of
+                 # its own words
+                 "wants to come round", "wants to come over", "wants to visit",
+                 "wants to come", "wants to stay")
+A_VISIT_PLAIN = ("coming round", "coming over", "comes over", "come over", "visits", "visiting")
+
+A_MEAL_FOR_THE_VISIT = ("for dinner", "for lunch", "for tea", "for supper", "for sunday lunch",
+                        "for christmas dinner", "for a roast", "for a barbecue", "for a bbq",
+                        "for brunch", "for breakfast", "for a meal", "for a bite",
+                        "coming for dinner", "coming for lunch", "coming for tea",
+                        "coming for supper", "coming over to eat", "coming round to eat",
+                        "dinner on sunday", "lunch on sunday", "sunday dinner", "sunday lunch",
+                        "to dinner", "for tea on")
+
 # An announced visit and an empty kitchen in one line is the kitchen's question, whether or not
 # the person thought to say "cook": "i've got people coming round in an hour and nothing in the
 # fridge" was answered "Give them the best bed and plan one shared outing a day", which is a
@@ -2332,6 +2613,26 @@ _AN_ENDING_OR_A_PERSON = re.compile(
     r"dating|romance|someone|somebody|broken heart|broken[- ]hearted|heart ?break|"
     r"heartbroken|my heart|in love|love of my life|feelings|closure|attached|"
     r"a loss|the loss|loved one|bereave\w*|passed away|widow\w*)\b", re.I)
+
+
+# The news card is for the first hours. A line that already puts the ending some time back is on
+# the recovery card instead: "my ex moved out last week" was handed "Nothing you do this week makes
+# it hurt less ... Tell two people today" - the day-one advice, to somebody a week in - where
+# "Treat the first weeks as recovery rather than a test of willpower" is the card for that person.
+# The line is read as a whole and not by an avoid word, because "week" is in this row's own keys.
+_SOME_TIME_AGO = re.compile(
+    r"\b(?:last (?:week|month|year|summer|christmas)|back in [a-z0-9]+|"
+    r"(?:[a-z0-9]+|a few|a couple of|several)\s+(?:weeks|months|years)\s+ago|"
+    r"(?:weeks|months|years)\s+ago)\b", re.I)
+
+
+def _not_some_time_ago(understood):
+    """False when the line says the ending was a while back, so the first-hours card stands down."""
+    reading = understood or {}
+    said = str(reading.get("clean") or reading.get("text") or reading.get("raw") or "")
+    if not said:
+        said = " ".join(str(one) for one in (reading.get("words") or ()))
+    return not _SOME_TIME_AGO.search(" ".join(said.lower().split()))
 
 
 def _a_person_is_what_they_get_over(understood):
@@ -2631,6 +2932,50 @@ def _told_them_off(understood):
     return bool(_TOLD_THEM_OFF.search(line))
 
 
+# One parent being tired is the tired-parent row's answer, and "exhausting" is this row's: an
+# avoid phrase is read by root, so "is exhausted" in the avoid list took "my mum is exhausting"
+# away from the visit script. The guard reads the exact word, and only the singular "is", which
+# is the form an avoid phrase cannot hold without catching "-ing".
+_ONE_PARENT_IS_TIRED = re.compile(
+    r"\bis\s+(?:really|so|very|quite|completely|totally|absolutely|utterly|properly|"
+    r"that|this)?\s*(?:exhausted|knackered|tired|worn out)\b")
+
+# A tired clause beside a hard-parent phrase is a fact about the same person, not the ask:
+# "my dad is hard work and he is tired" and "my mum is difficult and my sister is tired" are
+# both the visit conversation, and the tired guard must not take them. The row's own key words
+# are the fence: if one of them is in the line, the difficult-parent answer stays.
+_A_HARD_PARENT = re.compile(
+    r"\b(?:difficult|hard work|hard going|hard to be around|exhausting|draining|"
+    r"wears me out|tires me out|walking on eggshells|walk on eggshells|eggshells|"
+    r"never happy|nothing i do is right|nothing is good enough|never good enough|tricky|"
+    r"deal with|cope with|put up with|get on with|handle)\b")
+
+# The tiredness has a person as its cause: "my mum is exhausted by me" and "my mum is
+# exhausted because of me" are about what the writer is doing to her, not the tired-parent
+# card. The person can be a pronoun or the family word the line names.
+_TIRED_BECAUSE_OF_SOMEONE = re.compile(
+    r"\b(?:exhausted|knackered|tired|worn out)\s+(?:by|with|because of|from)\s+"
+    r"(?:me|you|him|her|us|them|everyone|the\s+(?:kids|children|family|baby)|"
+    r"my\s+(?:kids|children|family|son|daughter|partner|husband|wife|mum|dad))\b")
+
+
+def _the_parent_is_not_only_tired(understood):
+    """True unless the line says one parent is tired and nothing else names the hard parent.
+
+    `my mum is exhausted` is the tired-parent row's answer. `my dad is hard work and he is
+    tired` is not: the tired clause is a fact about the person the visit script answers. The
+    key phrases are checked first, so the guard only stands the row down when the tiredness is
+    the whole ask.
+    """
+    reading = understood or {}
+    line = " ".join(str(reading.get("clean") or reading.get("text") or "").lower().split())
+    if _A_HARD_PARENT.search(line):
+        return True
+    if _TIRED_BECAUSE_OF_SOMEONE.search(line):
+        return True
+    return not _ONE_PARENT_IS_TIRED.search(line)
+
+
 def _not_a_hard_conversation(understood):
     """Whether a "what do i say to her" is an asking rather than a hard conversation.
 
@@ -2714,6 +3059,42 @@ def _the_trip_i_am_making(understood):
     if not (_A_VISIT_I_AM_MAKING.search(line) or _A_VISIT_I_AM_MAKING.search(typed)):
         return False
     return not _A_TRIP_STILL_BEING_WEIGHED.search(line)
+
+
+# A named day is a rate as well: "my mum turns up every sunday for dinner without asking" is the
+# same complaint as "comes every week", and a weekday is the commonest way a family says how often.
+# Kept beside A_RATE_OR_A_GRIEVANCE rather than in it, because that one also decides whether a trip
+# the speaker is making is a boundary, and a trip on a named day is still a trip.
+A_NAMED_DAY_RATE = re.compile(
+    r"\b(?:every|each)\s+\w*day\b|\bwithout asking\b|\bunannounced\b|\buninvited\b|"
+    r"\binvites? (?:herself|himself|themselves)\b", re.I)
+
+# A meal named with the visit. The kitchen answers the same visit when the meal is asked for
+# plainly ("im cooking for my in laws on sunday"); what goes wrong is the announcement -
+# "my mum is coming over on sunday for dinner" got the hosting week ("Make up the best bed and
+# plan one shared outing a day ... Agree meal times on the first evening"), and with the hosting
+# row stood down the same line fell to the boundary script ("I love seeing you and I need Sundays
+# to myself"). One dinner is the kitchen's question, and either row is the wrong answer to it.
+A_MEAL_NAMED = re.compile(
+    r"\b(?:dinner|lunch|tea|supper|brunch|breakfast|roast|barbecue|bbq)\b", re.I)
+
+
+def _not_a_meal_the_visit_is_for(understood):
+    """True unless the line is a visit somebody is cooking for, which is the kitchen's question.
+
+    The stand-down is a guard and not an avoid word because an avoid phrase is read loosely - the
+    words anywhere in the line - so "for dinner" in the avoid list stood this row down for "my mum
+    turns up every sunday for dinner without asking" as well, and a boundary went to the cooking
+    card. A rate in the line keeps the row, the same way `_not_a_visit_i_am_making` reads one.
+    """
+    text = ""
+    if isinstance(understood, dict):
+        text = str(understood.get("text") or understood.get("clean") or "")
+    if not text:
+        return True
+    if not A_MEAL_NAMED.search(text):
+        return True
+    return bool(A_RATE_OR_A_GRIEVANCE.search(text) or A_NAMED_DAY_RATE.search(text))
 
 
 def _not_a_visit_i_am_making(understood):
@@ -2868,6 +3249,25 @@ def _names_someone_else(understood):
     """True when the line is about another person's drinking rather than the speaker's own."""
     words = {str(word).lower().strip(string.punctuation) for word in understood.get("words") or ()}
     return bool(words & _SOMEONE_ELSE)
+
+# A line that opens its question with "who" is asking for a route, not for something to say:
+# "who can i talk to about my benefits", "who do i speak to about my tax", "who should i talk to
+# about my will". The opener row holds the bare words "talk" and "about", so every one of those
+# was told to ask one open question about the queue and the weather, and the route the fallback
+# already knows (Citizens Advice for benefits, tax and rent; MoneyHelper for a debt or a pension)
+# never got the turn. This is a guard rather than a phrase in the avoid list because the ask has
+# a shape, not a wording: a who at the front, then a person-shaped verb.
+WHO_AT_THE_FRONT = re.compile(
+    r"^\s*(?:so |ok |okay |right |and |but |then )*"
+    r"(?:who|whos|whose|whom|which (?:person|service|number|office|department|organisation|"
+    r"organization|charity|helpline)|where do i)\b[^?]{0,60}?"
+    r"\b(?:talk|speak|ask|ring|phone|call|contact|complain|report|write|go|turn)\b")
+
+
+def _a_route_ask_not_an_opener(understood):
+    """False for a line asking who to go to about something, which is not small talk."""
+    said = " ".join(str((understood or {}).get("clean") or "").split())
+    return not WHO_AT_THE_FRONT.search(said)
 
 # A card for what to have in before a visit answers a line about the bed and the shopping. It does
 # not answer "how do i tell my friend she cant stay", which is the same words and a different
@@ -3103,12 +3503,53 @@ _SOMEONE_NAMED = re.compile(
     r"patient|client|elderly|he|she|they)\b", re.I)
 
 
+def _the_heart_is_the_persons_own(reading):
+    """True unless the line says the broken heart is somebody else's.
+
+    "she is heartbroken", "his heart is broken" and "my mum was broken hearted" name another
+    person's heart, and the heartbreak card is written for the person who is in it. Everything
+    else - the person's own heart, and the question about heartbreak in general - is theirs to
+    answer, so only a heart the reading gives to somebody else stands the row down.
+    """
+    return (reading or {}).get("state_owner") != "other"
+
+
 def _not_my_own_appetite(reading):
     """True unless the line is the reader's own appetite with nobody else named in it."""
     text = ((reading or {}).get("clean") or (reading or {}).get("text") or "")
     if not _OWN_APPETITE.search(text):
         return True
     return bool(_SOMEONE_NAMED.search(text))
+
+
+# "Who can help" is a question about services, and when the person to be looked after is a
+# parent it is the elder-care question: "who can help me look after my mum" was the council's
+# free needs assessment on main, and the break row - which now takes "who can help" as the ask of
+# a worn-out parent - answered it with "take the smallest break that is really a break". The
+# break belongs to the speaker worn out by small children, so the asking frame stands down when
+# the person named is an older relative. A single parent is the speaker, not an elder.
+_A_WHO_CAN_HELP = re.compile(
+    r"\b(?:who can help|who can i|who do i|who should i|whos going to help|who is going to help|"
+    r"can someone help|can anyone help|anyone help me|someone to help|where can i get help|"
+    r"is there anyone|any help for|what help)\b")
+_AN_ELDER_TO_LOOK_AFTER = re.compile(
+    r"\b(?:mum|mam|mother|dad|father|parent|parents|gran|granny|grandma|grandad|grandpa|"
+    r"grandmother|grandfather|mother in law|father in law|in laws|elderly|dementia|alzheimers)\b")
+
+
+def _a_break_for_the_carer(understood):
+    """True unless the line asks who can help and names an older relative to look after."""
+    if not isinstance(understood, dict):
+        return True
+    said = understood.get("text") or understood.get("clean") or ""
+    if not said:
+        said = " ".join(str(word) for word in (understood.get("words") or ()))
+    said = str(said).lower()
+    if "single parent" in said or "single mum" in said or "single dad" in said:
+        return True
+    if not _A_WHO_CAN_HELP.search(said):
+        return True
+    return not _AN_ELDER_TO_LOOK_AFTER.search(said)
 
 
 ENTRIES = [
@@ -3348,6 +3789,10 @@ ENTRIES = [
           # "dumped" is not here on its own: its loose form is "dump", and it turned down "how do
           # i dump my friend". Being the one dumped has its own entries.
           avoid=("boyfriend", "girlfriend", "husband", "wife", "partner", "fiance", "fiancee",
+                 # a parent is not a friend the row is about: "my mum is exhausted what can i do
+                 # to help her" was the slow-fade card once the tired guard stood the visit row
+                 # down. The parent rows own these lines.
+                 "my mum", "my mom", "my dad", "my mother", "my father", "my parents",
                  "my ex", "divorce", "dumped me", "got dumped", "he dumped", "she dumped",
                  # a relationship that is violent or frightening is a safety line, not a
                  # break-up script: "how do i break up with someone who hits me" was told to
@@ -3398,13 +3843,27 @@ ENTRIES = [
             # 8811). "the dump" is waste, and it keeps its own row.
             "she ended it", "he ended it", "they ended it",
             "ended it with me", "broke up with me", "just broke up", "we broke up",
-            "left me for", "she left me", "he left me", "walked out on me"),
+            "left me for", "she left me", "he left me", "walked out on me",
+            # The departure said as a move. "my ex moved out" is the same news as "my wife left
+            # me" and it reached no card at all: the day pool answered it "Good to hear. What was
+            # the best bit?", a cheer for a person leaving. The phrases carry the person, so a
+            # tenant, a flatmate or a grown child moving out stays their own row's.
+            "ex moved out", "ex has moved out", "ex moved away",
+            "partner moved out", "wife moved out", "husband moved out",
+            "girlfriend moved out", "boyfriend moved out",
+            # The same departure said as it is happening: "my ex is moving out on friday" was
+            # cheered ("That's lovely news - and something to look forward to"), which is the
+            # same mistake a turn later in the story. The person is still in the phrase.
+            "ex is moving out", "ex is moving away", "partner is moving out",
+            "wife is moving out", "husband is moving out",
+            "girlfriend is moving out", "boyfriend is moving out",
+            "moved out and left", "moved out on me"),
            ("week", "yesterday", "today", "just", "last night", "now what", "what do i do",
             "how do i", "cope", "coping", "deal", "help", "sad", "devastated", "hurt",
             "awful", "crying", "cant stop", "can't stop", "miss",
             # the news carries the person and nothing else: "my girlfriend broke up with me"
             "girlfriend", "boyfriend", "partner", "fiance", "fiancee", "wife", "husband",
-            "she", "he", "they", "me")),
+            "ex", "she", "he", "they", "me")),
           ("Nothing you do this week makes it hurt less, so do not make decisions in it: no long "
  "message, no driving past, no drinking the pain quiet. Tell two people today so you "
  "are not carrying it alone, keep the basics going - food, water, sleep, one walk "
@@ -3412,7 +3871,8 @@ ENTRIES = [
  "weeks, and the first days are the ones to get through rather than fix."),
           # being supported through it, and getting over it in the months after, are other
           # entries; this one is the news itself
-          avoid=("friend", "mate", "my friend", "best friend", "friendship")),
+          avoid=("friend", "mate", "my friend", "best friend", "friendship"),
+          guard=_not_some_time_ago),
     # The months after, which is a different question from the news itself: "how do i get over a
     # breakup", "how do i stop missing my ex" and "how long does it take to get over a breakup"
     # reached nothing at all, and "how do i stop missing my ex" was answered with a card about
@@ -3469,6 +3929,12 @@ ENTRIES = [
                  "interview", "interviews", "exam", "exams", "presentation", "presentations",
                  "public speaking", "a match", "the match", "a race", "performance",
                  "first date", "a date", "dating",
+                 # a potato that breaks up in the pan is not a person: "how do i boil
+                 # potatoes so they dont break up" was given the first weeks of a breakup,
+                 # because "break up" and "how do i" is the whole key. The kitchen words stand
+                 # this row down and leave it to the cooking rows, as the illness words do.
+                 "potato", "potatoes", "new potatoes", "spud", "spuds", "mash", "mashed",
+                 "boil", "boiling", "boiled", "saucepan", "roast", "roasting", "pan of",
                  # the instructions for cutting the contact are their own answer and are
                  # step-by-step where this row is a paragraph about weeks: "how do i stop
                  # texting my ex" was the block-the-number card and should stay there.
@@ -3508,7 +3974,8 @@ ENTRIES = [
     # a racing or pounding heart, a heart attack - those are a 999 card, not this one.
     entry("heartbreak",
           (("heartbroken", "heart break", "heartbreak", "heart broken", "broken heart", "brokenhearted",
-            "heart is broken",
+            "heart is broken", "heart is shattered", "heart shattered", "heart in pieces",
+            "heart feels broken", "heart feels shattered", "heart feels like it is broken",
             "heart feels heavy", "heart feels like", "heart ache", "heartache", "heart achey",
             "heart is aching", "heart aching", "aching heart", "my heart hurts",
             # the shortest way of saying the feeling, which the generic sympathy row takes
@@ -3535,7 +4002,15 @@ ENTRIES = [
                  # broken" wants the first-days card, which says what not to do tonight, and
                  # this row is the feeling and how long it lasts
                  "dumped", "broke up", "broken up", "split up", "left me", "ended it",
-                 "walked out")),
+                 "walked out"),
+          # "im heartbroken" says the whole feeling in one word, and the three ways of saying it
+          # the long way round - "my heart is broken", "im broken hearted", "my heart feels
+          # broken" - are the same heart in the same state. The state is the second signal, so
+          # the one word reaches the row, and the row still needs the heart in the line.
+          shape=(a_broken_heart_shape,),
+          # Somebody else's broken heart is their trouble, and the card is written for the
+          # person who is in it: "she is heartbroken" keeps the reply that names her.
+          guard=_the_heart_is_the_persons_own),
 
     entry("does-someone-like-me",
           (("like me", "likes me", "into me", "interested in me", "fancies me", "fancy me",
@@ -4251,6 +4726,13 @@ ENTRIES = [
             "grandmother", "grandad", "granddad", "grandpa", "grandfather", "grandparents",
             "nan", "nana", "aunt", "auntie", "uncle", "cousin", "cousins", "nephew", "niece",
             "stepmum", "stepdad", "stepmother", "stepfather", "sister in law", "brother in law",
+            # The plural of a relation is the same relation: "my in laws are coming for lunch
+            # sunday" had no person here at all, and reached the labour-law words in the work
+            # entries on the `laws` inside `in laws`, which answered it with a contract. The
+            # singular `mother in law` was known and the plural was not.
+            "in law", "in laws", "in-laws", "son in law", "son in laws", "daughter in law",
+            "daughter in laws", "sister in laws", "brother in laws", "mother in laws",
+            "father in laws",
             "relatives",
             # A person you live with is not a house guest: "my husband is staying for the
             # weekend", "my girlfriend is coming over tonight" and "my partner is staying the
@@ -4328,6 +4810,7 @@ ENTRIES = [
                  # The cooking ask is the kitchen's, not the hosting one.
                  A_KITCHEN_ASK,
                  AN_EMPTY_KITCHEN,
+                 A_MEAL_FOR_THE_VISIT,
 
                  "stop", "stops", "dreading", "cant stand", "driving me", "sick of",
                  "fed up", "too much of", "keeps coming", "kept coming", "keeps turning",
@@ -4833,15 +5316,30 @@ ENTRIES = [
     entry("baby-bath-bathtime",
           (("baby", "babies", "newborn", "infant", "6 week old", "3 month old"),
            ("bath", "baths", "bathe", "bathing", "bathtime", "bath time", "wash", "washing",
-            "top and tail", "hair wash", "how often", "water temperature")),
+            "top and tail", "hair wash", "how often", "water temperature",
+            # a shower with a baby is the same bathing question and had no answer at all: "can i
+            # shower with my baby" was a health-visitor handoff and "is a bath or a shower better
+            # for a baby" was the adult shower-against-bath card. The phrases are the ones that
+            # put a baby in the shower, not the bare word: "shower" alone is also in "how often
+            # should i shower" and "the shower is leaking", and both of those are other rows.
+            "shower with", "showering with", "shower a baby", "shower the baby",
+            "shower my baby", "shower my newborn", "bath or shower", "shower or bath")),
           "Fill the bath about 5cm deep with water at 37 to 38C, warm on your wrist rather than "
           "hot, and get the towel, nappy and clothes open and ready before you start. Hold the "
           "head and shoulders with one arm so they never slip under, wash the face and hair first "
           "with plain water, then the body, and keep the room warm. Two or three baths a week is "
-          "plenty for a newborn.",
+          "plenty for a newborn. A bath rather than a shower, because a newborn cannot hold their "
+          "head up to have water poured over it; a shower together is fine once they sit up, head "
+          "against your shoulder. Their hair needs no shampoo for the first months - plain water, "
+          "and a hand across the forehead so none runs into the eyes.",
+          # washing a baby is this row's line even where another washing row also fits: "how do i
+          # wash a newborn baby" matched the bottle row's "newborn" and "wash" and got the bottle
+          # brush. The bottle row keeps its own lines because a bottle is in its key and in this
+          # row's avoid, and a bias of 2 is what beats its 1.
+          bias=2,
           # the bathroom and the plumber are other conversations, and an unwell baby is someone
           # else's to answer
-          avoid=("bathroom", "bath bomb", "bath salts", "shower", "sink", "pool", "swimming",
+          avoid=("bathroom", "bath bomb", "bath salts", "sink", "pool", "swimming",
                  "bath mat", "bath panel", "bath tap", "leak", "boiler",
                  # a bottle to wash is its own job, not a bath
                  "bottle", "bottles", "sterilise", "sterilising", "sterilize", "formula", "pump",
@@ -4857,7 +5355,16 @@ ENTRIES = [
                  # "how often should i change my babys nappy" was getting 5cm of water, and
                  # "how often should a baby poo" got it too, on "how often" plus "baby"
                  "nappy", "nappies", "nappy change", "diaper", "diapers", "changing mat",
-                 "wipes", "wet nappy") + UNWELL_CHILD),
+                 "wipes", "wet nappy", "poo", "poos", "poop", "poops", "pooing", "pooped",
+                 "wee", "wees", "constipated", "stool", "stools",
+                 # a baby shower is a party, and "shower" is in the key for a bath with a baby
+                 "baby shower", "baby showers", "shower gift", "shower present",
+                 # the child's own warmth is the too-cold row's question, not the water's: "my
+                 # baby is cold after his bath" is a layer and a room, and this row was taking it
+                 # once it held "bath" and the phrase "shower with". The bath's own heat is still
+                 # read here, so the words are a child being cold or too warm rather than "warm".
+                 "is cold", "too cold", "feels cold", "cold after", "too hot", "overheated",
+                 "overheating", "warm enough", "cold hands") + UNWELL_CHILD),
     entry("baby-sleep-hours",
           (("baby", "babies", "newborn", "infant", "month old", "months old", "week old",
             "weeks old"),
@@ -5411,11 +5918,23 @@ entry("back-with-an-ex",
             # is part of the phrase on purpose: "a boy in his class wakes at 5" and "boy racers
             # keep me awake" are not a child of theirs, so bare "boy" and "girl" stay out.
             "my boy", "our boy", "my girl", "our girl", "little boy", "little girl",
-            "my little one", "our little one", "the little one", "my littleun", "my littlun",
-            "my wee one", "a wee one"),
-           ("wakes", "waking", "wake up", "up at", "awake", "gets up", "getting up")),
-          "Treat 5am as a night waking, not the start of the day: keep the room dark and boring, "
-          "go in quietly and say it is still night, and give the same short answer every time. "
+            # "little one" stays locked to a possessive: bare, it is any small thing, and
+            # "i've got a little one who needs picking up at half five" is a nursery run.
+            "my little one", "our little one", "the little one",
+            "my littleun", "my littlun", "my wee one", "a wee one",
+            "stepson", "stepdaughter", "stepchild", "grandson", "granddaughter"),
+           ("wakes", "waking", "wake up", "up at", "awake", "gets up", "getting up",
+            # A parent says "up", not "waking": "my little boy has been up since 4 every
+            # morning" reached no card and got the grown-up daylight line instead, and "my son
+            # has been up since 5 every morning" got a nod back. "up since" and "up from" are
+            # how the time is told; "up every morning" is the same news without a time in it.
+            # The child word in the first group is what keeps these off an adult's own waking.
+            "up since", "awake since", "up from", "up every morning")),
+          # The hour is the row's now that it answers "up since 4" as well as a 5am report, so
+          # the card cannot name one time back at a person who named another.
+          "Treat the early morning as a night waking, not the start of the day: keep the room "
+          "dark and boring, go in quietly and say it is still night, and give the same short "
+          "answer every time. "
           "Check the obvious first - hungry, cold, a wet nappy, a light coming under the blind - and "
           "move bedtime 15 minutes later only once the early waking has been the same for a week.",
           # A teenager's early waking is the body clock, not this card.
@@ -5442,11 +5961,30 @@ entry("back-with-an-ex",
             # the ordinary question. The refusal verb and a group of food is what this row is.
             "wont touch", "won't touch", "wont go near", "won't go near",
             "turns his nose up", "turns her nose up", "turns their nose up", "nothing green",
-            "anything green", "anything healthy", "wont touch greens"),
+            "anything green", "anything healthy", "wont touch greens",
+            # "refuses" is the verb parents use most often, and the row only had "refuses to
+            # eat": "my 4 year old refuses dinner" and "my toddler refuses dinner" went to the
+            # say-no-politely card in work.py, which taught the parent to keep their own refusal
+            # to four words at a table. The bare verb cannot be the key here - the child words in
+            # the second group are the commonest words in the language, so "my son refuses to do
+            # his homework" and "the little one refused to put his shoes on" were both answered
+            # with a plate of food - so the refusal is keyed with the meal it is a refusal of.
+            "refuses dinner", "refuses his dinner", "refuses her dinner",
+            "refuses their dinner", "refuses tea", "refuses his tea", "refuses her tea",
+            "refuses lunch", "refuses his lunch", "refuses her lunch", "refuses meals",
+            "refuses the meal", "refuses food", "refuses his food", "refuses her food",
+            "refused dinner", "refused his dinner", "refused her dinner", "refused food",
+            "refused his food", "refused her food", "turns his dinner down",
+            "turns her dinner down", "refuses to eat dinner", "refuses to eat at dinner"),
            ("eater", "eating", "vegetables", "veg", "greens", "green", "fruit", "meat",
             "food", "dinner", "meals", "normal",
             "worry", "worried", "ok", "what do i do", "is that",
-            "kid", "kids", "child", "children", "toddler", "son", "daughter") + _AGE_OLD_ENOUGH_TO_EAT),
+            "kid", "kids", "child", "children", "toddler", "son", "daughter",
+            # "my boy is 9 and wont eat his dinner" was "Noted: your boy is 9 and won't eat his
+            # dinner": a parent says "my boy" and "my girl" far more than "my son", and the row
+            # only knew the last two. The plain words for a child belong in a list of them.
+            "boy", "boys", "girl", "girls", "lad", "lass", "teen", "teenager", "tween",
+            "grandson", "granddaughter", "youngest", "eldest") + _AGE_OLD_ENOUGH_TO_EAT),
           _picky_eater,
           # the age names the child only when the child is eating at all
           guard=_a_child_old_enough_to_eat,
@@ -5456,6 +5994,9 @@ entry("back-with-an-ex",
           # mushrooms what can i cook" was claimed by the bare "wont eat" and answered with
           # advice on feeding children. A child has to be named for this row to speak.
           ask=(("kid", "kids", "child", "children", "toddler", "baby", "son", "daughter",
+                # the plainest words for a child, which the key above now holds too
+                "boy", "boys", "girl", "girls", "lad", "lass", "teen", "teenager", "tween",
+                "grandson", "granddaughter", "youngest", "eldest",
                 "picky", "fussy",
                 # "one of them" is how a parent names a child whose name the chat has not been
                 # given: the phrase says a child in the house without saying which, and a grown
@@ -5467,7 +6008,23 @@ entry("back-with-an-ex",
                 # a pronoun on its own took "i only eat 2 meals a day" style lines, so the pronoun
                 # has to be attached to the eating: "she only eats beige food"
                 "she only eats", "he only eats", "she only eat", "he only eat",
-                "she wont eat", "he wont eat", "she lives on", "he lives on"),),
+                "she wont eat", "he wont eat", "she lives on", "he lives on",
+                # The same pronoun shape for the refusal verb: "what if he just refuses
+                # dinner", said after "my son wont eat vegetables" and "hes 4", named the child
+                # nowhere the row could see, so the say-no-politely card answered it, and once
+                # that card stood down for a child it was a shrug. The pronoun has to be attached
+                # to the meal and not to the verb alone: a bare "she refuses" took "she refuses
+                # anything green" away from the vegetables answer the chat had, and handed back
+                # the fussy-eater card as a repeat of the turn before it.
+                "he refuses dinner", "she refuses dinner", "he refuses his dinner",
+                "she refuses her dinner", "he refuses food", "she refuses food",
+                "he refuses meals", "she refuses meals", "he refuses the meal",
+                "she refuses the meal", "he refused dinner", "she refused dinner",
+                "he refuses to eat dinner", "she refuses to eat dinner"
+                # the adverb is what a parent adds ("what if she just refuses dinner"), so the
+                # pronoun shapes are listed with it too: the phrase "refuses dinner" already
+                # matches the line, and this is the row's other signal saying which child.
+                ) + _REFUSAL_WITH_AN_ADVERB,),
           # A diet is not a fussy eater: "my mum wont eat meat any more" carried the "wont eat"
           # this entry keys on and got the toddler card, while the dish table's own answer (a
           # dinner that fits the diet) was the one meant.
@@ -5518,6 +6075,36 @@ entry("back-with-an-ex",
           # scores when two of its words are in the line, so "what should i get her" met "get"
           # and "her" and was answered with how to feed a child. `ask` is the only mandatory half.
           ask=("to eat", "eating", "eat", "eats")),
+    # Whether to pay for eating with a pudding is its own question, and no row answered it: the
+    # recipe row's `pudding` took "what about pudding as a reward" and handed back a crumble, and
+    # "should i bribe him with pudding" got the same. The reward words plus something eaten are
+    # what this row is, so a plain pudding question is still the kitchen's.
+    entry("a-reward-for-eating",
+          (("reward", "rewards", "rewarding", "rewarded", "bribe", "bribes", "bribing", "bribed",
+            "bribe him", "bribe her", "star chart", "sticker", "stickers", "sticker chart",
+            "incentive", "incentives", "good behaviour", "good behavior",
+            # the commonest way the bribe is said out loud: "pudding every time he eats his veg"
+            "every time he eats", "every time she eats", "every time they eat",
+            "when he eats his", "when she eats her", "when they eat their"),
+           ("eat", "eats", "eaten", "eating", "ate", "food", "foods", "vegetables", "veg",
+            "greens", "dinner", "tea", "supper", "lunch", "pudding", "puddings", "dessert",
+            "afters", "sweets", "fussy", "picky", "plate", "mouthful", "mouthfuls", "meal",
+            "meals")),
+          "No - paying for vegetables with pudding teaches a child that the veg is the price and "
+          "the sweet is the prize, and it stops working the moment the bribe is withdrawn. Give "
+          "pudding with the meal or after it because dinner is over, whichever mouthfuls were "
+          "eaten, and keep it ordinary rather than earned. Praise the trying (\"you had a go at "
+          "the carrot\") rather than the cleared plate, and a sticker chart for trying new foods "
+          "does more than any food reward, because it pays for the effort rather than the "
+          "mouthfuls.",
+          # A loyalty card, a staff bonus and a pet's treat are the same words and none of them
+          # is a child's dinner.
+          avoid=("loyalty", "loyalty card", "loyalty points", "nectar", "clubcard", "club card",
+                 "reward card", "points", "cashback", "air miles", "voucher", "vouchers",
+                 "credit card", "staff", "employees", "team", "bonus", "pay", "salary",
+                 "cat", "dog", "puppy", "kitten", "vet", "guinea", "rabbit", "hamster",
+                 "allergic", "allergy", "choking", "choke", "gag", "swallow", "ill", "sick",
+                 "hospital", "diabetes", "diabetic", "weight", "calories", "diet")),
     # Eating is one mealtime question and sitting still is another: a child who will not stay at
     # the table is not a fussy eater (the rows above answer that) and a parent's own desk posture
     # is not this. The child word plus one thing about sitting or the chair is enough, because
@@ -5621,8 +6208,11 @@ entry("back-with-an-ex",
           # rowing in the back of a car still want the rowing answer
           bias=2,
           # the speaker is one of the two people rowing, so this is not two children: "i argued
-          # with my sister" was answered "Separate them first".
-          guard=_i_am_not_one_of_the_two,
+          # with my sister" was answered "Separate them first". The clothes are the other thing
+          # that is not a sibling: "my son fights getting dressed" names one child and a
+          # wardrobe, so there is nobody to separate and the fight is the morning row's.
+          guard=lambda reading: (_i_am_not_one_of_the_two(reading)
+                                 and not_a_fight_about_clothes(reading)),
           # two children, not one: "my son fights me at bedtime" is a parent and a child, and it
           # wants the bedtime answer. "sons" matches its singular form too, so the shapes to pass
           # on are listed.
@@ -5880,9 +6470,20 @@ entry("back-with-an-ex",
           # answers a line with no dog in it; a line that does name one is stood down above.
           bias=2),
     entry("potty-refusal",
-          (("potty", "toilet", "loo"),
+          # "holds his poo in, he asks for a nappy instead" names no potty at all: the thing being
+          # refused, and the nappy they want back, say it.
+          (("potty", "toilet", "loo", "nappy", "nappies", "diaper", "diapers"),
            ("wont sit", "won't sit", "refuses", "refuse", "hates", "screams", "cries",
-            "wont use", "won't use", "wont go", "won't go", "will not sit")),
+            "wont use", "won't use", "wont go", "won't go", "will not sit",
+            # "my boy is 4 and wont do a poo on the potty" was "Noted: your boy is 4 and won't do
+            # a poo on the potty", which is the one thing a parent asking this does not need: the
+            # refusal almost always names the thing they will not do rather than the going.
+            "wont poo", "won't poo", "wont do a poo", "won't do a poo", "wont wee", "won't wee",
+            "wont do a wee", "won't do a wee", "wont do a number two", "won't do a number two",
+            "holds it", "holds it in", "holds his poo", "holds her poo", "holds his wee",
+            "holds her wee", "holds on", "asks for a nappy", "asks for a diaper",
+            "poos in his pants", "poos in her pants", "poo in his pants", "poo in her pants",
+            "wees in his pants", "wees in her pants")),
           "Stop asking for a few weeks and let them come to it: a refusal is usually about being "
           "made to sit, not about the potty. Leave it in the room with them dressed, read a book on "
           "the floor beside it, and let them choose a trainer seat on the big loo instead. Go back to "
@@ -6014,7 +6615,22 @@ entry("back-with-an-ex",
           "Take the fear seriously without feeding it: check the room together with the light on, "
           "leave a small lamp or the door ajar, and give a boring, calm bedtime routine at the same "
           "time each night. Nightmares are normal at four to six and usually ease; if a child is "
-          "terrified most nights for weeks, mention it to the health visitor or GP."),
+          "terrified most nights for weeks, mention it to the health visitor or GP.",
+          # "a nightmare" is the wear idiom for a week or a job at least as often as it is a
+          # child's dream: "this week has been a nightmare" was answered with a bedtime routine
+          # and a health visitor. The loose words here are "night" and "has", which is what let it
+          # in, so the stretch of time and the job stand the card down and the composer's own
+          # reply takes those lines. "is a nightmare" is deliberately NOT here: "the little one is
+          # a nightmare at bedtime" is the card's own line, and standing it down for that phrase
+          # traded a real answer for "Ah no. What's the worst of the little one?"
+          #
+          # The stretch and the job stand the card down only when nothing in the line says who it
+          # is about (`_not_a_stretch_or_a_job`). Said as a bare avoid word, "this week" took the
+          # card off two of its own lines - "my daughter is having nightmares this week", "our 5
+          # year old has been a nightmare this week" - and the second fell to a store echo, which
+          # is worse than the card it lost.
+          guard=_not_a_stretch_or_a_job,
+          avoid=("nightmare of a", "nightmare week", "nightmare month", "slog", "grind")),
 
     # A bedtime *time* is a different question from a child who will not stay in bed: the first
     # wants hours by age, the second wants what to do at 3am. Kept apart so "what time should i
@@ -6166,6 +6782,9 @@ entry("back-with-an-ex",
           # about them, which is the whole subject.
           avoid=("baby", "babies", "newborn", "6 month", "six month", "9 month", "toothache",
                  "tooth ache", "abscess", "filling", "crown", "braces", "dentures", "wisdom",
+                 # a tooth lost in a dream is not a tooth lost: "i dreamt my teeth fell out"
+                 # was told that milk teeth start coming out at about six
+                 "dream", "dreams", "dreamt", "dreamed", "dreaming", "nightmare",
                  # the hole a tooth left is a socket: "the hole where my tooth came out is
                  # bleeding" was told a loose adult tooth is a dentist's job this week
                  "hole", "socket", "dry socket", "extraction", "extracted", "blood", "bloody",
@@ -6285,7 +6904,10 @@ entry("back-with-an-ex",
                  "watched the game", "watched the match", "see the game", "saw the game",
                  "the football", "the rugby", "the cricket")),
     entry("screen-time",
-          (("screen time", "tablet", "ipad", "phone", "screens", "cartoons", "tv", "telly"),
+          # "screentime" is how it is often typed, and it was a shrug: "how do i limit
+          # screentime for a 4 year old" had nothing to match.
+          (("screen time", "screentime", "tablet", "ipad", "phone", "screens", "cartoons",
+            "tv", "telly"),
            ("kid", "kids", "child", "children", "toddler", "son", "daughter", "year old",
             "how much", "too much", "hour",
             # "my son spends too much time on his phone" was the phone-bill answer (the word
@@ -6315,7 +6937,12 @@ entry("back-with-an-ex",
                  "drank", "drunk", "sucked", "licked", "poison", "poisoned", "poisoning",
                  "choking", "choked",
                  # a lost or stolen phone is the Find My question, not a screen limit
-                 "lost", "stolen", "nicked", "left it", "left my phone", "missing")),
+                 "lost", "stolen", "nicked", "left it", "left my phone", "missing"),
+          # The limit answer is a parent's answer, about a child's screens. Without this the row
+          # also answered the grown-up's own phone: "im always on my phone how do i stop" was told
+          # to match the limit to the age, and so was "my girlfriend says im always on my phone".
+          # Those lines are `routines.phone-distraction`'s, or nobody's.
+          guard=screens_are_a_childs),
     # A grown child leaving is not the house-move card: "my daughter wants to move out" was told
     # "tell them as soon as it is certain, and keep it concrete: which room is theirs, where the
     # school is" - advice for the parent who is moving - and "my son wants to leave home" was
@@ -6559,12 +7186,18 @@ entry("back-with-an-ex",
                  # asking about the help, not about the personality
                  "elderly", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90",
                  # "my parents are exhausted" is about their tiredness, and the reply for it is
-                 # sympathy and one thing off their plate rather than a visit that is shorter
+                 # sympathy and one thing off their plate rather than a visit that is shorter.
+                 # One parent is the same sentence: "my mum is exhausted" was still read as a
+                 # difficult parent. That one is a guard below, not an avoid phrase here: an
+                 # avoid phrase is read by root, so "is exhausted" in this list also stood the
+                 # row down for "my mum is exhausting", which is the difficult parent this row
+                 # answers.
                  "are exhausted",
                  # the partner who does not get on with your mother is a different question, and
                  # "get on with" is in this row's key
                  "my partner", "my husband", "my wife", "my boyfriend", "my girlfriend",
-                 "my ex", "partner doesnt", "partner doesn't", "husband doesnt", "wife doesnt")),
+                 "my ex", "partner doesnt", "partner doesn't", "husband doesnt", "wife doesnt"),
+          guard=_the_parent_is_not_only_tired),
     entry("parent-criticism",
           (("criticises", "criticizes", "criticism", "critical", "judges", "judging", "nags",
             "nagging", "interferes", "interfering", "puts me down", "belittles", "moans",
@@ -6647,6 +7280,17 @@ entry("back-with-an-ex",
                  "trust her advice", "trust his advice", "trust their advice",
                  "trust my friends advice", "trusts the advice", "love her advice",
                  "love his advice", "took her advice", "took his advice",
+                 # "suggest a game for two people" was this row: "suggest" is a loose form of
+                 # "suggests" and "people" is in the second group, so asking the bot for an idea
+                 # read as a person handing out advice nobody wanted. A way of asking is not a
+                 # subject, and the thing being asked for is another row's.
+                 "suggest a", "suggest some", "suggest any", "can you suggest", "could you suggest",
+                 "recommend a", "recommend some", "recommend any", "can you recommend",
+                 "could you recommend", "ideas for", "any ideas", "something to watch",
+                 "something to play", "game", "games", "board game", "board games",
+                 "card game", "card games", "watch", "watching", "film", "films", "movie",
+                 "movies", "box set", "series", "playlist", "album", "podcast", "book to read",
+                 "what to read", "what to watch", "what to play",
                  "welcomed her advice", "welcomed his advice", "advice would you give",
                  "what advice would you",
                  # an interruption has a card of its own, and it is the better answer
@@ -6860,6 +7504,9 @@ entry("back-with-an-ex",
             "on my own", "isolated",
             # "how do i meet anyone new" was the shrug once the duplicate row went
             "meet anyone", "meet anyone new",
+            # the same question with a singular person in it: "how do i meet someone" reached
+            # the meetings card before that card stopped taking the verb, and then the shrug
+            "meet someone", "meet somebody", "meet someone new",
             # The report of an empty room, said of work, is this question asked as a fact
             # rather than as a how-to: "nobody talks to me at work" reached the listening line
             # and "no one speaks to me at work" nothing at all, though the move is the same
@@ -6874,7 +7521,15 @@ entry("back-with-an-ex",
             "nobody ever speaks to me at work", "no one ever speaks to me at work",
             "nobody at work talks", "no one at work talks", "nobody at work speaks",
             "no one at work speaks", "nobody in work talks", "no one in work speaks",
-            "nobody talks to me where i work", "no one talks to me where i work"),
+            "nobody talks to me where i work", "no one talks to me where i work",
+            # The people who are quiet can be named instead of counted: "my colleagues never
+            # talk to me" was the withdrawn-child card ("talk side by side, in the car"), which
+            # is advice for a parent, and the plurals missed the singular in the other row's
+            # avoid list. These are words rather than phrases, so the second group does the
+            # rest of the work: a colleague who is annoying, toxic or unkind is fenced out
+            # below, exactly as a friend is.
+            "colleague", "colleagues", "coworker", "coworkers", "co-worker", "co-workers",
+            "teammate", "teammates", "team mate", "team mates", "workmate", "workmates"),
            # Where it happens is the second signal, and it includes the two most common places
            # people ask about - work and the years after university - which used to reach nothing
            # or the university application entry. The first group carries the meaning, so a bare
@@ -6890,7 +7545,8 @@ entry("back-with-an-ex",
             "dont know where", "don't know where", "no idea where", "start again",
             # a person asking what to do about it, rather than only reporting the feeling
             # (a bare "i feel lonely" stays with the chat module, which answers it warmly)
-            "meet", "meeting", "talk to", "what can i do", "what should i do", "cope",
+            "meet", "meeting", "talk to", "speak to", "speaks to", "what can i do",
+            "what should i do", "cope",
             "deal with", "stop feeling", "isolated", "on my own")),
           _making_friends,
           # "cope" and "on my own" beside a child are the parent-coping question, not the
@@ -6913,6 +7569,11 @@ entry("back-with-an-ex",
                  "apply", "application", "ucas", "offer", "course", "fees", "accommodation",
                  # a complaint about the friends someone already has is not how to meet people:
                  # "my friends at work are annoying" was being sent "pick one regular thing"
+                 # a colleague who is hard work is the "deal with them" row's: naming the
+                 # people at work in the subject took "how do i deal with a difficult
+                 # colleague" off the card about behaviour and specifics
+                 "difficult", "hard to work with", "interrupting", "interrupts", "talks over",
+                 "takes credit", "credit for my work", "undermines", "undermining",
                  "annoying", "annoyed", "hate", "hates", "toxic", "bully", "bullied",
                  "bullying", "not invited", "left out", "leaves me out", "mean to me",
                  "clique", "two faced", "gossip", "gossiping", "falling out", "fell out",
@@ -7371,17 +8032,30 @@ entry("back-with-an-ex",
     # on a bare "what", the what-to-take-to-a-care-home row on "take her" - or nothing at all.
     entry("first-date",
           (("first date", "second date", "third date", "blind date", "date night", "date at home",
-            "date ideas", "date idea", "dating", "tinder", "hinge", "ask her out", "ask him out"),
+            "date ideas", "date idea", "dating", "tinder", "hinge", "ask her out", "ask him out",
+            # valentines is the same question with a date on it: "what should we do for valentines
+            # day", "any ideas for valentines day", "where should i take my girlfriend for
+            # valentines" are an evening with a person, and the letter row was taking the first
+            # two and a borrowed-things row the third.
+            "valentines", "valentine's", "valentines day", "valentine's day", "anniversary"),
            ("talk", "nervous", "conversation", "ideas", "idea", "what to say", "where to go",
             "say", "plan", "planning", "what to do", "what should we do", "what can we do",
             "something to do", "where", "place", "places", "cheap", "good", "suggestion",
             "suggestions", "recommend", "at home", "where to take", "take her", "take him",
-            "where should we go", "where can we go", "where do we go")),
+            "where should we go", "where can we go", "where do we go", "special", "make it nice",
+            "make a night of it", "occasions")),
           _date_idea,
           # A date that is ending is the refusal card's: "how do i say no to a second date" met
           # "date" and "say" here and was told to pick something with a bit of movement in it.
           # What to put on is the outfit row's, and a night in is answered from `_date_idea`.
-          avoid=("not interested", "turn him down", "turn her down",
+          avoid=("cook", "cooking", "dinner", "dinner party", "meal", "recipe", "restaurant menu",
+                 # where to eat out is the table row's, which knows how to narrow the list:
+                 # "where should we go for valentines" was answered from here with a plan for an
+                 # evening in, where the table row was already the better answer.
+                 "where should we go", "where can we go", "where do we go", "where to go",
+                 "place to eat", "restaurant", "restaurants", "eat out", "book a table",
+                 "present", "presents", "gift", "gifts", "buy", "buying", "voucher", "flowers",
+                 "not interested", "turn him down", "turn her down",
                  "turn them down", "let him down", "let her down", "let them down",
                  "cancel a date", "decline", "no to a date", "no to the date", "no to a second date",
                  "say no", "end it", "stop seeing", "dont want to see", "don't want to see",
@@ -7476,8 +8150,11 @@ entry("back-with-an-ex",
           # pronoun is the only thing in the line, so the row reads the turn before it.
           guard=_not_a_hard_conversation),
     entry("friendship-drifting",
-          (("friendship", "friend"),
-           ("drifting", "drifted", "grown apart", "grew apart", "no time", "stopped", "lost touch")),
+          (("friendship", "friend", "mate", "mates"),
+           ("drifting", "drifted", "grown apart", "grew apart", "no time", "stopped",
+            # a friend who stops texting is the same drift said as a phone: "my mate stopped
+            # texting me" was "Thanks for telling me" - nothing at all
+            "stopped texting", "stopped messaging", "lost touch")),
           "Send one specific message about something only they would get, and suggest a fixed, small "
           "plan: a walk, a coffee, a phone call. Friendships drift on busyness rather than on falling "
           "out, and one warm nudge usually tells you quickly whether there is still something there."),
@@ -7693,7 +8370,11 @@ entry("back-with-an-ex",
           # the goodbye row carries "conversation" and gets "how do i" for free, so it ties on
           # a line about starting one; the tie goes to the entry that names what is being
           # started, and that is this one
-          bias=2),
+          bias=2,
+          # and a "who do i talk to about X" is a route, not an opener: the row would otherwise
+          # hold the bare words "talk" and "about" and answer a benefits, tax, pension, debt, will
+          # or rent question with advice about the queue and the weather
+          guard=_a_route_ask_not_an_opener),
     # "What should i bring to a party" was answered with the dress code: the clothing entry
     # owned `party` and `what`, and a host's present is not an outfit.
     entry("party-bring",
@@ -8443,24 +9124,42 @@ entry("back-with-an-ex",
             # the night-time phrasing is a dummy question even though it says "at night":
             # without these it went to the night-waking card
             "using a dummy", "dummy at night", "stop the dummy", "dummy at bedtime",
-            "give up the dummy", "dummy habit"),
+            "give up the dummy", "dummy habit",
+            # "my 11 year old still sucks a dummy": the verb for a dummy is not only "has", and
+            # without these the line reached nothing and the bot asked the child to say more
+            "sucks a dummy", "sucks the dummy", "sucks his dummy", "sucks her dummy",
+            "sucking a dummy", "sucking the dummy", "sucking his dummy", "sucking her dummy",
+            "sucked a dummy", "on a dummy", "has a dummy", "had a dummy"),
            ("stop", "stopping", "give up", "get rid", "drop", "when", "age", "how old",
             "should", "need", "too old", "wean", "weaning", "sleep", "nap", "bedtime",
             "give it up", "break the habit",
             # the statement shape: "my 2 year old still has a dummy" names no question word,
             # so the card that answers the question could not see it
             "still has", "still uses", "still using", "still on the dummy", "has the dummy",
-            "loves the dummy", "wont give it up", "wont give up", "addicted to the dummy")),
-          ("Keep a dummy for sleep until about 12 months, because it lowers the risk of cot death, "
-           "then take it away in the day first and leave it for naps and nights only. Between one "
-           "and two is the easiest window - after two and a half the child can argue for it. "
-           "Pick a quiet week, expect two or three rough nights, and never dip it in sugar or "
-           "honey or hang it on a string round the neck."),
+            "loves the dummy", "wont give it up", "wont give up", "addicted to the dummy",
+            # "should i take my sons dummy away, hes 4": the taking-away is the question, and
+            # without it the line was answered by the borrowed-things card ("anything borrowed
+            # comes back by Sunday"), because "take my ... away" is what a loan reads like
+            "take away", "take it away", "take the dummy", "take his dummy", "take her dummy",
+            "take my sons dummy", "take my daughters dummy", "get rid of it",
+            "get rid of the dummy", "throw it away", "throw the dummy away", "bin the dummy",
+            "dummy away",
+            # the verb is the ask: "my daughter sucks her dummy all day" is a request for what to
+            # do about it, and without these the line went to the rainy-day games card
+            "sucks", "sucking", "sucked", "takes", "taking", "throws", "throwing")),
+
+          # the answer is chosen by the child's age, which is usually in the line: see
+          # _the_dummy_answer, and _the_child_age_in_the_chat for the reading it shares
+          _the_dummy_answer,
           # the sleep cards, the teething card and the birth registration all speak about babies
           avoid=("register", "registration", "birth", "certificate", "teething", "waking",
                  "wont sleep", "milk", "feeding", "nappies", "rash", "fever", "jabs",
                  "vaccinations", "pregnant", "colic", "reflux", "swaddle", "puppy",
-                 "puppies", "kitten", "dog", "cat", "adults", "me")),
+                 "puppies", "kitten", "dog", "cat", "adults", "me"),
+          # a line that names a dummy is about the dummy, and the borrowing card was winning it
+          # ("should i take my sons dummy away" got "anything borrowed comes back by Sunday"),
+          # because taking something away reads as a loan. The nudge is for that tie only.
+          bias=1),
 
     entry("thumb-sucking",
           (("thumb sucking", "thumb", "thumbs", "sucking my thumb", "sucking their thumb",
@@ -8512,6 +9211,9 @@ entry("back-with-an-ex",
            "wide toe box and a fastening that holds the heel, so you can feel their toes through "
            "it. Pram shoes are decoration only. Check the fit every eight to ten weeks - a thumb's "
            "width at the toe - because toddlers grow about two sizes a year."),
+          # the same refusal rule as the coat a child is bought: "my toddler wont wear his
+          # shoes" is the morning fight, and it was answered with how a first shoe should fit.
+          guard=not_a_fight_about_clothes,
           avoid=("register", "registration", "birth", "certificate", "teething", "sleep",
                  # a boot for a hill is a buying question about a grown-up's boot, not a first
                  # pair of shoes: "how do i choose walking boots" reached the barefoot answer
@@ -9046,6 +9748,11 @@ entry("back-with-an-ex",
                  "im a", "my nose", "cold sore", "cold sores", "cold water", "cold weather",
                  "outside", "in the cold", "cold room", "freezing", "frozen", "heating",
                  "fridge", "freezer",
+                 # The colour of the child is the question, not the sniffle: "my son is mottled
+                 # and cold" was told a cold is a virus and runs its course, and the pale-child
+                 # card is the answer to the colour. A cold never makes a child grey.
+                 "pale", "mottled", "clammy", "grey", "gray", "ashen", "white as a sheet",
+                 "blue round the lips", "blue lips",
                  "hay fever", "hayfever", "allergy", "allergies", "allergic", "pollen",
                  # a child who is cold is not a child with a cold, and the words that say it are
                  # the room's and the bed's: "my kids are cold in their room", "my baby is cold
@@ -9305,6 +10012,24 @@ entry("back-with-an-ex",
             "driving me crazy", "doing my head in", "at the end of my rope", "running on empty",
             "touched out", "worn out with the kids", "exhausted with the kids",
             "no time to myself", "dont get a minute", "don't get a minute", "not a minute to",
+            # "how do i get some time to myself with a baby" got no answer at all and the
+            # greeting's handoff instead, while the same ask said as "i never get a break from
+            # the kids" got this row: an hour to yourself is the same ask whether the line calls
+            # it a break or calls it time.
+            "time to myself", "time for myself", "any time to myself", "some me time",
+            "me time", "a minute to myself", "an hour to myself", "time to myself with",
+            # Who can help is the same worn-out-parent ask as "i need a break": "who can help me
+            # with the baby", "nobody helps me with the baby" and "can someone help me with the
+            # baby" were a greeting's handoff, and the answer they were asking for is the one
+            # below - ask one person for one named hour.
+            "nobody helps", "no one helps", "no one to help", "no help with",
+            "who can help", "can someone help", "someone to help", "whos going to help",
+            "who is going to help", "can anyone help", "anyone help me",
+            "a hand with", "need a hand", "no one gives me a hand",
+            "help with the baby",
+            "help with my baby", "help with a baby", "help with the children",
+            "on my own with", "all on my own with", "all on me", "its all on me",
+            "it is all on me", "doing it all",
             "all day with the kids", "all day with the children", "on my own with the kids",
             "on my own with the children",
             # A parent stuck in one room with a small child is the same worn-out ask, and the
@@ -9338,6 +10063,13 @@ entry("back-with-an-ex",
                  "boiler", "car", "phone", "social media", "instagram", "news", "tv",
                  "from my husband", "from my wife", "from my partner", "from my boyfriend",
                  "from my girlfriend", "respite", "carer", "caring", "dementia", "mum and dad",
+                 # A partner who will not help is the uneven-home-load complaint, and it has its
+                 # own answer ("ask for one named job on a named day"): "my wife wont help with
+                 # the baby at night" is not a worn-out parent asking for an hour, and the ask
+                 # words this row now shares with that one would have taken it.
+                 "my husband", "my wife", "my partner", "my boyfriend", "my girlfriend",
+                 "my ex", "wont help", "won't help", "doesnt help", "doesn't help",
+                 "never helps", "never does",
                  "vegetarian", "keyboard", "children in need",
                  # "my mum keeps asking when we're having kids and it's doing my head in" is the
                  # grandchild question, not a parent who needs an hour: "doing my head in" is in
@@ -9349,7 +10081,8 @@ entry("back-with-an-ex",
                  # the trapped words above are the speaker's own day, not a fire or a locked room
                  "fire", "smoke", "flood", "flooding", "burning", "lift", "elevator",
                  "locked in", "locked out", "cannot get out", "cant get out", "can't get out",
-                 "stuck in traffic", "trapped in the car", "stuck in the car", "snowed in")),
+                 "stuck in traffic", "trapped in the car", "stuck in the car", "snowed in"),
+          guard=_a_break_for_the_carer),
 
     # "the kids are at their dads this weekend" and "my kids are with their dad this week" were
     # echoed back as facts to remember. The weekend after a handover is the one people ask about:
@@ -10075,7 +10808,14 @@ entry("back-with-an-ex",
             # the home can be the subject of the line as well as the person: "should my dad go
             # into a care home" asks about the home, and with the noun only in the first group
             # the entry stood down and the chat answer took it
-            "care home", "care homes")),
+            "care home", "care homes",
+            # "who can help with my mum" is this question and nothing else: the parent in the
+            # first group means the help named is help for them, so the asking phrases belong
+            # here. They are phrases rather than the bare "help", which took every line where
+            # the parent was the one doing the helping.
+            "help with", "help for", "help looking after", "help caring", "help at home",
+            "get help", "get some help", "can i get help", "any help", "what help",
+            "who can help", "who can i ask", "who do i ask", "support for")),
           "Start with a free needs assessment from the council - it opens the door to home help, grab "
           "rails and a care package without you paying privately first. Then take the falls out of "
           "the house: rugs taped down, a light by the bed, a shower seat, a keysafe so help can get "
@@ -10529,12 +11269,19 @@ entry("back-with-an-ex",
                  "wire bra", "wicker", "chicken wire", "barbed wire")),
 
     entry("child-wont-wear-coat",
-          # "tips for getting a toddler dressed" named none of these words: the row is the
-          # morning fight and it was keyed only on the coat and the shoes.
+          # The refusal is the key, and every wording of it puts the refusing verb beside the
+          # garment, so the verb shapes are keyed and not the sentences people type:
+          # "wont wear his coat", "wont put her coat on", "hates wearing shoes", "fights getting
+          # dressed". "tips for getting a toddler dressed" named none of these words, and the
+          # bare "wont wear" alone still lost to the buying-a-coat row on score, which is why
+          # that row now declines a refusal (not_a_fight_about_clothes, clothing.py).
           (("wont wear his coat", "wont wear her coat", "refuses to wear", "wont put his shoes on",
-            "wont get dressed", "wont wear",
-            "getting dressed", "get dressed", "fights getting dressed", "hates getting dressed",
-            "dressing", "gets dressed"),
+            "wont get dressed", "wont wear", "getting dressed", "get dressed",
+            "fights getting dressed", "hates getting dressed", "dressing", "gets dressed",
+            "wont put on", "wont put her coat on", "wont put his coat on",
+            "wont put her shoes on", "wont put them on", "wont put it on",
+            "hates wearing", "hates his coat", "hates her coat", "hates shoes",
+            "refuses to put"),
            ("child", "son", "daughter", "toddler", "mornings", "school", "coat", "shoes")),
           "Stop arguing about the coat and argue about the temperature instead: 'It's four degrees - "
           "you can wear the thin one or the thick one, your pick.' Give two options you can live "
@@ -10827,7 +11574,9 @@ entry("back-with-an-ex",
           "friends, or giving up things they loved, ask the GP or the school about CAMHS - that is "
           "a different thing from a row.",
           avoid=("husband", "wife", "partner", "boyfriend", "girlfriend", "mum", "mother",
-                 "dad", "father", "in law", "boss", "colleague", "step",
+                 "dad", "father", "in law", "boss", "colleague", "colleagues", "coworker",
+                 "coworkers", "co-worker", "co-workers", "teammate", "teammates", "workmate",
+                 "workmates", "step",
                  "wont talk", "won't talk", "wont speak", "won't speak", "never talks",
                  "not talking", "hasnt spoken", "has not spoken")),
 
@@ -10855,7 +11604,14 @@ entry("back-with-an-ex",
           # the answer for a named teenager, and teen-shut-out is
           avoid=("teenager", "teenagers", "teen", "teens", "teenage", "teenaged",
                  "13 year old", "14 year old", "15 year old", "16 year old", "17 year old",
-                 "is 13", "is 14", "is 15", "is 16", "is 17", "at uni", "at university"),
+                 "is 13", "is 14", "is 15", "is 16", "is 17", "at uni", "at university",
+                 # The people at work are named in the plural far more often than the singular
+                 # the other rows already fence, so "my colleagues never talk to me" was this
+                 # card - a child who says nothing at seven and talks at ten - to a person
+                 # describing an office. Same for the words beside it.
+                 "colleague", "colleagues", "coworker", "coworkers", "co-worker", "co-workers",
+                 "teammate", "teammates", "team mate", "team mates", "workmate", "workmates",
+                 "boss", "manager", "office", "staff", "workplace"),
           # When the silence follows something the person did - "i let my sister down again and
           # she wont talk to me" - the card about drawing out a withdrawn adult answers the wrong
           # question: they know why she is quiet. What they asked is how to put it right, which is
@@ -11104,7 +11860,9 @@ entry("back-with-an-ex",
           bias=2,
           # the cost, the probate and the grieving are other answers
           avoid=("cost", "costs", "price", "much", "pay", "afford", "probate", "will",
-                 "grief", "died", "death", "passed away", "cry", "crying", "miss")),
+                 "grief", "died", "death", "passed away", "cry", "crying", "miss"),
+          # the "wake" in the key is the gathering, not a child waking at night
+          guard=_a_waking_is_not_a_wake),
 
     # "how do i tell my son we cannot afford a new phone" was answered with the arrears script
     # ("tell the person or company what you can pay"), and "how do i tell my child we cannot afford
@@ -11511,24 +12269,10 @@ entry("back-with-an-ex",
 
     entry("parent-needs-space", (("mum", "mother", "dad", "father", "parents", "stepmum",
                                   "stepdad"),
-                                 ("space", "back off", "too much", "constantly", "every day",
-                                  # "rings" is the parent phoning you, so it needs its object:
-                                  # a bare "rings" is also "ring my mum", which is your call to
-                                  # make, not hers.
-                                  "rings me", "ringing me", "rings all the time",
-                                  "rings constantly", "keeps ringing", "phones me",
-                                  "calls me", "calls constantly", "boundaries", "boundary",
-                                  "distance", "overbearing", "smothering",
-                                  # "coming round" is the same visit as "comes over every day",
-                                  # and the phrasal words said nothing this entry keys on: the
-                                  # line about a mother who comes round got no answer at all.
-                                  "coming round", "coming over", "comes over", "come over",
-                                  "turns up", "turning up", "visits", "visiting",
-                                  # a want with a frequency behind it is a complaint, and it
-                                  # was falling between the two rows: "my mum wants to visit
-                                  # every weekend" came back as an echo of its own words
-                                  "wants to come round", "wants to come over", "wants to visit",
-                                  "wants to come", "wants to stay")),
+                                 # "coming round" is the same visit as "comes over every day",
+                                 # and the phrasal words said nothing this entry keys on: the
+                                 # line about a mother who comes round got no answer at all.
+                                 A_VISIT_WEARS + A_VISIT_PLAIN),
           "Be warm and specific rather than general: \"I love seeing you and I need Sundays to "
           "myself\" lands, where \"I need space\" sounds like a rejection. Offer the thing you will "
           "do instead, such as a call on Thursdays or lunch once a month, and keep to it, because a "
@@ -11550,6 +12294,11 @@ entry("back-with-an-ex",
                  # reason: "my mum is coming round and theres nothing in the fridge" got "I love
                  # seeing you and I need Sundays to myself" once the visiting row stood down.
                  AN_EMPTY_KITCHEN,
+                 # ...and so is a visit somebody is cooking for, which is only a boundary if the
+                 # row's own rate words are in the line: "my mum turns up every sunday for dinner
+                 # without asking" is a boundary and keeps the turn. That one is a guard rather
+                 # than an avoid word, because an avoid phrase is read loosely (words in the line,
+                 # anywhere) and "for dinner" was standing this row down for the complaint too.
                  # a parent who has NOT rung is the exact inverse of a parent who rings too
                  # much, and the loose word forms took one for the other: "my mum hasnt called
                  # me back" was told to "be warm and specific" about a call that never came,
@@ -11590,13 +12339,23 @@ entry("back-with-an-ex",
                  "staying with us", "staying for a week", "keep everyone sane",
                  "called me back", "hasnt called", "hasn't called", "not answering",
                  "isnt answering", "isn't answering", "picking up", "heard from", "cant reach",
-                 "can't reach", "no answer", "unreachable", "voicemail", "rang him", "rang her"),
+                 "can't reach", "no answer", "unreachable", "voicemail", "rang him", "rang her",
+                 # A parent who repeats himself is a memory question, not a request to back off.
+                 # This row keys the loose frequency words ("constantly", "every day", "too much"),
+                 # so "my dad repeats himself constantly" was taken from the memory card and
+                 # answered with the be-warm-and-specific script once the talk had carried a
+                 # person from an earlier turn - a fact about the deck's word rarity, not about
+                 # the line. The forgetting words are the fence.
+                 "repeats himself", "repeats herself", "repeats themselves", "repeating himself",
+                 "repeating herself", "keeps repeating", "forgetful", "forgetting", "forgets",
+                 "forget things", "memory", "confused", "confusion", "same question"),
           # a parent is the one to back off from, and the general space row beside this one
           # takes "need some space" first; the person named decides it
           # A visit the speaker is making is not a boundary: the hosting card stands down for a
           # trip they are taking, and this row was taking the line it left ("im going to visit my
           # mum" got the be-warm-and-specific script). See _not_a_visit_i_am_making.
-          bias=2, guard=_not_a_visit_i_am_making),
+          bias=2, guard=lambda u: (_not_a_visit_i_am_making(u)
+                                   and _not_a_meal_the_visit_is_for(u))),
 
     # An older parent living alone who does not answer is a common, frightening line, and the
     # useful reply is a list to work down: it turns an hour of fretting into three phone calls.
@@ -11655,7 +12414,16 @@ entry("back-with-an-ex",
             # and "my son wets the bed" were left to the composer's echo (lemon-elk's read).
             # An adult still cannot get here: "i wet", "husband" and "partner" are avoided.
             "child", "children", "kid", "kids", "son", "daughter", "boy", "girl",
-            "toddler", "teenager")),
+            "toddler", "teenager",
+            # "the bed is wet every morning" named the bed and the wetness but no night, and the
+            # condensation card took it: a bed that is wet every morning is the child, not the
+            # windows. The morning is the same frame as the night here.
+            "every morning", "each morning", "morning", "mornings", "every day",
+            # the bed named by its linen: "wet patch on the bed sheet" was left to the composer's
+            # "say more", and a wet sheet is the same question as a wet bed
+            # ("mattress" is not one of them: "wet patch on the mattress" is a stain to treat,
+            # and the mattress card's answer is the one that person wants)
+            "sheet", "sheets", "bed sheet", "bed sheets", "duvet")),
           "It is common at four and still common at nine, but past ten it is less usual: "
           "constipation, an infection, diabetes and stress all cause it, so it is worth a GP "
           "visit whatever the age. Stop drinks an hour before bed, have them wee last thing, "
@@ -11665,7 +12433,24 @@ entry("back-with-an-ex",
                  # wetting the bed is a child's question: an adult who does it needs the GP
                  "husband", "wife", "partner", "boyfriend", "girlfriend", "adult", "grown up",
                  "grown-up", "myself", "my own", "i wet", "i still wet", "im 30", "im 40",
-                 "in my 30s", "in my 40s") + UNWELL_CHILD),
+                 "in my 30s", "in my 40s",
+                 # "wet patch" is the same two words in a plumbing line, and the phrase alone was
+                 # enough to bring a person asking about water under the sink to a child's bed:
+                 # "what should i do about the wet patch under the sink" was told it is common at
+                 # four and still common at nine. A wet patch is only this card when a bed or a
+                 # child is in the line - "the wet patch under the sink is spreading", "wet patch
+                 # on the ceiling" and "wet patch on the garage wall" are water, not a child.
+                 "sink", "under the sink", "ceiling", "washing machine", "radiator", "boiler",
+                 "pipe", "pipes", "plumber", "floorboards", "loft", "garage", "upstairs",
+                 "leak", "leaking", "dripping", "spreading", "damp patch", "water under",
+                 "water coming", "water is coming",
+                 # a bed soaked through with sweat is the night-sweats question, and with no
+                 # child and no "night" in the line it is the only thing it can be: "the bed is
+                 # soaking every morning" came here because "bed is soaked" and "every morning"
+                 # are both in the key, and these words are what says which of the two it is.
+                 # The line that names a child keeps this card.
+                 "sweat", "sweats", "sweating", "sweaty", "night sweats", "clammy", "fever",
+                 "hot flush", "hot flushes", "soaking", "drenched") + UNWELL_CHILD),
     # the biting is the subject and the nails are the evidence, so a plain "my daughter bites
     # her nails" matches without an asking word beside it
     entry("nail-biting-edges",
@@ -12366,6 +13151,12 @@ entry("back-with-an-ex",
           "knowing where it is'.",
           # money borrowed is the money file's, and a thing that came back broken is its own row
           avoid=("money", "quid", "pounds", "£", "cash", "lend me", "loan", "owes me",
+                 # an outing is not a thing lent, and "where should i take my girlfriend for
+                 # valentines" says "take my" and names a person: the thing being taken is out
+                 "where should i take", "where to take", "where can i take", "where do i take",
+                 "take her out", "take him out", "take them out", "take my wife", "take my husband",
+                 "take my girlfriend", "take my boyfriend", "take my partner", "day out",
+                 "night out", "for valentines", "for our anniversary", "date night",
                  # "my mate keeps asking to borrow a tenner" is a sum, said as a note: the
                  # money is the whole question and the borrowing row for things stood on it.
                  "tenner", "fiver", "borrow a ten", "tenner off",
@@ -12555,7 +13346,16 @@ entry("back-with-an-ex",
           "about the kitchen, the door and the evenings, saves months of small rows. It is your "
           "partner's home too, so the offer has to be theirs as well as yours before you give it.",
           avoid=("care home", "nursing home", "dementia", "hospital", "died", "funeral",
-                 "flatmate", "housemate", "landlord", "boyfriend", "girlfriend")),
+                 "flatmate", "housemate", "landlord", "boyfriend", "girlfriend",
+                 # the parent moving into somebody else's home is not this conversation: "my mum
+                 # wants to move in with her sister" reached the terms card once it outranked the
+                 # first-night card.
+                 "her sister", "his sister", "her brother", "his brother", "her son",
+                 "her daughter", "his son", "his daughter", "her friend", "his friend",
+                 "on her own", "on his own", "her own place", "his own place"),
+                 # a kin word plus "move in with us" is both groups of this row and one group of
+                 # the first-night card ("we just moved in"), and the first-night card won:
+                 bias=2),
 ]
 
 # An aid a parent will not use is one of the most-asked things about an older person, and nothing
@@ -12672,7 +13472,14 @@ ENTRIES.append(entry(
            "walking group", "walking club", "walk in the rain", "walking the dog",
            "fish stick", "glue stick", "memory stick", "candle", "incense", "drumstick",
            "hockey", "lacrosse", "supermarket trolley", "trolley coin", "trolley dash",
-           "stairlift", "wheelchair", "car", "van", "lorry", "train", "bus", "plane")))
+           "stairlift", "wheelchair", "car", "van", "lorry", "train", "bus", "plane",
+           # "how do i stop paper going yellow in a frame" is a picture, not a walking frame: the
+           # key holds "a frame" for "my mum needs a frame", so the paper and the glass have to
+           # be named here or a page of paper is offered a walking stick.
+           "paper", "papers", "paper going", "newspaper", "newspapers", "photo", "photos",
+           "picture", "pictures", "print", "prints", "painting", "paintings", "poster",
+           "posters", "certificate", "picture frame", "photo frame", "yellow", "yellowing",
+           "yellowed", "brown at the edges", "fading", "sunlight", "acid-free")))
 
 # The nappy is asked for as a method ("how do i change a nappy") and as a frequency ("how often
 # should i change my babys nappy"), and the sequence answers the first while the second was a
@@ -12979,6 +13786,11 @@ ENTRIES.append(entry(
     avoid=("tummy ache", "tummy aches", "tummy bug", "tummy pain", "tummy hurts", "bad tummy",
            "upset tummy", "sore tummy", "stomach ache", "stomach bug", "diarrhoea", "vomiting",
            "constipated", "colic", "wind", "reflux",
+           # "my baby has a rash on her tummy" is a rash question: the place was the whole of
+           # what made it this row's, and the answer was how much time to spend on the floor.
+           "rash", "rashes", "spot", "spots", "spotty", "blotchy", "blotches", "hives",
+           "itchy", "itching", "eczema", "dry skin", "red patch", "red patches", "mole",
+           "moles", "birthmark", "nappy rash", "cradle cap", "skin",
            "sleeps on his tummy", "sleeps on her tummy", "sleeping on his tummy",
            "sleeping on her tummy", "sleep on his tummy", "sleep on her tummy",
            "rolled onto his tummy", "rolls onto his tummy", "roll onto his tummy",
@@ -13172,3 +13984,30 @@ ENTRIES.append(entry(
 from .family_more import ENTRIES as _ROWS_IN_FAMILY_MORE  # noqa: E402
 
 ENTRIES.extend(_ROWS_IN_FAMILY_MORE)
+
+ENTRIES.append(entry(
+    "childminder",
+    (("childminder", "childminders", "child minder", "child minders", "registered childminder",
+      "childminding"),
+     ("what is", "whats", "what does", "mean", "how much", "cost", "costs", "need",
+      "do i need", "find", "finding", "choose", "choosing", "check", "questions", "ofsted",
+      "registered", "register", "difference", "vs", "instead of", "nursery", "tax free",
+      "tax-free", "hours", "ratio", "ratios")),
+    # The price comes second because "how much does a childminder cost" is asked as often as
+    # "what is one", and this row answers both: without a figure under the definition, the cost
+    # line lost the nursery figures it used to get and got nothing back in their place.
+    "A childminder looks after other people's children in their own home, usually with one other "
+    "adult and no more than six children under eight at a time, and is registered with Ofsted "
+    "(or a CMA in Wales, the Care Inspectorate in Scotland). Expect roughly £5 to £7 an hour in "
+    "England, more in London, with the free hours for three and four year olds on top - usually "
+    "cheaper than a nursery day. That home setting is the difference "
+    "from a nursery: fewer children, one person who knows your child well, and hours that often "
+    "bend round a shift, but no cover if the childminder is ill. Ask to see the registration "
+    "certificate and the latest inspection report, ask what a normal day looks like, and check "
+    "the first-aid certificate and whether they take the tax-free childcare payments, which most "
+    "registered childminders do.",
+    # a nanny, an au pair and a nursery are the other kinds of childcare, and a babysitter is
+    # an evening
+    avoid=("nanny", "nannies", "au pair", "babysitter", "babysitting", "nursery", "nurseries",
+           "pre-school", "preschool", "after school club", "holiday club", "school"),
+    bias=1))

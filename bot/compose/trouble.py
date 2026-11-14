@@ -78,6 +78,54 @@ A_THING_PACKED_UP = r"""
           (?:has|have|had)?\s*(?:packed\s+(?:up|in)|(?:gave|given)\s+up)
 """
 
+# A thing of theirs that has gone into a bad state, said with the state rather than a fault verb.
+# This is the commonest way people describe a thing that wants fixing and the vocabulary above had
+# none of it, so the whole class fell past this module to the pool for an ordinary day:
+# "my bike chain has seized up" was answered "Good to hear. What was the best bit?", "my oven door
+# glass has gone all black and burnt on" with "Thanks for telling me - I'm here if you want to dig
+# into any of that" and "the glass on my oven door is burnt on" with "Got it. Is there anything
+# you'd like a hand with?". A cheer at a seized chain is the worst reply the bot can give, and it
+# is not the fault of the day pool: no reader had called the line a fault at all.
+#
+# So the shape is the state, not the topic: what has happened to the thing. Only states that mean
+# damage are here - black from burning, mould, rust, split, seized, hanging off - and not the
+# states a thing goes into by itself (a hair going grey, the weather turning cold), which are news
+# or a remark rather than a fault to talk through.
+THING_STATE = r"""
+    (?:has|have|had|is|are|was|were)\s+
+      (?:(?:gone|got|become|turned)\s+)?
+      (?:all\s+|a\s+bit\s+|a\s+lot\s+|really\s+|very\s+|quite\s+|so\s+|completely\s+
+         |totally\s+|properly\s+|now\s+)?
+      (?:a\s+|an\s+)?
+      (?:
+          black|brown|green|rusty|mouldy|moldy|mildewed|lumpy|soggy|slimy|sticky|greasy
+        | furry|furred|scaled|pitted|warped|brittle|cracked|frayed|threadbare|bubbled
+        | blistered|peeling|discoloured|discolored|crusty
+        | burnt|burned|scorched|seized|rusted|corroded|perished|split|snapped|melted|bent
+        | stuck|jammed|solid|knackered|kaput|buggered|stiff|dropped|flat
+        | yellow|patchy|faded|bald|rip(?![\s-]+off\b)
+        | crack|hole|tear|dent|patch
+      )
+      (?:\s+(?:on|up|through|off|shut|together|solid|apart|open|down|in|out))?
+  | burnt\s+on
+  | blown\s+(?:down|off|out|over|away)
+  | (?:hanging|fell|fallen|come|coming|pulled)\s+(?:off|away|loose|apart|down|open)
+  | conked\s+(?:out|off)
+"""
+
+# A plant going brown or green is the season and the weather, not a fault to talk through: "the
+# leaves have gone brown" is an autumn remark. The colour words below are the mould and the rust
+# on a made thing, so a growing thing named in the line is left to the garden reading.
+GROWING = frozenset("""
+    leaves leaf grass lawn lawns plants plant tree trees hedge hedges shrub shrubs bush bushes
+    fruit veg vegetables tomatoes tomato potatoes crops flowers flower garden allotment ivy
+    moss weeds weed field fields meadow hedgerow
+""".split())
+
+# The state block on its own, so a reading can tell a state of a thing from the fault verbs above:
+# "my knee is stiff" is the body said in the same shape, and a knee wants the sore reading.
+THING_STATE_ONLY = re.compile(r"\b(?:" + THING_STATE + r")\b", re.X)
+
 # A thing is not doing what it should. Only the words that mean a fault, so "i put her to sleep
 # at 7" and "my sister is staying for a fortnight" stay out of it.
 THING = re.compile(r"""
@@ -99,6 +147,7 @@ THING = re.compile(r"""
       | clapped\s+out | seen\s+better\s+days | knackered
       | went\s+bang | blew\s+(?:a\s+)?fuse
 """ + THE_END_OF_A_THING + A_THING_PACKED_UP + r"""
+      | """ + THING_STATE + r"""
     )\b
 """, re.X)
 
@@ -1031,6 +1080,19 @@ def _someone_is_the_subject(text):
     return False
 
 
+def _the_noun_before(text, at):
+    """The noun just before a match, whoever owns it: "the leaves" is leaves, "my slabs" is slabs.
+
+    _the_thing_it_hangs_on answers a different question - whether the fault is a thing of theirs
+    rather than the world's, so it says nothing when the owner is "the". This one only wants the
+    word, for readings about what kind of thing it is.
+    """
+    words = re.findall(r"[a-z']+", " " + str(text or "")[:at])
+    while words and words[-1] in JOINING:
+        words.pop()
+    return words[-1] if words else ""
+
+
 def _a_fault_of_a_thing(text):
     """True when the fault in the line hangs on a thing, not on a person or an animal."""
     padded = " " + text + " "
@@ -1060,12 +1122,24 @@ def _shape(clean, words=None):
     if not text or "?" in text:
         return None
     words = set(words) if words else set(re.findall(r"[a-z']+", text))
+    mine = " " + text + " "
+    # A state of a thing - "has gone all black", "is burnt on", "has seized up" - read before the
+    # body and the acute fence, because the burn and the seizure are words those two also own.
+    a_state = THING_STATE_ONLY.search(mine)
+    growing_state = bool(a_state and _the_noun_before(mine, a_state.start()) in GROWING)
     if someone_elses(words) and not _a_fault_of_a_thing(text):
         # Someone else in the line stands this reading down when they are what the fault hangs
         # on ("my mum is ill", "the cat is stuck up the tree"). A thing of theirs is not that:
         # "the cat flap is broken" is a flap, and the cat is only part of its name.
         return None
-    if PLEA.search(text) or ACUTE.search(text) or DEATHWISH.search(text):
+    if PLEA.search(text) or DEATHWISH.search(text):
+        return None
+    # The one acute word this reading shares with the safety reader is the burn: "the pan is
+    # burnt" and "my oven door glass has gone all black and burnt on" are a thing's damage, and
+    # the burn the safety reader owns is on a body. So the acute stand-down holds everywhere but
+    # a state of a thing with no body part in the line.
+    if ACUTE.search(text) and not (a_state and not growing_state
+                                   and not words & BODY_PART):
         return None
     # A fracture word is an injury only when a body is there for it to belong to: "my wrist is
     # broken" keeps safety's turn, "my washing machine is broken" is a fault to talk through.
@@ -1078,14 +1152,19 @@ def _shape(clean, words=None):
     hung_on = _the_fault_hangs_on(text)
     if BREAKS.search(text) and ((words & NOT_A_THING) or (hung_on & NOT_A_THING)):
         return None
-    mine = " " + text + " "
     own = bool(MINE.match(text))
     # "my legs are dead after that run" is the same complaint as "my knee is aching" said with a
     # body part and no pain word, so a body part plus dead/killing/hurting counts as one.
     # "my knee has had it" and "my knees are done for after that run" are the same complaint as
     # "my knee is killing me", said in the words a person uses for a machine, so a body part with
     # the end-of-a-thing words counts as the body's trouble too.
-    ache = BODY.search(mine) or (words & BODY_PART
+    body_word = BODY.search(mine)
+    if a_state and not growing_state and not words & BODY_PART:
+        # "the pan is burnt" and "my oven door glass has gone all black and burnt on" are a thing's
+        # damage; the burn the body reader owns is the one on a body, so only a body part in the
+        # line keeps the word for the body ("my lips are burnt") .
+        body_word = None
+    ache = body_word or (words & BODY_PART
                                  and re.search(r"\b(?:dead|killing|kills|hurts?|banging|"
                                                r"thumping|pounding|splitting|had\s+it|"
                                                r"done\s+for)\b", mine))
@@ -1115,6 +1194,15 @@ def _shape(clean, words=None):
         hangs_on = _the_thing_it_hangs_on(mine, thing.start())
         if hangs_on in NOT_A_THING:
             return "strain"
+        # A body part said in the shape of a state - "my knee is stiff", "my back has gone" - is
+        # the body's complaint, and the sore reading is the one that talks about it rather than
+        # asking what the knee is doing while it does it.
+        if hangs_on in BODY_PART and a_state and a_state.start() == thing.start():
+            return "sore"
+        # The state branch is what matched, and the thing that went into the state is growing:
+        # its colour is the season. Read after the body so "my lips are burnt" keeps its answer.
+        if growing_state and a_state.start() == thing.start():
+            return None
         # "my knee is on its last legs" is a body said with the words for a washing machine:
         # "what's it doing exactly" is the wrong question for a knee, and the next thing a
         # person needs is what a doctor or a pharmacist would ask. A body part stands this

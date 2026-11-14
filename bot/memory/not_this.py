@@ -210,7 +210,7 @@ def the_place_ruled_out(text, memory):
     return ""
 
 
-def reply_for(text, memory):
+def _the_place_ruled_out(text, memory):
     """The reply to a line that only rules a place out, or None."""
     gone = the_place_ruled_out(text, memory)
     if not gone or not isinstance(memory, dict):
@@ -233,3 +233,19 @@ def reply_for(text, memory):
                    if isinstance(turn, dict) and isinstance(turn.get("bot"), str)}
     fresh = [line for line in lines if line not in said_lately] or lines
     return pick(fresh, memory, str(text or ""))
+
+
+def reply_for(text, memory):
+    """The reply to a line that only rules a place out, or a thing said again with "still", or None.
+
+    Both readings are the store's before any card is opened, and the store asks this reader first,
+    so they are answered here in one call. The still reading is `bot.memory.tried`'s: it is a
+    follow-up on the chat's own thing, and the one word the line carries ("cold", "freezing")
+    must not open a card about something else.
+    """
+    ruled_out = _the_place_ruled_out(text, memory)
+    if ruled_out:
+        return ruled_out
+    from . import tried
+
+    return tried.reply_for(text, memory)

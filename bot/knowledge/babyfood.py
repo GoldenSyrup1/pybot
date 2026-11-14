@@ -64,6 +64,12 @@ _BABY = ("baby", "baby's", "babys", "babies", "infant", "infants", "little one",
 # reaches it and keeps the newborn-feeding answer it already had.
 AGE = ("month old", "months old", "week old", "weeks old", "newborn", "newborns",
        "1 year old", "one year old", "a year old", "eighteen month", "18 month",
+       # An age written in words is the same age as one written in digits, and the stage table
+       # reads the figure either way: "my two year old, what should i feed her" was a shrug
+       # because the key only knew "one year old". Bare "year old" stays out, as the note below
+       # says - a five-year-old's homework is not a feeding question.
+       "two year old", "three year old", "four year old", "five year old", "six year old",
+       "seven year old", "eight year old", "nine year old", "ten year old",
        "toddler", "toddlers",
        # A figure with its unit next to it is the age however it is written, and "baby is 1" is a
        # first birthday: the reply reads the number off the line, so the key only has to see that
@@ -221,8 +227,18 @@ SPICE_NAMES = ("cinnamon", "cumin", "turmeric", "paprika", "nutmeg", "coriander"
 NOT_ABOUT_WATER = ("dehydrate", "dehydrates", "dehydrated", "dehydration", "dehydrating",
                    "hydration", "diuretic", "electrolytes")
 
+# A job is never a baby's age. "is it ok to leave a job after three months" read "three months"
+# as a stage and was answered by the feeding table's punt, because the age is the only thing in
+# the line this domain knows. Every row here carries STAND_DOWN, so the job words go in the
+# shared fence. The bare "work" is not in it: "my baby is 6 months and i go back to work" is
+# still a feeding line, and only the job nouns hold a line out.
+JOB_WORDS = ("job", "jobs", "my job", "new job", "job offer", "leave a job", "leaving a job",
+             "left a job", "quit my job", "quitting my job", "boss", "employer", "employee",
+             "career", "resign", "resigning", "resignation", "hand in my notice",
+             "handing in my notice", "notice period", "interview", "salary", "my salary")
+
 STAND_DOWN = (NOT_A_MENU + _HOW_MUCH_MILK + NOT_A_BABY + WEANING_ELSEWHERE + NOT_AN_AGE
-              + SPICE_NAMES + NOT_ABOUT_WATER)
+              + SPICE_NAMES + NOT_ABOUT_WATER + JOB_WORDS)
 
 # A book for the baby is not the readiness question, and "read" reaches this domain's "ready"
 # because the words are matched in their loose form: "what book should i read to my baby" was
@@ -606,6 +622,20 @@ def _age_in_months(understood):
     for words in _NUMBER_WORDS:
         if re.search(r"\b%s\s+months?\b" % words, said):
             return _NUMBER_WORDS_AT[words]
+        # "my two year old, what should i feed her": the age is spelled and the unit is the
+        # word "old", so the figure-with-a-unit reader above never sees it.
+        if re.search(r"\b%s\s+years?[\s-]*old\b" % words, said):
+            return 12 * _NUMBER_WORDS_AT[words]
+    # "my kid 4, what should i feed him", "my daughter 6": the verb is left out and so is the
+    # unit, which is how people type, and the older-child word is the only thing that says the
+    # figure is years. Beside "baby" the same figure is months and stays unread, as before.
+    if any(re.search(r"\b%s\b" % word, said) for word in _OLDER_CHILD_WORD):
+        bare = re.search(r"\b(?:%s)\s+(?:is\s+|are\s+|aged\s+|at\s+|of\s+)?(\d{1,2})\b"
+                         r"(?!\s*(?:month|months|mth|mths|week|weeks|wk|wks|day|days|stone|"
+                         r"kilos|kilo|kg|lbs|pounds)\b)"
+                         % "|".join(_OLDER_CHILD_WORD), said)
+        if bare and 2 <= int(bare.group(1)) <= 19:
+            return 12 * int(bare.group(1))
     if re.search(r"\b(toddler|toddlers)\b", said):
         return 12
     if re.search(r"\b(newborn|newborns)\b", said):
@@ -1036,6 +1066,56 @@ def _a_pronoun_is_in_the_line(understood):
     return not any((" " + word + " ") in low for word in _AN_ADULT)
 
 
+def _a_baby_or_a_pronoun(understood):
+    """The feeding rows' guard: the line has to be about a young child, not an adult.
+
+    A pronoun is the child only when the line names nobody grown-up. "what can i give him for
+    lunch" is a baby the chat has already named; "my nan is diabetic, what can i take to her for
+    tea" is a nan, and the first-foods paragraph answered it because the key takes a pronoun and
+    an eating verb and asks nothing else.
+
+    Stricter than `_a_pronoun_is_in_the_line` on purpose, and only the feeding rows use it: the
+    rows that answer a texture ("my mum thinks she should have lumps by now") or a food by name
+    ("my nan says give her a bit of porridge") read the adult's name as an opinion about the
+    baby's meal, which is right for them and wrong for this table's oldest question.
+    """
+    if _a_baby_is_named(understood):
+        return True
+    low = " " + _text(understood) + " "
+    if not any((" " + word + " ") in low for word in _A_CHILD_PRONOUN):
+        return False
+    return not any((" " + word + " ") in low for word in _AN_ADULT)
+
+
+# The row below answers a *baby's* first food, and it has never asked how old the child is:
+# "my kid is 4 years old, what should i feed him" was told to start with soft food in sticks.
+# An age of a year or more is not weaning, so the feeding rows stand down on one.
+_OLDER_CHILD_WORD = ("kid", "kids", "child", "children", "son", "daughter", "boy", "girl",
+                     "teenager", "teenagers", "teen", "lad", "lass")
+_A_BARE_YEAR_FIGURE = re.compile(
+    r"\b(?:is|are|aged|at)\s+(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b"
+    r"(?!\s*(?:month|months|week|weeks|wk|wks|mth|mths|day|days))")
+
+
+def _an_age_of_a_year_or_more(understood):
+    """True when the line gives the child an age of a year or more.
+
+    One reader for every shape people write an age in, so the guard and the stage table cannot
+    disagree about the same line: a figure with a unit ("18 months", "4 years"), a spelled age
+    with "old" ("my two year old"), and a bare figure beside a word for an older child ("my kid
+    4", "my daughter 6"), because nobody says "my kid 4" of a baby of four months. Beside "baby"
+    a bare figure is months, and `_age_in_months` leaves it unread, exactly as before.
+    """
+    age = _age_in_months(understood)
+    return age is not None and age >= 12
+
+
+def _of_weaning_age(understood):
+    """The feeding rows' other guard: a first food is for a child young enough to need one."""
+    return not _an_age_of_a_year_or_more(understood)
+
+
 # "Can I eat this" is about the speaker's own lunch; "how much milk should i give" is about the
 # baby's, and the verb is what tells them apart. A pronoun and an eating verb within a word or
 # two of each other is the person eating; give, feed and offer are somebody else eating.
@@ -1068,6 +1148,15 @@ _BABY_ACT = ("breastfeed", "breastfeeds", "breastfeeding", "breast feed", "breas
 # phrase that only a question about feeding a baby is made of joins the gate. They are pairs on
 # purpose - "jar" alone is jam and chutney ("how long does homemade jam keep in jars"), and the
 # bath, the bottle steriliser and the freezer bags keep the answers they have.
+# A first taste of a food is a feeding line even with nobody named: "how do i introduce eggs",
+# "how do i introduce cow's milk", "when do i first give fish". The verb "introduce" is a verb
+# about people as often as about food, so a food from this table's own list has to be in the line,
+# and a line about the speaker's own diet keeps out of it.
+_INTRODUCES_A_FOOD = re.compile(
+    r"\b(?:introduc(?:e|ing|ed)|first\s+(?:taste|try|time\s+giving)|start(?:ing)?\s+giving)\b")
+_NOT_MY_DIET = ("diet", "into my", "to my diet", "for me", "myself", "my own")
+
+
 _A_FEEDING_PHRASE = ("jars or pouches", "jars and pouches", "jars as good", "pouches as good",
                      "jars or homemade", "pouches or homemade", "own purees", "purees or",
                      "puree or jars", "buy jars", "shop bought", "shop-bought",
@@ -1169,6 +1258,15 @@ def _the_line_feeds_somebody(understood, memory):
     if not feeds and len(word_list) >= 3 and words & _GIVING_WATER_ASKS:
         if any(phrase in padded for phrase in _GIVING_WATER):
             feeds = not any((" %s " % word) in padded for word in _GIVING_WATER_OUT)
+    # "how do i introduce eggs" is the allergen ladder's question, and it names no baby: the verb
+    # for a first taste plus a food is what says a child is being fed. It is not a line about the
+    # speaker's own diet.
+    # A bottle and formula are feeds but not allergens, and "how do i introduce a bottle" is the
+    # bottle-feeding question, not this ladder's.
+    if not feeds and _INTRODUCES_A_FOOD.search(padded) and not any(
+            cue in padded for cue in _NOT_MY_DIET) and any(
+            (" " + word + " ") in padded for word in _ALLERGEN_FOOD - {"bottle", "formula"}):
+        feeds = True
     if not names_a_baby and not feeds and _says_the_speaker_is_eating(word_list, said):
         return False
     if (not names_a_baby and _WHILE_SHE_FEEDS.search(said)
@@ -1451,6 +1549,17 @@ ENTRIES = [
     # drink" was the litre-a-day card until this row took it, and the food stage is the wrong
     # answer to it.
     entry("babyfood-by-age", (_WHAT_TO_FEED, AGE, EATING), _by_age, ask=AGE, bias=1,
+          # The key names no person at all - a "what can i give" and an eating verb are enough -
+          # so the line has to say whose food it is: an age, a baby, or a pronoun with no adult
+          # named. Without this, "my nan is diabetic, what can i take to her for tea" was the
+          # first-foods paragraph, and the nan was a baby of about six months.
+          # The age guard is NOT on this row. The stage table answers every age from twelve
+          # months up with the family-food reply, so standing the row down on a year or more
+          # took the one-year-old's answer away: "what can i give my 1 year old for lunch" went
+          # from "From one they can eat what the rest of the family eats" to a gift-for-a-child
+          # card. `_of_weaning_age` stays on the first-foods row below, which is the one that
+          # hands a four-year-old soft sticks of carrot.
+          guard=_a_baby_or_a_pronoun,
           avoid=STAND_DOWN + ("drink", "drinks", "drinking", "drank", "thirsty", "fluids",
                               "hydrate", "hydrated")),
     # Eating what the family eats is the question for a child of one and up, and it was answered
@@ -1546,6 +1655,68 @@ ENTRIES = [
           bias=3,
           # The shared stand-down names "formula" itself, and this row is the formula question.
           avoid=NOT_A_BABY + tuple(word for word in NOT_A_MENU if word != "formula")),
+
+    # Which formula to buy, and whether to change it, is its own question and it had no card at
+    # all: "which formula should i buy" was the search hedge, "should i switch my babys formula"
+    # was the refused-bottle card ("have somebody else offer it"), "can i change formula brand"
+    # was a shrug, and "how do i switch formula" and "what formula should i use for my baby"
+    # were the spreadsheet card, because "formula" is Excel's word too. The brand is a question
+    # about the tin, and the making up, the amount and the sterilising all keep their own rows.
+    entry("babyfood-which-formula",
+          (("formula", "formula milk", "baby formula", "infant formula",
+            "first infant milk", "infant milk", "hungry baby milk", "hungry baby",
+            "follow on milk", "follow-on milk", "stage 2 milk", "stage 3 milk",
+            "growing up milk", "brand of formula", "formula brand", "formula brands"),
+           ("which", "what", "best", "better", "switch", "switching", "switched",
+            "change", "changing", "changed", "try", "trying", "brand", "brands", "use",
+            "using", "buy", "buying", "choose", "choosing", "recommend", "worth", "need",
+            "mix", "mixing", "suit", "suits", "baby", "babies", "baby's", "babys",
+            "newborn", "infant", "bottle", "bottles", "feed", "feeds", "feeding",
+            "milk", "colic", "colicky", "reflux")),
+          ("Every first infant milk sold has to meet the same standard, so the brand matters much "
+           "less than the price and the tin you can get hold of: pick one first infant milk and "
+           "stay with it. Hungry-baby and follow-on milks are the same kind of thing under a "
+           "different label, and moving to them is marketing rather than a stage, so there is no "
+           "need to change when a baby seems hungrier - offer a little more of the same milk "
+           "first, because it is usually volume and not the powder. If you do want a different "
+           "brand, change straight over rather than mixing two powders in one bottle, and give it "
+           "a few days: a bit of wind, looser nappies or more posseting on a new milk usually "
+           "settles, while blood in the nappy, forceful vomiting, a rash or eczema that will not "
+           "settle is worth a word with the health visitor about a milk-free trial."),
+          # The rest of formula is four other rows: making it up (the kettle and 70C), how much,
+          # sterilising, and the move to cows milk. A maths formula is the spreadsheet and
+          # school rows' word, and none of those questions is this one.
+          avoid=("how much", "how many", "how often", "ml", "oz", "ounces", "scoop",
+                 "scoops", "make up", "making up", "made up", "prepare", "preparing",
+                 "sterilise", "sterilising", "steriliser", "kettle", "70c", "70 c",
+                 "cool it", "left out", "left over", "two hours", "reheat", "warm up",
+                 "bottle warmer", "how long", "how do i make", "cows milk", "whole milk",
+                 # The temperature of the water, and the making up of the powder, is the
+                 # method row's question, not the brand's.
+                 "temperature", "how hot", "hot water", "boiling", "boil the kettle", "warm it",
+                 "the formula for", "formula for the", "area", "circle", "triangle",
+                 "equation", "quadratic", "maths", "math", "algebra", "percentage",
+                 "spreadsheet", "sheet", "excel", "cell", "cells", "calculate", "gcse",
+                 "homework",
+                 # A formula in a column of numbers is the spreadsheet card's line, including
+                 # when it arrives as a follow-up to a spreadsheet turn ("What would the formula
+                 # look like for a column of numbers?"), which the context search would otherwise
+                 # hand to this row.
+                 "column", "columns", "row", "rows", "numbers", "number", "sum", "autosum",
+                 # Breast or bottle is a different question with its own answer, and it is
+                 # about the feeding and not the tin.
+                 "breast", "breastfeeding", "breastfeed", "breastfed", "breast milk",
+                 "breastmilk", "expressed", "expressing"),
+          # "which formula should i buy" is three stopwords and one content word - "which",
+          # "should" and "buy" are all dropped before scoring - so the asking has to be in the
+          # key as well, or the shortest form of the question gets the search hedge.
+          ask=("which", "what", "buy", "buying", "brand", "best", "better", "switch", "change",
+               "use", "try", "mix", "mixing", "worth", "recommend", "need", "needs", "does",
+               "do", "is", "are", "should", "suit", "suits", "right", "good"),
+          # The tin wins over the rows that share one word with it: the refused-bottle card
+          # ("have somebody else offer it") and the toddler-drinks card both key "baby" and
+          # "milk", and neither is a question about which milk to buy.
+          bias=3),
 
     # "how do i introduce a cup" and "when do i introduce water" reached the advice row about
     # introducing two people, which shares the verb and nothing else, and a shrug.
@@ -1756,6 +1927,9 @@ ENTRIES = [
           "with the tongue. Reaching for your plate or waking at night is not a sign on its "
           "own. Before four months is too early, and by six months it is time - waiting longer "
           "makes the iron and the chewing harder.",
+          # The same guard as the row below: "is she ready for food" is the baby, and "is my
+          # nan ready for food" is not.
+          guard=_a_baby_or_a_pronoun,
           bias=1, avoid=STAND_DOWN + BOOK_WORDS),
     # What to feed, for the lines that name no age: "what should i feed my baby first" is the
     # same question as the one above with the age left out.
@@ -1767,6 +1941,9 @@ ENTRIES = [
     # "give" is how the first food is asked for -- "what should i give her first" names no
     # food word at all, so the eating ask alone stood the row down.
     entry("babyfood-what-to-feed", (_WHAT_TO_FEED, BABY + _A_CHILD_PRONOUN), _FIRST_FOODS,
+          # "what can i give him for lunch" is the baby; "my nan is diabetic, what can i take to
+          # her for tea" is a nan, and this row answered it with the first-foods paragraph.
+          guard=lambda u: _a_baby_or_a_pronoun(u) and _of_weaning_age(u),
           ask=EATING + ("give", "gives", "giving", "first", "start", "starting"),
           avoid=STAND_DOWN + ("breakfast", "lunch", "dinner", "supper", "snack", "snacks",
                              # a bottle, a cup and a night feed are not food to start on:
@@ -1797,9 +1974,29 @@ ENTRIES = [
     # A food can bring on an allergy, and this is the one weaning question with a timing rule
     # worth stating plainly. A line that says a reaction already happened is not this row.
     entry("babyfood-allergens",
-          (BABY, ("allergen", "allergens", "allergy", "allergies", "sensitive", "sensitivities",
-                  "introduce", "introducing")),
+          (BABY,
+           ("allergen", "allergens", "allergy", "allergies", "sensitive", "sensitivities",
+            "introduce", "introducing")),
           _the_allergen_row, bias=3, avoid=STAND_DOWN),
+    # Asking how to introduce a food is asking about a first taste, and the allergen row cannot
+    # take it: its first arm is a baby word and these lines name the food instead ("how do i
+    # introduce eggs", "how do i introduce cow's milk", "how do i introduce solids"). Until this
+    # row they were told to show the older child the scan picture, because "introduce" is a verb
+    # about people too. The gate every row here passes (`_only_for_a_baby`) reads the verb plus a
+    # food as a feeding line, so this row is the one that answers it.
+    entry("babyfood-first-taste",
+          (("introduce", "introducing", "introduced", "first taste", "first tastes",
+            "first time giving", "start giving", "start on"),
+           ("egg", "eggs", "milk", "cow's milk", "cows milk", "peanut", "peanuts",
+            "peanut butter", "nut butter", "wheat", "fish", "sesame", "soya", "nuts", "dairy",
+            "cheese", "yoghurt", "yogurt", "strawberry", "kiwi", "food", "foods", "finger food",
+            "solids", "allergen", "allergens", "puree", "lumps")),
+          ("One new food at a time, in the morning on a day they are well: a teaspoon is a first "
+           "taste, then watch for twenty minutes, and a rash, swelling or sickness means stop and "
+           "ring 111. Once a food is in, keep giving it a couple of times a week, because stopping "
+           "is what raises the risk. Peanut and egg are the ones worth doing early rather than "
+           "late, and with severe eczema or a reaction already, ask a GP before starting."),
+          bias=2, avoid=STAND_DOWN + ("bottle", "bottles", "bottle feed", "formula", "dummy")),
     # A snack is its own question - how many, and what, between meals - and it is the one an
     # eating word only half covers: "what snacks can i give my baby" was the health visitor line
     # and "healthy snacks for a toddler" was "I'm listening". The age picks the band, the same way

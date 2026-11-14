@@ -19,7 +19,7 @@ This module is the speaker for those lines, so it says what it answers in two wa
 It proposes only a line it is sure of, so a false reading would take a turn — that is why the
 read demands a person or a pet behind the death word (bot/compose/loss.py).
 """
-from ..compose import loss, pick
+from ..compose import fit, loss, pick
 from ..understanding import understand
 
 PRIORITY = 2000  # 1000-3999: a general helpful module, above small talk and the fallback
@@ -41,10 +41,25 @@ def defers_to(reply, line):
     should i get another one"). The last two are separate because a line can ask for a decision
     the card has no answer to, and a hamster does not get a paw print for "is it my fault".
     """
-    return (loss.acknowledges(reply) and loss.a_pet_died(line)
+    if (loss.acknowledges(reply) and loss.a_pet_died(line)
             and not loss.names_a_feeling(line)
             and loss.asks_for_a_decision(line)
-            and loss.asks_about_the_remains(line))
+            and loss.asks_about_the_remains(line)):
+        return True
+    # A death line carries its paperwork in the same breath as the death: "my mum died, is the
+    # cremation expensive", "my husband passed away last month and i dont know where to start with
+    # probate". The condolence answers the death and leaves the question, so an entry that answers
+    # that question keeps the turn. Three things have to hold: the line names the administration
+    # rather than the person's feelings, the entry's reply gives the kind of answer the line asked
+    # for (a figure for a price, steps for "where do i start") - the composer's own fit check, so
+    # this reads no phrasing of its own - and the reply is about that same piece of paperwork, not
+    # a right-shaped card on the next topic over (bot/compose/loss.py, `is_about_the_paperwork`).
+    if not loss.asks_the_administration(line) or loss.names_a_feeling(line):
+        return False
+    if not loss.is_about_the_paperwork(reply, line):
+        return False
+    want = fit.wants(understand(line))
+    return bool(want and fit.gives(reply, want, line))
 
 
 DEFERS_TO = defers_to

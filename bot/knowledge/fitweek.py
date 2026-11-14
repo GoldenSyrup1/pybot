@@ -8,7 +8,20 @@ with the number or the one thing to buy, because that is what the person asked f
 The five rows live here rather than in `fitness.py` and `sport.py` because those two files are
 edited by other lanes several times an hour; nothing about the rows is specific to this file.
 """
+import re
+
 from .lookup import entry
+
+# Every white good and small appliance home.py knows, read from its one table rather than copied,
+# so this row recognises the machines the fault rows answer. A cool-down is a body doing a workout;
+# no appliance is one.
+from .home import SMALL_APPLIANCES, WHITE_GOODS
+MACHINE_WORDS = tuple(dict.fromkeys(
+    [word for pair in WHITE_GOODS + SMALL_APPLIANCES for word in pair]
+    + ["appliance", "appliances", "white goods"]))
+# "machine" and "machines" are deliberately not in that list: a rowing machine and "the gym
+# machines" are what a workout happens on, and standing the card down for them answered
+# "how do i cool down after using the rowing machine" with the rowing technique instead.
 
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
 ANSWERS = ("fitness", "sport")
@@ -31,6 +44,11 @@ entry("cool-down",
              # a hot room, a car or a dog is not a workout: "cool down" is the same words
              "room", "bedroom", "house", "flat", "summer", "weather", "dog", "baby",
              "car", "drink", "fever", "temperature", "bath", "shower",
+             # and neither is a machine: "my dishwasher is not cooling down properly" was
+             # answered with a five-minute walk and two stretches. The white goods are read
+             # from the same table home.py answers them from, so a machine added there is
+             # stood down here the same day.
+             MACHINE_WORDS,
              # the other half of "after a workout" is what to eat: "what should i eat after a
              # workout" wants the protein answer, not a five-minute walk and two stretches
              "eat", "eating", "ate", "food", "protein", "carb", "carbs", "snack", "snacks",
@@ -43,7 +61,13 @@ entry("cool-down",
 entry("back-to-exercise",
       (("back into exercise", "getting back into exercise", "get back into exercise",
         "start exercising again", "exercise again", "havent exercised", "have not exercised",
-        "havent trained", "years off", "stopped exercising", "restart exercise",
+        "havent trained",
+        # "years off" on its own was the CV-gap card's line: "i took 3 years off to care for my
+        # mum how do i explain it" matched this row on "years off" and the ask, and was answered
+        # with how to start walking again. The years off are the years off training, so the
+        # phrase carries the training with it; a bare "ive had two years off" leans on the chat
+        # it follows, which is what `use_context` is for.
+        "years off", "stopped exercising", "restart exercise",
         "starting again with exercise", "unfit", "really unfit", "long break"),
        ("how", "best", "should", "start", "again", "after", "long", "years", "slowly",
         "beginner", "where do i")),
@@ -64,6 +88,11 @@ entry("back-to-exercise",
       avoid=("gym", "membership", "swim", "kettlebell", "dumbbell", "running plan", "couch to 5k",
              "run", "runs", "running", "ran", "jog", "jogs", "jogging", "5k", "10k",
              "marathon", "half marathon", "parkrun",
+             # The ask of a CV gap, not of a training plan: "how do i explain it", "how do i put
+             # it on my cv". A fitness question does not ask how to explain the years away to an
+             # employer, so those words hand the line back to the CV-gap card.
+             "explain", "explaining", "explanation", "cv", "resume", "work history",
+             "employment", "employer", "interview", "recruiter", "maternity", "career break",
              "how many times", "how often", "times a week", "days a week", "a week", "per week",
              "rest days", "every day"),
       bias=1),
@@ -212,6 +241,13 @@ entry("training-injuries",
              "stopped going", "stopped training", "stopped the gym", "stop going",
              "quit", "quits", "quitting", "gave up", "give up", "packed it in",
              "cancelled", "cancels", "cancelling", "cancel my", "left the gym",
+             # a nose that will not stop running is not a training load: "my nose wont stop
+             # running" was answered with "add about a tenth a week". What runs here is a body
+             # part or a fixture, and the list of them is the one the running rows already use.
+             "nose", "noses", "eye", "eyes", "loo", "toilet", "cistern", "tap", "taps", "hose",
+             "sink", "drain", "plughole", "shower", "bath", "boiler", "radiator", "heater",
+             "dishwasher", "washing machine", "software", "app", "apps", "programme", "program",
+             "campaign", "school run", "errand run",
              "knee", "knees", "shoulder", "shoulders", "back", "backs", "achilles", "shin",
              "shins", "shin splints", "plantar", "hamstring", "hamstrings", "elbow", "elbows",
              "wrist", "wrists", "ankle", "ankles", "hip", "hips", "groin", "sciatica",
@@ -236,5 +272,27 @@ entry("training-injuries",
              "flushing", "flush button", "ball valve", "fill valve", "flush valve", "tap",
              "taps", "faucet", "sink", "sinks", "drain", "drains", "plughole", "radiator",
              "radiators", "boiler", "washing machine", "dishwasher", "shower", "bath",
-             "overflow", "overflowing", "pipes", "pipework")),
+             "overflow", "overflowing", "pipes", "pipework"),
+      # This row is the prevention half and nothing else, and an injury that has already
+      # happened is the first-aid question: "i hurt myself at the gym" and "i hurt myself
+      # running" were both answered with "add about a tenth a week at most", advice for
+      # somebody who is not yet hurt. The tense is the test, so it cannot be an avoid word:
+      # "hurting" folds onto "hurt", and an avoid phrase for it took the prevention lines that
+      # are this row's whole point ("how do i avoid hurting myself in the gym" became a hedge).
+      guard=lambda u: not _the_hurt_already_happened(u)),
 ]
+
+# The injury said as something that has happened, in the past tense, by the person in the line:
+# "i hurt myself", "i've hurt my back", "i got injured playing football". A prevention question
+# asks how not to ("how do i avoid hurting myself", "how do i not get injured") and never has
+# this shape, which is why the test is the wording around the verb and not the verb alone.
+_ALREADY_HURT = re.compile(
+    r"\b(?:i|ive|i've|i have|he|she|we|they)\s+(?:have\s+|has\s+|had\s+|got\s+|just\s+)?"
+    r"(?:hurt|injured)\b")
+
+
+def _the_hurt_already_happened(understood):
+    """True when the line says the injury has already happened, not how to avoid one."""
+    reading = understood if isinstance(understood, dict) else {}
+    line = " ".join(str(reading.get("clean") or reading.get("text") or "").lower().split())
+    return bool(_ALREADY_HURT.search(line))

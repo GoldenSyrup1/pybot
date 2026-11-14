@@ -14,6 +14,8 @@ bot/modules/memory_store.py. Nothing here replies; memory_store words the answer
 """
 import re
 
+from . import topics
+
 # "what have we talked about", "what did we cover", "what have we been on about".
 # "else" is what people add when they want the rest of the list, and "remind me" is the same
 # question with the asking in front of it.
@@ -137,6 +139,38 @@ def the_thing_named(text):
     return thing
 
 
+# The person's own side of the same ask: "what did i say about lisbon", "remind me what i said
+# about the trip", "what was it i said about my tablets". It names a thing of theirs, and the
+# answer is the turn that names it - not the bot's answer about it, which is a different question
+# and is what `SAID_ABOUT_HEAD` reads.
+MY_SAID_ABOUT_HEAD = re.compile(
+    r"^(?:and |so |ok |okay |also |but |oh )*"
+    r"(?:what did (?:i|we) (?:say|tell you|mention)"
+    r"|(?:what|anything) have (?:i|we) (?:said|told you|mentioned)"
+    r"|remind me what (?:i|we) (?:said|told you|mentioned)"
+    r"|what was (?:it|that) (?:i|we) (?:said|told you|mentioned)"
+    r"|did (?:i|we) (?:say|mention))\s*(?:anything\s+)?(?:about|on|regarding|for)\s+(?P<thing>.+)$")
+
+
+def the_thing_they_named(text):
+    """The thing a "what did i say about X" names, or "" when there is no such thing.
+
+    The mirror of `the_thing_named`, which reads the bot's side. Kept apart from it because the
+    two are answered from different turns: what they said about the tablets is their own line,
+    and what the bot said about the tablets is its answer, and reading one as the other handed
+    back the bot's advice where the person's line was asked for.
+    """
+    low = _flat(text).strip(" ?.!,")
+    match = MY_SAID_ABOUT_HEAD.match(low)
+    if not match:
+        return ""
+    thing = match.group("thing").strip(" ?.!,")
+    thing = re.sub(r"\s+", " ", thing)
+    if not thing or thing in ("it", "that", "this", "them", "those", "these"):
+        return ""
+    return thing
+
+
 def asked(text, memory=None):
     """Which conversation question this is: 'topics', 'first' or None.
 
@@ -210,8 +244,7 @@ def not_a_subject(text):
 # "last time"), and a return ("welcome back", "back again", "good to see you again").
 CLAIMS_A_PAST = re.compile(
     r"\b(?:where\s+we\s+(?:were|left\s+off|got\s+to)|what\s+were\s+we\s+(?:saying|on\s+about|up\s+to)"
-    r"|what\s+were\s+you\s+saying|welcome\s+back|back\s+again|youre\s+back|you\s+are\s+back"
-    r"|good\s+to\s+(?:see|have)\s+you\s+(?:again|back)|nice\s+to\s+see\s+you\s+again"
+    r"|what\s+were\s+you\s+saying"
     r"|as\s+(?:i|we)\s+said|as\s+before|same\s+as\s+before|you\s+mentioned|earlier\s+(?:you|we)"
     r"|last\s+time\s+(?:we|you|i)\b|what\s+did\s+i\s+say|remind\s+me\s+(?:what|where|which|how)"
     r"|carry\s+on\s+where|before\s+we\s+(?:broke\s+off|stopped)|still\s+here\s*,?\s+(?:if|so)"
@@ -220,8 +253,21 @@ CLAIMS_A_PAST = re.compile(
     r"|(?:a\s+)?break\s+does\s+(?:a\s+lot\s+of\s+|you\s+)?good"
     r"|keep\s+it\s+going\s+(?:for\s+)?another|since\s+we\s+last\s+spoke|last\s+we\s+spoke"
     r"|(?:we|i)\s+(?:talked|spoke)\s+about\s+(?:it|that|this)"
-    r"|(?:hello|hi|hey)\s+again|where\s+(?:were\s+we|did\s+we\s+get\s+to|did\s+we\s+leave"
+    r"|where\s+(?:were\s+we|did\s+we\s+get\s+to|did\s+we\s+leave"
     r"|have\s+we\s+got\s+to))\b", re.I)
+
+# The return half of the same list, read only where a welcome can be: at the front of a reply.
+# "Welcome back", "you're back", "back again", "hello again" are openers, and the same words
+# inside a sentence are about something else entirely - a card about a dog left alone says "a
+# proper walk before you go and another when you are back", of a person coming home in the
+# evening, and the guard read that as a welcome to a conversation that had not happened. The card
+# that answered the line stood down for a remark about the dog's name, on the opening line of a
+# chat. Nothing before the opener but the little words a reply can start with.
+GREETS_A_RETURN = re.compile(
+    r"^\s*(?:(?:oh|ah|well|hello|hi|hey|right|ok|okay|and|so)\s*[,!.]?\s*)?"
+    r"(?:welcome\s+back|you(?:'re|\s+are)\s+back|back\s+again|"
+    r"(?:good|nice)\s+to\s+(?:see|have)\s+you\s+(?:again|back)|(?:hello|hi|hey)\s+again)\b",
+    re.I)
 
 
 # The other half of the same fault: a reply that *answers* a turn rather than pointing back at
@@ -271,15 +317,16 @@ def brings_nothing_of_its_own(text):
     return all(word in NO_CONTENT_WORDS for word in words)
 
 
-def an_earlier_turn(memory):
+def an_earlier_turn(memory, text=""):
     """Whether the conversation has a turn before this one.
 
     The runtime appends a turn after the modules answer it, so an empty history is the opening
     line. One reading of that, so every reply that leans on the chat asks the same question of the
-    same place.
+    same place. `text` is the line being answered: a turn carrying those words is this line and
+    not an earlier one, which matters to a reader that cannot rely on the store having recorded
+    the line yet.
     """
-    turns = memory.get("turns") if isinstance(memory, dict) else None
-    return bool(isinstance(turns, list) and turns)
+    return bool(_earlier_turns(memory, text))
 
 
 def a_past_that_is_not_there(reply, memory, said=None):
@@ -297,7 +344,7 @@ def a_past_that_is_not_there(reply, memory, said=None):
     low = " ".join(str(reply or "").lower().split())
     if not low:
         return False
-    if CLAIMS_A_PAST.search(low):
+    if CLAIMS_A_PAST.search(low) or GREETS_A_RETURN.match(low):
         return True
     if said is None:
         return False
@@ -314,6 +361,79 @@ def first_bot_line(memory):
             if isinstance(turn, dict) and str(turn.get("bot", "")).strip():
                 return " ".join(str(turn["bot"]).split())
     return ""
+
+
+def _earlier_turns(memory, text=""):
+    """Every turn of theirs before this line, oldest first.
+
+    The store writes the line being answered into memory["turns"] as it observes it, so the
+    newest turn is this line itself and is not an earlier one. Comparing the words rather than
+    dropping the last turn keeps this right for a reader called with a line the store has not
+    seen yet.
+    """
+    mine = " ".join(str(text or "").split()).lower()
+    out = []
+    for row in (memory.get("turns") if isinstance(memory, dict) else None) or []:
+        if not isinstance(row, dict):
+            continue
+        line = " ".join(str(row.get("user") or "").split())
+        if line and line.lower() != mine:
+            out.append(row)
+    return out
+
+
+# A line they asked is not a thing they said. "what was it i said about the tap", asked twice in a
+# row, quoted the first ask back: "That was: "remind me what i said about the tap"". A recall is
+# about a line that gave something, so the asks in the chat are not candidates for it.
+A_THEY_ASKED = re.compile(
+    r"\?\s*$|^(?:what|when|where|who|why|how|which|do|does|did|can|could|should|would|is|are|"
+    r"was|were|have|has|will|remind|tell me|any idea|any chance)\b", re.I)
+
+
+def _a_line_they_asked(row):
+    """True when the turn is a question of theirs, not something they told the chat."""
+    return bool(A_THEY_ASKED.search(" ".join(str((row or {}).get("user") or "").split())))
+
+
+def _the_forms(words):
+    """The words and the verb forms of each - "walking" asks about a line that says "walk".
+
+    `topics.content` takes the ending off what it keeps, so the ask and the line can miss each
+    other ("walking" against "walk"), and the ask then fell back to the newest line and handed
+    back something said about another thing.
+    """
+    out = set()
+    for word in words or ():
+        out |= topics.forms(word)
+    return out
+
+
+def the_earlier_turn(memory, text="", about=""):
+    """The turn of theirs this line is about, or None when the chat holds no earlier one.
+
+    The one check for "is there an earlier turn?", and for which one. An ask that names a thing
+    ("what did i say about lisbon") is about the turn that names it, not about the newest line:
+    a chat that says "im saving 3000 for a trip to lisbon" and then "the flights are about 120
+    each" answers the lisbon ask from the first line, where reading the newest line handed back
+    a figure given for something else. When the line names nothing, or names something no turn
+    has, the newest turn is the honest one.
+    """
+    earlier = _earlier_turns(memory, text)
+    if not earlier:
+        return None
+    told = [row for row in earlier if not _a_line_they_asked(row)]
+    if told:
+        earlier = told
+    thing = about or the_thing_they_named(text) or the_thing_named(text)
+    wanted = _the_forms(topics.content(thing)) if thing else set()
+    if not wanted:
+        return earlier[-1]
+    scored = [(len(wanted & _the_forms(topics.content(row.get("user") or ""))), row)
+              for row in earlier]
+    best = max(hit for hit, _row in scored)
+    if not best:
+        return earlier[-1]
+    return [row for hit, row in scored if hit == best][-1]
 
 
 def first_line(memory):
@@ -492,3 +612,86 @@ def only_with_an_earlier_turn(reader):
 
     guarded.__name__ = getattr(reader, "__name__", "guarded")
     return guarded
+
+
+# --------------------------------------------------------------------------------------------
+# One check for "is there an earlier turn?", which every memory-based reply goes through.
+#
+# `turns_before` and `the_turn_before` above answer "did anything happen yet". These two answer
+# what the answer *was*: almost every reader in this package reaches back for the bot's last line
+# and each used to spell the reach out for itself - a list comprehension over the turns, a step
+# back past the composer's own notes, a step back past a hedge. Three copies is three places to get
+# the window wrong, and a fix in one leaves the other two answering about a turn that ended the
+# thread. So `the_last_answer` is the line as written, notes and hedges included (what the person
+# can see), and `the_answer_on_screen` is the answer rather than the last line. A reply with no
+# earlier turn to go on gets "" and passes.
+#
+# Callers use the module, not the function: `from ..memory import history` then
+# `history.the_last_answer(memory)`. One implementation is then the one a test can point at.
+def the_last_answer(memory):
+    """The bot's last line as it was written, or "" when there is no earlier turn.
+
+    This is the raw line, notes and hedges included: what the person can see. A caller that wants
+    the answer rather than the last line asks `the_answer_on_screen`, which steps back over the
+    turns that are not answers.
+    """
+    said = [one.get("bot") for one in turns_before(memory) if str(one.get("bot") or "").strip()]
+    return " ".join(str(said[-1]).split()) if said else ""
+
+
+# The composer's own turn is not an answer to come back to: a note about the answer, or the
+# repeat of it, adds no fact, so a follow-up two lines later still has the answer to work from.
+def _a_note_not_an_answer(said):
+    from ..compose import fallback, verdict
+
+    return verdict.takes_a_fact_back(said) or fallback.is_said_it_already(said)
+
+
+def _a_hedge(said):
+    from ..compose import fallback
+
+    flat = said.lower()
+    return fallback._is_a_hedge(said) or any(punt in flat for punt in fallback.PUNT)
+
+
+def the_answer_on_screen(memory, within=3, modules=("answers", "safety")):
+    """The knowledge answer the person is looking at, or "" when the last turns hold none.
+
+    This is the answer a follow-up is read from, so it steps back past the composer's notes and
+    past a hedge - neither is an answer - and it stops at the first real answer only when that
+    answer came from the knowledge base or a safety card. A turn of the store's own, or of small
+    talk, is not an answer to come back with, and "" is what the caller needs to pass.
+    """
+    seen = 0
+    for turn in reversed(turns_before(memory)):
+        said = str(turn.get("bot") or "").strip()
+        if not said:
+            continue
+        seen += 1
+        if seen > within:
+            break
+        if _a_note_not_an_answer(said):
+            continue
+        if str(turn.get("module") or "") not in modules:
+            return ""
+        if _a_hedge(said):
+            return ""
+        return " ".join(said.split())
+    return ""
+
+
+def the_turn_the_answer_came_from(memory, within=3):
+    """The turn dict `the_answer_on_screen` read, or None - for callers that need the module."""
+    answer = the_answer_on_screen(memory, within)
+    if not answer:
+        return None
+    for turn in reversed(turns_before(memory)):
+        if " ".join(str(turn.get("bot") or "").split()) == answer:
+            return turn
+    return None
+
+
+def the_answer_is_a_card(memory, within=3):
+    """Whether the answer on the screen is a safety card rather than a knowledge entry."""
+    turn = the_turn_the_answer_came_from(memory, within)
+    return bool(turn) and str(turn.get("module") or "") == "safety"

@@ -76,7 +76,7 @@ For a `pybot` command you can run from anywhere, install the clone with `pip ins
 
 | Path | What it holds |
 |---|---|
-| `bot/` | PyBot itself: 368 Python files and about 530,000 lines, exactly as the swarm wrote them |
+| `bot/` | PyBot itself: 528 Python files and about 640,000 lines, exactly as the swarm wrote them |
 | `pybot.py` | the command line shown above. It contains no chatbot logic |
 | `tests/` | tests for the command line: `python -m unittest discover -s tests` |
 | `assets/` | the banner and the chart |
@@ -85,12 +85,12 @@ Every turn, each module in `bot/modules/` may propose a reply, and an arbiter (`
 
 | Part | Where | Lines |
 |---|---|---:|
-| Understanding engine: what you typed and meant, with typos, chat-speak, the topic and what "it" refers to | `bot/understanding/` | 22,000 |
-| Memory store: what you and PyBot have said so far | `bot/memory/` | 92,000 |
-| Knowledge base: facts about the world, kept as data | `bot/knowledge/` | 275,000 |
-| Response composer: how a reply is phrased, and what to say when nothing fits | `bot/compose/` | 75,000 |
+| Understanding engine: what you typed and meant, with typos, chat-speak, the topic and what "it" refers to | `bot/understanding/` | 25,000 |
+| Memory store: what you and PyBot have said so far | `bot/memory/` | 109,000 |
+| Knowledge base: facts about the world, kept as data | `bot/knowledge/` | 317,000 |
+| Response composer: how a reply is phrased, and what to say when nothing fits | `bot/compose/` | 104,000 |
 
-The modules themselves are another 67,000 lines.
+The modules themselves are another 81,000 lines.
 
 ## License
 

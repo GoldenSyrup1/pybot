@@ -122,11 +122,17 @@ NOT_A_LOOKUP = re.compile(
     r"^\s*who\b|(?<![a-z])(?:how do you say|how do i say|how would you say|how to say|"
     r"what does [a-z' ]{1,20} mean|translate|in french|in spanish|in german|in italian|"
     r"in welsh)(?![a-z])")
+# A pointer on its own is not a reply: every line here leads with the thing that makes the answer
+# move under the bot's feet (an address changes hands, a catalogue turns over, a tide turns) and
+# only then says where the rest is. The rule comes from the lane: lead with what the bot knows -
+# the usual options, what to look for, the first step - and point at the rest afterwards.
 PLACE_POOL = (
-    "I can't look up places or numbers, sorry. Put the name into a map app and it gives you the "
-    "address, the postcode and the phone number, with the opening hours underneath.",
-    "No directory here, sorry. A map app search for the name shows the address and the number, "
-    "and the place's own page has the hours; tell me what it says and I'll help with the rest.",
+    "A postcode, a phone number and opening hours all change hands, so I can't hold them: a "
+    "map app turns the name into the address, the postcode and the number, and the place's "
+    "own page has today's hours.",
+    "The place's own page is the one with today's hours, and a map app has the address and "
+    "the number, so tell me what they say and I'll help with the rest - I can't look either "
+    "up from here.",
 )
 # How to get somewhere: a journey planner knows the roads, the changes and the times, and none of
 # that is knowable from here. Only a line that names a way of travelling or two places? A "how do
@@ -159,10 +165,12 @@ GOES_TO = tuple(PLACE_NOUNS) + ("airport", "station", "town", "city", "coast", "
                                 "work", "school", "office", "home", "town centre",
                                 "city centre", "train station", "bus stop")
 PLACE_ROUTE_POOL = (
-    "I can't measure a journey from here, sorry. A map app or journey planner gives the distance "
-    "and the time in one go; tell me what it says and I'll help you plan round it.",
-    "No maps here, sorry. Put the two places into a map app and it'll give you the miles and the "
-    "time; say what you're planning and I'll help with the rest of it.",
+    "Miles and minutes depend on the roads on the day, which is why a journey planner is the "
+    "one to ask - I can't measure one from here: put the two places in and it gives the "
+    "distance and the time in one go.",
+    "The roads decide it rather than the map, so I can't give you the miles and the time "
+    "myself: put the two places into a map app and it'll have both; say what you're planning "
+    "and I'll help with the rest of it.",
 )
 
 # Somebody to do a job: the trade is named and the line asks for one. "how do i complain about a
@@ -197,26 +205,36 @@ OWN_PROFESSIONAL = re.compile(
 # a registration check are how that goes; a professional is seen rather than hired, and the
 # question there is whether they take new patients and how long the wait is. One pool for both
 # said "get two written quotes" to a person looking for a dentist.
+# A garage quotes for a job like a trade does - a written estimate, the price agreed before the
+# work, the old parts back - and it is the one professional-looking trade that was in the list
+# above but not here, so "can anyone recommend a mechanic" asked him whether he was taking new
+# patients and how long the wait was. A wait and a fee is the dentist's question; a second quote
+# is the garage's.
 QUOTING_TRADES = ("plumber", "electrician", "builder", "builders", "roofer", "painter",
                   "decorator", "joiner", "carpenter", "plasterer", "tiler", "gardener",
                   "locksmith", "boiler engineer", "gas engineer", "heating engineer", "mover",
                   "movers", "removals", "tree surgeon", "pest controller", "chimney sweep",
-                  "appliance repair", "man with a van", "cleaner")
+                  "appliance repair", "man with a van", "cleaner", "mechanic")
 TRADE_POOL = (
-    "I can't see who works near you, sorry - no local lists or reviews from here. Search a "
-    "directory or a map app for {trade} near you, sort by the recent reviews, and get two "
+    "Who is any good and who is free changes month to month, so I can't vouch for one: a "
+    "directory or map app search for {trade} near you sorted by the recent reviews, then two "
     "written quotes before you book anyone.",
-    "I can't vouch for anyone local, sorry. A map app search for {trade} near you sorted by "
-    "reviews is the quickest way in; ask for two quotes, and check they're registered before "
-    "you pay a deposit.",
+    "The recent reviews are what tells you and I can't see them from here: a map app search "
+    "for {trade} near you sorted by reviews is the quickest way in; ask for two quotes, and "
+    "check they're registered before you pay a deposit.",
 )
-# A professional is rung rather than hired: whether they take new patients, and how long the wait
-# is, are the two things that decide it, and neither is here.
+# A professional is rung rather than hired: whether they take new business, and how long the wait
+# is, are the two things that decide it, and neither is here. The word for that cannot be
+# "patients": this pool is drawn for every professional the trade list knows, so a lawyer, a
+# hairdresser and an accountant were all told to ask whether they were taking new patients. "New
+# people" is true of a dentist and of a solicitor, which is the test every line here has to pass.
 PROFESSIONAL_POOL = (
-    "I can't see who's taking new people near you, sorry. A map app or the profession's own "
-    "finder lists them by area; ring two and ask about the wait and the fee before you go.",
-    "No local list here, sorry. Search a map app or the official finder for {trade} near you, "
-    "read the recent reviews, and ring to check they're taking new patients before you set off.",
+    "Whether they're taking new people and how long the wait is are the two things that "
+    "decide it, and neither is something I can see: a map app or the profession's own finder "
+    "lists them by area - ring two and ask about the wait and the fee before you go.",
+    "The wait and the fee are the parts that decide it and I can't see either from here: a "
+    "map app or the official finder for {trade} near you shows who is taking on new people, so "
+    "read the recent reviews and ring before you set off.",
 )
 
 # "The best beach in cornwall", "a good pub in york": what is on the ground somewhere the bot has
@@ -243,13 +261,26 @@ IN_A_PLACE = re.compile(
 # name: "the best chippy near me" names nowhere and is still a local pick.
 NEAR_ME = re.compile(r"(?<![a-z])(?:near|around|round|by) (?:me|us|here)(?![a-z])")
 PICK_POOL = (
-    "I can't see what's on the ground there, sorry. A map app's reviews and the town's own "
-    "visitor site are the honest way to pick - tell me what you want from it and I'll help you "
-    "choose between the ones they name.",
-    "I've never been, sorry, and reviews beat anything I could invent. A map app or the local "
-    "visitor site will name the ones people rate; say what matters to you and I'll help you "
-    "narrow it down.",
+    "Reviews beat anything I could say about {thing}, which I have never been to: a map app or "
+    "the town's visitor site will name the ones people rate - tell me what you want from it and "
+    "I'll help you choose.",
+    "Reviews beat a guess from me about {thing}, since I have never been to any of them: a map "
+    "app or the local visitor site names the ones people rate - say what matters and I'll help "
+    "you narrow it down.",
 )
+# The same ask where no thing was named: "is it worth visiting in skegness", "what is worth
+# visiting near me". PICK_POOL names the thing back to the person, so it cannot answer these -
+# "Reviews beat a guess about the it near you" is what the slot filler produced. This pool names
+# no thing and still gives the route.
+PICK_ANYWHERE_POOL = (
+    "Reviews from people who have been beat any guess of mine about a place, and a map app or "
+    "the town's visitor site names the ones people rate: tell me what you want from the trip "
+    "and I'll help you choose.",
+    "Other people's reviews beat anything I could say about a place, and I have never been to it: "
+    "a map app or the local visitor site sorts it by what you want from the trip - say what "
+    "matters and I'll help you narrow it down.",
+)
+
 WORTH_VISITING = re.compile(
     r"(?<![a-z])(?:is|are|will)\b[^.!?]{0,40}\bworth (?:visiting|going to|a visit|seeing)"
     r"(?![a-z])")
@@ -262,10 +293,12 @@ WHO_FACT = re.compile(
     r"wrote|writes|invented|founded|created|discovered|sang|sings|composed|directed|built|"
     r"designed|painted|won)(?![a-z])")
 WHO_POOL = (
-    "I can't look that up from here, sorry. Wikipedia has it with its sources and the official "
-    "site will confirm it - tell me what you find and I'll help you make sense of it.",
-    "Not one I can check, sorry. The Wikipedia page for it answers that in a line; paste what "
-    "it says and I'll help you weigh the rest.",
+    "The record is the only place it is written down, and a name I got half right would stick, "
+    "so I can't check one: "
+    "Wikipedia has it with its sources and the official site will confirm it - tell me what "
+    "you find and I'll help you make sense of it.",
+    "The Wikipedia page for it answers that in a line and cites where the line comes from, "
+    "and I can't look it up from here: paste what it says and I'll help you weigh the rest.",
 )
 
 # A figure about the world: a population, a height, an age, an area. The bot does not guess a
@@ -287,11 +320,12 @@ METHOD_ASKS = re.compile(r"^\W*(?:how (?:do|would|can|might) (?:you|i|we|one)|wa
 POLICY_WORDS = ("return window", "refund policy", "returns policy", "warranty", "guarantee",
                 "terms and conditions", "the policy", "their policy", "rules")
 FIGURE_POOL = (
-    "I can't check a figure I don't hold, sorry. Wikipedia has that number with its source; tell "
-    "me what it says and I'll help you make sense of it - the date on the figure matters as much "
-    "as the figure.",
-    "No number for that here, sorry, and I'd rather not invent one. The Wikipedia page or the "
-    "official site will have it; paste what it says and I'll help you weigh it up.",
+    "The date on a figure matters as much as the figure, and I can't check one I wasn't told: "
+    "Wikipedia has that number with its source - tell me what it says and I'll help you make "
+    "sense of it.",
+    "A number I invented would be worse than none, and the year is half of it, so I would not "
+    "guess: the Wikipedia page or the official site will have it, with the source; paste what "
+    "it says and I'll help you weigh it up.",
 )
 
 # "How many paving slabs do I need", "how many tins of paint for a bedroom": the bot cannot see
@@ -409,11 +443,11 @@ SERVICE_JOB_NAMES = {
     ("shoe", "resoling"): "shoe repairs",
 }
 SERVICE_POOL = (
-    "I can't see who does {job} near you, sorry - no local lists and no prices from here. A map "
-    "app or a directory search for {job} near you, sorted by the recent reviews, and ring two "
-    "for a price before you book.",
-    "No way to check who does {job} near you from here, sorry. Search a map app for {job} near "
-    "you, read the last few reviews, and get two prices: the range for the same job is wide.",
+    "The last few reviews and two prices are what decide a {job}, not a list I could keep: "
+    "search a map app or a directory near you, read the recent ones, and ring two for a price "
+    "before you book.",
+    "Prices for the same {job} swing wide, so the reviews and two quotes decide it: a map app "
+    "or a directory near you, sorted by the recent ones, then two prices before you book.",
 )
 # The ask that puts the thing in for work, as opposed to buying one: "where can i get my bike
 # fixed", "who can fix my bike near me", "where do i get a suit altered".
@@ -445,10 +479,12 @@ cheap cheaply properly professionally done somewhere someone today tonight tomor
 back off out about that which because so and or for taken take taking let
 """.split())
 BUY_POOL = (
-    "I can't check stock or shops near you, sorry. A map app search for {thing} shows what's "
-    "nearest, and ring before you set off - stock moves and the site is not always right.",
-    "No stock lists here, sorry. A map app or the chain's own site will say who has {thing} "
-    "near you; a ring first saves the trip.",
+    "Stock moves by the hour and a phone call is the only thing that checks it, so I can't "
+    "see who has {thing} near you: a map app search shows what's nearest, and ring before you "
+    "set off.",
+    "Stock moves by the hour, so a list from me would be wrong by the time you got there: a "
+    "map app or the chain's own site will say who has {thing} near you, and a ring first "
+    "saves the trip.",
 )
 
 
@@ -579,6 +615,24 @@ def _about_a_place(line, ctx):
     return bool(NEAR_ME.search(line))
 
 
+def _the_picked_thing(line):
+    """The phrase the person picked out of the place: "beaches" from "the best beach in cornwall".
+
+    PICK_POOL names it back to them ("Reviews beat anything I could say about beaches"), so the
+    pool has a {thing} slot and every route that returns it has to fill that slot - a line said
+    with "{thing}" still in it is worse than the shrug it replaced.
+    """
+    found = ""
+    for phrase in PICKED_IN_A_PLACE:
+        if len(phrase) <= len(found):
+            continue
+        if _names_one_of(line, (phrase,)):
+            found = phrase
+    if found == "thing to do" or found == "things to do":
+        return "things to do"
+    return found
+
+
 def _pick_route(line, ctx):
     """Something to do, eat or stay in somewhere: the picks are the reviews' job, not the bot's."""
     if not _has(line, PICK_ASKS) and not WORTH_VISITING.search(line):
@@ -586,16 +640,22 @@ def _pick_route(line, ctx):
     if _has(line, NOT_A_PICK) or not _about_a_place(line, ctx):
         return None
     if WORTH_VISITING.search(line) and IN_A_PLACE.search(line):
-        return PICK_POOL
+        thing = _the_picked_thing(line)
+        if not thing:
+            # "Is it worth visiting in skegness" names no thing, so a line that says "about
+            # {thing}" would have to say "about the it near you". Poetry is not the job.
+            return PICK_ANYWHERE_POOL
+        return tuple(pool.format(thing=thing) for pool in PICK_POOL)
     where = IN_A_PLACE.search(line)
     if not where:
         return None
     # The thing picked has to come before the place it is picked in: "the best beach in
     # cornwall" is a pick, and "losing my best friend to a new job in another city" only has the
     # place word "city" after the "in", which is the place itself and not a thing to pick.
-    if not _names_one_of(line[:where.start()], PICKED_IN_A_PLACE):
+    thing = _the_picked_thing(line[:where.start()])
+    if not thing:
         return None
-    return PICK_POOL
+    return tuple(pool.format(thing=thing) for pool in PICK_POOL)
 
 
 def _how_many_route(line, ctx):
@@ -720,6 +780,57 @@ def _figure_route(line, ctx):
     return FIGURE_POOL
 
 
+# A record: the biggest, the oldest, the longest. It is a settled fact and it is one the bot does
+# not hold, so the honest reply is a hand-off to the page that keeps the list - not the news note,
+# which is what "in the world" earned it ("I can't see the news from here, sorry"), and not the
+# plain hedge, which names nothing to look at. The understanding engine says which of the two
+# kinds a question is (`over_time`), so this reader fires only on the settled one, and a live
+# question that happens to use a superlative ("the cheapest price today") keeps its own reader.
+RECORD_ASKS = re.compile(
+    r"(?<![a-z])(?:biggest|largest|tallest|longest|oldest|youngest|smallest|deepest|shallowest|"
+    r"highest|lowest|heaviest|lightest|fastest|slowest|widest|narrowest|thinnest|strongest|"
+    r"richest|poorest|wealthiest|busiest|coldest|hottest|wettest|driest|sunniest)(?![a-z])|"
+    r"\bmost\s+(?:populous|expensive|common|popular|visited|deadly|abundant|spoken)(?![a-z])")
+# The record has to be asked for, not used as a figure of speech: "the biggest mistake i made at
+# work" is a line about them, and "the best way to clean a grill" is advice with no record in it.
+RECORD_ASKED = re.compile(
+    r"(?<![a-z])(?:what|whats|what's|which|whichs|which's|who|whos|who's|where|wheres|where's|"
+    r"name|tell me)(?![a-z])")
+RECORD_POOL = (
+    "I can't check a record from here, sorry - the list moves when somebody breaks it. Wikipedia "
+    "keeps it with the date each one was set; paste what it says and I'll help you weigh it up.",
+    "No record book here, sorry, and a half-remembered number would be wrong without saying so. "
+    "The Wikipedia page for it keeps the list and dates it - tell me what it says and we can go "
+    "from there.",
+)
+
+
+def _record_route(line, ctx):
+    """A record the bot does not hold: the page that keeps the list, not today's news."""
+    if not ctx.get("settled"):
+        return None
+    if not RECORD_ASKS.search(line) or not RECORD_ASKED.search(line):
+        return None
+    if _words(line) & OWN_PERSON or SETTING_ASKS.search(line) or METHOD_ASKS.search(line):
+        return None
+    if re.search(r"(?<![a-z])(?:the best|my best|your best|best way|worst way|best time)(?![a-z])",
+                 line):
+        return None
+    # "whats the biggest size nappy" and "the biggest pack of loo roll" ask what a shop stocks,
+    # not who holds a record: a superlative in front of a thing being bought is the shelf.
+    if _has(" " + line + " ", ("size", "sizes", "pack", "packs", "box", "boxes", "bottle",
+                              "bottles", "tin", "tins", "bag", "bags")):
+        return None
+    # A number is not a record that is measured: there is no page holding the biggest one, and no
+    # list that moves - the biggest number is arithmetic and the longest word is a dictionary.
+    # "what is the biggest number" and "the longest word in english" were sent to the record book
+    # and told that somebody breaks the record, which is worse than the plain hedge they had.
+    if _has(" " + line + " ", ("number", "numbers", "word", "words", "letter", "letters",
+                              "digit", "digits", "prime", "sum", "total")):
+        return None
+    return RECORD_POOL
+
+
 # What the understanding engine makes of a line that the readers use: the places it names, and
 # whether it is a travel line at all. Read once per ask, because every reader may want it.
 TRAVEL_TOPICS = ("geography-and-travel", "travel", "holidays", "days-out", "outdoors")
@@ -728,7 +839,7 @@ TRAVEL_TOPICS = ("geography-and-travel", "travel", "holidays", "days-out", "outd
 def _the_reading(understood):
     """The parts of the reading the readers use, from what the understanding engine says."""
     if not understood:
-        return {"places": set(), "travel": False, "pointed": ""}
+        return {"places": set(), "travel": False, "pointed": "", "settled": False}
     places = set()
     for entity in understood.get("entities") or ():
         if isinstance(entity, dict) and entity.get("type") == "place" and entity.get("text"):
@@ -746,7 +857,11 @@ def _the_reading(understood):
     if understood.get("topic"):
         topics.add(understood["topic"])
     travel = bool(topics & set(TRAVEL_TOPICS))
-    return {"places": places, "travel": travel, "pointed": pointed}
+    # Whether what the line asks about is a settled fact rather than live data: a record, a count,
+    # a date in the past. Read from the understanding engine, which owns the reading of the two
+    # kinds, so this file does not keep a second list of the words.
+    settled = understood.get("over_time") is False
+    return {"places": places, "travel": travel, "pointed": pointed, "settled": settled}
 
 
 # When the sea comes in and goes out: a live number for one beach and one day, which is the kind
@@ -772,18 +887,111 @@ TIDE_WHY = re.compile(
     r"[^.!?]{0,20}(?<![a-z])tides?(?![a-z])"
     r"|(?<![a-z])tides?\b[^.!?]{0,24}(?:work|works|happen|caused|spring|neap|moon)(?![a-z])")
 TIDE_POOL = (
-    "No tide table here, sorry, and a tide time is the one thing I would not guess: high and low "
-    "water move by up to an hour a day, and by minutes between two beaches a few miles apart. A "
-    "tide-table site for that beach, or the harbour or pier's own page, has today and tomorrow, "
-    "and the local paper prints them too.",
-    "I can't see the sea from here, so I can't say when it turns. The harbour's page or a tide "
-    "table for that beach has today's high and low water, with the height as well as the clock "
-    "time - the height is the bit that matters if you are walking a causeway or launching a boat.",
+    "High and low water move by up to an hour a day, and by minutes between two beaches a few "
+    "miles apart, so a tide time is the one thing I would not guess: a tide-table site for "
+    "that beach, or the harbour or pier's own page, has today and tomorrow, and the local "
+    "paper prints them too.",
+    "Two beaches a few miles apart turn minutes apart and the same one is an hour later "
+    "tomorrow, so I can't hold today's times: the harbour's page or a tide table for that "
+    "beach has them, with the height as well as the clock time - the height is the bit that "
+    "matters if you are walking a causeway or launching a boat.",
 )
 
 
+# ---------------------------------------------------------------- a form that ate the work
+
+# The one route where what the bot knows is not a place that holds the answer but the order to do
+# things in. Nobody's system is visible from here, and "I'm listening" is no help to somebody
+# staring at an empty application they spent twenty minutes on.
+FILLING_IT_IN = re.compile(
+    r"(?<![a-z])(?:form|forms|application|answers|questionnaire|survey|booking|checkout|basket|"
+    r"page|webpage|website|site|screen|portal|online|typed|filled\s+it\s+in|"
+    r"filled\s+the\s+form\s+in)(?![a-z])")
+# A save button is only on a screen, so this arm of the loss cue puts the form on one by itself.
+SAVING_FAILED = re.compile(
+    r"(?<![a-z])(?:didnt|didn't|did\s+not|doesnt|doesn't|does\s+not|wouldnt|wouldn't|would\s+not|"
+    r"wont|won't|will\s+not|refused\s+to)\s+(?:save|keep|remember)(?![a-z])")
+LOST_THE_WORK = re.compile(
+    r"(?<![a-z])(?:didnt|didn't|did\s+not|doesnt|doesn't|does\s+not|wouldnt|wouldn't|would\s+not|"
+    r"wont|won't|will\s+not|refused\s+to)\s+(?:save|keep|remember)(?![a-z])"
+    r"|(?<![a-z])(?:went|took\s+me|jumped)\s+back\s+to\s+the\s+start(?![a-z])"
+    r"|(?<![a-z])(?:start|do)\b[^.!?]{0,22}?(?<![a-z])(?:again|from\s+scratch)(?![a-z])"
+    r"|(?<![a-z])(?:all\s+over\s+again)(?![a-z])"
+    r"|(?<![a-z])(?:lost|wiped|cleared|erased|emptied)\s+(?:my\s+|the\s+|all\s+|the\s+whole\s+)?"
+    r"(?:answers|work|everything|it\s+all|the\s+lot|basket|cart|form|application)(?![a-z])"
+    r"|(?<![a-z])(?:disappeared|vanished|never\s+went\s+through)(?![a-z])"
+    r"|(?<![a-z])(?:timed\s+out|crashed)(?![a-z])"
+    r"|(?<![a-z])(?:signed\s+me\s+out|logged\s+me\s+out|kicked\s+me\s+out|threw\s+me\s+out)(?![a-z])"
+    r"|(?<![a-z])(?:cant|can't|couldnt|couldn't|wont|won't)\s+(?:let\s+me\s+|allow\s+me\s+)?"
+    r"(?:submit|send\s+it)(?![a-z])")
+# A form on paper is a different problem, and a lost parcel with a claim is not this one at all.
+# "form" and "application" are also a thing on paper: "i lost the application form" is a sheet
+# off a desk, and the order below (a back button, a saved draft) is advice about a screen. So the
+# bare filling-in words need a word that puts the form on a screen with them. "booking" is the same
+# shape and is the booking reader's (a lost paper form is nobody's here).
+ON_A_SCREEN = re.compile(
+    r"(?<![a-z])(?:online|website|web\s?site|site|webpage|web\s?page|page|screen|portal|checkout|"
+    r"basket|cart|typed|typing|type|submitted|submit|link|app|browser|internet|form\s+online|"
+    r"filling\s+in|click\w*|tap\w*|refresh\w*|reload\w*|scroll\w*|timed\s+out|session|"
+    r"the\s+back\s+button|save\s+button)(?![a-z])")
+# The work itself named as a quantity - "the whole application", "every answer" - is not a sheet
+# of paper, whatever the noun is.
+THE_WORK_ITSELF = re.compile(
+    r"(?<![a-z])(?:whole|entire|all\s+of\s+(?:it|my|the)|every\s+(?:answer|page|line|word)|"
+    r"all\s+(?:of\s+)?(?:my|the)\s+(?:answers|work))(?![a-z])")
+# The loss is described as the form going back or starting over, which is a screen and nothing else.
+BACK_TO_START = re.compile(
+    r"(?<![a-z])(?:went|took\s+me|jumped|sent\s+me)\s+back\s+to\s+the\s+start(?![a-z])"
+    r"|(?<![a-z])(?:start|do)\b[^.!?]{0,22}?(?<![a-z])(?:again|from\s+scratch)(?![a-z])"
+    r"|(?<![a-z])(?:all\s+over\s+again)(?![a-z])")
+THE_BARE_FORMS = re.compile(
+    r"(?<![a-z])(?:form|forms|application|applications|answers|questionnaire|survey)(?![a-z])")
+NOT_A_WRECKED_FORM = ("in the post", "by post", "posted", "paper", "printed", "print it",
+                      "in the letter", "through the door", "on paper", "claim", "compensation",
+                      "lost my bag", "lost bag")
+WRECKED_POOL = (
+    "I can't see their system, but this order gets a lost form back more often than not: the back "
+    "button before a reload, then a saved draft or a 'continue where you left off' link, then the "
+    "service itself - ask them to check the half-finished application before you type it all "
+    "again, because a duplicate is harder to undo than a gap.",
+    "Their system isn't visible from here, so the order is what matters: back one page rather than "
+    "reloading, then the drafts or 'continue your application' link, then the service itself, "
+    "quoting any reference you were given. When you do type it again, keep the long answers in a "
+    "document and paste them in, so a second timeout costs you nothing.",
+)
+
+
+def the_wrecked_form_reply(line):
+    """The pool for a form or a page that threw the person's work away, or None.
+
+    Public because a line like this is a *statement* - "my online application didnt save" has no
+    question in it - so it never reaches `for_the_ask`: the chain has already offered the lost-ask
+    and sympathy pools by then. The composer asks this one question first, and it answers for
+    every wording of a form that ate the work, not just this one.
+    """
+    if not line or _has(line, NOT_A_WRECKED_FORM):
+        return None
+    if not FILLING_IT_IN.search(line) or not LOST_THE_WORK.search(line):
+        return None
+    # A paper form that went missing keeps the reply it had: when the only word about filling
+    # something in is a form or an application, and nothing in the line puts it on a screen, the
+    # order below (a back button, a saved draft) is about a screen the person is not looking at.
+    if THE_BARE_FORMS.search(line) and not (ON_A_SCREEN.search(line)
+                                           or SAVING_FAILED.search(line)
+                                           or BACK_TO_START.search(line)
+                                           or THE_WORK_ITSELF.search(line)):
+        return None
+    return WRECKED_POOL
+
+
+# No entry in `READERS`: a line that asks about a form ("will it keep my answers?") is a question
+# and the pools above read it, while a line that *reports* a form eating the work is a statement
+# and never reaches `for_the_ask` at all. The statement is answered from `fallback_chain.py`, and
+# the question shape reaches this pool through `HEDGE_POOL`, which is where a question with no
+# reader of its own ends up.
 READERS = (_trade_route, _service_route, _buy_route, _pick_route, _how_many_route, _place_route,
-           _route_route, _who_route, _tide_route, _figure_route, _open_chemist_route)
+           _route_route, _who_route, _tide_route, _figure_route, _record_route,
+           _open_chemist_route)
 
 
 def for_the_ask(clean, repaired="", understood=None):

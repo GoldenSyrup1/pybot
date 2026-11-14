@@ -240,6 +240,15 @@ scribble trim dust polish sprinkle knead whisk stir simmer mash peel dice slice 
 fought frown frowns frowning fins fats fens finer fated funder
 """
 
+# Everyday words the one-edit repair bent into another word, because the vocabulary did not
+# hold them: "how do i pray" was read as "how do i pay", "is fury any good" as "is furry any
+# good", "everyone just stared" as "starred", "the sleeper to fort william" as "thort william",
+# a London borough as "healing", and a garden of "0.15 acres" as "0.15 cares". A word the reader
+# knows is left as it was typed, so the words a person says plainly belong here.
+COMMON += """
+pray prayed praying prayer prayers fury stare stared staring stare fort acre acres cute
+"""
+
 # How a body is, said of yourself: "im clamy", "im queezy", "im akey". These are ordinary words,
 # and the reading and the memory store already use most of them for the way somebody is, but the
 # repair only lands on a word the lexicon holds, so a letter short of one was read as a name:
@@ -289,6 +298,9 @@ FEELINGS = _words("""sad unhappy miserable down low gutted heartbroken crying te
 disappointed devastated depressed upset lonely alone isolated angry annoyed furious cross
 irritated frustrated mad livid raging anxious worried worry nervous scared afraid
 frightened stressed overwhelmed panic panicking dreading tired exhausted knackered
+# The doing form of a worry: "im worrying", "im stressing", "im overthinking", "im obsessing".
+# A word the reading calls a feeling has to be in this list, or "im worrying" is a name.
+worrying stressing overthinking obsessing spiralling spiraling
 shattered wiped sleepy bushed drained happy glad delighted thrilled pleased excited proud
 relieved chuffed grateful thankful appreciate guilty ashamed embarrassed bored boring
 stress cry terrified petrified panicky butterflies
@@ -345,6 +357,18 @@ blue
 # reading knows, which is what stops a name.
 bipolar schizophrenic anorexic bulimic narcoleptic psychotic infertile sterile paranoid
 transgender nonbinary hiv""")
+
+# How the body looks and feels when something is wrong with it, said as a bare word after "im".
+# None of these was a state the reading knew, so the name reader took the word for what the person
+# is called: "im spotty", "im pale", "im tender" and "im grey" were answered "Nice to meet you,
+# Spotty. What can I help with?", the store kept the word as their name, and every later line knew
+# them by it. A word that says how the body is, said in the place where the person says how they
+# are, is never a name - so they are in this list, which is what the name reader asks, and the
+# pools that answer them are BODY_STATES in bot/compose/fallback_data.py (bot/memory/ack.py keeps
+# its own copy of the words, because the echo has to decline the line and must not import the
+# composer).
+A_BODY_STATE = frozenset("""pale pallid ashen grey gray greyish grayish mottled blotchy spotty
+puffy bloated clammy flushed feverish shivery shaky tender husky snotty sniffly""".split())
 # A state is not a name. "im hurt", "im desperate", "im content", "im broken", "im hungover"
 # were all introductions - "Nice to meet you, Hurt. What can I help with?" - because the only
 # thing between a bare word and a welcome was whether the engine knew it as a feeling. These say
@@ -362,7 +386,7 @@ transgender nonbinary hiv""")
 A_STATE = frozenset("""hurt hurting desperate content confused confusing broken drunk torn
 hungover sober skint shattered wiped gutted
 starving fuming freezing boiling raging aching itching shaking shivering sweating
-chocka chocker manky wonky tickety wabbit""".split())
+chocka chocker manky wonky tickety wabbit""".split()) | A_BODY_STATE
 
 # The same states and feelings with the g left off. The reader puts the g back from this list,
 # so the word is not a guess and the mended spelling is the one the knowledge base is handed:
@@ -470,20 +494,25 @@ CHAT = {
     # "cya", which the goodbye already reads.
     "tmoro": "tomorrow", "n8": "night", "seeya": "see you", "speek": "speak",
     "gr8": "great", "b4": "before", "w8": "wait", "2day": "today", "2morrow": "tomorrow",
+    # The moment a remark is about, typed short: "rn its baltic" opened on a word no reader knows
+    # and the day outside was answered with "What are you up to there?" - the passing-the-time
+    # reader taking the opener for something the person did. "atm" is not here: it is as often the
+    # cash machine as "at the moment", and "the atm ate my card" is a bank line.
+    "rn": "now", "tn": "tonight",
     # The 8 spellings are the letters the digit says, and the table held every one but the one
     # people type most: "gr8", "n8", "w8" and "m8" were all here, so "i h8 my job" was the only
     # line of that family the reader did not know, and it got "Got it. Is there anything you'd
     # like a hand with?" where "i hate my job" gets "Ugh, that's a lot to carry."
-    "h8": "hate", "h8s": "hates", "h8d": "hated", "h8ing": "hating", "l8": "late",
+    "h8s": "hates", "l8": "late",
     "msg": "message", "msgs": "messages", "asap": "as soon as possible",
-    "idk": "i do not know", "dunno": "do not know", "dont know": "do not know",
+    "idk": "i do not know", "dont know": "do not know",
     # "cba"/"cbf" are read further down, where the word they make is spelled out in full.
     "stomakaike": "stomach ache", "stomach ake": "stomach ache",
-    "gonna": "going to", "wanna": "want to", "gotta": "got to", "lemme": "let me",
-    "gimme": "give me", "kinda": "kind of", "sorta": "sort of", "outta": "out of",
+    "wanna": "want to",
+    "gimme": "give me", "outta": "out of",
     "hafta": "have to", "coulda": "could have", "shoulda": "should have",
     "woulda": "would have", "musta": "must have", "nuthin": "nothing",
-    "imo": "in my opinion", "imho": "in my opinion", "tbh": "to be honest",
+    "imo": "in my opinion", "imho": "in my opinion",
     "btw": "by the way", "nvm": "never mind", "np": "no problem", "yw": "you are welcome",
     "rn": "right now", "atm": "at the moment", "abt": "about", "abt.": "about",
     "prob": "probably", "probs": "probably", "def": "definitely",
@@ -511,7 +540,7 @@ CHAT = {
     "wdyt": "what do you think", "wdy think": "what do you think",
     "jk": "just kidding", "rofl": "lol", "yolo": "you only live once",
     "nm": "not much", "nmu": "not much you", "wbu": "what about you", "ikr": "i know right",
-    "tbh": "to be honest", "idk": "i do not know", "dunno": "i do not know",
+    "tbh": "to be honest", "dunno": "i do not know",
     # The shortest ways of typing "I don't know" and "don't": no vowel, no apostrophe, no
     # space. Each is a run of letters that is not a word, so it can be read straight, and
     # without it the line names nothing and gets the shrug - "dno" and "i dno" were both
@@ -519,7 +548,7 @@ CHAT = {
     # were answered as the "I don't know" they are.
     "dno": "i do not know", "dnno": "i do not know", "iunno": "i do not know",
     "donno": "i do not know", "dnt": "do not",
-    "gonna": "going to", "wanna": "want to", "gotta": "got to", "lemme": "let me",
+    "gonna": "going to", "gotta": "got to", "lemme": "let me",
     "kinda": "kind of", "sorta": "sort of", "cmon": "come on", "aint": "is not",
     # The spellings people actually type for the words a line turns on. None of these is a
     # real word, so a spelling here cannot bend one. `wana` matters beyond tidiness: without
@@ -538,7 +567,7 @@ CHAT = {
     # "m8" and "b4" were read and "h8" was not, so "i h8 my job" named nothing and got a nod
     # back while "i hate my job" was answered. `wna` is the same shortening as `wana` and
     # `wanta`, and `nething`/`nethin` are the "ne" of `ne1` with "thing" on the end.
-    "h8": "hate", "h8s": "hates", "h8d": "hated", "h8ing": "hating",
+    "h8": "hate", "h8d": "hated", "h8ing": "hating",
     "wna": "want to", "nething": "anything", "nethin": "anything",
 }
 
@@ -599,7 +628,7 @@ TYPED_CONTRACTIONS = {
 # "i can't breathe" exactly as "i cant breathe" is. The long form keeps the apostrophe because
 # that is the spelling a pattern matches without knowing which way it was typed.
 CONTRACTIONS = {
-    "dont": "don't", "cant": "can't", "wont": "won't", "didnt": "didn't", "isnt": "isn't",
+    "dont": "don't", "cant": "can't", "wont": "won't", "isnt": "isn't",
     "doesnt": "doesn't", "im": "i'm", "ive": "i've", "i'll": "i'll",
     # A missing apostrophe is the same typo, and the possessive of a child word is what the
     # floppy and sleepy arms read: "my babys lips have gone blue".
@@ -613,7 +642,7 @@ CONTRACTIONS = {
 CHAT.update({
     "fone": "phone", "fones": "phones", "fonecall": "phone call", "phne": "phone",
     "av": "have", "bv": "have", "hve": "have",
-    "avnt": "have not", "avent": "have not", "havnt": "have not", "propa": "proper",
+    "avnt": "have not", "propa": "proper",
     "gf": "girlfriend", "gfs": "girlfriends", "bf": "boyfriend", "bfs": "boyfriends",
     "sed": "said", "syas": "says",
     "bova": "bothered", "bovad": "bothered", "bovered": "bothered", "botherd": "bothered",
@@ -626,7 +655,7 @@ CHAT.update({
     "nt": "not", "cnt": "can not",
     # The "not" of a modal with its o dropped and the apostrophe gone: "i cudnt sleep",
     # "we shudnt bother", "they wudnt say". "havnt" and "avnt" are the same for "have".
-    "havnt": "have not", "avnt": "have not", "avent": "have not",
+    "havnt": "have not", "avent": "have not",
     "shudnt": "should not", "cudnt": "could not", "wudnt": "would not",
     "dats": "that is", "das": "that is", "dere": "there",
     "tryna": "trying to", "trynna": "trying to",
@@ -656,7 +685,7 @@ CHAT.update({
     # "prezzy", "pressie" and both plurals were, so a question about one never reached the
     # present answers: "what prezzie should i get my mum" got the search hedge where
     # "what present should i get my mum" gets the gift line.
-    "prezzie": "present", "prezzies": "presents",
+    "prezzie": "present",
     "prezzy": "present", "prezzies": "presents", "pressie": "present", "pressies": "presents",
     "presant": "present",
 })
@@ -718,6 +747,11 @@ MISSPELLINGS = {
     "chest pane": "chest pain",
     "hart attack": "heart attack", "hart rate": "heart rate", "hart beat": "heartbeat",
     "my hart": "my heart", "his hart": "his heart", "her hart": "her heart",
+    # "crack" typed with the letters run together. "crak" is not a word, so it needs no fence,
+    # and the same slip turns up in every line about a thing that has split: `my phone screen has
+    # a crak` answered "I'm listening" while `my phone screen has a crack` gets the screen card,
+    # and a crack in a cup, a ceiling or a bone reads the same way once the word is put back.
+    "crak": "crack", "craks": "cracks", "craked": "cracked", "craking": "cracking",
     # "numb" with its last letter dropped, which is one of the stroke signs: `my face feels num`
     # answered "I'm listening" while `my face feels numb` gets the face-numbness answer. "num" is
     # also chat-speak for a phone number ("whats ur num"), so the repair is held to the verbs
@@ -738,18 +772,18 @@ MISSPELLINGS = {
     # "failure" with its i and l typed the wrong way round: the one-edit readers leave a
     # vowel-consonant swap alone, because that is how a real word becomes another real word.
     "faliure": "failure", "faluire": "failure", "failiure": "failure",
-    "dissapointment": "disappointment", "dissapointed": "disappointed",
+    "dissapointment": "disappointment",
     "dissapointing": "disappointing", "dissapoint": "disappoint",
     # The judgement words again, with a vowel or a letter the wrong way round. "fix_typo" leaves
     # a letter swapped for another one alone on purpose, so the table is the only way these land
     # - and a judgement noun that does not land is read as a thing being named: "im wortles" was
     # answered "Nice to meet you, Wortles. What can I help with?" and "im a faliur" was read as
     # a role to chat about ("Faliur - good to know. What do you like most about it?").
-    "burdon": "burden", "faliur": "failure", "falure": "failure", "fialure": "failure",
+    "faliur": "failure", "falure": "failure", "fialure": "failure",
     "failur": "failure", "wortles": "worthless", "wothles": "worthless",
     "useles": "useless", "uselss": "useless", "hopeles": "hopeless",
     "nuiscance": "nuisance", "letdow": "letdown",
-    "usless": "useless", "usefull": "useful",
+    "usless": "useless",
     # Two letters typed round the wrong way, in the words people write most: a swapped pair is
     # two edits, so the one-edit corrector refuses it and the word stayed as typed. "whcih one
     # should i get" then read "one" as a count and the ask never reached the answer, and "whaat
@@ -758,41 +792,41 @@ MISSPELLINGS = {
     "whcih": "which", "whihc": "which", "whaat": "what", "tounge": "tongue", "toung": "tongue",
     "recipie": "recipe", "reciepe": "recipe", "resipee": "recipe",
     "qinuoa": "quinoa", "qunioa": "quinoa", "quinoia": "quinoa", "quinnoa": "quinoa",
-    "sandwhich": "sandwich", "sandwitch": "sandwich", "brocolli": "broccoli",
+    "sandwhich": "sandwich", "sandwitch": "sandwich",
     "potatos": "potatoes", "tomatos": "tomatoes", "avacado": "avocado", "eg": "egg",
-    "definately": "definitely", "definatly": "definitely", "seperate": "separate",
+    "definately": "definitely", "definatly": "definitely",
     "sence": "sense",
-    "temprature": "temperature", "tempreture": "temperature", "tempriture": "temperature",
-    "wierd": "weird", "freind": "friend", "freinds": "friends",
-    "beleive": "believe", "recieve": "receive", "untill": "until", "aswell": "as well",
+    "tempreture": "temperature",
+    "wierd": "weird",
+    "beleive": "believe", "aswell": "as well",
     "apreciate": "appreciate", "appriciate": "appreciate", "apprechiate": "appreciate",
-    "alot": "a lot", "becuase": "because", "thier": "their", "wich": "which",
+    "alot": "a lot", "thier": "their", "wich": "which",
     "wheather": "weather", "tomorow": "tomorrow", "exercize": "exercise",
-    "excercise": "exercise", "excersize": "exercise", "suprise": "surprise",
-    "acheive": "achieve", "adress": "address", "occured": "occurred",
-    "goverment": "government", "enviroment": "environment", "neccessary": "necessary",
-    "necesary": "necessary", "reccomend": "recommend", "recomend": "recommend",
-    "restaraunt": "restaurant", "resturant": "restaurant", "vegtable": "vegetable",
+    "excercise": "exercise",
+    "acheive": "achieve", "adress": "address",
+    "goverment": "government", "enviroment": "environment",
+    "necesary": "necessary",
+    "restaraunt": "restaurant",
     "vegtable": "vegetable", "chocalate": "chocolate", "choclate": "chocolate",
     "spagetti": "spaghetti", "lasagne": "lasagne", "yoghurt": "yogurt",
     "teh": "the", "hte": "the", "adn": "and", "nad": "and", "taht": "that",
     "waht": "what", "whta": "what", "yuo": "you", "fo": "of", "ot": "to",
     "becuase": "because", "becasue": "because", "beacuse": "because",
-    "wether": "weather", "wheather": "weather", "wether or not": "whether or not",
+    "wether": "weather", "wether or not": "whether or not",
     "weather or not": "whether or not",
-    "seperate": "separate", "definately": "definitely", "definetly": "definitely",
-    "recieve": "receive", "recieved": "received", "beleive": "believe",
-    "belive": "believe", "occured": "occurred", "alot": "a lot", "begining": "beginning",
+    "seperate": "separate", "definetly": "definitely",
+    "recieve": "receive", "recieved": "received",
+    "belive": "believe", "occured": "occurred", "begining": "beginning",
     "calender": "calendar", "recomend": "recommend", "reccomend": "recommend",
     "recomendations": "recommendations", "diffrent": "different", "differnt": "different",
-    "excersize": "exercise", "excercise": "exercise",
-    "tommorow": "tomorrow", "untill": "until", "wierd": "weird", "freind": "friend",
+    "excersize": "exercise",
+    "tommorow": "tomorrow", "untill": "until", "freind": "friend",
     "freinds": "friends", "garantee": "guarantee", "gratefull": "grateful",
     "immediatly": "immediately", "independant": "independent", "intresting": "interesting",
     "knowlege": "knowledge", "libary": "library", "maintainance": "maintenance",
     "neccessary": "necessary", "occassion": "occasion", "posible": "possible",
     "prefered": "preferred", "recomended": "recommended", "resturant": "restaurant",
-    "restaraunt": "restaurant", "rythm": "rhythm", "suprise": "surprise",
+    "rythm": "rhythm", "suprise": "surprise",
     "truely": "truly", "useing": "using", "usefull": "useful", "vegeterian": "vegetarian",
     "verry": "very", "writting": "writing",
     # Slips that cost a real answer: each of these made the bot hedge or hand back a stock line on a
@@ -830,7 +864,7 @@ MISSPELLINGS = {
     # answered "Nice to meet you, Awsome", while a curated spelling reads it as the state it
     # is. None of them is an English word, so no line about anything else can move.
     "awsome": "awesome", "awfl": "awful", "awfull": "awful", "hopefull": "hopeful",
-    "ankshus": "anxious", "anxous": "anxious", "anxios": "anxious", "anxty": "anxious",
+    "ankshus": "anxious", "anxios": "anxious", "anxty": "anxious",
     "emosh": "emotional",
     # The same class with the vowels taken out, which the one-edit fixer cannot see because the
     # word is two or three letters short of the feeling: "im anxty", "im deprsd" and "im woryd"
@@ -851,14 +885,14 @@ MISSPELLINGS = {
     "ankel": "ankle", "plummer": "plumber", "shoer": "shower", "curtins": "curtains",
     "cusion": "cushion", "cupbord": "cupboard", "tabl": "table", "hous": "house",
     "brocolli": "broccoli", "omlette": "omelette", "porrige": "porridge",
-    "recepie": "recipe", "recpie": "recipe", "spagetti": "spaghetti",
+    "recepie": "recipe", "recpie": "recipe",
     "tirred": "tired", "tierd": "tired", "headach": "headache", "headace": "headache",
     "docor": "doctor", "reciept": "receipt", "radiater": "radiator", "boilar": "boiler",
     "boilier": "boiler",
     # the letters people leave out of the words they say most when something is wrong
-    "docer": "doctor", "docter": "doctor", "doctur": "doctor", "dockter": "doctor",
+    "docer": "doctor", "doctur": "doctor", "dockter": "doctor",
     "ambulnce": "ambulance", "ambulence": "ambulance", "ambulanc": "ambulance",
-    "hospitle": "hospital", "hostpital": "hospital", "hospitl": "hospital",
+    "hostpital": "hospital", "hospitl": "hospital",
     "paracetomal": "paracetamol", "paracetemol": "paracetamol", "paracetmol": "paracetamol",
     "ibuprofin": "ibuprofen", "ibruprofen": "ibuprofen", "ibroprofen": "ibuprofen",
     "matress": "mattress", "allergey": "allergy", "allergies": "allergies",
@@ -876,7 +910,7 @@ MISSPELLINGS = {
     "medecine": "medicine", "millenium": "millennium", "noticable": "noticeable",
     "occuring": "occurring", "paralel": "parallel", "perfomance": "performance",
     "personel": "personnel", "persue": "pursue", "posession": "possession",
-    "priviledge": "privilege", "probaly": "probably", "probally": "probably",
+    "priviledge": "privilege", "probaly": "probably",
     "pronounciation": "pronunciation", "publically": "publicly", "questionaire": "questionnaire",
     "recommened": "recommended", "refered": "referred", "relevent": "relevant",
     "religous": "religious", "rember": "remember", "remeber": "remember",
@@ -900,7 +934,7 @@ MISSPELLINGS = {
     "neigbour": "neighbour", "neigbours": "neighbours",
     "daugther": "daughter", "daugthers": "daughters",
     "dauter": "daughter", "dauters": "daughters",
-    "tird": "tired", "geting": "getting", "kiling": "killing",
+    "tird": "tired", "geting": "getting",
     # A body that hurts, and the words for it: the reply code tells "my back is killing me" (a
     # body, so it asks about it) from a fact to say back by reading the word, so the slip has to
     # reach it put right. A slip is never a word of its own - "kiling", "headeche", "leeking" are
@@ -939,7 +973,7 @@ MISSPELLINGS = {
     # the doctor answer, and "ive got a migrane" was said straight back as "your migrane" where
     # "migraine" gets the health answer. The list stays short and only holds slips seen in the
     # wild, because a table of guesses is worse than none.
-    "temprature": "temperature", "tempreture": "temperature",
+    "temprature": "temperature",
     "tempreature": "temperature", "tempratue": "temperature",
     "migrane": "migraine", "migranes": "migraines", "migrain": "migraine",
     "stomaches": "stomachs",
@@ -986,8 +1020,8 @@ MISSPELLINGS = {
     # back ("Dissapointment - good to know."). "im a burden" reaches "you're being harder on
     # yourself than you'd be on a friend"; "im a burdon" reached the job pool that tells a person
     # who calls themselves a burden "A burdon - nice one."
-    "dissapointment": "disappointment", "disapointment": "disappointment",
-    "disappoinment": "disappointment", "dissapointed": "disappointed",
+    "disapointment": "disappointment",
+    "disappoinment": "disappointment",
     "burdon": "burden", "burdons": "burdens",
     "worthles": "worthless", "worthlesly": "worthlessly",
 }
@@ -1081,6 +1115,11 @@ MISSPELLINGS.update({
     "bulid": "build",
     "cehst": "chest",
     "chets": "chest",
+    # "cheast" is the chest with an "a" in it, the way people type it after "breast". It is
+    # not a transposition, and without this row the corrector reaches for a real word one
+    # letter away instead: "my cheast hurts" was read as "my cheats hurts", so the part
+    # repair below never saw it and a chest pain opened as nothing at all.
+    "cheast": "chest",
     "chlid": "child",
     "cihld": "child",
     "claen": "clean",
@@ -1219,7 +1258,7 @@ URGENT_MISSPELLINGS = {
     "colapsed": "collapsed", "collapsd": "collapsed", "collapsesd": "collapsed",
     "colapsing": "collapsing",
     # choke
-    "chok": "choke", "chokng": "choking", "chokin": "choking", "chocking": "choking",
+    "chok": "choke", "chokng": "choking", "chocking": "choking",
     "chokeing": "choking", "chokking": "choking",
     # unconscious, unresponsive
     "unconcious": "unconscious", "unconsious": "unconscious", "unconcius": "unconscious",
@@ -1334,8 +1373,8 @@ MISSPELLINGS.update({
     # only place they land. Without them `what does that meen`, `what dos that mean` and
     # `whats that suposed to mean` reached the search hedge while the same line spelt correctly
     # got the answer said again in plainer words (crisp-goose, #understanding).
-    "meen": "mean", "meens": "means", "meening": "meaning", "meent": "meant",
-    "meen": "mean", "meens": "means", "meening": "meaning", "meent": "meant",
+    "meens": "means",
+    "meen": "mean", "meening": "meaning", "meent": "meant",
     "deos": "does", "suposed": "supposed", "supose": "suppose",
     "suposedly": "supposedly",
     # "dos" is a word already ("the dos and donts", "ms dos"), so it is bent only where the words
@@ -1390,6 +1429,26 @@ CHAT.update({
     "bort": "bought", "thort": "thought", "brort": "brought",
     # The one question word that is not spelt the way it sounds.
     "hu": "who",
+})
+
+# A common verb written the way it sounds. "werk" is "work" typed in a hurry, and the letter
+# is not the point: the word is the subject of the line, and every card about a thing that has
+# stopped is keyed on it. "my tv dont werk" got "Thanks for telling me", "my laptop dont werk"
+# got "I'm listening", and "me fone dont werk" got "Got it" while the same three lines spelt
+# right get the television, the laptop and the phone repair. No other word in the language is
+# read the same way, so the whole family is set down: the -s, the -ed and the -ing.
+CHAT.update({
+    "werk": "work", "werks": "works", "werked": "worked", "werking": "working",
+    # "elp" is "help" with its first letter gone - the line a person types when they are asking
+    # for it. "i need elp wiv me cv" was answered "Elp wiv you cv - fair enough. What's stopped it
+    # happening so far?", which is the echo frame for a noun nobody named, and "can u elp me
+    # sleep" got "I'm not sure about that one" where "can you help me sleep" gets the sleep card.
+    "elp": "help", "elps": "helps", "elped": "helped", "elping": "helping",
+    # "reckn" is "reckon" with the o gone, and the phrase it sits in - "what do you reckon" - is
+    # the whole of an opinion ask. "what do u reckn" got "I'm not sure about that one, sorry - I'd
+    # rather not guess" where "what do you reckon" gets "Ask away, I'm listening." "rekon" is
+    # already set down; this is the same word with the vowel gone rather than swapped.
+    "reckn": "reckon", "reckns": "reckons", "recknd": "reckoned", "reckning": "reckoning",
 })
 
 # A dialect word for how somebody is, read as the plain word it means, so the answers keyed on
@@ -1449,7 +1508,7 @@ CHAT.update({
     "hv": "health visitor", "hvs": "health visitors",
     "wev": "we have", "av": "have",
     "shud": "should", "shld": "should", "wud": "would", "wuld": "would",
-    "guna": "going to", "gona": "going to", "goina": "going to", "gonna": "going to",
+    "guna": "going to", "gona": "going to", "goina": "going to",
     # "meself" is how the reflexive is said and typed in most of the north of England, and
     # "mesen" is the same word further north again: "im cacking meself", "im shittin mesen".
     "meself": "myself", "mesen": "myself", "me self": "myself",
@@ -1652,6 +1711,7 @@ wasting waterproofing weeping wetting wheezing wobbling wrapping wrecking wuther
 # "kiling" and "anyfing" as the words they are.
 _DOUBLED_NOT_A_SLIP = """
 bled butt cal canceling caper carers casein committed crispin desserts ding fibrin filing
+latte
 filings filling fillings finnish freeing hover hovering hovers lager latter leds ling losses
 mealy moped moping mopped mopping munches noted noting notted notting oily painting paned
 pilling planed planing pulsing putin putt queueing saladin sed stalin sumer teether tether
@@ -1678,8 +1738,11 @@ scored staring tankful""".split())
 # as a short temper, and "he was nappy" and "he was nappy all day" with it. The word a person
 # wrote stays the word they wrote, and the repair keeps the words it was built for ("nackered",
 # "exausted", "worrid": none of those is a word, which is why they are not here).
+# "fired" is a word of its own, and the feeling list holds "fried": the two are one swap apart,
+# so the feeling repair read "i got fired today" as "i got fried today" and the reply lost the
+# job. It bends into a feeling, which is what this list is for.
 REAL_WORDS = frozenset("""career careers dyeing singeing tingeing swingeing
-nappy nappies""".split())
+nappy nappies fired""".split())
 
 # The words above, and the words the deck and the bot's prose use as they stand, as one set: a
 # word here is a word, so no reader bends it. It is kept out of REAL_WORDS on purpose - a word a

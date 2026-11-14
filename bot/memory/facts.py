@@ -451,7 +451,11 @@ case fact truth style general particular common between limbo fear
 tonight today tomorrow yesterday now soon later always never usually often sometimes already still
 once twice early late morning evening afternoon night weekend week month year day minute moment while
 ago yet again anyway anymore then there here coming going and but so because or plus also
-originally born""".split())
+originally born from to into onto towards toward via until till before after about""".split())
+# "to" is the one that bites a move: "i moved from leeds to bristol" kept the origin as "Leeds To",
+# because the word after a place had to be a stop word to be refused and the destination's own
+# preposition was not on the list. The other connectives are the same seam one phrasing over
+# ("from leeds into bristol", "from india until 2019"), so the fix is the list and not the move.
 # Where they are from, which is not where they live: "i live in bristol now, but im from leeds
 # originally" names two places, and a later "where am i from?" asks for the second one.
 # The subject and its auxiliary are read as whole words, because half of "were" is "we" and "re":
@@ -1656,6 +1660,23 @@ INCOME = re.compile(r"\b(?:i|we)(?:'m|m\b| am| are)?\s+(?:only\s+)?(?:"
 INCOME_BARE = re.compile(r"\b(?:i|we)(?:'m|m\b| am| are)?\s+(?:only\s+)?(?:"
                          r"earn|make|get paid|get|bring home|take home|on)\s+"
                          r"((?:about |around |roughly |up to |just )?\d[\d,.]*)", re.I)
+# A year's pay said with no period at all: "i earn 32000", "my salary is 32000", "im on 32k".
+# The period is what tells money from a count ("i get 300 emails") and from a rate ("i earn 20
+# pounds an hour"), so its absence is why these lines filed nothing - and why the reply to a
+# statement of their pay was a stock line, while "i earn 32000 a year" got the year-to-month
+# answer. What stands in for the period is the *shape* of the figure and the verb: only the verbs
+# that cannot mean anything but pay are here ("get" and "make" are not, because "i get 3000
+# views" and "i make 2000 cookies" are counts), and the figure has to be a year's wage rather
+# than a count, which is four digits or a figure in thousands.
+INCOME_A_YEAR = (
+    re.compile(r"\b(?:i|we)(?:'m|m\b| am| are)?\s+(?:only\s+)?"
+               r"(?:earn|earns|earned|get paid|bring home|take home|be on|am on|on)\s+"
+               r"((?:about |around |roughly |up to |just )?"
+               r"(?:[£$€]\s?\d[\d,.]*|\d[\d,.]*(?:\s?(?:pounds?|quid|grand|k)\b)?))", re.I),
+    re.compile(r"\b(?:my|our)\s+(?:salary|wages?|pay|income)\s*(?:is|was|'s|are)?\s*"
+               r"((?:about |around |roughly )?"
+               r"(?:[£$€]\s?\d[\d,.]*|\d[\d,.]*(?:\s?(?:pounds?|quid|grand|k)\b)?))", re.I),
+)
 # A budget said with nothing around it: "under 15 pounds", "about 30", "anything under 15 pounds",
 # "no more than 20 pounds", "something around 20". The figure is what the line is about, so a lead
 # in is allowed but nothing else is: "anything" and "something" are people thinking out loud about
@@ -1903,6 +1924,10 @@ WEIGH_MY = re.compile(r"\bmy\s+weights?\s+(?:(?:is|are|works out at)\s+)?"
 COMPOUND_AFTER = frozenset("""evening wedding birthday party house home flat garden car room
 meeting funeral anniversary holiday dinner tea lunch day night weekend bedtime visit health
 money phone number address school work dog cat baby pram bath""".split())
+# The compounds a relation can own: everything the list above has, less the one phrase that is
+# an event of the school rather than a thing of the parents'.
+COMPOUND_THAT_IS_THEIRS = COMPOUND_AFTER - {"evening"}
+
 # The age said with its own name: "my age is 34", "my ages 34".
 # A number with a unit after it is a measurement and not an age, the same as for anybody else:
 # "my age is 68 kilos" said a weight and was filed as the age 68.
@@ -2093,6 +2118,15 @@ RELATION_POSSESSIVE_AGE = re.compile(
 RELATION_AGE = re.compile(
     r"\b(?:my|our)\s+" + MODIFIER_BEFORE + r"(?P<who>" + _A_PERSON + r")(?:\s+is\s+|'s\s+|s\s+|\s+)?"
     r"(?:turning\s+|turns\s+)?(?P<age>\d{1,3})" + NOT_A_UNIT, re.I)
+# "the eldest is 7", "the little one is 4": a child named by their place in the family takes the
+# definite article as readily as a possessive. It is how the second of two children is said - "our
+# youngest is 4 and the eldest is 7" - and read with the possessive only, the second age was filed
+# against nobody, so the ask about that child ("how old is the eldest") fell through to the world
+# and came back as advice about something else. The article says "mine" here because the place
+# word is the whole of the noun phrase: "the eldest son" is the son, and that shape is left alone.
+THE_PLACE_AGE = re.compile(
+    r"\bthe\s+(?P<who>" + "|".join(sorted(ALONE_PERSON, key=len, reverse=True)) + r")"
+    r"(?:\s+is\s+|'s\s+|s\s+)(?P<age>\d{1,3})" + NOT_A_UNIT, re.I)
 # A baby is somebody people give an age for with no relation word in the line: "my baby is 4
 # months old", "the baby is 18 months". The readers above need a word like "son" or "daughter",
 # so the age was filed nowhere and the store said a turn later that it had never been told.
@@ -2186,12 +2220,37 @@ def a_chained_person(text):
 # was read as nothing at all while "hes 5" was read as the son's age, so a person who spelled the
 # number out - which is most people, most of the time - was told "You haven't told me how old your
 # son is" about a line that had just said it.
+# The words that put an age in the future rather than now: "next month", "in june", "on friday".
+# Written once so a reader that keeps the age they have now can stand aside for the one that keeps
+# a birthday, instead of taking the figure and losing the day it was said with.
+AGE_TO_COME_TAIL = (r"(?!\s+(?:next\s+(?:week|month|year|spring|summer|autumn|winter)|"
+                    r"(?:in|on)\s+[a-z]{3,9})\b)")
+# How the person feels about it is a thing they told you, and it outranks the figure:
+# "shes turning 40 and she hates being the centre of attention" is a line about a sister, and
+# reading the 40 as a fact to file turned a warm reply into a receipt for it. This is a check
+# rather than part of the pattern below because it only applies to an age said with the word
+# that says it is coming: "shes 70 and she hates fuss" is a fact with an aside, and the aside
+# has always been echoed back to the person, which is the reply that line wants.
+HOW_THEY_FEEL = re.compile(r"\b(?:hate|hates|hated|hating|love|loves|loved|likes?|liked"
+                           r"|wants?|wanted|prefers?|dreads?|shy|embarrassed|nervous"
+                           r"|excited|proud|rather)\b", re.I)
+
 _AN_AGE_IN_WORDS = ("(?:" + _A_TEN_WORD + r"(?:[-\s]" + _A_UNIT_WORD + r")?|"
                     + _A_TEEN_WORD + "|" + _A_UNIT_WORD + ")")
 PRONOUN_AGE = re.compile(r"\b(?P<who>she|he|they)(?:'s|s|re|'re)?(?:\s+(?:is|are))?"
                          r"(?:\s+(?:about|around|nearly|almost|roughly|maybe|probably|just|only"
                          r"|now|already|still))*\s+"
-                         r"(?P<age>\d{1,3}|" + _AN_AGE_IN_WORDS + r")" + NOT_A_UNIT, re.I)
+                         # The word that says the age is coming, which the relation readers have
+                         # always taken: "my daughter is turning 6" was read and "shes turning 6"
+                         # was not, so the age the chat had just been given was filed nowhere and
+                         # the next ask was a punt. Same words, same reading, whoever they are
+                         # said of.
+                         r"(?P<come>turning\s+|turns\s+|will\s+be\s+|is\s+going\s+to\s+be\s+)?"
+                         r"(?P<age>\d{1,3}|" + _AN_AGE_IN_WORDS + r")" + NOT_A_UNIT
+                         # A birthday still to come is `AGE_TO_COME`'s: "hes turning 9 in june"
+                         # is the age he is not yet, and reading it here as the age he is now
+                         # replaced the 8 the chat had been told with the 9.
+                         + AGE_TO_COME_TAIL, re.I)
 
 
 def a_stated_number(word):
@@ -2332,7 +2391,7 @@ def _relation_facts(text):
         # two hours" got a search hedge. A baby is what the line is about, and months is how the
         # age is kept.
         entry("baby").setdefault("months", int(match.group("age")))
-    for pattern in (RELATION_AGE, RELATION_NAMED_AGE, RELATION_WHOS_AGE):
+    for pattern in (RELATION_AGE, THE_PLACE_AGE, RELATION_NAMED_AGE, RELATION_WHOS_AGE):
         # A clause ("my brother whos 30 is coming to stay") ends where the next verb starts, so
         # the age is read when what follows it is not a unit, rather than only when it is one of
         # the words an age ends with. The plain shapes keep the short list: "my son is 8 grams"
@@ -2369,8 +2428,15 @@ def _relation_facts(text):
         if not thing:
             continue
         key = "likes" if tasted.get("how") == "yes" else "dislikes"
-        if tasted.get("eaten"):
-            continue  # "she doesnt eat meat" is her diet, which the line's own reader has
+        if tasted.get("eaten") and set(str(thing).split()) & DIET_GROUP:
+            # "she doesnt eat meat" is her diet, which the line's own reader has. Only a whole
+            # food group is a diet, though: "wont eat vegetables" is a fussy eater rather than a
+            # way of eating, and "my daughter wont eat peas" is one food she will not eat, which
+            # the diet reader leaves alone (it wants a group). The store kept nothing at all
+            # then, so the person had to say it twice and "what wont she eat" was answered "You
+            # haven't told me what your daughter eats". A food they will not eat is a taste like
+            # any other, so it goes on the list the dislike ask reads.
+            continue
         who = tasted.get("who")
         if who:
             known = entry(who)
@@ -2409,6 +2475,12 @@ def _relation_facts(text):
     pronoun = PRONOUN_AGE.search(text)
     if pronoun and a_stated_number(pronoun.group("age")) is None:
         pronoun = None
+    if pronoun and pronoun.group("come"):
+        # Only what the line says in the same breath as the age: "shes turning 40. she hates
+        # being the centre of attention" is two thoughts, and the second is not about the 40.
+        same_breath = re.split(r"[.!?]", text[pronoun.end():], 1)[0]
+        if HOW_THEY_FEEL.search(same_breath):
+            pronoun = None
     if pronoun and _month_age_after(text, pronoun.end()):
         # The same month age with only a pronoun: "shes 18 months old" after "my daughter...".
         fits = SHE if pronoun.group("who").lower() == "she" else HE
@@ -2908,7 +2980,7 @@ def _a_day_taken_back(text):
     The value is the day, which is what the shapes for a moved time carry, so the store puts a
     plan's day to it rather than filing a plan of its own.
     """
-    return A_DAY_TAKEN_BACK.search(text)
+    return A_DAY_TAKEN_BACK.search(text) or A_DAY_I_MEANT.search(text)
 
 
 def _a_moved_time(text):
@@ -2935,6 +3007,14 @@ A_DATE_VALUE = (r"((?:the\s+)?\d{1,2}(?:st|nd|rd|th)?(?:\s+of\s+(?:the\s+)?[a-z]
                 r"|(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\s+[a-z]{3,10}"
                 r"|the\s+[a-z]{3,10}"
                 r"|[a-z]{3,10})")
+# The words a person puts after the value they are putting right: "sorry, the 5th actually",
+# "no, june then", "make it july, i think". The marker in front is what says the line is a
+# correction, and people say a second one after the value as often as before it. It stopped the
+# value being read at all, so the correction turn moved nothing and the ask after it gave the old
+# date back ("my sons birthday is on 4 june" / "its the 5th actually" still said 4 June), and
+# `a_date_put_right` said yes while `the_date_put_right` found no date in the line.
+AFTER_THE_VALUE = (r"(?:\s+(?:actually|instead|then|though|sorry|please|i\s+think|"
+                   r"i\s+reckon|if\s+thats\s+ok|if\s+that'?s\s+ok))*\s*[.!]?\s*$")
 # "we moved it to july": the date of a plan is moved, and the plan itself is pointed at ("it",
 # "the booking", "our trip") rather than named. People say the new date and leave the old one
 # out, because the plan already holds it.
@@ -2943,13 +3023,13 @@ CHANGED_TO = re.compile(
     r"(?:moved|changed|pushed|shifted|switched|brought|put|bumped|made)\s+"
     r"(?:it|that|this|the\s+[a-z]{2,15}|our\s+[a-z]{2,15}|my\s+[a-z]{2,15})\s+"
     r"(?:back\s+|forward\s+|on\s+)?(?:to|until|for)\s+"
-    + A_DATE_VALUE + r"(?:\s+instead)?\s*[.!?,]?\s*$", re.I)
+    + A_DATE_VALUE + AFTER_THE_VALUE, re.I)
 # The same move said with no subject: "make it july", "change it to august". A question is not
 # a change ("can we move it to july?"), so the reader refuses a line with a question mark.
 CHANGED_BARE = re.compile(
     r"^\s*(?:(?:ok|okay|right|well|so|and|actually|no|sorry|oh)[, ]+)?"
     r"(?:make|change|move|push|put|shift|bring)\s+"
-    r"it\s+(?:to\s+)?" + A_DATE_VALUE + r"\s*[.!]?\s*$", re.I)
+    r"it\s+(?:to\s+)?" + A_DATE_VALUE + AFTER_THE_VALUE, re.I)
 # A change of date said with no verb at all: "its actually july", "its july instead". The
 # "actually" or the "instead" is what makes it a correction rather than a fact about the world,
 # so "its july" on its own states something else and is left alone. A bare "now" is not enough:
@@ -2981,8 +3061,7 @@ CORRECTION_A_DATE = re.compile(
     r"^\W*(?:(?:ok|okay|right|so|and|no|nope|sorry|actually|oops|wait|oh|hmm)[,.]?\s+)+"
     r"(?:(?:it'?s|its|it\s+is|that'?s|thats|the\s+date\s+is)\s+)?"
     r"(?:(?:now|on|for)\s+)?"
-    + A_DATE_VALUE +
-    r"(?:\s+instead)?\s*[.!]?\s*$", re.I)
+    + A_DATE_VALUE + AFTER_THE_VALUE, re.I)
 # A day put right in the words people use when they got the day wrong. `CORRECTION_A_DATE` wants
 # the line to be nothing but the date, and these two shapes are not: the day comes with the reason
 # after it ("sorry saturday i got the day wrong") or with "now" after it ("actually its sunday
@@ -3002,12 +3081,29 @@ A_DAY_TAKEN_BACK = re.compile(
     r"|[,.]?\s*(?:i\s+(?:got|had|put)\s+(?:the|that)\s+day\s+wrong|wrong\s+day|"
     r"my\s+mistake|i\s+was\s+wrong|im\s+wrong|silly\s+me|\s+i\s+meant\b))", re.I)
 
+# The day said with the words people use when they got it wrong in front of it: "sorry i meant
+# friday", "no i mean sunday", "i said thursday". The shapes above put the reason after the day
+# ("sorry saturday i got the day wrong") or the word "instead"; the way most people correct a day
+# is to say "i meant" and then the day, and that line was read as nothing at all:
+#
+#     i got the job and i start thursday / sorry, i meant friday
+#       before  On Thursday.   (the day they had just taken back)
+#       after   On Friday.
+#
+# The marker in front is still needed, so "i meant it" and a line that means something else about a
+# day ("i meant to ring on monday") are not a date put right.
+A_DAY_I_MEANT = re.compile(
+    r"^\W*(?:(?:ok|okay|right|so|and|no|nope|sorry|actually|oops|wait|oh|hmm)[,.]?\s+)+"
+    r"i\s+(?:meant|mean|said|was\s+thinking)\s+"
+    r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"
+    r"(?!\s+(?:is|was|are|were)\b)", re.I)
+
 # The same date said only as the thing that replaces the old one: "its the 4th instead". With no
 # marker in front, the "instead" is the whole of what makes it a correction, so it is required.
 A_TIME_INSTEAD = re.compile(
     r"^\W*(?:it'?s|its|that'?s|thats)\s+"
     + A_DATE_VALUE +
-    r"\s+instead\s*[.!]?\s*$", re.I)
+    r"\s+instead\b" + AFTER_THE_VALUE, re.I)
 # The date moved by saying what the thing does now: "actually it starts tuesday", "the move
 # slipped to september", "it got pushed back to the 4th". Only the verbs a date moves with are
 # read, and the value still has to be a date: "it went to london" moves nothing, and "it is red"
@@ -3231,6 +3327,39 @@ CORRECTION_LEAD = (r"^\s*(?:(?:ok|okay)[,.]?\s+)?"
                    r"(?:(?:(?:no|nope|sorry|wait|ah|oh|actually|oops|"
                    + CORRECTION_STALL + r"|" + CORRECTION_HEDGE + r"|"
                    + CORRECTION_TAKEBACK + r")[,.]?\s+){1,3})")
+# The correction word on the end of the line instead of in front of the value: "its the 4th
+# actually", "my budget is 400 actually". People put the marker after the thing as often as before
+# it, and every reader in the correction block anchors the value to the end of the line, so a
+# marker there left the line with nothing taken back at all: after "the party is on 3 june", "its
+# the 4th actually" was answered "It's the 4th, good to know" and the store still held the 3rd, so
+# the next ask said their own correction was the date they had taken back. The word is the same
+# word, so a line that ends with it is read as the line with it in front.
+A_MARKER_ON_THE_END = re.compile(r"\s+(?:actually|really|honestly)\s*[.!?]*\s*$", re.I)
+
+
+def _the_marker_in_front(text, question=False):
+    """The line with a correction word moved from its end to its front, or None.
+
+    "its the 4th actually" is "actually its the 4th". Only the word moves: what follows is read by
+    the readers that already know the shape, so a date, a figure, a count and a name all come back
+    the same way they do with the marker in front.
+
+    The line left behind has to be a value and nothing else. "my mum is 70 actually" states the
+    mother's age, and moving the word would file the 70 a second time as the correction of some
+    other fact; "my son is jack actually" would correct the son's name to the name he was just
+    given. So a head that says anything of its own is a statement with the word on the end, and a
+    statement is not a correction.
+    """
+    said = str(text or "").strip()
+    end = A_MARKER_ON_THE_END.search(said)
+    if end is None:
+        return None
+    head = said[:end.start()].strip()
+    if not head or len(head.split()) > 8:
+        return None
+    if _extract(head, question):
+        return None
+    return "actually " + head
 # A bare value can carry the unit it is said in ("no wait, 8 kilos", "no, 5 minutes"): which
 # fact it corrects is still decided by the line before, and memory_store refuses a unit the fact
 # on the table is not measured in.
@@ -3269,13 +3398,13 @@ CORRECTION_BARE = re.compile(
 CORRECTION_HEDGED = re.compile(
     CORRECTION_LEAD
     + r"(?:just|only|about|around|roughly|nearly|almost|exactly|more\s+like|closer\s+to)"
-    r"\s+(?:(?:it'?s|its|that'?s|thats)\s+)?"
+    r"\s+(?:(?:it'?s|its|that'?s|thats|the)\s+)?"
     + r"([\u00a3$\u20ac]?\s?\d[\d,]*(?:\.\d+)?"
       r"(?:\s?(?:pounds?|quid|euros?|dollars?|k|kilos?|kgs?|kg|stones?|st|lbs?|lb|grams?|g"
       r"|litres?|liters?|ml|miles?|km|minutes?|mins?|hours?|days?|weeks?|months?|years?"
       r"|people|guests?|adults?|kids?|of\s+us)\b)?"
       r"|" + "|".join(sorted(NUMBER_WORDS, key=len, reverse=True)) + r")"
-    r"\s*(?:[.!?,]|$)",
+    r"\s*(?:now\b)?\s*(?:[.!?,]|$)",
     re.I)
 # A clock said again: "sorry, its at 8pm", "no wait, 8pm". The plan on the table holds the
 # clock this replaces, so the line names only the new one. Only a time with am or pm (or a clock
@@ -3409,6 +3538,34 @@ CORRECTION_DATE = re.compile(
     r"(?:\s+(?:of\s+)?(?:" + _MONTH_ALT + r"))?"
     r"|(?:" + _MONTH_ALT + r")(?:\s+(?:the\s+)?" + _DAY_NUMBER + r"(?:st|nd|rd|th)?)?)"
     r"\s*[.!?]?$", re.I)
+
+
+# A date is moved on a plan by saying the going itself, and the going sits between the correcting
+# word and the date: "im going to spain in june" then "actually we fly in july now". The words say
+# which of the person's dates moved, the way "actually its cornwall we go to" says which place -
+# and without them the line read as no correction at all, so the month in the plan stayed June and
+# the line went on to be answered as something else ("we fly in july now" was answered about fruit
+# flies). Only the going is allowed there, and only in the present: "actually we went in june" is a
+# line about a trip already taken, not a plan being moved.
+_GOING_VERB = (r"(?:fly|flies|flying|go|goes|going|travel|travels|travelling|traveling|head|heads"
+               r"|heading|leave|leaves|leaving|visit|visits|visiting|get|gets|getting|are|is)")
+_GOING_SAID = (r"(?:(?:we|i|they|he|she)(?:'?re|'?m|'?s)?\s+" + _GOING_VERB +
+               r"|(?:the\s+|our\s+|their\s+)?(?:flight|trip|holiday|booking|wedding|party"
+               r"|appointment|visit)\s+(?:is|are|'s))")
+_GOING_DATE = (r"(?:the\s+)?(?:0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?"
+               r"(?:\s+(?:of\s+)?(?:" + _MONTH_ALT + r"))?"
+               r"|(?:" + _MONTH_ALT + r")(?:\s+(?:the\s+)?" + r"(?:0?[1-9]|[12]\d|3[01])"
+               r"(?:st|nd|rd|th)?)?")
+CORRECTION_DATE_GOING = re.compile(
+    CORRECTION_LEAD + _GOING_SAID + r"\s+(?:out\s+)?(?:on\s+|in\s+)?(?P<date>" + _GOING_DATE
+    + r")", re.I)
+# The same move said with the marker behind it instead of in front: "we fly out in august now",
+# "we travel in december instead". The word at the end is what makes it a change rather than a
+# statement ("we fly in june every year" is not read here), and the plan it moves is the store's
+# question, so the reader only says which date the line names.
+CORRECTION_GOING_MOVED = re.compile(
+    r"^\s*" + _GOING_SAID + r"\s+(?:out\s+)?(?:on\s+|in\s+)?(?P<date>" + _GOING_DATE + r")"
+    r"\s+(?:now|instead|this\s+time|from\s+now\s+on)\b", re.I)
 
 
 # A correction is rarely the value and nothing else: people put a word of apology or a shrug after
@@ -3642,11 +3799,15 @@ bad terrible awful horrible rubbish useless hopeless worthless pathetic stupid d
 idiot imbecile moron failure loser letdown disappointment burden nuisance waste mess disaster
 wreck nightmare fool clown muppet fraud imposter impostor hypocrite doormat lazy selfish
 greedy ungrateful nasty boring shit crap lousy naff rotten dreadful
-# The same words said the ruder way, and the ones built out of them: "im shitty", "im crappy",
-# "im bollocks" and "im pants" were all kept as names, because none of them is in the state
-# lists the name reader asks.
 shitty crappy crapola shite pants wank bollocks tosser twat prick git sod bugger arse arsehole
 """.split())
+# The same words said the ruder way, and the ones built out of them ("im shitty", "im crappy",
+# "im bollocks", "im pants"), were kept as names because none of them is in the state lists the
+# name reader asks. The note is out here on purpose: a "#" line written inside the triple quotes
+# above is data, not a comment, so `.split()` turned every word of it into a judgement - and any
+# reader that builds a shape out of this set then matched the prose ("the", "in", "and", "of",
+# "as", "all", "is", "them"), which read a plain fact about the person as a verdict on themselves:
+# "im in bristol" answered "you're being harder on yourself than you'd be on a friend".
 # The noun after the word is what makes a judgement a verdict. A role with somebody on the other
 # side of it - "im a bad mum", "im a shit driver", "im a lazy student" - is a verdict on the job
 # they are doing, and saying it back to them agrees with it. A habit being described - "im a bad
@@ -3992,6 +4153,49 @@ ORDINAL_DAY = re.compile(r"(?:the\s+)?\d{1,2}(?:st|nd|rd|th)", re.I)
 A_DATE_WORD = MONTHS | DAYS
 
 
+# A plan's destination is put right the way its date is: "no we changed it to devon", "we moved
+# it to florence", "the booking has been moved to portugal". The verb is the same one a date uses
+# ("we moved it to july"), so the two are told apart by what the words after it name: a month or a
+# day is the date reader's, a place is this one's.
+MOVED_PLACE_TO = re.compile(
+    r"\b(?:we|i|they|you|we've|weve|i've|ive|they've)\b[^.!?]{0,24}?"
+    r"\b(?:changed|change|moved|move|switched|switching|swap|swapped|shifted|transferred|"
+    r"rebooked|booked)\s+(?:it|that|this|the\s+booking|the\s+trip|the\s+holiday|the\s+flight)"
+    r"\s+(?:to|for|instead\s+to)\s+([A-Za-z][A-Za-z' -]{1,30})", re.I)
+MOVED_PLACE_PASSIVE = re.compile(
+    r"\b(?:booking|trip|holiday|flight|plan|reservation|its|it's|it)\b[^.!?]{0,30}?"
+    r"\b(?:has|have|had|is|its|it's|was|were|been)\s+(?:been\s+)?"
+    r"(?:changed|moved|switched|swapped|shifted)\s+to\s+([A-Za-z][A-Za-z' -]{1,30})", re.I)
+# The words that name no place at all, however much they look like one after a move: "we changed
+# it to the other one", "we changed it to one side".
+NOT_A_PLACE_NAME = frozenset("""one ones other others same thing place somewhere else front back
+side left right first second third last next top bottom middle here there it that this""".split())
+
+
+def a_moved_place(text):
+    """The place a line moves a plan to: "no we changed it to devon" -> "Devon", else "".
+
+    A plan's destination is put right the way its date is ("we moved it to july"), so the line is
+    a correction of the plan the store already holds and not a place of its own. Whether the words
+    name a place is the module's own question, asked of the same reader that reads a place said
+    out loud, so "we changed it to a cottage" and "i changed it to the other one" name nothing
+    here either. A question is not a change, and a date is the date reader's.
+    """
+    line = str(text or "")
+    if not line or "?" in line:
+        return ""
+    for pattern in (MOVED_PLACE_TO, MOVED_PLACE_PASSIVE):
+        for found in pattern.finditer(line):
+            places, _home, _said = _places("we are going to " + found.group(1))
+            for place in places:
+                if _a_date(place) or a_moved_time(place):
+                    continue
+                if place.lower() in NOT_A_PLACE_NAME:
+                    continue
+                return place
+    return ""
+
+
 def a_date_put_right(text):
     """True when the line is only a date put right, with no subject of its own.
 
@@ -4003,7 +4207,7 @@ def a_date_put_right(text):
     if "?" in line:
         return False
     return bool(CORRECTION_A_DATE.search(line) or A_DAY_TAKEN_BACK.search(line)
-                or A_TIME_INSTEAD.search(line))
+                or A_DAY_I_MEANT.search(line) or A_TIME_INSTEAD.search(line))
 
 
 def the_date_put_right(text):
@@ -4011,7 +4215,7 @@ def the_date_put_right(text):
     line = str(text or "")
     if "?" in line:
         return ""
-    for pattern in (CORRECTION_A_DATE, A_DAY_TAKEN_BACK, A_TIME_INSTEAD):
+    for pattern in (CORRECTION_A_DATE, A_DAY_TAKEN_BACK, A_DAY_I_MEANT, A_TIME_INSTEAD):
         found = pattern.search(line)
         if found is not None:
             for group in found.groups():
@@ -4370,6 +4574,31 @@ def _a_word_that_is_a_state(word):
         or word in NOT_NAMES_EXTRA)
 
 
+# How somebody looks, said the same way a name is: "she is blonde", "her name is ginger".
+# None of them ends in one of NAME_TAIL_MIN's tails, so the endings cannot catch them, and none of
+# them is a state either - a hair colour is not a feeling. A closed list, because these are the
+# ones people say about a person in a line that is not about their name.
+LOOKS_WORDS = frozenset("""
+blonde blond brunette ginger redhead fair pale tanned olive freckled spotty pimply
+curly straight bald bearded
+""".split())
+
+
+def _a_word_not_a_name(low):
+    """Whether a word after "is" says how somebody is rather than what they are called.
+
+    A name put right is read from the word after "is" ("she is rosie"), and that is also how a
+    person says everything else about somebody: "she is blonde", "she is twelve", "she is
+    tired", "she is married". Without this the correction reader kept Blonde as a person's name
+    and said "Blonde, not Amy - got it", the same open class as "im blonde" was for the
+    introduction reader. The colours and the numbers written out have no ending to catch them,
+    so they are listed; the states, the conditions and the nationalities are the ones the
+    introduction reader already knows by their ending or by name.
+    """
+    return (low in LOOKS_WORDS or low in NUMBER_WORDS
+            or _sounds_like_a_state(low) or _a_word_that_is_a_state(low))
+
+
 # The endings English makes a comparison with. A state takes -er and -est, and a name can carry
 # the same two letters by accident (peter, heather, summer), so the stem has to be a state from
 # the closed list before the word counts as one.
@@ -4685,6 +4914,43 @@ def _the_correction_named_a_thing(text, match):
     return bool(words) and words[0] not in JOB_WORDS
 
 
+# The endings a word that names a role has and a word that names a state rarely does: a plumber,
+# a barrister, a dentist, a pianist, a chairman, an assistant. The lexicon is the first test and
+# this is the second, because the roles people type are endless and the lexicon is not.
+ROLE_ENDING = ("er", "or", "ist", "ian", "man", "woman", "ess", "ant", "ent")
+
+
+def _was_names_a_role(phrase, article=None):
+    """Whether a phrase said after "i was" names what they did, not how they were.
+
+    "i was a nurse" and "i was head chef at the pub" are roles. "we were flat out", "i was eight
+    weeks pregnant" and "i was born in leeds" are a state, a length and a birth, and read as roles
+    they came back late in a chat as "You were a flat out". What a role is said with is an article
+    in front of it ("a nurse", "an electrician"), or a word the job lexicon knows ("head chef",
+    "student"), or an ending only a role has ("a plumber", "a barrister"). A participle is a verb
+    ("i was managing a shop") and a state word is how they were ("flat out", "retired"), so
+    neither is a role however noun-like the line looks.
+    """
+    low = [word.lower().strip(".,!?;:") for word in str(phrase or "").split() if word.strip()]
+    while low and low[0] in ("both", "all", "just", "only", "still", "now", "then", "also"):
+        low.pop(0)  # "we were both nurses" is the same role said with a word in front of it
+    low = low[:3]
+    if article and low:
+        return True
+    if not low:
+        return False
+    if any(len(word) > 4 and word.endswith(("ing", "ed")) for word in low):
+        return False
+    head = low[-1]
+    if head in STATE_WORDS or head in PAST_STATES or head in PREGNANCY_STATES:
+        return False
+    # The lexicon is written in the singular and people say the plural: "we were both nurses".
+    single = [word[:-1] if word.endswith("s") and word not in JOB_WORDS else word for word in low]
+    if any(word in JOB_WORDS for word in low + single):
+        return True
+    return len(head) > 4 and head.endswith(ROLE_ENDING)
+
+
 def _job_and_city(text, name=None, question=False):
     job = city = None
     frame = ""
@@ -4738,6 +5004,11 @@ def _job_and_city(text, name=None, question=False):
         words = without_the_moment(phrase.split())
         if match.re is JOB_WAS and words and words[0].lower() in WAS_NOT_A_JOB:
             # "i was a kid", "i used to be a lad": how old they were, not what they did.
+            continue
+        if match.re is JOB_WAS and not _was_names_a_role(
+                phrase, article=len(groups) > 1 and groups[1]):
+            # "we were flat out", "i was eight weeks pregnant", "i was born in leeds": how they
+            # were, and when - not what they did.
             continue
         if (not words or words[0].lower() in JOB_STOP or words[0].lower() in NOT_NAMES
                 or words[0].lower() in NOT_NAMES_EXTRA
@@ -5001,6 +5272,33 @@ def _born_place(text):
     return max(born)[1] if born else None
 
 
+# A move names two places: the one they went to and the one they came from. "i moved to preston
+# from bolton last year" said both, and the origin was kept as nothing - the older patterns want
+# the person in front of "from" ("im from leeds"), and here the subject is at the front of the
+# line with the destination between it and the word. So the move verb is the cue: whatever "from"
+# names after it is where they came from.
+FROM_A_MOVE = re.compile(
+    r"\b(?:moved|moves|moving|relocated|relocating|relocate|migrated)\b[^.;!?]{0,40}?"
+    r"\bfrom\s+([A-Za-z][A-Za-z'-]{1,}(?:[ -][A-Za-z][A-Za-z'-]{1,})?)\b", re.I)
+
+
+# The same move typed the other way round - origin first, destination second. "i moved from leeds
+# to bristol" named Bristol as plainly as the other order names Preston, and only the origin was
+# kept: "where do i live" answered "You haven't told me where you live - I know you're from Leeds."
+A_MOVE_FROM_THEN_TO = re.compile(
+    r"\b(?:moved|moves|moving|relocated|relocating|relocate|migrated)\s+from\s+"
+    r"[A-Za-z][A-Za-z'-]{1,}(?:[ -][A-Za-z][A-Za-z'-]{1,})?\s+"
+    r"(?:to|into)\s+"
+    r"(?P<place>[A-Za-z][A-Za-z'-]{1,}(?:[ -][A-Za-z][A-Za-z'-]{1,})?)\b", re.I)
+
+
+def _the_person_moved(before):
+    """True when the clause in front of a move verb has the person themselves as its subject."""
+    clause = re.split(r"[.;!?,]|\band\b|\bbut\b|\bso\b", str(before or ""))[-1]
+    return bool(re.match(r"\s*(?:i|im|i'm|ive|i've|id|we|were|we're|weve|we've|we'd)\b",
+                         clause, re.I))
+
+
 def _from_place(text):
     """The place they say they are from, when the line says where that is.
 
@@ -5011,8 +5309,12 @@ def _from_place(text):
     """
     born = []
     said = []
-    for pattern in (FROM_PLACE, FROM_MORE, FROM_GROWN):
+    for pattern in (FROM_PLACE, FROM_MORE, FROM_GROWN, FROM_A_MOVE):
         for match in pattern.finditer(text):
+            if pattern is FROM_A_MOVE and not _the_person_moved(text[:match.start()]):
+                # "my cousin moved to preston from bolton" is where her family is from, not
+                # where they are from: the move has to be the person's own.
+                continue
             phrase = match.group(1)
             if pattern is FROM_GROWN and not _grown_up_in_a_place(phrase, text):
                 continue
@@ -5068,6 +5370,20 @@ def _places(text):
                     home_said = " ".join(said_with.group(0).split()) + " " + word
             break
         if home:
+            break
+    if home is None:
+        for match in A_MOVE_FROM_THEN_TO.finditer(text):
+            if not _the_person_moved(text[:match.start()]):
+                continue
+            word = _place_name(match.group("place"))
+            if not word:
+                continue
+            if not any(word.lower() == p.lower() for p in places):
+                places.append(word)
+            # "we're moving from york to bristol next month" is a move still to come, so the
+            # destination is a place they named and not where they live yet.
+            if not FUTURE.search(text):
+                home = word
             break
     for match in PLACE_AFTER.finditer(text):
         word = match.group(1)
@@ -5198,6 +5514,18 @@ SUBJECT = re.compile(
     re.I)
 
 
+# The person is one of the people the clause is about: "me and my husband", "my wife and i",
+# "us and the kids". The relation alone would file the thing against somebody else.
+A_ME_WITH_SOMEONE = re.compile(
+    r"\b(?:me|us|we|i)\b[^.!?]{0,24}\b(?:and|,|&)\b[^.!?]{0,24}\b(?:my|our)\s+\w+"
+    r"|\b(?:my|our)\s+\w+[^.!?]{0,24}\b(?:and|,|&)\b[^.!?]{0,12}\b(?:me|us|i)\b", re.I)
+
+
+def _the_person_is_in_it(clause):
+    """Whether the clause says the thing is about the person as well as somebody else."""
+    return bool(A_ME_WITH_SOMEONE.search(clause))
+
+
 def subject(text, pos):
     """Who the clause that ends at pos is about: (kind, who).
 
@@ -5221,6 +5549,13 @@ def subject(text, pos):
             kind, who = "other", ""
         else:
             kind, who = "user", ""
+    if kind == "other" and who and _the_person_is_in_it(clause):
+        # "its for me and my husband, four days": the relation is the last person the clause names,
+        # so the length was filed against the husband and not kept at all - the chat then answered
+        # "and how many days was it again" from its own memory of a "few days" said before. A
+        # thing said about "me and my husband" is about both of them, and the person is one of
+        # the two.
+        kind = "user"
     if kind == "other" and who:
         # A pair of people is one person, and the clause's own words say which: "my partners mum is
         # allergic to shellfish" read the first relation as the subject and filed the allergy
@@ -5230,7 +5565,101 @@ def subject(text, pos):
         pair = a_chained_person(clause)
         if pair and pair.split("'s ")[0] == who:
             who = pair
+    if kind == "":
+        # Nobody in the clause said "my" or "i", so the person in it is the one the words name:
+        # a relation word on its own ("mum is allergic to shellfish") or a name ("tom is
+        # allergic to nuts"). Before this they were both read as the user, and the bot told the
+        # person about somebody else's allergy as if it were their own.
+        bare_who, bare_name = _the_person_without_a_relation(clause)
+        if bare_who or bare_name:
+            kind, who = "other", bare_who
+            # A bare relation can head a pair the same way "my" can: "mum and dad are allergic to
+            # nuts" is one couple in the store the way "my mum and dad" is.
+            pair = a_chained_person(clause)
+            if pair and pair.split("'s ")[0] == who:
+                who = pair
     return kind, who
+
+
+# The person a clause names without the "my" in front of them, or by name alone: "mum is
+# allergic to shellfish" is the mum's allergy and "tom is allergic to nuts" is Tom's, and both
+# were filed as the user's own, so the store told the person about an allergy they never said they
+# had, and the mum's or Tom's went in the bin. The word has to be the last thing before the fact,
+# which is where a subject stands, and a bare name has to be the whole clause, so a line about a
+# thing ("the boiler is broken") is not read as somebody called Boiler.
+BARE_RELATION = re.compile(
+    r"\b(?P<rel>" + "|".join(sorted(OTHER_NOUNS, key=len, reverse=True)) + r")"
+    r"(?P<inlaw>\s+in\s+laws?)?s?$", re.I)
+# Words that fill the place in front of a fact without naming anybody: the softeners people open
+# a line with, and the grammar words a subject is never made of.
+NOT_A_PERSON_WORD = frozenset("""
+and but so then also oh ok okay well now anyway actually quick just plus hey hi sorry right yeah yes
+today tonight tomorrow yesterday here there this that these those it its he she they them their his
+her him i im ive me my mine we us our ours you your yours who what which the a an some any no not
+dont doesnt didnt is are was were be been am do does did have has had can could would should will
+shall may might must of to for from in on at by with about time day week month year morning
+evening night thing things something anything nothing everything someone anyone everyone nobody
+help thanks please get got go going come coming done""".split())
+
+
+# The words between a person and the fact said of them: "mum is", "tom has", "sarah cant". The
+# clause the readers hand over ends at the fact, so what is left in front of it is the person once
+# these are taken off the end.
+BETWEEN_PERSON_AND_FACT = frozenset("""
+is are was were be been being am has have had isnt arent wasnt werent hasnt havent hadnt
+s does do did doesnt dont didnt can cant cannot could couldnt may might must shall should
+shouldnt will wont would wouldnt get gets got become becomes became
+""".split())
+# The words in front of a person that mean the clause is not naming them the bare way: "the
+# boiler is broken" has "the" in it and no person, and neither does "my son is 4".
+NOT_A_BARE_PERSON_AHEAD = frozenset("""
+my our his her their your its the a an this that these those some any every no each
+""".split())
+# A pronoun with its verb written on is not a name: "i'm allergic to nuts" is the person typing
+# and "shes got a nut allergy" is the woman they were talking about, and read as names the two
+# lines lost the fact and filed it on somebody called Im and somebody called Shes.
+A_PRONOUN_NOT_A_NAME = frozenset("""
+im ive id ill ima youve youre youd youll hes shes its itd its were weve wed well theyre theyve
+theyd theyll thats whats theres heres isnt arent wasnt werent hasnt havent hadnt doesnt dont didnt
+cant couldnt wouldnt shouldnt wont mustnt aint lets
+""".split())
+
+
+def _a_person_word(word):
+    """A word the way a person says it, so "i'm", "im" and "I’m" are one word."""
+    return str(word or "").strip().strip(".,!?;:\"'").lower().replace("\u2019", "'").replace("'", "")
+
+
+def _the_person_without_a_relation(clause):
+    """(who, name) for a person the clause names without a "my": ("mum", ""), ("", "Tom")."""
+    words = [word.strip(" ,.;:!?").strip("'") for word in clause.split()]
+    words = [word for word in words if word]
+    while words and words[0].lower() in ("and", "but", "so", "then", "also", "oh",
+                                        "ok", "okay", "well", "now", "btw"):
+        words.pop(0)
+    while words and words[-1].lower() in BETWEEN_PERSON_AND_FACT:
+        words.pop()
+    if not words or len(words) > 3:
+        return "", ""
+    if any(word.lower() in NOT_A_BARE_PERSON_AHEAD for word in words[:-1]) \
+            or words[-1].lower() in NOT_A_BARE_PERSON_AHEAD:
+        return "", ""
+    said = " ".join(words)
+    found = BARE_RELATION.search(said)
+    if found:
+        who = found.group("rel") + (found.group("inlaw") or "")
+        who = " ".join(who.lower().split())
+        if who.endswith("s") and who[:-1] in RELATIONS:
+            who = who[:-1]
+        return SPOKEN_RELATION.get(who, who), ""
+    if len(words) == 1:
+        word = words[0]
+        if _a_person_word(word) in NOT_A_PERSON_WORD or _a_person_word(word) in DIET_GROUP \
+                or _a_person_word(word) in RELATIONS or _a_person_word(word) in A_PRONOUN_NOT_A_NAME:
+            return "", ""
+        if _may_be_a_name(word) and _name_after_a_title(word):
+            return "", word
+    return "", ""
 
 
 # Words that end the sentence rather than name a thing: "I'm allergic to nuts, please don't put
@@ -6315,6 +6744,14 @@ KID_COUNT = re.compile(
     r"a\s+couple\s+of)\s+(?:kids?|children|child)\b"
     r"|\bmy\s+(?P<m>\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)"
     r"\s+(?:kids?|children)\b", re.I)
+# The count is often the second thing in the line, after something else they have: "i've got a dog
+# and two kids" kept the dog and no number of children, while the same count said first ("i've got
+# two kids and a dog") was held - so the recap of the first line could not say the children at all.
+# A count joined on with "and" or a comma belongs to the same person, and it is read as one.
+KID_COUNT_AND = re.compile(
+    r"\b(?:i|we)(?:'ve|ve|\s+have|\s+have\s+got|\s+got)\s+[^.;!?]{0,40}?(?:\band\b|,)\s*"
+    r"(?P<n>\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"a\s+couple\s+of)\s+(?:kids?|children|child)\b", re.I)
 KID_NUMBERS = {word: number for number, word in enumerate(
     ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
      "eleven", "twelve"))}
@@ -6470,7 +6907,7 @@ def kid_count(text):
     none = KID_NONE.search(text)
     if none and not KID_NONE_NOT_AFTER_ALL.search(text[none.end():]):
         return 0
-    match = KID_COUNT.search(text)
+    match = KID_COUNT.search(text) or KID_COUNT_AND.search(text)
     if not match:
         # Children given one by one are still a number of children: "i have a 4 year old and a 7
         # year old" and "my kids are 4 and 7" name two children in the same breath as their ages,
@@ -6595,12 +7032,21 @@ KID_GROUP = tuple(KIDS) + ("sons", "daughters", "boys", "girls")
 KID_ONE_BY_ONE = ("son", "daughter", "sons", "daughters", "child", "children", "kid",
                   "kids", "boy", "girl", "boys", "girls", "baby", "twins", "twin")
 # "my kids are 4 and 7", "my children are 4, 7 and 9"
-KID_AGES_ARE = re.compile(r"\bmy\s+(?P<who>" + "|".join(KIDS) + r")\s+(?:are|is)\s+"
+#
+# Two words in front of the group were read as not the group at all. A count is the number of
+# them, not part of who they are - "my two girls are 6 and 9" names the same two girls "my girls
+# are 6 and 9" does - and "our" is the same possessive as "my": "our two boys are 6 and 9" and
+# "our 2 girls are 6 and 9" were answered with a receipt ("Thanks for telling me") and the store
+# kept nothing, so "how old are they" a turn later had no ages to read.
+A_COUNTED_GROUP = (r"\b(?P<whose>my|our)\s+"
+                   r"(?:(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+                   r"|\d{1,2})\s+)?")
+KID_AGES_ARE = re.compile(A_COUNTED_GROUP + r"(?P<who>" + "|".join(KIDS) + r")\s+(?:are|is)\s+"
                           r"(?:both\s+)?(?:aged?\s+)?(?P<ages>\d{1,3}"
                           r"(?:\s*(?:,|and)\s*\d{1,3})*)", re.I)
 # The same ages said under any of the words a group of children go by: "my boys are 9 and 6" is
 # the line "my kids are 9 and 6" in another word, and the ask can be in either.
-KID_GROUP_AGES_ARE = re.compile(r"\bmy\s+(?P<who>" + "|".join(KID_GROUP) + r")\s+"
+KID_GROUP_AGES_ARE = re.compile(A_COUNTED_GROUP + r"(?P<who>" + "|".join(KID_GROUP) + r")\s+"
                                r"(?:are|is)\s+(?:both\s+)?(?:aged?\s+)?"
                                r"(?P<ages>\d{1,3}(?:\s*(?:,|and)\s*\d{1,3})*)", re.I)
 # "i have two kids, 4 and 7", "i've got three children aged 2, 4 and 7": the count in front of
@@ -6742,7 +7188,10 @@ def _own_states(text):
     weeks pregnant": the weeks date nothing, they are only true of now, so a past tense keeps
     nothing at all.
     """
-    for match in OWN_STATE.finditer(text):
+    # "im eight weeks pregnant" is the same fact as "im 8 weeks pregnant": most people spell a
+    # small number out, and the length was lost while the state was kept, so "how far along am i"
+    # after it was a search hedge about a chat that had said the answer.
+    for match in OWN_STATE.finditer(figures_as_digits(text)):
         said = match.group(0).lower()
         if re.search(r"\b(?:was|were|thought|maybe|might|may|hope|hoping|could)\b", said):
             continue
@@ -6795,6 +7244,13 @@ YEAR_OLD_ANIMAL = re.compile(r"\b(?:" + "|".join(sorted(ANIMALS)) + r")\b", re.I
 THING_AGED = re.compile(
     r"\b(?:it|its|it's|that|thats|that's|this|these|those|there|hes|he's|shes|she's|theyre|"
     r"they're|mine|ours|yours|theirs)\b[^.!?]{0,12}$", re.I)
+# A person pointed at is a person, and the years after them are theirs: "he is 8 years old" says
+# what "hes 8" says, and neither line says there are any children. Read as a count of children,
+# the store answered "One kid, eight - noted." to a person who had just said how old their nephew
+# was, and the count then stood as a fact about the family. The pronoun's own entry keeps the
+# age, so nothing is lost by standing down here.
+A_PERSON_AGED = re.compile(
+    r"\b(?:he|she|they|hes|she's|he's|shes|theyre|they're)\b[^.!?]{0,12}$", re.I)
 NAMED_THING_AGED = re.compile(
     # A figure belongs in the noun because the reading spells figures as digits before this runs:
     # "the old one is 12 years old" arrives as "the old 1 is 12 years old", and a noun class of
@@ -6804,6 +7260,21 @@ NAMED_THING_AGED = re.compile(
     # is 8 years old"), so the noun takes a figure wherever it falls.
     r"\b(?:my|our|your|his|her|their|the)\s+(?P<noun>[a-z' 0-9]{1,30}?)\s*"
     r"(?:is|was|are|were|s|'s)\b[^.!?]{0,12}$", re.I)
+# A thing is aged in years without a be-form too: "a dell about 4 years old", "the sofa, about 6
+# years old". The determiner and the thing are there; only the word "is" is missing. Without this
+# the age went in as a child's - "a dell about 4 years old" was answered "One kid, four. What are
+# they into at the moment?" in a chat about a laptop fan, and "the sofa, about 6 years old" the
+# same. So when a determiner names a thing and only a be-form or a qualifier ("about", "roughly",
+# "around", "nearly", "only", "just") sits between that name and the age, the age is the thing's -
+# unless the name is a person word, which is what the check below is for. A determiner with nothing
+# after it names no thing ("i have a 4 year old and a 7 year old"), so it is left alone.
+THING_AGED_QUALIFIED = re.compile(
+    r"\b(?:a|an|the|my|our|your|his|her|their)\s+(?P<noun>[a-z'][a-z'0-9]*)(?:\s*,)?\s*"
+    r"(?:(?:is|was|are|were|s|'s)\s*)?(?:(?:,\s*)?(?:about|roughly|around|nearly|only|just)\s*)?$",
+    re.I)
+# "the youngest about 4 years old" is one of the children, not a thing that is 4 years old.
+PERSON_ELSEWHERE = frozenset("""youngest oldest eldest younger older middle first second third
+last little big small""".split())
 # The words a line uses for the children themselves: a noun here is a person ("my kids are 4 and
 # 7 years old") and the age is one of theirs.
 PEOPLE_AGED = frozenset(KID_GROUP) | frozenset("""kid child children boy boys girl girls son
@@ -6825,6 +7296,20 @@ A_LIST_OF_AGES = re.compile(r"(?P<ages>\d{1,3}(?:\s*(?:,|and|, and)\s*\d{1,3})+)
 
 
 GROUP_NAMED = re.compile(r"\b(?:" + "|".join(KID_GROUP) + r")\b", re.I)
+# The thing an age belongs to is often a clause away from the number: "it's a front loader,
+# about five years old" put the whole of "a front loader," between the pronoun and the years, so
+# the two guards above (which reach 12 characters back) sailed past it and the store filed a
+# five-year-old child. On the same chat the store then answered "how many kids do i have" with
+# "You've got one kid." about a child nobody had. So the subject is read back to the last thing
+# the line named, and a line with no people word in it at all cannot be counting children.
+THING_NAMED_BACK = re.compile(
+    r"\b(?:it|its|it's|that|thats|that's|this|these|those|there|they|theyre|they're)\b"
+    r"|\b(?:my|our|your|his|her|their|the)\s+(?P<noun>[a-z' ]{1,30}?)\s*"
+    r"(?:is|was|are|were|s|'s)\b", re.I)
+PEOPLE_NAMED_ANYWHERE = re.compile(r"\b(?:" + "|".join(sorted(PEOPLE_AGED)) + r")\b", re.I)
+# How far back the subject of an age is worth looking for: one short clause and the thing it
+# named ("my old washing machine, a front loader, about five years old").
+SUBJECT_REACH = 80
 
 
 # The nouns an age in years is said of, and the "is" that puts the age after them, with the
@@ -6893,6 +7378,12 @@ def _children_by_year_old(text):
             continue
         if OWN_AGE_BEFORE_IT.search(text[:match.start()]):
             continue
+        if not group_named and A_PERSON_AGED.search(
+                text[max(0, match.start() - 40):match.start()]):
+            # "he is 8 years old" is somebody's age, said the way "hes 8" says it, and the
+            # reader for the pronoun keeps it. Counting a child here put a kid in the store the
+            # person never mentioned.
+            continue
         if YEAR_OLD_ANIMAL is not None and YEAR_OLD_ANIMAL.search(
                 text[max(0, match.start() - 24):match.start()]):
             continue
@@ -6903,10 +7394,29 @@ def _children_by_year_old(text):
             # person never mentioned - the turn after answered "One kid, two - good to know. Tell
             # me about them.", and the next ask about the dog came back with the children's food.
             continue
+        if not PEOPLE_NAMED_ANYWHERE.search(text):
+            # Nothing in the line is a person, so the number cannot be a child's age: it is the
+            # age of whatever the line was about. "how old is it" is the next question, not "how
+            # many kids do you have". This is the same fault the breed guard above fixes for an
+            # animal, for every other thing: a machine's age is a whole clause from its name
+            # ("it's a front loader, about five years old"), further than the guards under this
+            # line can see.
+            nearest = None
+            for found in THING_NAMED_BACK.finditer(
+                    text[max(0, match.start() - SUBJECT_REACH):match.start()]):
+                nearest = found
+            noun = (nearest.groupdict().get("noun") or "").split() if nearest else []
+            if nearest is not None and (not noun or noun[-1].lower() not in PEOPLE_AGED):
+                continue
         if group_named and LIST_BEFORE_IT.search(before):
             continue
         if THING_AGED.search(before):
             continue
+        qualified = THING_AGED_QUALIFIED.search(before)
+        if qualified:
+            thing = qualified.group("noun").lower()
+            if thing not in PEOPLE_AGED and thing not in PERSON_ELSEWHERE:
+                continue
         named = NAMED_THING_AGED.search(before)
         # The thing can be named in more than one word ("my washing machine is 8 years old"), so
         # the noun that is aged is the last word of the phrase in front of the be-form.
@@ -7826,17 +8336,27 @@ def _people(text):
     for relation in RELATIONS:
         for match in re.finditer(r"\b" + relation + r"s?\b", text, re.I):
             after = text[match.end():]
-            if after.startswith("'s") or after.startswith("s'"):
+            said_possessive = after.startswith("'s") or after.startswith("s'")
+            if said_possessive:
                 after = after.split("'", 1)[1][1:]  # "my son's allergy": the son is still a person
             # "my brother-in-law is coming" is the in-law, not the brother: the suffix is the
             # person the line named, and dropping it filed a brother the chat had never mentioned.
             if IN_LAW_AFTER.match(after):
                 found.append(relation + " in law")
                 break
-            words = after.split()
-            next_word = words[0].strip(".,!?;:").lower() if words else ""
+            words = [word.strip(".,!?;:'") for word in after.split()]
+            words = [word for word in words if word]  # a lone "'" is not a word
+            next_word = words[0].lower() if words else ""
             if next_word in COMPOUND_AFTER:
-                continue
+                # "my daughters birthday" and "my daughter's birthday" are one fact: the "s" with
+                # no apostrophe is the possessive people type out, and reading the whole thing as
+                # a compound noun ("my parents evening") left the daughter out of the chat, so the
+                # age said for her two turns later ("shes turning 6") had nobody to belong to and
+                # "how old is my daughter" answered "You haven't told me". The school evening is
+                # the one compound that is genuinely an event rather than a thing of theirs.
+                if not ((str(match.group(0)).lower().endswith("s") or said_possessive)
+                        and next_word in COMPOUND_THAT_IS_THEIRS):
+                    continue
             before = _the_clause_before(text, match.start())
             if SOMEONE_ELSE_HAS.search(before) or A_RELATION_OWNED.search(before):
                 # somebody else's relation, said as theirs: the owner is the person the line is
@@ -8184,6 +8704,9 @@ def _pets(text, question=False):
         animals.append([match.start(), match.end(), kind, breed])
     animals.sort()
     pets = []
+    # One animal in the line is the only one a description and a figure can both be about:
+    # "we have two dogs, 3 and 5" gives two ages in one clause (`_names_after`), not one.
+    one_animal = len(animals) == 1
     for index, (start, end, animal, breed) in enumerate(animals):
         limit = animals[index + 1][0] if index + 1 < len(animals) else len(text)
         # "we got another cat called Max" beside a cat they already have is a second cat; the same
@@ -8289,6 +8812,13 @@ def _pets(text, question=False):
         # "my dog is 5", "my dog max is 4": how old the animal is is a fact of theirs like any
         # other, so it is kept with the animal and a later "how old is max" has an answer.
         age = _pet_age(text[end:limit])
+        if not age and one_animal and not pet.get("count"):
+            # The figure said after what the animal is: "hes a labrador, 9", "my dog is a
+            # spaniel and hes 11", "she is a tabby, 3 years". The breed line is the animal's
+            # own record, and the figure that follows it belongs to the same animal - without
+            # this it was filed against nobody and "what did i tell you his age was" said the
+            # chat had never been told, about an age it had just been given.
+            age = _pet_age_tail(text[end:limit])
         if age:
             pet["age"] = age[0]
             if age[1]:
@@ -8299,6 +8829,36 @@ def _pets(text, question=False):
             pet["breed_of_one"] = True
         pets.append(_with_the_breed(pet, breed))
     return pets
+
+
+# The figure a line gives for an animal right after saying what it is: "hes a labrador, 9",
+# "my cat is a tabby and she is 3". The comma or the "and" is what makes it the same animal's
+# age: a figure set off on its own is a new clause and could be anybody's.
+PET_AGE_TAIL = re.compile(
+    r"^\s*(?:is\s+(?:a|an)\s+[A-Za-z][A-Za-z'-]{1,19}\s*)?(?:,|\band\b)\s*"
+    r"(?:(?:hes|shes|its|theyre|he's|she's|it's|they're|he is|she is|it is|they are)\s+)?"
+    r"(?:aged?\s+)?(?P<age>\d{1,2})(?![\d.,]\d)"
+    r"(?!\s*(?:kg|kilo\w*|lbs?|pounds?|stone|st|cm|inches?|inch|metres?|meters?|miles?|km|mph|"
+    r"hours?|hrs?|mins?|minutes?|percent|%))"
+    r"\s*(?P<unit>years?|yrs?|months?|weeks?)?\b", re.I)
+
+
+def _pet_age_tail(after):
+    """The age said after the animal's own description, or None: "hes a labrador, 9".
+
+    Read only where the line gave one animal (`one_animal` in `_pets`), because with two a
+    figure cannot say which one it is. `unit` is kept the way `_pet_age` keeps it, so "shes a
+    tabby, 6 months" is a kitten and not a six-year-old cat.
+    """
+    match = PET_AGE_TAIL.match(str(after or ""))
+    if not match:
+        return None
+    age = int(match.group("age"))
+    if not 0 < age <= 40:
+        return None
+    unit = str(match.group("unit") or "").lower()
+    return age, ("months" if unit.startswith("month")
+                 else "weeks" if unit.startswith("week") else "")
 
 
 # The figure a line gives for an animal's age: "is 5", "max was 12", "is 3 years old". A figure
@@ -8548,6 +9108,10 @@ def _not_a_name(word, strict_ly=True):
     if low in PET_ANIMALS or not re.search(r"[aeiouy]", low):
         return True
     if strict_ly and low.endswith("ly") and len(low) > 4:
+        return True
+    if _a_word_not_a_name(low):
+        # "her name is blonde": a hair colour, a number written out or a state is how somebody
+        # is, not what they are called, and every reader of a name asks this guard.
         return True
     return bool(re.fullmatch(r"\d+", low))
 
@@ -8857,6 +9421,17 @@ A_DAY_SAID_FIRST = re.compile(
     r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?\b", re.I)
 
 
+# "dinner for 6 on saturday" is six people, not six o'clock. A figure after "for" is a clock only
+# when nothing in front of it is what people are counted for - "be there for 6", "booked for 7" -
+# and a count when a meal, a table or a party is the thing said before it. Kept as a clock, the
+# plan was filed "dinner at 6 on saturday", so "actually make that 8" moved the dinner to eight
+# o'clock instead of putting the table up to eight people, and "how many am i cooking for" could
+# not be answered at all.
+_A_COUNT_NOT_A_CLOCK = re.compile(
+    r"\b(?:dinner|lunch|breakfast|brunch|supper|tea|meal|table|tables|party|round|booking|"
+    r"seats?|covers|guests?|people|plates?|portions?|helpings?|rooms?)\b", re.I)
+
+
 def _the_thing_said_after_the_day(low, day):
     """The thing named after a day said at the front of the line, "" when the rest is not a thing.
 
@@ -8898,6 +9473,8 @@ def _appointment(text):
     if SECOND_PERSON.search(low):
         return ""  # "your appointment is at 3" is about the bot
     clock, day = APPOINTMENT_CLOCK.search(low), APPOINTMENT_DAY.search(low)
+    if clock and re.match(r"for\s", clock.group(0), re.I) and _A_COUNT_NOT_A_CLOCK.search(low[:clock.start()]):
+        clock = None
     if not clock and not day:
         return ""
     if clock:
@@ -9031,6 +9608,68 @@ WHEN_OR_WHERE = re.compile(
     re.I)
 A_SHARED_VERB = re.compile(r"^(?:is|are|was|were|am)\b", re.I)
 CORRECTION_LEAD_RE = re.compile(CORRECTION_LEAD, re.I)
+# A word that can open a correction, and is also an ordinary word in front of a noun: "no heat",
+# "no comedy", "sorry business", "wait list". What tells the two apart is the punctuation the
+# person put after the opener - "no, four brothers" - or an opener that is more than one word and
+# announces itself - "no wait, three sisters", "oh actually, six". Written once, so the reader that
+# takes the opener off and the one that asks whether the words are only an opener agree.
+OPENER_WORDS = ("ok", "okay")
+OPENER_PUNCTUATION = re.compile(r"[,.:;!?\-\u2013\u2014]\s*$")
+
+
+def _the_opener_end(said):
+    """Where the correction opener in front of `said` ends, or 0 when it does not open with one."""
+    lead = CORRECTION_LEAD_RE.match(said)
+    if not lead:
+        return 0
+    front = lead.group(0)
+    if OPENER_PUNCTUATION.search(front):
+        return lead.end()
+    words = [one for one in re.split(r"[^a-z']+", front.lower()) if one]
+    words = [one for one in words if one not in OPENER_WORDS]
+    return lead.end() if len(words) >= 2 else 0
+
+
+
+def without_the_correction_opener(text):
+    """The line after the opener that says the last thing is being said again, or "" when the
+    line does not open with one.
+
+    The opener is the person's, but it names nothing the line is about: "sorry, four brothers"
+    and "no wait, three sisters" both go back over the fact the turn before stated, and the apology
+    in front of one says only that the value is being said again. Every reader that takes a
+    subject, a thing or a key out of a line reads it here first, so a correction never arrives
+    wearing an opener that a card can match on - "sorry, three sisters" after "i have two sisters"
+    was answered by the apology row, whose ask word is "sorry"
+    (bot/knowledge/lookup.py, `_past_a_correction`; bot/memory/named.py, `about_it`).
+    Only a lead the person punctuated - or one that is two words and announces itself ("no wait",
+    "oh actually") - is taken off. "no" and "sorry" are ordinary words too: "no heat in my car",
+    "no time to cook dinner" and "sorry i snapped at her" are the line, not an opener with a value
+    behind it, and stripping the word off those took a heater, a dinner and an apology away from
+    their own answers.
+    """
+    said = " ".join(str(text or "").lower().split())
+    end = _the_opener_end(said)
+    if not end:
+        return ""
+    return said[end:].strip(" ,.;:\t\u2013\u2014")
+
+
+def is_a_correction_opener(text):
+    """True when the words are nothing but the opener that announces a correction.
+
+    The words are the person's ("no wait,", "sorry,", "oh, actually,", "scratch that,"), and they
+    name nothing on their own: they say that the last thing is being said again. Read off the same
+    lead as the correction itself, so a reader that has to tell an opener from a value cannot
+    disagree with the one that reads the correction - "wait, four brothers" was said back as
+    "Got it - wait, four brothers" because the echo took "wait," for part of the value
+    (bot/memory/ack.py, `_only_the_correction_in_front`).
+    """
+    said = " ".join(str(text or "").lower().split())
+    if not said:
+        return False
+    lead = CORRECTION_LEAD_RE.match(said + " ")
+    return bool(lead and lead.end() > len(said))
 
 
 def _said_after_the_subject(clause):
@@ -9533,6 +10172,19 @@ def _paid_by_a_period(text, end):
     return bool(INCOME_PERIOD.match(text, end + (qualifier.end() if qualifier else 0)))
 
 
+def _a_years_pay(figure):
+    """Whether a figure with no period is a year's wage rather than a count.
+
+    "i earn 32000" and "my salary is 32k" are a year's pay and nobody says the period; "i get 300
+    emails" and "i make 2000 cookies" are counts and their period is what said so. So the figure
+    itself has to be the size of a wage: four digits, or a figure in thousands.
+    """
+    said = str(figure or "")
+    if re.search(r"\d[\d,.]*\s?(?:k|grand|thousand)\b", said, re.I):
+        return True
+    return len(re.sub(r"[^\d]", "", said)) >= 4
+
+
 def extract(text, question=False):
     """Facts this line states about the user (only the keys it states).
 
@@ -9583,6 +10235,16 @@ def extract(text, question=False):
             if isinstance(entry, dict) and entry.get("who") in SPOKEN_RELATION:
                 entry["who"] = SPOKEN_RELATION[entry["who"]]
         found["others"] = _one_entry_per_person(found["others"])
+    if not found.get("correction") and found.get("drop") is None:
+        # A correction word on the end of the line takes the same values back as one in front of
+        # it, and the line already reads with the word in front, so the read is that line's read:
+        # only the correction is taken, because the rest of the words are the same words.
+        marked = _the_marker_in_front(text, question)
+        if marked is not None:
+            again = _extract(marked, question)
+            for key in ("correction", "drop"):
+                if again.get(key) is not None:
+                    found[key] = again[key]
     return found
 
 
@@ -9651,7 +10313,19 @@ def _one_entry_per_person(entries):
             out.append(dict(entry))
             continue
         for key, value in entry.items():
-            if key in ("who", "pronoun", "name"):
+            if key in ("who", "pronoun"):
+                continue
+            if key == "name":
+                # A name read on the line goes onto the person the line already named: "my son
+                # tom is allergic to nuts" is one boy with a name and an allergy, and dropping
+                # the name left the store unable to answer to "what is tom allergic to". The
+                # spelling that keeps its capital is the one to keep: the reader that catches a
+                # name as it was typed says "Meg", and one that takes the word after the verb
+                # says "meg", and a store that answers "your sister is called meg" is a store
+                # that looks like it was not listening.
+                mine = str(one.get("name") or "")
+                if not mine or (mine[:1].islower() and str(value)[:1].isupper()):
+                    one["name"] = value
                 continue
             if key == "age":
                 # The birthday already kept, said again: the age they are stays.
@@ -9742,8 +10416,65 @@ def _the_person_the_pronoun_is(text, pos, pronoun):
     return who if who in fits or any(part in fits for part in parts) else ""
 
 
+# A name that opens a clause with the verb after it: "tom is allergic to nuts" says nothing about
+# the person typing, and the fact is Tom's. Only a name that opens the clause counts - "the bag tom
+# left is heavy" says nothing about anybody's allergy even where it sits in front of a verb.
+NAME_THEN_THE_VERB = re.compile(
+    r"^\W*(?:(?:and|but|so|then|also|oh|ok|okay|well|now|btw|hey|hi|quick)\W+)?"
+    r"(?P<name>[A-Za-z][A-Za-z'\-]{1,19})\s+(?:is|was|has|had|isnt|wasnt|hasnt|cant|cannot|"
+    r"doesnt|dont|didnt|never|only|gets|got|became)\b", re.I)
+
+
+def _a_name_opening_the_clause(clause):
+    """The name a clause opens with, or "" - "tom" in "tom is allergic to nuts"."""
+    found = NAME_THEN_THE_VERB.match(clause or "")
+    if not found:
+        return ""
+    name = found.group("name")
+    low = _a_person_word(name)
+    if low in NOT_A_PERSON_WORD or low in RELATIONS or low in DIET_GROUP \
+            or low in A_PRONOUN_NOT_A_NAME:
+        return ""
+    if not (_may_be_a_name(name) and _name_after_a_title(name)):
+        return ""
+    return name
+
+
+def _the_name_in_front(text, pos):
+    """The name of the person the clause ending at pos names, or "".
+
+    "tom is allergic to nuts" names Tom and nobody else, and "my son tom is allergic to nuts"
+    names the son, who is Tom - the relation is the store's word for him, so the name is kept
+    beside it rather than instead of it.
+    """
+    start = 0
+    for match in CLAUSE_BREAK.finditer(text, 0, pos):
+        start = match.end()
+    clause = text[start:pos]
+    who, name = _the_person_without_a_relation(clause)
+    if name and not who:
+        return name
+    if not who:
+        opening = _a_name_opening_the_clause(clause)
+        if opening:
+            return opening
+    if who:
+        # The relation is the subject; a name after it ("my son tom") is who that person is.
+        found = re.search(r"\b(?:" + "|".join(sorted(OTHER_NOUNS, key=len, reverse=True))
+                          + r")(?:\s+in\s+laws?)?s?\s+(?P<name>[A-Za-z][A-Za-z'\-]{1,19})\s*$",
+                          clause, re.I)
+        if found:
+            name = found.group("name")
+            low = name.lower().strip("'")
+            if (low not in NOT_A_PERSON_WORD and low not in RELATIONS
+                    and _may_be_a_name(name) and _name_after_a_title(name)):
+                return name
+    return ""
+
+
 def _a_person(text, pos, who):
-    """The person a fact about somebody else belongs to: {"who": "mum"} or {"pronoun": "she"}.
+    """The person a fact about somebody else belongs to: {"who": "mum"}, {"name": "Tom"} or
+    {"pronoun": "she"}.
 
     A line can point at somebody without naming them ("shes allergic to nuts", "hes vegetarian
     now"), and that person is still a person: a fact filed against nobody is an entry whose
@@ -9753,6 +10484,11 @@ def _a_person(text, pos, who):
     """
     if who:
         return {"who": who}
+    # A person named and nothing else: "tom is allergic to nuts" is Tom's allergy, and there is
+    # no relation word to file it under, so the entry carries the name the way "ada is 8" does.
+    named = _the_name_in_front(text, pos)
+    if named:
+        return {"name": named}
     pronoun = _the_pronoun(text, pos)
     if not pronoun:
         return {}
@@ -9775,9 +10511,13 @@ def _same_person(seen, entry):
     if who or other:
         # Two children named in one breath ("my kids are ada 7 and sam 4") share the word in
         # front of them, so the word alone cannot tell them apart: the name is what says which
-        # child an age belongs to, and two named children are never folded into one.
-        return (who == other
-                and str(seen.get("name") or "").lower() == str(entry.get("name") or "").lower())
+        # child an age belongs to, and two named children are never folded into one. A reading
+        # with no name of its own is the same person as one that has a name - "my son is called
+        # tom" then "my son is allergic to nuts" is one boy, and the name read on its own line
+        # is how the allergy entry learns who he is.
+        mine = str(seen.get("name") or "").lower()
+        theirs = str(entry.get("name") or "").lower()
+        return who == other and (not mine or not theirs or mine == theirs)
     return bool(seen.get("pronoun")) and seen.get("pronoun") == entry.get("pronoun")
 
 
@@ -9824,8 +10564,164 @@ def _a_name_and_a_figure(text):
     return {"name": shown, "age": age}
 
 
+# Where it hurts: the part of the body a line names, and the side or the place on it.
+# "its on the outside of the knee", "my left shoulder is killing me", "the pain is in my lower
+# back", "i hurt my ankle yesterday". A closed vocabulary, because a part of the body is not a
+# word the line can invent, and a line that names one of these with nothing the matter with it
+# ("my knee is fine") files nothing.
+BODY_PARTS = ("knee", "knees", "back", "shoulder", "shoulders", "hip", "hips", "ankle", "ankles",
+              "foot", "feet", "heel", "heels", "calf", "calves", "shin", "shins", "thigh",
+              "thighs", "hamstring", "hamstrings", "wrist", "wrists", "elbow", "elbows", "hand",
+              "hands", "finger", "fingers", "thumb", "neck", "head", "chest", "stomach", "tummy",
+              "tooth", "teeth", "ear", "ears", "eye", "eyes", "arm", "arms", "leg", "legs", "toe",
+              "toes", "jaw", "rib", "ribs", "groin", "abdomen", "spine", "tailbone", "collarbone",
+              "achilles", "quad", "quads", "glute", "glutes", "arch")
+BODY_PART = re.compile(r"\b(" + "|".join(BODY_PARTS) + r")\b", re.I)
+BODY_HURTS = re.compile(r"\b(?:hurt|hurts|hurting|sore|ache|aches|aching|achy|pain|painful|"
+                        r"injur\w*|twinge|stiff|swollen|swelling|niggle|flare[sd] up|"
+                        r"killing me|playing up)\b", re.I)
+BODY_LATERAL = re.compile(r"\b(left|right|both)\s+(?:(?:outer|inner|lower|upper|front|back)\s+)?"
+                          r"(?:" + "|".join(BODY_PARTS) + r")\b", re.I)
+BODY_PLACE = re.compile(r"\b(?:on|in|at|to|round|around)\s+(?:the|my|his|her|their|its)\s+"
+                        r"(outside|inside|front|lower|upper|top|bottom|inner|outer)\b", re.I)
+
+
+# The people a body part can belong to instead of them: "my mum has a sore hip", "my son hurt his
+# arm", "my daughter has a sore knee" are how people talk about a parent or a child. A part with
+# one of these in front of it is that person's, and a part said with "his", "her", "their" or
+# "its" is not theirs at all.
+SOMEONE_ELSE = re.compile(r"\b(?:my|our|the)\s+(?:(?:little|older|youngest|eldest|baby|big|"
+                          r"grown[- ]up|step)\s+)?(?:son|sons|daughter|daughters|child|children|"
+                          r"kid|kids|boy|boys|girl|girls|baby|babies|toddler|mum|mums|mom|mother|"
+                          r"dad|dads|father|husband|wife|partner|ex|boyfriend|girlfriend|brother|"
+                          r"brothers|sister|sisters|friend|friends|mate|mates|nephew|niece|cousin|"
+                          r"grandma|grandad|granny|gran|nan|nanna|aunt|aunty|uncle|in-?law|"
+                          r"dog|cat|puppy|kitten|patient|client|customer|colleague|boss)\b"
+                          r"(?:'s|s')?", re.I)
+# A part handed to another body: "my son hurt his arm". The name is its own because `NOT_THEIRS`
+# above is the pet reader's ("i dont want a dog"), and a second constant of that name would take
+# the first one's place for every reader loaded after this line.
+A_PART_HANDED_OVER = re.compile(r"\b(?:his|her|their|its)\s+(?:\w+\s+){0,2}?(?:"
+                                + "|".join(BODY_PARTS) + r")\b", re.I)
+
+
+# The words that tie a part to the person typing: "my knee", "my left shoulder", "i have a sore
+# knee", "i hurt my ankle". A part with none of them is a part the line is about rather than a
+# report of one, and most lines like that are questions: "who has a sore hip", "does a sore knee
+# need a doctor", "what helps a sore back". Filing one of those put a complaint in the person's
+# mouth that they never made - the recall then said "It is your hip that you said was hurting" to
+# someone who had asked who a sore hip has.
+MY_OWN_PART = re.compile(r"\b(?:my|our)(?:\s+\w+){0,2}\s+$", re.I)
+# A part said as the subject of the hurting word is theirs with no possessive at all: "knee
+# hurts", "back is killing me", "shoulders are sore". Rare in chat, and unambiguous when it does
+# happen, because nobody asks a question about a part in that word order.
+THE_PART_HURTS = re.compile(r"^\s*(?:'s|s)?\s*(?:is|are|was|were|has|have|have been|has been|"
+                            r"keeps)?\s*(?:killing|hurting|hurts|sore|aching|aches|ache|painful|"
+                            r"stiff|swollen|playing|giving|in pain|bad|killing me)\b", re.I)
+# A clause that opens with the person and then says something is the matter with a part of them:
+# "i have a sore knee from running", "i hurt my ankle yesterday", "i've got a dodgy shoulder".
+THE_PERSON_SAYS = re.compile(r"^(?:ok(?:ay)?[, ]+|and |so |but |well |oh |also )*"
+                             r"(?:i|i'm|im|i've|ive|we|we're|were|we've|weve)\b", re.I)
+# A line about a place on a part already named is about their own complaint even with no "my" in
+# it: "its on the outside of the knee", "the pain is in the lower back".
+A_PLACE_ON_IT = re.compile(r"^(?:it|its|it's|that|that's|this|the (?:pain|ache|hurt|soreness))\b",
+                           re.I)
+
+
+def _tied_to_them(part, low):
+    """Whether the line ties the part to the person typing it, or only talks about parts.
+
+    A question about a part names one with nothing that makes it theirs, and reading it as a
+    complaint is the worst thing this reader can do: "who has a sore hip" filed a sore hip on the
+    person who asked, and the store then answered "what did i say was hurting" with a hip they had
+    never mentioned. Miss a bare "knee hurts" and nothing is lost; assert a complaint they did not
+    make and the store lies to them.
+    """
+    before = low[:part.start()]
+    after = low[part.end():]
+    if MY_OWN_PART.search(before):
+        return True
+    if THE_PART_HURTS.match(after):
+        return True
+    # The clause the part sits in, so a question's own "i" does not count: "should i see someone
+    # about a sore back" opens with "should", and the part is what it asks about.
+    clause = re.split(r"[,;.!?]|\s+(?:and|but|so|then)\s+", before)[-1]
+    if THE_PERSON_SAYS.match(clause.strip()) and BODY_HURTS.search(low):
+        return True
+    if A_PLACE_ON_IT.match(low) and BODY_PLACE.search(low):
+        return True
+    return False
+
+
+def _theirs(part, low):
+    """Whether the part at this place in the line is the speaker's own body.
+
+    A part belongs to somebody else when a person word comes between them and it ("my mum has a
+    sore hip", "my son's back"), and when the line hands it to another body with his, her, their
+    or its ("my son hurt his arm"). Filing one of those as theirs put their mother's hip on them.
+    A part the line only talks about, with no owner at all, is nobody's: it is a question.
+    """
+    part_at = part.start()
+    owner = None
+    for found in SOMEONE_ELSE.finditer(low):
+        if found.start() < part_at:
+            owner = found
+    if owner is not None:
+        between = low[owner.end():part_at]
+        if not re.search(r"\b(?:my|our|i|me|mine|myself)\b", between):
+            return False
+    for other in A_PART_HANDED_OVER.finditer(low):
+        if other.end() <= part_at + 1 and other.start() < part_at:
+            return False
+    return _tied_to_them(part, low)
+
+
+def the_part_it_hurts(text):
+    """The part of them that is sore, and where on it, or None.
+
+    Filed as one record because it is one fact: the part, the side they gave ("left", "right",
+    "both"), the place on it ("outside", "lower"), and the line as they said it, so the store can
+    hand the words back instead of describing them. Read this way because nothing filed it at
+    all: "its on the outside of the knee" left the store holding no fact, and eight turns later
+    "and which knee was it" was answered with a hedge.
+    """
+    if not isinstance(text, str):
+        return None
+    low = " ".join(text.lower().split())
+    # The first part that is their own body: "my son hurt his arm" says nothing about them, and
+    # "my son has a sore arm and my knee is bad" says something about both.
+    part = None
+    for found in BODY_PART.finditer(low):
+        if _theirs(found, low):
+            part = found
+            break
+    if part is None:
+        return None
+    lateral = BODY_LATERAL.search(low)
+    place = BODY_PLACE.search(low)
+    if not (BODY_HURTS.search(low) or lateral or place):
+        return None
+    # "my knee is fine", "the back door": a part word with nothing the matter with it is not a
+    # complaint, and the words that put a body word in front of another noun are not a side.
+    if re.search(r"\b(?:no|not|never)\b[^.]{0,20}" + re.escape(part.group(1)) + r"\b", low):
+        return None
+    if not lateral and not place and re.search(r"\b" + re.escape(part.group(1)) +
+                                              r"\s+(?:door|room|garden|yard|seat|window|wheel|"
+                                              r"teacher|line|table|of the house)\b", low):
+        return None
+    held = {"part": part.group(1).lower(), "said": " ".join(text.split())}
+    if lateral:
+        held["side"] = lateral.group(1).lower()
+    if place:
+        held["place"] = place.group(1).lower()
+    return held
+
+
 def _extract(text, question=False):
     found = {}
+    hurt = the_part_it_hurts(text)
+    if hurt:
+        found["hurts"] = hurt
     text = _the_numbers_in_words(text)
     diet = VEGETARIAN.search(text)
     name = _name(text)
@@ -10090,6 +10986,13 @@ def _extract(text, question=False):
                 figure = bare.group(1).split()[-1]
                 if sum(ch.isdigit() for ch in figure) >= 3:
                     money = bare
+        if not money:
+            for a_year in INCOME_A_YEAR:
+                year = a_year.search(text)
+                if (year and _a_years_pay(year.group(1))
+                        and not text[year.end():].strip(" .,;!?-").strip()):
+                    money = year
+                    break
         if money and INCOME_RATE.match(text, money.end()):
             money = None
         budget = money
@@ -10231,7 +11134,8 @@ def _extract(text, question=False):
     made = correction is not None and correction.re is CORRECTION_MAKE
     hedged = None
     if correction is None:
-        dated = CORRECTION_DATE.search(text)
+        dated = (CORRECTION_DATE.search(text) or CORRECTION_DATE_GOING.search(text)
+                 or CORRECTION_GOING_MOVED.search(text))
         if dated is not None:
             # A date is said back with its day and its month in it, which the one-word reader
             # keeps to a single value: "sorry, its the 4th of may" is the whole date.

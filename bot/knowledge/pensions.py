@@ -11,7 +11,7 @@ and a private pension is money.py too, so this file says where it stops.
 """
 import re
 
-from .lookup import entry
+from .lookup import a_thing_has_stopped, entry
 
 # The same topic as money.py and lifeadmin.py: the answers module already declares it.
 ANSWERS = ("money",)
@@ -110,5 +110,10 @@ ENTRIES = [
                  # pension's age is not the answer to it, and the bare "retire early" key made
                  # this entry take the line and hand back the age.
                  "how can i retire", "how do i retire", "how can i retire early",
-                 "retire early", "retiring early")),
+                 "retire early", "retiring early"),
+          # "my oven has stopped working" carries "stop working", which is the phrase for somebody
+          # stopping work, and this card then told a person with a dead oven when the state pension
+          # starts. A machine that stopped is the plug and the fuse; the guard keeps this entry for
+          # the lines where what stopped is the person's own working life.
+          guard=lambda understood: not a_thing_has_stopped(understood)),
 ]

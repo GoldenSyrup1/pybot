@@ -321,6 +321,16 @@ A_STATE_ABOUT_THEIR_PERSON = re.compile(
     r"(?:(?:still|actually|even|really|now|also)\s+)?"
     r"(?:retired|married|single|divorced|separated|widowed|ok|okay|alright|happy|unhappy|"
     r"well|better|alive|working|studying|at\s+home|back|settled|keeping\s+well)\b")
+# Where one of their people is: "is my sister in cork", "is my dad in hospital", "is she in town
+# yet". The same not-a-look-up as the rest - no page holds where somebody is this week - and it was
+# the search hedge. A word said with "in" that is a state rather than a place is not this shape
+# ("is my mum in pain", "is she in labour"), so those keep their own reply.
+A_PLACE_ABOUT_THEIR_PERSON = re.compile(
+    r"^\s*(?:is|was|are|were)\s+(?P<who>" + _ANY_PERSON + r")\s+"
+    r"(?:(?:still|actually|even|really|now|already|finally|back)\s+)?"
+    r"(?:in|at|near|round|around|off\s+to|down\s+in|up\s+in|over\s+in|back\s+in|out\s+in)\s+"
+    r"(?!a\s|an\s|the\s|pain|trouble|danger|labour|labor|tears|need|agony|hospital\s+bed)"
+    r"[a-z]")
 # "is my son 5", "is my mum 72" - the person puts a figure to the bot for checking, and no page
 # holds it either. Only the number that comes after the person is read, so a question with a verb
 # in it ("is my mum coming", "is my son sleeping") keeps the reply it had.
@@ -503,14 +513,18 @@ def _feeling_subject(clean):
 
 def _a_fact_about_their_person(clean):
     """The pool for a question only the asker can answer about their own people, or None."""
-    asked = (A_FACT_ABOUT_THEIR_PERSON.match(clean) or A_WH_ABOUT_THEIR_PERSON.match(clean)
+    # Where somebody is comes first and needs no body fence: "is my dad in hospital" is still only
+    # his to answer, and the hospital in the line is the place he is in, not a symptom to treat.
+    place = A_PLACE_ABOUT_THEIR_PERSON.match(clean)
+    asked = (place
+             or A_FACT_ABOUT_THEIR_PERSON.match(clean) or A_WH_ABOUT_THEIR_PERSON.match(clean)
              or A_STATE_ABOUT_THEIR_PERSON.match(clean)
              or A_FIGURE_ABOUT_THEIR_PERSON.match(clean))
     if not asked:
         return None
     # A body, a dose, an illness, a death, a pet or an ask for advice in the line has its own
     # answer and its own lane, whatever person the question names.
-    if NOT_A_FACT_ASK.search(clean) or A_BODY_OR_ILLNESS.search(clean):
+    if not place and (NOT_A_FACT_ASK.search(clean) or A_BODY_OR_ILLNESS.search(clean)):
         return None
     wh = not (A_FACT_ABOUT_THEIR_PERSON.match(clean) or A_STATE_ABOUT_THEIR_PERSON.match(clean))
     _who_said, _them_said, possessive = _said_person(clean)

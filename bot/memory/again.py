@@ -108,14 +108,32 @@ UNDERNEATH_CLAUSE = (
     "{said}, and it comes to the same thing: {reply}",
 )
 
+# The answer given again for a line that names no part of it ("what else can i do with it"): there
+# is no detail to put in the lead-in, so the lead says the entry has nothing further and the short
+# form of the answer follows, rather than the paragraph word for word. The knowledge module reads
+# it (`bot/modules/answers.py`), and it is written here with the other frames because a lead-in
+# that no reader can see through is one that gets a second lead-in put in front of it.
+NOTHING_MORE = (
+    "Nothing more on it I'm afraid: {reply}",
+    "That is all I have on it: {reply}",
+    "There is nothing further to add: {reply}",
+)
+
+# The knowledge module's own pool, which is `topics.REPEAT` plus this one word more: the lead-in
+# moves on with each repeat and then runs out of ways to say it, and a fourth repeat should not
+# say "same again" a third time. Written here with the other frames so every lead-in the bot can
+# put in front of an answer is in one place, and none of them can be put in front of another.
+LIKE_I_SAID = ("Like I said: {reply}",)
+
 # Every frame in the codebase that carries an answer behind a lead-in, in one place: this module
 # and `topics.REPEAT` say the answer has not changed, the two above name the detail the line
 # asked about, and the knowledge module has a wording of its own for a line asked a third time.
 # A reply under any of them is the answer already on the screen, so a caller deciding whether its
 # own reading found anything new has to look at the body, not at the lead-in - and a frame added
 # anywhere else has to be added here, or its answers read as new words.
-FRAMES = (AGAIN + (AGAIN_HELP,) + DETAIL_AGAIN + SAME_ADVICE + RETURN
-          + UNDERNEATH_SAID + UNDERNEATH_CLAUSE + topics.REPEAT)
+FRAMES = tuple(dict.fromkeys(
+    AGAIN + SHORT_AGAIN + (AGAIN_HELP,) + DETAIL_AGAIN + SAME_ADVICE + RETURN
+    + UNDERNEATH_SAID + UNDERNEATH_CLAUSE + NOTHING_MORE + LIKE_I_SAID + topics.REPEAT))
 # The words that turn round when the bot says the person's own line back to them.
 FOR_THE_PERSON = {
     "i": "you", "me": "you", "my": "your", "mine": "yours", "myself": "yourself", "am": "are",
@@ -143,6 +161,52 @@ OPENING_FILLER = re.compile(r"^(?:so|and|but|yeah|yeah|well|honestly|tbh|idk|dun
                             r"hi|hey)\b[ ,]*", re.I)
 # A phrase longer than this is a sentence about something rather than a word for how somebody is.
 A_PHRASE = 8
+
+
+def the_name_the_answer_says(answer, detail, card=""):
+    """The longest run of `detail`'s own words that `answer` says, or "" for none.
+
+    A lead-in may only name a part of the answer the answer itself names. Two ways it went wrong
+    without that: a yes/no ask puts its verb at the end, so "would a scratching post help" named
+    "a scratching post help" and came back "Nothing different for a scratching post help I'm
+    afraid"; and "should i buy a bigger one" named "a bigger", which is a fragment rather than a
+    thing. The answer is the only dictionary this needs - it says "post" and never says "help" -
+    so nothing has to be kept up to date, and a detail the answer does say ("the biting") is
+    handed back whole.
+
+    The tail is dropped one word at a time, and a word that only points at one ("a", "the") never
+    ends the name: "Same for a: ..." is not a sentence.
+    """
+    said = topics.words(str(answer or ""))
+    if not said:
+        return ""
+    words = str(detail or "").split()
+    while words:
+        last = words[-1].lower()
+        if last not in _NOT_THE_END and (last in said or (
+                len(last) > 3 and any(word.startswith(last) for word in said))):
+            return " ".join(words)
+        words = words[:-1]
+    # The sentence being handed back can be the whole of what the lead-in may *say* without being
+    # the whole of what the answer *is*: the amount sentence of the paint card says "emulsion" and
+    # never "paint", while the card's own opening names the paint. A person's word for the thing
+    # is the one thing a lead-in is for, so the rest of the answer counts too - but only the whole
+    # word, never a longer word it sits inside ("helps" is not the line's "help", and a name that
+    # ends there puts the ask's verb back in), and never a word that only points at a thing.
+    whole = topics.words(str(card or ""))
+    phrase = str(detail or "").split()
+    last = phrase[-1].lower() if phrase else ""
+    # A determiner in front is what makes the phrase a name rather than a bare word picked out of
+    # the line: "the paint" is a thing, and "late" on its own is not a name a lead-in can carry.
+    led = len(phrase) > 1 and any(word.lower() in _NOT_THE_END for word in phrase[:-1])
+    if led and last not in _NOT_THE_END and last in whole:
+        return str(detail or "").strip()
+    return ""
+
+
+# A determiner never ends a name, and neither does a word that only points at one.
+_NOT_THE_END = frozenset(
+    "a an the my your our his her their its this that these those some any".split())
 
 
 def as_a_phrase(text):
@@ -267,17 +331,52 @@ def the_same_thing_underneath(text, reply, times, memory=None):
     return pool[turns % len(pool)].format(said=said, reply=reply.strip())
 
 
+# The punctuation a lead-in ends with before the answer. A frame is written with the colon, and
+# the same frame is written with a dash when the answer has a colon of its own ("Same answer, and
+# it covers this \u2014 The ambulance is on its way: keep him on his side"), so the separator is
+# not part of what the lead says.
+SEPARATOR = re.compile(r"\s*(?::|\u2014|\u2013|-)\s*$")
+ANY_SEPARATOR = r"\s*(?::|\u2014|\u2013|-)\s*"
+
+
 def _lead(frame):
     """A pattern for the lead-in `frame` puts in front of its answer.
 
     Anything in front of the answer is matched word for word, except the filled slots, which
-    stand for whatever was put in them."""
+    stand for whatever was put in them. The separator is read as either the colon the frame is
+    written with or the dash it is written with when the answer holds a colon of its own: a
+    lead-in read only in its colon form stops its turn counting as a repeat, which is the fault
+    `_times_on_the_screen` was fixed for."""
     head = str(frame).split("{reply}")[0]
-    return re.compile("^" + ".+?".join(re.escape(part) for part in SLOT.split(head)))
+    tail = ""
+    stripped = SEPARATOR.sub("", head.rstrip())
+    if stripped != head.rstrip():
+        head, tail = stripped, ANY_SEPARATOR
+    return re.compile("^" + ".+?".join(re.escape(part) for part in SLOT.split(head)) + tail)
 
 
-LEADS = tuple(str(frame).split("{reply}")[0] for frame in FRAMES) + ("Like I said: ",)
-PATTERNS = tuple(_lead(frame) for frame in FRAMES) + (re.compile(r"^Like I said: "),)
+LEADS = tuple(str(frame).split("{reply}")[0] for frame in FRAMES)
+PATTERNS = tuple(_lead(frame) for frame in FRAMES)
+
+# The lead-in each frame puts in front of its answer, as bare words, so a reply already framed by
+# any of them is recognised as framed however its punctuation was flattened. Only the part before
+# a slot counts ("Same for" in "Same for {detail}: ..."). One word is not enough on its own:
+# "still" is also how an answer of its own can open ("Still hot, so ..."), so a one-word lead
+# counts only with the colon or comma that makes it a lead-in.
+LEAD_WORDS = tuple(
+    lead for lead in (
+        tuple(topics.words(str(frame).split("{")[0])) for frame in FRAMES
+    ) if len(lead) > 1
+)
+COLON_LEADS = tuple(
+    lead[0] for lead in (
+        tuple(topics.words(str(frame).split("{")[0])) for frame in FRAMES
+    ) if len(lead) == 1
+)
+ONE_WORD_LEAD = re.compile(
+    r"^(%s)\s*[:,]\s" % "|".join(re.escape(word) for word in COLON_LEADS),
+    re.IGNORECASE,
+) if COLON_LEADS else None
 
 
 def unframed(reply):
@@ -295,12 +394,124 @@ def _flat(text):
     return " ".join(topics.words(text or ""))
 
 
-def _short(reply):
+def the_cause_said_again(reply, memory=None):
+    """The sentence that names the cause, when the line asked why and the answer has one.
+
+    A card is written for the fix and keeps the reason in a sentence of its own at the end: "Pull
+    the hair and soap out of the trap first ... The reason is hair, soap and grease caught in the
+    trap and the bend." Asked the same why a second time, the short of an answer is its opening,
+    so the person who asked why was handed the steps again and the one sentence that answers them
+    was the part that got cut. A why line (``memory["understood"]["wants"] == "reason"``,
+    `bot/modules/intent.py`) is owed the cause whichever time it is asked, so the cause sentence is
+    what is kept - and only a sentence the card itself frames as its cause ("the reason is ...",
+    "the cause is ..."), which is the reading `bot/compose/why` already does for the bare why
+    line. A card that only explains in passing ("... is what stops the smell coming back") is left
+    to its opening: the opening of a card is still its answer.
+    """
+    from ..compose import why  # lazy: the sentence shapes belong to the composer
+    understood = memory.get("understood") if isinstance(memory, dict) else None
+    if not isinstance(understood, dict) or understood.get("wants") != "reason":
+        return None
+    named = getattr(why, "NAMED_CAUSE", None)
+    if named is None:
+        return None
+    for said in (reply, _the_answer_in_hand(reply, memory), _a_card_behind(memory)):
+        parts = [part.strip() for part in quoted.sentences(said, SENTENCE) if part.strip()]
+        for at, part in enumerate(parts):
+            found = named.search(part)
+            if not found or found.start() > 2 or len(part.split()) < 6:
+                continue
+            if at == 0:
+                # The answer already opens on its cause, so a why asked again is owed the rest of
+                # it: the sentences the cause was put in front of, which are still unread.
+                if len(parts) > 1 and _led_an_earlier_answer(part, memory):
+                    return " ".join(parts[1:])
+                return None
+            move = [other for other in parts[:at] if other]
+            if _led_an_earlier_answer(part, memory):
+                # Asked again: the cause is already the first thing they read, and saying it a
+                # second time in a row is not an answer either. The part of the card they have not
+                # been given is, and the reason stays where the card puts it.
+                return " ".join(parts[1:]) if len(parts) > 1 else None
+            # The move stays with the cause. A why is usually asked about a fix the person has on
+            # screen, and the line after it is so often "and then": `bot/memory/plan` builds what
+            # comes next out of the steps of the last answer, so a cause sentence handed back on
+            # its own leaves that answer with no step in it and the turn after it has nothing.
+            return part + (" " + move[0] if move else "")
+    return None
+
+
+def _a_card_behind(memory):
+    """The newest reply in this chat that carries a cause sentence of its own, or "".
+
+    "why does that happen" is asked two turns after the card as often as one ("... and then" in
+    between), and the answer they were given outright is still the answer: the last reply was the
+    steps of it and names no cause, so the card behind it is where the cause is.
+    """
+    from ..compose import why  # lazy: the sentence shapes belong to the composer
+    named = getattr(why, "NAMED_CAUSE", None)
+    if named is None or not isinstance(memory, dict):
+        return ""
+    seen = 0
+    for turn in reversed(list(memory.get("turns") or ())):
+        if not (isinstance(turn, dict) and turn.get("bot")):
+            continue
+        said = str(turn["bot"])
+        for part in quoted.sentences(said, SENTENCE):
+            found = named.search(part.strip())
+            if found and found.start() <= 2 and len(part.split()) >= 6:
+                return said
+        seen += 1
+        if seen >= 3:
+            break
+    return ""
+
+
+def _led_an_earlier_answer(sentence, memory):
+    """Whether a reply in this chat opened on this sentence, so it is not news a second time.
+
+    Two whys in a row ask for the same sentence twice, and the second one is owed something it has
+    not read - the rest of the card, which is where the answer's other sentences are. An answer
+    that only *mentions* the cause somewhere in the middle does not count: the person asking why
+    was given the steps, and the cause is still the part they were not given.
+    """
+    said = " ".join(str(sentence or "").lower().split())
+    if not said or not isinstance(memory, dict):
+        return False
+    for turn in reversed(list(memory.get("turns") or ())):
+        if isinstance(turn, dict) and turn.get("bot"):
+            if " ".join(str(turn["bot"]).lower().split()).startswith(said):
+                return True
+    return False
+
+
+def _the_answer_in_hand(reply, memory):
+    """The answer on the screen, when what this turn is building is the opening of it."""
+    mine = " ".join(str(reply or "").lower().split()[:8])
+    if len(mine) < 25 or not isinstance(memory, dict):
+        return ""
+    seen = 0
+    for turn in reversed(list(memory.get("turns") or ())):
+        if not (isinstance(turn, dict) and turn.get("bot")):
+            continue
+        said = str(turn["bot"])
+        if mine in " ".join(said.lower().split()):
+            return said
+        seen += 1
+        if seen >= 3:
+            break    # the answer being cut is the one a turn or two above, not any of the chat
+    return ""
+
+
+def _short(reply, memory=None):
     """The first sentence of an answer, or the first two when the first is only a lead-in.
 
     Never stops inside a quotation: the words an answer hands over to say have full stops of
     their own, and half a quotation is a broken answer rather than a short one (`quotes.closed`).
     """
+    cause = the_cause_said_again(reply, memory)
+    if cause:
+        return cause
     parts = quoted.sentences(reply, SENTENCE)
     if not parts:
         return str(reply or "")
@@ -311,8 +522,11 @@ def _short(reply):
     return quoted.closed(" ".join(part.strip() for part in kept), parts[len(kept):], reply)
 
 
-def _the_first_sentence(reply):
+def _the_first_sentence(reply, memory=None):
     """The sentence that carries the answer, so a return gives the move rather than the lot."""
+    cause = the_cause_said_again(reply, memory)
+    if cause:
+        return cause
     parts = quoted.sentences(reply, SENTENCE)
     if not parts:
         return str(reply or "")
@@ -324,14 +538,37 @@ def _the_first_sentence(reply):
 
 def _carries_a_lead_in(mine):
     """True when the reply opens with a repeat's lead-in ("as i said: ...", "same as before: ...")."""
-    for lead in topics.REPEAT_LEADS:
-        if mine.startswith(" ".join(lead)):
+    said = " ".join(topics.words(mine))
+    if not said:
+        return False
+    for lead in tuple(topics.REPEAT_LEADS) + LEAD_WORDS:
+        if said.startswith(" ".join(lead) + " "):
             return True
+    if ONE_WORD_LEAD is not None and ONE_WORD_LEAD.match(str(mine or "").lstrip()):
+        return True
     return False
 
 
+def carries_a_lead_in(reply):
+    """True when the reply already opens with a lead-in, so a second one may not go in front.
+
+    The rule the frame readers keep to, "a lead-in is never stacked on another": an answer said
+    again twice over reads as a glitch - "Same as before: Same answer, and it covers this: Wash
+    the bin with hot soapy water" - and the outer lead says nothing the inner one did not."""
+    return _carries_a_lead_in(str(reply or ""))
+
+
 def _times_on_the_screen(mine, memory):
-    """How many turns in a row already said this reply, word for word."""
+    """How many turns in a row already said this reply, word for word or under a lead-in.
+
+    A repeat that was already framed still counts as a repeat. It did not before: the screen then
+    held "Same answer, and it covers this: The ambulance is on its way...", which is not the
+    paragraph word for word, so the count started again from nothing on every turn and the same
+    lead-in was picked every time - `AGAIN` holds three leads so a person who hears an answer a
+    third time gets "Nothing new to add on it", and they got "Same answer, and it covers this"
+    three turns running instead. The body under a lead is the short of the answer, so a run of
+    framed turns is counted by the answer starting with that short.
+    """
     turns = memory.get("turns")
     if not isinstance(turns, list):
         return 0
@@ -339,8 +576,11 @@ def _times_on_the_screen(mine, memory):
     for turn in reversed(turns):
         if not isinstance(turn, dict):
             break
-        if _flat(turn.get("bot")) != mine:
-            break
+        said = turn.get("bot")
+        if _flat(said) != mine:
+            body = _flat(unframed(said) or "")
+            if not body or not mine.startswith(body):
+                break
         times += 1
     return times
 
@@ -539,6 +779,61 @@ def _said_recently(mine, memory, look=3):
 A_DETAIL = re.compile(r"\bhow\s+(?:long|much|many|often|far|hot|old|quickly)\b", re.I)
 
 
+def _says_it_came_back(text):
+    """Whether the line reports the thing the last answer was about coming back.
+
+    "my back is sore again" after "my back is sore", "and the rota changed again this morning",
+    "its dropped again" in a boiler chat. `bot/memory/returned` holds the one reading of it; this
+    asks there so the frame and the return rules cannot disagree.
+    """
+    try:
+        from . import returned
+    except Exception:  # noqa: BLE001 - a lane that will not import treats the line as no news
+        return False
+    says = getattr(returned, "says_it_happened_again", None)
+    return bool(says and says(text))
+
+
+# A line that puts another thing beside the one answered: "and what about a bigger one" after the
+# licence card, "what about the cheaper one", "and a different one". The comparative is the tell -
+# it names a second thing by how it differs from the first - and the part of the answer that says
+# what the second thing needs ("anything heavier needs the C1") is not the opening.
+ANOTHER_ONE = re.compile(
+    r"\b(?:what|how) about\b|\b(?:bigger|smaller|larger|heavier|lighter|cheaper|dearer|pricier|"
+    r"costlier|older|younger|worse|better|other|different|longer|shorter|higher|lower|faster|"
+    r"nearer|further|farther|easier|harder|stronger|weaker|hotter|colder|warmer|quicker|"
+    r"newer|smarter|richer|poorer|nicer|simpler|tougher|thicker|thinner|slower)\b", re.I)
+
+
+# A question about money in the chat, and the amount a money answer carries. A frame says the
+# answer covers the line; where the line asks for an amount and the answer holds none, the claim is
+# false and the module that can reach the figure the chat was given has to have the turn.
+A_MONEY_ASK = re.compile(
+    r"\bhow much\b|\bhow many (?:pounds|dollars|euros)\b", re.I)
+MONEY_SAID = re.compile(
+    r"\b(?:owe|owes|owed|pay|paid|pays|cost|costs|price|prices|afford|spend|spent|bill|bills|"
+    r"budget|save|saved|earn|earns|salary|wage|wages|rent|money|card|loan|mortgage|debt|"
+    r"deposit|refund|quote|quoted)\b", re.I)
+AN_AMOUNT = re.compile(
+    r"[\u00a3$\u20ac]|\b\d+(?:\.\d+)?\s?(?:pounds?|quid|dollars?|euros?|bucks|pence|cents)\b|"
+    r"\b\d+(?:,\d{3})+\b|\b[bB]\d{2,}\b", re.I)
+
+
+def _a_figure_asked_that_the_answer_does_not_hold(text, reply):
+    """Whether the line asks for an amount of money and the reply holds no amount.
+
+    "how much do i owe on the card" after "should i clear the card first" was framed as the card's
+    answer come round again - "Same answer, and it covers this: Pay more than the minimum ..." -
+    when the chat had the figure said out ("You said 2000") and the card holds none of it. A frame
+    claims to cover the line, so it may not answer a money question with money-less prose. Read
+    here, before the frame is built, because both callers would otherwise serve it.
+    """
+    line = " ".join(str(text or "").split())
+    if not line or not A_MONEY_ASK.search(line) or not MONEY_SAID.search(line):
+        return False
+    return not AN_AMOUNT.search(str(reply or ""))
+
+
 def _asks_for_a_detail(text):
     """True when the line asks for a time, an amount or a count."""
     return bool(A_DETAIL.search(str(text or "")))
@@ -561,10 +856,29 @@ AN_ASK = re.compile(r"\b(?:what|which|how|why|when|where|who|can|could|should|wo
                     r"are|do|does|did|any|anything|anyone|remind|tell|told|worth)\b|\?", re.I)
 
 
+# The same trouble said again is not a report: "he keeps coming into our bed at 2am", "she still
+# wont eat at the table", "it happened again last night". Those lines were read as new information
+# too, so the frame stood aside, nothing else answered, and the paragraph came back word for word -
+# the exact repeat this module exists to stop: "my son is 6 and he wont sleep" / "he keeps coming
+# into our bed at 2am" was the sleep paragraph, twice. A line that says the trouble is still going
+# on is the paragraph's own subject, so it gets the short of it under a lead.
+A_STILL_GOING_ON = re.compile(
+    r"\b(?:keeps?|kept|keeps on|still|again|always|every|each|wont|won't|never|constantly|"
+    r"over and over|every time|all the time)\b", re.I)
+
+
 def _a_report(text):
-    """True when the line tells the bot something about the person rather than asking for a part."""
+    """True when the line tells the bot something about the person rather than asking for a part.
+
+    A report that the chat has not heard is new information, and the paragraph that came back on a
+    shared word is a misreading. A line that says the *same* trouble is still going on is not new
+    information: it is the subject of the answer already on the screen, and standing aside there
+    prints that answer word for word a second time.
+    """
     line = str(text or "")
-    return bool(line) and bool(A_REPORT.search(line)) and not AN_ASK.search(line)
+    if not line or not A_REPORT.search(line) or AN_ASK.search(line):
+        return False
+    return not A_STILL_GOING_ON.search(line)
 
 
 # A sentence in the answer that the person could say out loud, in quotes: "Say it as a
@@ -626,6 +940,10 @@ def _said_and_more(mine, memory):
 FACT_RECALL = re.compile(
     r"^(?:you(?:'ve| have) (?:got|had)|you (?:live|'re|are)|your \w[\w' -]{0,20}? (?:is|was)|"
     r"i have you as|you told me (?:you|your|it))\b", re.I)
+# A reply that only says one of their own facts back in the words of the recall reader: "You
+# said: my bike chain keeps slipping". `instead` framed that as "Same as before: You said:
+# ..." - a repeat laid on a repeat, when the fact is the answer the person asked for.
+SAID_BACK = re.compile(r"^(?:you said\b|you told me\b|i have you as\b)", re.I)
 
 
 def already_had(reply, memory):
@@ -649,15 +967,58 @@ def already_had(reply, memory):
     return AGAIN[0].format(reply=str(reply or "").strip())
 
 
-def _content_words_in_order(text):
-    """The content words of a line, in the order they were said."""
+def _as_said(text):
+    """The content words of a line in the person's own spelling, in the order they said them."""
     seen = []
     for word in topics.words(str(text or "")):
-        word = word.rstrip("s") or word
-        if len(word) > 2 and word not in topics.STOPWORDS and word not in topics.ASK_ONLY:
+        if len(word.rstrip("s")) > 2 and word not in topics.STOPWORDS \
+                and word not in topics.ASK_ONLY:
             if word not in seen:
                 seen.append(word)
     return seen
+
+
+def _content_words_in_order(text):
+    """The content words of a line as the matcher compares them, in the order they were said.
+
+    The words are cut to a stem (`rstrip("s")`) so "sandwiches" and "sandwich" compare equal. A stem
+    is for comparing only: what goes back on the screen is the person's own spelling, because
+    "packed lunch idea sandwiche" is not a phrase anybody wrote.
+    """
+    return [word.rstrip("s") or word for word in _as_said(text)]
+
+
+# A rule-out is not a topic to say back: "Back to sandwiches then" is the one thing a person who
+# said "no sandwiches" does not want named, and the words after "instead of" are what they are
+# moving away from rather than what they came back to.
+_RULED_OUT = re.compile(r"\b(?:no|not|without|instead|except|never|other\s+than)\b", re.I)
+
+
+def _the_run_they_said_both_times(text, earlier):
+    """The longest run of the line's own words that the earlier line used too, as they said it.
+
+    A run is words that stood next to each other in this line ("packed lunch ideas" in "packed
+    lunch ideas no sandwiches"). A joining word ("or", "and") is nobody's topic and neither starts
+    nor ends a run; a word the earlier line did not use ends one; and a rule-out ends the reading
+    altogether, so the thing the person said they did not want is never the thing the lead names.
+    One word is not a topic to say back, so a single word returns "" and the caller falls back to
+    the subject on the screen.
+    """
+    said = str(text or "")
+    stop = _RULED_OUT.search(said)
+    if stop:
+        said = said[:stop.start()]
+    best, run = [], []
+    for word in topics.words(said):
+        if (word.rstrip("s") or word) in earlier:
+            if word not in run:
+                run.append(word)
+            if len(run) > len(best):
+                best = list(run)
+        elif len(word.rstrip("s")) > 2 and word not in topics.STOPWORDS \
+                and word not in topics.ASK_ONLY:
+            run = []
+    return " ".join(best) if len(best) > 1 else ""
 
 
 def _the_same_question_asked_again(mine, text, memory):
@@ -684,8 +1045,12 @@ def _the_same_question_asked_again(mine, text, memory):
             continue
         if len(asked & earlier) * 4 < len(asked | earlier) * 3:
             continue  # less than three quarters shared: a different question on the same subject
-        return " ".join([word for word in _content_words_in_order(text)
-                         if word in earlier])
+        # The phrase said back is in the person's own words, and it is a phrase they said: the
+        # longest run of this line's words that they used last time. Joining whatever matched,
+        # scattered through the line, put "Back to packed lunch idea sandwiche then" and "Back to
+        # heat better then" on the screen - a stem nobody wrote, with the line's words in between
+        # taken out, so it read as the bot's own garble rather than as the person's topic.
+        return _the_run_they_said_both_times(text, earlier)
     return ""
 
 
@@ -717,6 +1082,43 @@ def _as_your(subject):
     return subject
 
 
+def replied(respond):
+    """A module's respond, with the earlier-turn check applied once at its exit.
+
+    "Is there an earlier turn?" was a question every reply path had to remember to ask, and the
+    paths that forgot printed the paragraph a second time: across the deck, 74 turns in 67 of 557
+    chats said something the same chat had already said, and 59 of them were a card served again by
+    `answers` on a route that had not been taught to ask. A route added tomorrow would have been
+    the 75th.
+
+    Wrapping `respond` makes the check the module's, not the route's: whatever a module returns,
+    the last thing that happens to it is `instead`, so a new reader, a new entry or a new branch
+    inside one is covered without knowing this file exists. Module code stays the same - decorate
+    it at the bottom of the module:
+
+        respond = again.replied(respond)
+
+    It frames, it never invents: `instead` is the only thing that decides what a repeat is, and a
+    reply the chat has not had comes back exactly as the module wrote it. That is the whole point
+    of doing it here - five turns into a collapse, "should i move him" got the ambulance card for
+    the fourth turn running, because `safety` had never been taught to ask; a fresh card on a new
+    line is untouched, because `instead` returns None for it.
+    """
+    def respond_once(text, memory):
+        reply = respond(text, memory)
+        if not isinstance(reply, str) or not reply.strip():
+            return reply
+        try:
+            return instead(reply, text, memory) or reply
+        except Exception:  # noqa: BLE001 - the check never takes an answer off the screen
+            return reply
+
+    respond_once.__name__ = getattr(respond, "__name__", "respond_once")
+    respond_once.__doc__ = respond.__doc__
+    respond_once.checks_earlier_turns = True  # tests/test_no_module_prints_a_paragraph_twice.py
+    return respond_once
+
+
 def instead(reply, text, memory):
     """The reply framed as the repeat it is, or None when it is new to this conversation.
 
@@ -730,7 +1132,14 @@ def instead(reply, text, memory):
         return None
     if _carries_a_lead_in(mine):
         return None  # another path already framed it: a lead-in is never stacked on another
-    if FACT_RECALL.match(str(reply or "").strip()) and len(mine.split()) <= SHORT:
+    said_back = str(reply or "").strip()
+    if SAID_BACK.match(said_back) and len(mine.split()) <= SHORT:
+        # The recall reader's own wording ("You said: my bike chain keeps slipping"), which was
+        # framed "Same as before: You said: ..." - a repeat laid on the answer the person asked
+        # for. Only that wording stands aside: a fact the chat has now had twice ("Your gran is
+        # 88." to "how old is my gran") is the same answer on the screen twice, and the arbiter
+        # passes over a candidate that is the last answer word for word, so without the two words
+        # of lead-in the question hands the turn to whatever module has something new.
         return None  # a fact said back is the answer, not a paragraph on the screen twice
     times = _times_on_the_screen(mine, memory)
     if not times:
@@ -754,7 +1163,8 @@ def instead(reply, text, memory):
             if asked:
                 detail = _the_subject_on_the_screen(memory) or asked
                 frame = RETURN[len(memory.get("turns") or []) % len(RETURN)]
-                return frame.format(detail=_as_a_name(detail), reply=_the_first_sentence(reply))
+                return frame.format(detail=_as_a_name(detail),
+                                    reply=_the_first_sentence(reply, memory))
             return None
         said = _said_earlier_text(mine, memory)
         if said and not _adds_nothing_the_answer_did_not_say(thing, text, said, memory):
@@ -808,6 +1218,30 @@ def a_thing_of_the_answer(reply, text, memory):
     return _framed_as_a_repeat(reply, mine, memory, 1, text)
 
 
+def _another_stand_down(reply, memory):
+    """A stand-down said a second time, in the words of another one, or None.
+
+    The hedge is the bot saying it cannot answer from here, and there are a few ways it says so.
+    Saying the same one again with "Same answer, and it covers this" in front of it claims the
+    thing has been answered, which it has not; saying it in another of the same words is the same
+    honesty and does not read as a machine. Only a whole reply that is one of the hedges is
+    swapped: a card that opens with a hedge has the answer in it, and it is the card.
+    """
+    from ..compose import fallback  # lazy: the stand-downs live with the lines that answer
+    mine = _flat(reply)
+    if not mine:
+        return None
+    for line in fallback.UNKNOWN:
+        if _flat(line) != mine:
+            continue
+        others = [o for o in fallback.UNKNOWN if _flat(o) != mine]
+        if not others:
+            return None
+        turns = memory.get("turns") or []
+        return others[len(turns) % len(others)]
+    return None
+
+
 def _framed_as_a_repeat(reply, mine, memory, times, text=""):
     """The reply under a lead-in saying it is the same answer, cut to the short of it.
 
@@ -820,6 +1254,12 @@ def _framed_as_a_repeat(reply, mine, memory, times, text=""):
     as it is meant to, and the whole knowledge base went silent behind a greeting: "how do i cook
     rice" / "sorry how do i cook rice" was told "I'm not sure about that one, sorry".
     """
+    if _says_it_came_back(text):
+        # "my back is sore again", "and the rota changed again this morning", "its dropped again":
+        # the trouble has come back, so this is news and the return rules answer it. Measured on
+        # the two chats a reviewer named, and on the boiler one, which is why the guard is on the
+        # line here rather than on the answer in either caller.
+        return None
     if len(mine.split()) <= SHORT:
         # A few words is already the short of itself, so the paragraph frame is wrong: "how old is
         # she again" wants the fact, not a sentence about the fact being repeated. The answer still
@@ -852,15 +1292,35 @@ def _framed_as_a_repeat(reply, mine, memory, times, text=""):
         # every sentence they had already read to answer a question about the first one. The
         # reader that hands the step back is the module this one would stand aside for.
         return None
-    underneath = the_same_thing_underneath(text, _short(reply), times, memory)
+    if _a_figure_asked_that_the_answer_does_not_hold(text, reply):
+        # A money question asked again under a frame must get an answer holding a figure:
+        # "Same answer, and it covers this: whatever you can afford" names no amount and
+        # answers a different question. The tree that says it is not this one.
+        return None
+    underneath = the_same_thing_underneath(text, _short(reply, memory), times, memory)
     if underneath:
         return underneath
-    short = _short(reply)
+    short = _short(reply, memory)
     if _flat(short) != mine and _times_on_the_screen(_flat(short), memory):
         short = reply  # the short form was served last turn too: say the whole of it, framed
-    if _asks_for_a_detail(text) and not _asks_for_a_detail(_the_line_that_got_it(mine, memory)):
+    if ((_asks_for_a_detail(text) or ANOTHER_ONE.search(str(text or "")))
+            and not _asks_for_a_detail(_the_line_that_got_it(mine, memory))):
         # This line asks for a part of the answer the earlier line did not ("how long do i cook
         # rice for" after "how do i cook rice"), so the part it asks for is further down than the
         # opening, and the frame must not throw it away.
         short = reply
-    return AGAIN[min(times, len(AGAIN)) - 1].format(reply=short)
+    said_twice = _another_stand_down(reply, memory)
+    if said_twice:
+        # A refusal is not an answer, so "same answer" is the wrong thing to say about it, and the
+        # honest line is the one thing the chat has that can be said again in other words: the
+        # pool it came from. "That's beyond what I know well, sorry" framed as a repeat reads
+        # worse than the hedge on its own (sound-mask, deck `mtl-sick-note-work-01` t8).
+        return said_twice
+    lead = AGAIN[min(times, len(AGAIN)) - 1]
+    if ":" in short:
+        # The card has a colon of its own ("The ambulance is on its way: keep him on his side"),
+        # so a lead ending in one reads as a double colon and contradicts itself - "Nothing new to
+        # add on it: The ambulance is on its way: keep him on his side". A dash never clashes, and
+        # `_lead` reads a frame written either way, so the turn still counts as the repeat it is.
+        lead = lead.replace(": {reply}", " \u2014 {reply}")
+    return lead.format(reply=short)

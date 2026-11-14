@@ -23,9 +23,11 @@ place to look and, where it helps, one short question.
     will it frost tonight                 "...no live weather from me - a forecast app has
                                            today's, hour by hour..."
 
-Five kinds are here and no more, because each one has a *named* place that knows and that is what
-makes the reply worth more than a search: a service's own catalogue, a journey planner, the place's
-own listing, the government that writes the rules, and the sky over the person's own postcode.
+Six kinds are here and no more, because each one has either a *named* place that knows or a list
+the bot has already given, and that is what makes the reply worth more than a search: a service's
+own catalogue, a journey planner, the place's own listing, the government that writes the rules,
+the sky over the person's own postcode, and - the sixth - the checks the bot itself named a turn or
+two ago, handed back when the person asks what to check before they commit.
 Anything else stands down (returns None) and the floor answers as it did before.
 
 Two more were added after the operator's note that a pointer on its own is not an answer: a choice
@@ -59,6 +61,28 @@ HOME_COUNTRIES = frozenset((
 ))
 NOT_HOME_COUNTRIES = tuple(sorted(
     (name for name in COUNTRIES if name not in HOME_COUNTRIES), key=len, reverse=True))
+# The names of the countries a move could be going to, longest first so "south sudan" is not read
+# as "sudan". They are the knowledge base's own table, read the first time a line asks about the
+# rules rather than at import: the table is big and most conversations never come near it. Only the
+# UK's own names are left out - moving to Ireland or to Holland is a move somewhere else, moving
+# to Leeds or to Edinburgh is not.
+MOVE_HOME_NAMES = frozenset((
+    "united kingdom", "england", "scotland", "wales", "northern ireland", "great britain",
+    "britain", "uk",
+))
+_A_NAMED_COUNTRY = None
+
+
+def _a_named_country_in(text):
+    """True when the line names a country other than this one."""
+    global _A_NAMED_COUNTRY
+    if _A_NAMED_COUNTRY is None:
+        from ..knowledge.geography import COUNTRIES as all_countries, _COUNTRY_ALIASES
+        names = sorted((set(all_countries) | set(_COUNTRY_ALIASES)) - MOVE_HOME_NAMES,
+                       key=len, reverse=True)
+        _A_NAMED_COUNTRY = re.compile(
+            r"\b(?:" + "|".join(re.escape(name) for name in names) + r")\b", re.I)
+    return bool(_A_NAMED_COUNTRY.search(text or ""))
 
 # The services whose catalogue the bot cannot see. Named the way people type them, with the form
 # the reply uses - "iplayer" is "iPlayer" on screen and "bbc" alone is not a service.
@@ -103,9 +127,26 @@ TRAVEL = {
 # are about a thing and a habit) are not this reading.
 # Both ends are required, so "how do i get to sleep", "get to work" and "get to the gym" - a
 # thing and two habits - are not this reading. The "from" is what makes it a journey.
+# The superlative is the same question as "best way": a person asking the quickest way to get
+# somewhere from somewhere else is asking for the route, and the reading held only the word
+# "best", so "wats the quickest way to get to heathrow from ealing" reached the search hedge
+# while "whats the best way to get to heathrow from ealing" got the route card. What matters is
+# not which superlative it is - it is that both ends are named and the word before "way" or
+# "route" is a comparison, so the two ends do the work and the adverb is a class, not a list.
+_A_COMPARISON = (r"(?:best|quickest|fastest|easiest|cheapest|simplest|shortest|safest|"
+                 r"most direct|nicest|prettiest)")
 GET_FROM_TO = re.compile(
     r"\bhow (?:do|can|would|could) (?:i|we|you) (?:get|travel)\s+(?:to|from)\b[^?.]{0,30}\bfrom\b|"
-    r"\bbest way (?:to|of) (?:get|getting|travel|travelling)\s+(?:to|from)\b[^?.]{0,30}\bfrom\b|"
+    # "the fastest route to leeds from manchester" names both ends and no verb, and it hedged.
+    # The noun has to be one that is about places - a route, a journey, a drive - because "way"
+    # is not: "the best way to make bread from scratch" and "the quickest way to get over a cold
+    # from day one" have the same shape and are about something else entirely.
+    r"\b(?:" + _A_COMPARISON + r"\s+)?(?:route|journey|drive|commute)\s+to\b[^?.]{0,30}\bfrom\b|"
+    r"\b" + _A_COMPARISON + r"\s+(?:way|route)\s+(?:to|of)\s+(?:get|getting|travel|travelling)"
+    r"\s+(?:to|from)\b[^?.]{0,30}\bfrom\b|"
+    r"\b" + _A_COMPARISON + r"\s+(?:way|route)\s+from\b[^?.]{0,30}\bto\b|"
+    r"\b" + _A_COMPARISON + r"\s+(?:way|route)\s+(?:to|of)\s+(?:get|getting|travel|travelling)"
+    r"\s+from\b[^?.]{0,30}\bto\b|"
     r"\bhow long (?:does it|will it|would it) take to (?:get|drive|travel|cycle|walk)\s+to\b"
     r"[^?.]{0,30}\bfrom\b|"
     r"\bhow (?:do|can|would|could) (?:i|we|you) (?:get|travel)\s+from\b[^?.]{0,30}\bto\b", re.I)
@@ -114,6 +155,16 @@ WANTS_A_TIME = re.compile(
     r"won'?t make|is there a|are there any|how often)\b", re.I)
 # "the last train to leeds" is this reading. A train that is late, a ticket price, a seat and a
 # season ticket are all questions with an answer of their own, and the bot has them.
+# A destination that is not a place: "the quickest way to get to sleep from a busy day" and "the
+# best way to get to grips with it from here" are about a thing, not a journey, and the two ends
+# being named does not make them one. Only the widened superlative can reach these - the old
+# "best way to get to X from Y" did not hold "sleep" often enough to matter - so the words that
+# make a destination a figure of speech are listed rather than guessed at.
+NOT_A_DESTINATION = re.compile(
+    r"\bget(?:ting)?\s+(?:to\s+)?(?:sleep|rid|grips|know|understand|talk|the\s+(?:point|bottom)|"
+    r"terms|an?\s+agreement|a\s+decision|the\s+root)\b|"
+    r"\bget(?:ting)?\s+(?:over|through|around|on\s+top\s+of|out\s+of|away\s+with|the\s+hang)\b",
+    re.I)
 NOT_A_JOURNEY = re.compile(
     r"\b(?:delayed|delay|cancelled|cancel|refund|ticket price|how much is .{0,20}ticket|"
     r"season ticket|railcard|strike|replacement bus|sleeper|i'?m on (?:the|a) "
@@ -171,10 +222,35 @@ PICK_NOT = {
 # A pick is a pick *in a place*: without one the question is "what should i do with half an hour",
 # which is not a list of places to go. The place can be on the turn before this one ("we're going
 # to cornwall in august" then "any good beaches for the kids").
+# A time of day is not a place, and it is the word a preposition of place most often lands on
+# when somebody asks what to do rather than where to go: "what do i do at dinner time" after a
+# feeding question was read as a place name and answered with the day-out shape ("one thing worth
+# the journey out, one long lunch"), and "what should i do in the evening" the same way. The words
+# below name a part of the day, a meal or a routine, so a preposition in front of one is telling
+# you when, not where; `time` is here for the same reason, it is never a place. The article is
+# stepped over first, because "in the evening" and "at the weekend" are the same time as
+# "in evening" and the place reading was landing on `the`. The weekend is deliberately not here: a
+# weekend ask is served well by the day-out shape, which is about a day and not about a meal.
+A_TIME_NOT_A_PLACE = (
+    r"(?:dinner|dinnertime|dinner\s+time|lunch|lunchtime|lunch\s+time|breakfast|"
+    r"breakfast\s+time|tea|teatime|tea\s+time|supper|brunch|snack|elevenses|"
+    r"bed|bedtime|bed\s+time|nap|naptime|nap\s+time|playtime|play\s+time|bathtime|"
+    r"bath\s+time|homework|pickup|pick\s+up|school\s+run|morning|mornings|afternoon|"
+    r"afternoons|evening|evenings|night|nights|tonight|midday|noon|time)")
+# The words a preposition of place can land on that are not places: the verbs the pick reading
+# already refused, and the times above. "in times square" is a square and stays one - the word
+# boundary keeps `time` from eating `times`.
+#
+# `day`, `days`, `week` and `weeks` are deliberately NOT in the list, on `weekend`'s reasoning: "in
+# the day" and "in the week" ask about a stretch of time to fill, which is exactly what the day-out
+# shape is written for, and `A_PART_OF_DAY` names no such thing - refusing them took the trigger off
+# "what should i do in the day" and left it on the search hedge (plain-hippo's read of this).
+A_NOT_A_PLACE = (
+    r"(?:(?:the|a|an)\s+)?"
+    r"(?:eat|go|walk|do|take|get|see|find|pick|order|book|be|have|" + A_TIME_NOT_A_PLACE + r")\b")
 A_PLACE = re.compile(
     r"\b(?:in|near|around|round|at|by|beside|from|to|outside|inside)\s+"
-    r"(?!eat\b|go\b|walk\b|do\b|take\b|get\b|see\b|find\b|pick\b|order\b|book\b|be\b|"
-    r"have\b)[a-z]", re.I)
+    r"(?!" + A_NOT_A_PLACE + r")[a-z]", re.I)
 WANTS_A_PICK = re.compile(
     r"\b(?:best|good|nice|decent|any good|recommend|worth|where should|what should|"
     r"suggest|anywhere|favourite|favorite|top)\b", re.I)
@@ -182,15 +258,92 @@ WANTS_A_PICK = re.compile(
 # A day out is not a pick the bot can be wrong about: it cannot name a beach or a museum, but the
 # shape of a day and the question that decides it are honest and useful, and it is the follow-up
 # its own invitation asks for ("where to stay or what to do while you are there?").
+# A meal or a part of the day is a time, and "what do i do at dinner time" is an ask about a plan
+# for that time. Read as a place it was answered with the day-out shape ("one thing worth the
+# journey out, one long lunch"), which is a day, and refusing it left the search hedge - neither is
+# an answer. What the bot does know is the shape of that part of the day, which is the same in most
+# houses, and the one question that decides it.
+A_MEAL_TIME = re.compile(
+    r"\b(?:at|for|before|after|around|over)\s+(?:the\s+|my\s+|our\s+)?"
+    r"(?:dinner|dinner\s*time|lunch|lunch\s*time|breakfast|breakfast\s*time|tea|tea\s*time|"
+    r"supper|supper\s*time|brunch|tea ?time)\b", re.I)
+# "this morning" and "tomorrow afternoon" name a part of the day as plainly as "in the morning"
+# does, and a real line arrives with the apostrophe stripped ("what s on this morning").
+A_PART_OF_DAY = re.compile(
+    r"\b(?:at|in|during|over|before|after|this|tomorrow|next)\s+"
+    r"(?:the\s+|my\s+|our\s+)?"
+    r"(?:morning|afternoon|evening|night|midday|noon|bedtime)\b", re.I)
+# The ask is what to *do*, not what to cook or eat: "what should i cook in the evening" has a card
+# of its own and keeps it.
+WANTS_A_PLAN = re.compile(
+    r"\b(?:what|anything|any|how)\b[^?]{0,32}\b(?:should|shall|can|could|do)\s+(?:i|we)\s+do\b"
+    r"|\bwhat\s+to\s+do\b|\bhow\s+(?:do|should)\s+(?:i|we)\s+(?:fill|pass|plan|spend)\b"
+    r"|\banything\s+(?:to\s+do|planned|on|happening)\b"
+    r"|\bwhat(?:'s|s|\s+s|\s+is|\s+else\s+is)?\s+(?:on|happening|going\s+on|good\s+to\s+do)\b",
+    re.I)
+# "what's on" and "what's happening" ask about the place, not about what to do with the time: a
+# meal named in the same line ("whats on at lunchtime") is when they are asking about, and the
+# food answer ("tell me what is in the house") is an answer to a different question. The frame is
+# read first and decides the pool, whatever time was named (@plain-hippo's read on #12919).
+AN_ON_ASK = re.compile(
+    r"\bwhat(?:'s|s|\s+s|\s+is|\s+else\s+is)?\s+(?:on|happening|going\s+on)\b"
+    r"|\banything\s+(?:on|happening)\b", re.I)
+MEAL_TIME_POOL = (
+    "Meals are the part worth pinning down: decide the one thing you are eating and keep the rest "
+    "plain, and the time sorts itself out. What have you got in the fridge?",
+    "At that time of day the trap is deciding it late. Pick the food first - something you can do "
+    "with one pan is plenty - and let the rest of it be whatever it is. What do you fancy?",
+    "One thing cooked and one thing cold is a meal, and it takes about twenty minutes. Tell me "
+    "what is in the house and I will say which of them to use.",
+)
+PART_OF_DAY_POOL = (
+    "The part of the day that works has one thing in it you actually want to do, and nothing else "
+    "booked round it. What would that one thing be?",
+    "Fill it from the other end: what would you be sorry to have missed by bedtime? That is the "
+    "one thing, and the rest of the time can look after itself. What sounds good?",
+    "Days like that are easier when the shape is set rather than the plan: one thing out of the "
+    "house, one meal, and the rest left loose. What kind of thing do you enjoy doing?",
+)
+
+
+def _a_time_of_day(said):
+    """The reply for a plan asked about a meal or a part of the day, or None.
+
+    Only a line that names a time and asks what to do with it. A place named as well as the time
+    ("what should we do in the evening in rome") is the day-out reading's, a person or a ward is
+    not a plan at all, and a line that asks what to cook has a card of its own.
+    """
+    if not said:
+        return None
+    meal = A_MEAL_TIME.search(said)
+    part = A_PART_OF_DAY.search(said)
+    if not (meal or part) or not WANTS_A_PLAN.search(said):
+        return None
+    if NOT_A_DAY_OUT_PLACE.search(said):
+        return None
+    rest = said
+    for match in (meal, part):
+        if match:
+            rest = rest.replace(match.group(0), " ")
+    if A_PLACE.search(rest) or A_PLACE_THERE.search(rest):
+        return None
+    # A meal time is the meal pool only when the ask was about the time; a "what's on at
+    # lunchtime" is about what is happening, and "one thing cooked and one thing cold" is the
+    # wrong half of that.
+    meal_pool = meal and not AN_ON_ASK.search(said)
+    return pick(MEAL_TIME_POOL if meal_pool else PART_OF_DAY_POOL, {}, said)
+
+
 THINGS_TO_DO_POOL = (
-    "I don't know the place well enough to name things, so here is the shape instead: one thing "
-    "worth the journey out, one long lunch, and the rest of the day left loose. What do you "
-    "usually enjoy doing?",
-    "Nothing specific from me, sorry - naming places I have not been to would be guessing. A day "
-    "that works most places is one big thing in the morning and nothing booked after it. Are "
+    "A day that works most places is one big thing in the morning and nothing booked after "
+    "it, though I don't know this place well enough to name the things: one worth the journey "
+    "out, one long lunch, the rest loose. What do you usually enjoy doing?",
+    "Naming places I have not been to would be guessing, so here is the shape of a day "
+    "instead: one big thing in the morning, one long lunch, and nothing booked after it. Are "
     "you after coast and walking, or food and towns?",
-    "I can't recommend places I have not been to. What I would do is pick the one thing you "
-    "would be sorry to miss and plan the day round that. What sort of thing do you like doing?",
+    "Pick the one thing you would be sorry to miss and plan the day round that, though I "
+    "can't recommend places I have not been to: it decides where you stay, when you eat and "
+    "what you drop. What sort of thing do you like doing?",
 )
 # A day out asked about the place the conversation is already in: "what should i do there",
 # "anything good to do while we are there", "what should we see in rome". The line names the
@@ -267,6 +420,20 @@ ABROAD = re.compile(
     r"|\b(?:relocat|retir|buy(?:ing)? (?:a|an) (?:house|flat|place))\w*\b[^?.]{0,25}"
     r"\b(?:to|in|abroad)\b" + A_TIME_AFTER +
     r"|\bmov\w*\b(?!\s*out\b)[^?.]{0,25}\b(?:to|in|abroad)\b" + A_TIME_AFTER, re.I)
+# The move on its own, with the text after it kept: the destination is the part that decides
+# whether this is a plan to live somewhere else or the town the person already lives in.
+# `_the_home_town` reads this and `GOING_AWAY` below, and nothing else defines them: a rewrite of
+# `ABROAD` took both with it, and a name read and not defined raises inside the arbiter's try, so
+# the whole move-and-paperwork reading went quiet - "what paperwork do i need" after two moves was
+# answered "Hello!" on main.
+MOVING = re.compile(
+    r"\b(?:mov|relocat|retir|buy(?:ing)? (?:a|an) (?:house|flat|place))\w*\b[^?.]{0,25}"
+    r"\b(?:to|in|abroad)\b", re.I)
+# A line that says the move is still to come: where it is planned rather than where they are.
+GOING_AWAY = re.compile(
+    r"\b(?:abroad|overseas|emigrat\w*|expat\w*|planning to (?:move|go|leave)|"
+    r"going to (?:move|emigrate)|thinking of (?:moving|emigrating|leaving)|"
+    r"want(?:s|ed)? to (?:move|emigrate|live) (?:to|abroad|overseas))\b", re.I)
 # The words that make "move ... to" be about a thing rather than a country.
 A_THING_NOT_A_PLACE = re.compile(
     r"\b(?:phone|mobile|laptop|computer|pc|tablet|account|money|funds|savings|isa|pension|bin|"
@@ -314,56 +481,162 @@ WANTS_THE_RULES = re.compile(
 # somewhere to put the part of the question the bot did not get. Only one reading uses it, and only
 # where the answer genuinely depends on a detail (which service, which journey, what they want).
 SERVICES_POOL = (
-    "I can't see what's on {service} from here, sorry. Its own search settles it in seconds, and "
-    "says whether the thing is included or to pay for.",
-    "I can't check {service}'s catalogue, sorry. Typing the title into its search is the quickest "
-    "way to know whether it is there today.",
-    "No access to {service} from here. Its own search will say whether it has it, and whether that "
-    "is a rental or part of the subscription.",
+    "A catalogue turns over every month with the rights, so I can't hold the list: "
+    "{service}'s own search settles it in seconds, and says whether the thing is included or "
+    "to pay for.",
+    "A catalogue turns over every month with the rights, so typing the title into {service}'s "
+    "own search is what says whether it is there today - I can't see it from here, and it "
+    "says whether that is a rental or part of the subscription.",
+    "What is on {service} changes with the rights, month to month, so I can't check it: its "
+    "own search is the one that knows, and it says whether that is a rental or part of the "
+    "subscription.",
 )
 JOURNEY_POOL = (
-    "I can't see live {mode} times from here, sorry. A journey planner will have today's, "
-    "cancellations included - where are you starting from, and when do you need to be there?",
-    "No live {mode} times from me, sorry. The operator's app or a journey planner has the real "
-    "ones - tell me the two ends and the time you have to be there and I'll help you plan around "
-    "it.",
+    "No live {mode} times from me, sorry: they are re-run all day and cancellations land "
+    "late, which is why a journey planner has today's and I can't - where are you starting "
+    "from, and when do you need to be there?",
+    "No live {mode} times from me, sorry - they are re-run all morning and cancellations land "
+    "later still, so a journey planner has the real ones and I can't: tell me the "
+    "two ends and the time you have to be there and I'll help you plan around it.",
 )
+# When both ends are already in the line, the route pool that asks for them is the wrong reply: the
+# person named Ealing and Heathrow and is told to name two places. These say the ends back and put
+# the one question that decides a journey - the hour - where it belongs. Nothing about a road, a
+# line or a time is added: what is true of every journey (the hour decides it, the planner holds the
+# times, and a buffer for parking or finding the platform) is all that is said.
+ROUTE_ENDS_POOL = (
+    # The ends are said back in the person's own words, so none of these opens with one: a reply
+    # that began "cardiff to bristol turns on the hour" starts in a small letter, and giving it a
+    # capital only trades that for "Cardiff to bristol", which is worse. The place goes where a
+    # sentence can hold it instead, and at least one wording closes on a statement rather than a
+    # question, because a friend does not end every turn the same way.
+    "On {start} to {end} the hour you set off decides it more than the miles do, and the bit at "
+    "each end counts as much as the road between - I can't see the times or the traffic from "
+    "here, sorry. A journey planner does it door to door, parking or platform included, and the "
+    "one thing worth settling before you look is the time you have to be there.",
+    "What settles {start} to {end} is the hour more than the distance: the peak is where it goes "
+    "wrong, and the queue at both ends counts as much as the road between them, so the same pair is "
+    "two different journeys at eight and at eleven. I can't see the day's times or the traffic from "
+    "here, so a planner is the one that gives both ends door to door - when do you need to be "
+    "there?",
+    "Where in each place you start and finish settles {start} to {end} more than the route between, "
+    "so fix the door first and let a planner work back from the hour you have to be there. The "
+    "times are the planner's, not mine, sorry.",
+)
+# The two ends of a route, in the words the person used, so the reply can say them back. A line
+# that names one end only is left to the pool that asks for the other.
+# Lazy groups with the end of the line behind them: "to heathrow from ealing" gives the two
+# places with nothing after them, and the tail of a longer line ("... on friday, thanks") is trimmed
+# by the words below rather than by the pattern.
+_THE_ENDS = re.compile(r"\bto\s+(?P<end>.+?)\s+from\s+(?P<start>.+?)\s*[?.!,]*\s*$", re.I)
+_THE_ENDS_REVERSED = re.compile(
+    r"\bfrom\s+(?P<start>.+?)\s+to\s+(?P<end>.+?)\s*[?.!,]*\s*$", re.I)
+# Words that end a place and start the rest of the sentence, so "heathrow from ealing on friday"
+# gives "heathrow" and not "heathrow from ealing on friday". The trim runs from the right.
+_NOT_THE_PLACE = frozenset((
+    "the", "a", "an", "on", "at", "in", "by", "for", "about", "and", "or", "but", "tomorrow",
+    "today", "tonight", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday", "next", "this", "please", "thanks", "quickest", "fastest", "best", "cheapest",
+    "easiest", "way", "route", "time", "times",
+))
+
+def _the_route_ends(said):
+    """The two places in a route ask, as the person wrote them, or None.
+
+    The line is a route question already, so the ends are the last two place-like runs of words
+    around "from" and "to". Anything longer than four words is not a place name a person typed,
+    and a line whose ends are only "the"/"my" has none to say back.
+    """
+    for pattern in (_THE_ENDS, _THE_ENDS_REVERSED):
+        found = pattern.search(said)
+        if not found:
+            continue
+        end = _a_place_name(found.group("end"))
+        start = _a_place_name(found.group("start"))
+        if end and start and end.lower() != start.lower():
+            return start, end
+    return None
+
+# A qualifier said after a place rather than of it: "manchester by bike", "manchester in rush
+# hour", "cardiff then", "leeds tomorrow". The cut is made anywhere in the run, not only at its
+# tail, because the qualifier trails whichever end it was said after - trimming the end of the
+# line alone gave "manchester by bike to leeds", which states a journey nobody asked about.
+_A_QUALIFIER_AFTER_THE_PLACE = re.compile(
+    r"\s+(?P<word>by|via|with|in|on|upon|at|for|then|please|thanks|today|tomorrow|tonight|now|"
+    r"early|late|weekdays|this|next|around)\b", re.I)
+# "in" and "on" also sit inside a real name - "stoke on trent", "sutton in ashfield",
+# "newcastle upon tyne" - so those two cut only when what follows them is not a name part.
+# A short list, because the names that are two words joined this way are few.
+_A_NAME_PART = frozenset((
+    "trent", "thames", "tyne", "avon", "wye", "humber", "sea", "furness", "ashfield", "arden",
+    "lyme", "wolds", "moss", "ribble", "derwent", "don", "aire", "clyde", "ness", "stour",
+))
+
+def _without_a_qualifier(run):
+    """The place alone, with anything said after it about how or when cut off."""
+    text = str(run or "").strip(" .?,'")
+    for found in _A_QUALIFIER_AFTER_THE_PLACE.finditer(text):
+        if found.group("word").lower() in ("in", "on", "upon"):
+            rest = text[found.end():].split()
+            if rest and rest[0].strip(".,").lower() in _A_NAME_PART:
+                continue
+        return text[:found.start()]
+    return text
+
+def _a_place_name(run):
+    words = [word for word in _without_a_qualifier(run).split() if word]
+    while words and words[-1] in _NOT_THE_PLACE:
+        words.pop()
+    while words and words[0] in ("the", "a", "an", "to", "from", "get", "my", "our"):
+        words.pop(0)
+    # "here" and "there" are ends the bot cannot see, and "here to work is a journey" is a
+    # sentence about nothing the person said. Without them the line asks for the ends instead.
+    if not words or len(words) > 4 or any(word in ("here", "there") for word in words):
+        return ""
+    return " ".join(words)
+
 ROUTE_POOL = (
-    "I can't see live times or routes from here, sorry. A journey planner has today's options door "
-    "to door - where are you going from, and when do you need to be there?",
-    "No timetables from me, sorry. A journey planner is the one that knows the real times between "
-    "two places - tell me the two ends and the day and I'll help you pick.",
+    "No timetables from me, sorry: they are re-cut every few months and the day's works "
+    "change them, so I can't see today's - a journey planner has the options door to door: "
+    "where from, and when do you need to be there?",
+    "No timetables from me, sorry - they are re-cut every few months, so the planner is the "
+    "one that knows the real times between two places, and I can't: tell me the two ends and "
+    "the day and I'll help you pick.",
 )
 PICK_POOL = (
-    "I can't vouch for {thing} somewhere I have never been, so a pick from me would be a guess. A "
-    "map app's reviews are the honest way to do it - say what matters and I'll help you narrow it "
-    "down.",
-    "Nothing reliable from me on {thing} I have not been to, sorry. Sorting a map app's reviews "
-    "by what you need, or asking in a local group, beats a guess.",
+    "Reviews beat a guess from me on the {thing} near you, which I have never been to: a map "
+    "app's, sorted by what you need, is the honest way - say what matters and I'll help you "
+    "narrow it down.",
+    "Reviews from people who have been beat my guess on the {thing} near you, since I have never "
+    "been to any of them: sort a map app's by what you need, and the count matters more than the "
+    "score.",
 )
 SHOP_POOL = (
-    "I can't see {shop}'s stock, prices or delivery times from here, sorry. Its own site has them, "
-    "worked out for your postcode.",
-    "That is {shop}'s own to know - I have no window on its stock or charges. Its site has the "
-    "answer, and the checkout tells you before you pay.",
+    "Stock, prices and delivery change by the hour and they are {shop}'s own to know, so I "
+    "can't see them: its site has them worked out for your postcode, and the checkout tells "
+    "you before you pay.",
+    "Stock, prices and delivery are {shop}'s own to know and they change by the hour, so "
+    "there is no window on them from here: its site has the answer, and the checkout tells "
+    "you before you pay.",
 )
 ABROAD_POOL = (
-    "I can't tell you what the paperwork needs - it depends on your passport and what you would be "
-    "doing there. The gov.uk pages on living abroad and the country's own official site are the "
-    "two that count.",
-    "That is one for the official pages rather than me: it turns on your nationality and your "
-    "plans. gov.uk's living abroad guidance, then the destination's own government site, are the "
-    "ones to read.",
+    "What paperwork you need depends on your passport and what you would be doing there, so I "
+    "can't tell you which one applies: gov.uk's living abroad guidance and the country's own "
+    "government site are the two that count.",
+    "It depends on your nationality and your plans, so the official pages are the ones to "
+    "read: gov.uk's living abroad guidance, then the destination's own government site.",
 )
 # The sky is the one reading here that is not a place at all: the forecast is live information
 # about where the person is standing, and the bot has no window on it. A forecast app or a
 # national weather site does, and it is worked out for their own postcode, which is the part a
 # general answer cannot give. The pool says only that: no invented weather, no guess at the week.
 WEATHER_POOL = (
-    "I can't check the forecast from here, sorry - no live weather in me. A weather app has "
-    "today's for your postcode, hour by hour, and the week ahead when you are planning.",
-    "No live weather from me, sorry. A forecast app or the national weather site has what is "
-    "actually coming where you are - that is the part I cannot see.",
+    "A forecast is worked out for a postcode and re-run through the day, so I can't hold "
+    "today's: a weather app has it for yours, hour by hour, and the week ahead when you are "
+    "planning.",
+    "A forecast is re-run for a postcode through the day, so there is no live weather from "
+    "me: a forecast app or the national weather site has what is actually coming where you "
+    "are.",
 )
 # The sky as the subject of an ask: "will it rain", "is it going to be icy", "is it foggy",
 # "will it be frosty on monday", "is there a frost tonight". The article is refused after "it"
@@ -397,10 +670,11 @@ A_SETTING = re.compile(
     r"machine|tumble dryer|dishwasher|iron|shower|bath|sauna|engine|car|van|room|bedroom|"
     r"house|flat|dough|batter|sourdough)\b", re.I)
 COUNCIL_POOL = (
-    "I can't check your council's rules from here, sorry - they differ from one to the next. Its "
-    "own site has the rule and the form, and the phone line will tell you which applies to you.",
-    "That depends on where you live, so I would not guess. Your council's own site is the one that "
-    "decides it, and it has the form.",
+    "The rules differ from one council to the next and change with the year, so I would not "
+    "guess at yours: its own site has the rule and the form, and the phone line will tell you "
+    "which applies to you.",
+    "It depends on where you live and no two councils do it the same, so I can't see your "
+    "council's rules from here: its own site is the one that decides it, and it has the form.",
 )
 
 # The other half of STYLE.md's "Not knowing, honestly": a limit is worth nothing on its own.
@@ -465,6 +739,68 @@ def _the_line_before(memory):
     return " ".join(said)
 
 
+def _the_answers_before(memory, count=4):
+    """The bot's own last few answers, newest first, or [] on the first turn.
+
+    Newest first because a person asking what to check is asking about the thing that is still on
+    the table: "what should i check" three turns after the price came up is about the price, and an
+    answer from before that is about something they have moved on from.
+    """
+    if not isinstance(memory, dict):
+        return []
+    turns = [turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)]
+    found = [str(turn.get("bot") or "").strip() for turn in turns[-count:]]
+    return [line for line in reversed(found) if line]
+
+
+def _the_checks_in(answer):
+    """The sentence of an answer that names the conditions, or "".
+
+    Taken whole, and not cut at a comma: the conditions *are* the sentence, and "A second-hand one
+    is fine if the frame is straight" without the brakes and the fabric is half the list the person
+    asked for. A long sentence is handed back as it is for the same reason; the only answers
+    skipped are the ones that are a question or a shrug, which name nothing.
+    """
+    found = []
+    for sentence in re.split(r"(?<=[.!?])\s+", str(answer or "")):
+        sentence = sentence.strip().strip("\"'\u201c\u201d").strip()
+        if not sentence or len(sentence) > 320:
+            continue
+        if NOT_A_CHECK_SENTENCE.search(sentence):
+            continue
+        if A_CHECK_SENTENCE.search(sentence):
+            found.append(sentence)
+    for sentence in found:
+        # The answer's *condition* is the list: "A second-hand one is fine if the frame is
+        # straight, the brakes hold and the fabric washes." Its neighbour says what matters about
+        # the thing in general ("what matters is that it folds into the car"), which is worth
+        # reading and is not the checks, so an "if" sentence is taken first wherever it comes.
+        if A_CONDITION.search(sentence):
+            return sentence
+    return found[0] if found else ""
+
+
+def _about_a_check(said, understood, memory):
+    """The checks the bot has named, handed back, or None.
+
+    The reply is the bot's own sentence with one line about what to do with it and, in two of the
+    three, a short question. Nothing is added to the list: a check this file made up would be a
+    fact about a pram or a boiler that the knowledge base has not got, which is the one thing a
+    last resort may not do. So an ask with no such sentence behind it stands down and the floor
+    answers as it did before.
+    """
+    if WANTS_A_CHECK.search(said) is None or CHECK_OF_SOMETHING_ELSE.search(said):
+        return None
+    for answer in _the_answers_before(memory):
+        checks = _the_checks_in(answer)
+        if not checks:
+            continue
+        if checks[-1] not in ".!?":
+            checks += "."
+        return pick(CHECKS_POOL, understood or {}, said).replace("{checks}", checks)
+    return None
+
+
 def _named_service(said):
     """The service a line names, as (the word in the line, the name on screen), or ("", "").
 
@@ -518,8 +854,21 @@ def _about_a_shop(said):
     return chosen
 
 
+def _the_mode_named(mode):
+    """The service noun as the pools need it: a modifier before "times", so always singular.
+
+    The line can name the service in the plural - "how often do the buses run", "how often do the
+    trains run on sunday" - and the slot it fills is "No live {mode} times", where the noun is
+    doing the work of an adjective. So a plural is put in the singular there; "no live buses
+    times" is not a sentence anybody says. Which plural belongs to which singular is already the
+    table above, so nothing is guessed from the ending of the word.
+    """
+    single = (TRAVEL.get((mode or "").lower()) or ("", ""))[0]
+    return single or mode
+
+
 def _about_a_journey(said):
-    if GET_FROM_TO.search(said) and not any(
+    if GET_FROM_TO.search(said) and not NOT_A_DESTINATION.search(said) and not any(
             re.search(r"\b" + re.escape(word) + r"\b", said) for word in TRAVEL):
         return "route"
     for word, (single, plural) in TRAVEL.items():
@@ -536,9 +885,12 @@ def _about_a_journey(said):
         # for a time or a journey is this reading.
         if word in ("tube", "metro"):
             mode = "Tube"
-        elif plural and re.search(r"\b" + re.escape(plural) + r"\b", said):
-            mode = plural
         else:
+            # The word that goes in front of "times" is the singular, whatever the person typed:
+            # "how often do the buses come" was answered "I can't see live buses times from here",
+            # and the plural appears in the line about as often as the singular. The plural still
+            # says which vehicle was meant (the entry is found by its own word), so nothing is
+            # lost by handing back the one name.
             mode = single
         return mode
     return None
@@ -664,7 +1016,7 @@ def _about_the_subject_named(said, understood, before=""):
         if kind == "journey":
             word = named.group(0).lower()
             return pick(JOURNEY_POOL, understood or {}, said).replace(
-                "{mode}", _SUBJECT_MODE.get(word, word))
+                "{mode}", _the_mode_named(_SUBJECT_MODE.get(word, word)))
         thing = _SUBJECT_LABEL.get(named.group(0).lower())
         if not thing:
             return None
@@ -811,10 +1163,16 @@ def _about_the_rules(said, understood, before="", memory=None):
     if not WANTS_THE_RULES.search(said):
         return None
     # The country is allowed to be on the turn before this one; the ask is not, because an ask
-    # with nothing of its own to ask about is the shrug's business, not this reading's.
+    # with nothing of its own to ask about is the shrug's business, not this reading's. A move
+    # needs a country as well: `ABROAD`'s move branch reads any "move to <word>" as a move abroad,
+    # so "we are thinking of moving to leeds" and then "what are the schools like" was answered
+    # with the passport pages. The town a person is moving to is not a country, and the rules for
+    # the move are the council's - "we are moving to spain" names one and keeps the pages.
     both = said + " " + before
-    strong = re.search(r"\b(?:abroad|overseas|emigrat\w*|visa|residency|passport for)\b", said)
-    if (ABROAD.search(both) and not _the_move_was_to_their_own_town(said, memory)
+    strong = re.search(r"\b(?:abroad|overseas|emigrat\w*|expat\w*|visa|residency|passport for|"
+                       r"work permit|right to (?:live|work)|country)\b", said)
+    if (ABROAD.search(both) and (strong or _a_named_country_in(both))
+            and not _the_move_was_to_their_own_town(said, memory)
             and not NOT_THE_PAPERWORK.search(said)):
         # A country is named on this line or the one before it, and the thing being moved is not
         # a phone, an account or a house: "should we move house" is not a visa question.
@@ -920,11 +1278,91 @@ def _about_the_sky(said, understood):
     return pick(WEATHER_POOL, understood or {}, said)
 
 
+# A check on a thing in hand, asked after the bot has already named the checks.
+#
+#     im looking at a used pram on facebook marketplace for 90 quid
+#     is that a good price
+#       "A pram is £150 to £400 new ... A second-hand one is fine if the frame is straight,
+#        the brakes hold and the fabric washes."
+#     what should i check before i pay
+#       "I'm not sure about that one, sorry - a quick search online will get you a solid answer."
+#
+# The list the person is asking for is in the answer two lines above their own: the bot has just
+# said what settles a second-hand pram. What it does not have is the reading that "what should i
+# check" is asking for that sentence back, so it offers a search for a question it has answered.
+# This is the same reading `bot/compose/verdict.py` makes when a person asks how to tell whether
+# the thing in the answer has gone off - the answer's own test, handed back - widened from one
+# sign to the conditions an answer puts on a thing.
+WANTS_A_CHECK = re.compile(
+    r"\b(?:what|which|anything|something)\b[^?.!]{0,26}\b(?:should|shall|do|to|need to|must|"
+    r"can|could)\b[^?.!]{0,24}\b(?:check|checking|look for|look at|look over|look out for|"
+    r"watch out for|watch for|ask|be careful|be wary)\b|"
+    r"\bwhat to (?:check|look for|look at|ask)\b|"
+    r"\banything\b[^?.!]{0,26}\b(?:be careful|be wary|to watch out|to look out)\b|"
+    r"\b(?:what|anything)\b[^?.!]{0,24}\bto be careful (?:of|about)\b", re.I)
+# A check the line puts on a thing of its own - "what should i check on a used car", "what do i
+# look for in a mortgage" - is not asking for the last answer back. The subject is new, and
+# handing back the pram's conditions would answer about the wrong thing.
+CHECK_OF_SOMETHING_ELSE = re.compile(
+    r"\b(?:on|about|for|in|with)\s+(?:a|an|the|my|your|his|her|their|our)\b", re.I)
+# The sentence of an earlier answer that names the conditions, in the words the bot chose: the
+# "fine if" an answer puts on the thing, the check to run, the claim about what is worth looking
+# at. A bare "if" is not one of them - "a boiler is built for 10 to 15 years ... even if it is
+# working today" is a condition on a claim about a boiler's life, and handing that back as the
+# list to work through was worse than the hedge it replaced.
+A_CHECK_SENTENCE = re.compile(
+    r"\bfine if\b|\bworth (?:checking|looking|a)\b|\bmatters?\b|\bwhat (?:settles|decides)\b|"
+    r"\bchecks?\b|\bchecking\b|\blook (?:for|at)\b|\bwatch (?:out )?for\b|\bsigns? of\b",
+    re.I)
+# An earlier answer that is itself a shrug or a question is not a list of anything, and neither is
+# a sentence that names care: "call 999 if the swelling spreads" is a condition on an answer, but
+# handing it back with "which of them can you test yourself?" would take the urgency out of it and
+# make a warning into a checklist. Those sentences are skipped and the floor keeps the turn.
+NOT_A_CHECK_SENTENCE = re.compile(
+    r"\?\s*$|\b(?:search online|look it up|not sure about that|tell me more)\b|"
+    r"\b(?:999|112|111|a&e|ambulance|hospital|nhs|gp|doctor|pharmacist|midwife|vet|"
+    r"urgent|emergency|straight away|right away)\b", re.I)
+# What makes a sentence the list rather than the description: the answer's own "if".
+A_CONDITION = re.compile(r"\b(?:fine )?if (?:the|it|there|they|you|your|its)\b", re.I)
+# The checks come back as the bot's own sentence, and the pool only says what to do with them, so
+# nothing here is a fact of its own: no list is invented, and no answer is widened past what it
+# already said.
+CHECKS_POOL = (
+    "{checks} That is the list to go through, and I can't see it from here - which of them can "
+    "you try yourself?",
+    "{checks} Those are still the things that decide it, so work through them first and tell me "
+    "what you find; I can only go on what you say about it.",
+    "{checks} Nothing to add to that: those are what goes wrong, in the order I would check "
+    "them. Which of them are you least sure about?",
+)
+
+
+def the_checks_already_named(text, memory=None):
+    """The checks the bot named earlier, handed back, or None.
+
+    The same reading `answer_for` makes, under a name `bot/modules/greeting.py` can call for the
+    one kind of line that does not always reach it as a hedge: "anything i should be careful of"
+    after the price of a second-hand pram is filed by the composer's neutral pool ("Got it. Is
+    there anything you'd like a hand with?"), which is a receipt rather than an answer, and the
+    receipt is what the reading replaces there.
+    """
+    said = _said(text)
+    if not said.strip():
+        return None
+    read = {}
+    if isinstance(memory, dict):
+        candidate = memory.get("understood")
+        if isinstance(candidate, dict):
+            read = candidate
+    return _about_a_check(said, read, memory)
+
+
 def answer_for(text, memory=None):
     """The honest limit and the place that knows, or None when the line is not one of these.
 
-    Only five kinds are read, and each one names a place the person can go to today. A line that
-    fits none of them is left to the floor, which is where it was before this module existed.
+    Only six kinds are read, and each one names a place the person can go to today or hands back
+    the checks the bot gave earlier. A line that fits none of them is left to the floor, which is
+    where it was before this module existed.
     """
     said = _said(text)
     if not said.strip():
@@ -942,13 +1380,23 @@ def answer_for(text, memory=None):
         return sky
     mode = _about_a_journey(said)
     if mode == "route":
+        ends = _the_route_ends(said)
+        if ends:
+            return (pick(ROUTE_ENDS_POOL, read, said)
+                    .replace("{start}", ends[0])
+                    .replace("{end}", ends[1]))
         return pick(ROUTE_POOL, read, said)
     if mode:
-        return pick(JOURNEY_POOL, read, said).replace("{mode}", mode)
+        return pick(JOURNEY_POOL, read, said).replace("{mode}", _the_mode_named(mode))
     shop = _about_a_shop(said)
     if shop:
         return pick(SHOP_POOL, read, said).replace("{shop}", shop)
     before = _the_line_before(memory)
+    # A time, not a place: "what do i do at dinner time" is a plan for a meal, and it is asked
+    # here so the day-out reading below cannot take it.
+    time_of_day = _a_time_of_day(said)
+    if time_of_day:
+        return time_of_day
     if _a_day_out(said, before):
         return pick(THINGS_TO_DO_POOL, read, said)
     thing = _about_a_pick(said, before)
@@ -957,6 +1405,9 @@ def answer_for(text, memory=None):
     subject = _about_the_subject_named(said, read, before)
     if subject:
         return subject
+    checks = _about_a_check(said, read, memory)
+    if checks:
+        return checks
     rules = _about_the_rules(said, read, before, memory)
     if rules:
         return rules

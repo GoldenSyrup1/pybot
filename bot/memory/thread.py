@@ -23,6 +23,7 @@ from ..understanding.normalize import IRREGULAR_PARTICIPLES
 from ..understanding.topics import PLACES as PLACE_WORDS
 from ..compose import pick
 from . import detail
+from . import _from_the_bot, _to_the_bot
 from .facts import no_tone
 
 # Lines that carry no subject of their own: acknowledgements and short reactions.
@@ -238,6 +239,130 @@ def thin(text):
     """
     reading = understand(text, {})
     return _is_thin(reading) or _is_memory_line(reading)
+
+
+# A line that points back at what was said before and names nothing of its own: "same as
+# before", "like last time", "the usual", "and that one", "the thing you said", "i meant the
+# other one", "same again". With a turn behind it these lines are read as they always were - the
+# store's for a correction, the composer's for a choice - so this reading only speaks where the
+# chat has nothing behind it, and then the whole answer is that there is no "before" to go on.
+POINTS_BACK = re.compile(
+    r"^(?:and |so |but |or |ok |okay |well |no |nah |yes |yeah |right |actually |sorry |please"
+    r"|how about |what about )*"
+    r"(?:"
+    r"(?:the )?same(?: one| thing)?"
+    r"(?: as (?:before|last time|last night|last week|last year|yesterday|the other day"
+    r"|the usual|usual|that|then|them|it|earlier))?"
+    r"|(?:just )?like (?:before|last time|last night|last week|yesterday|the usual|that|them|it)"
+    r"|(?:anything|something|what) else like (?:that|before|it|them)"
+    r"|the usual"
+    r"|as (?:we|i) (?:said|discussed|agreed)"
+    r"|(?:the )?(?:other|second|first|last) one"
+    r"|(?:that|this) one"
+    r"|(?:the )?(?:same|other) thing"
+    r"|(?:do |try |use )?what (?:you|we) said"
+    r"|the thing (?:you|we) said"
+    r"|(?:sorry )?(?:i|we) meant (?:the )?(?:other|that)(?: one| thing)?"
+    r")"
+    r"(?: (?:then|please|again|really|though|now|too|instead))*$")
+
+
+def points_back(text):
+    """True for a line that names nothing of its own and points at what was said before.
+
+    The words are the whole line ("and the other one then"), because a line with a subject in
+    it is that subject's: "the other flat" names a flat, and "same as the boiler" names the
+    boiler. Nothing here is a question about the chat, which the store reads elsewhere.
+    """
+    low = " ".join(str(text or "").lower().replace("'", "").split()).strip(" .!?,")
+    return bool(low) and len(low.split()) <= 6 and bool(POINTS_BACK.match(low))
+
+
+# A pointing word that is the whole subject of an ask: "how do i do it", "how long will it
+# take", "do that again", "is it worth it". The word carries the subject, so the line names
+# nothing the store or the knowledge base can be asked about. "it" and the rest are read as one
+# subject by the person typing it, whatever the line around it is asking.
+POINTING_WORD = re.compile(r"\b(?:it|that|this|them|those|these|one|ones|there)\b", re.I)
+# What the rest of such a line may be made of: the asking words, the auxiliaries, the little
+# prepositions, and the verbs that say what to do with a thing without naming one. A line with
+# any word outside these names its own subject ("how do i fix a bike"), and is not this.
+ASK_WORD = frozenset("""how what when where why which who whose do does did doing done can could
+should would will shall am is are was were be been being have has had may may might must i you we
+me my our your it that this them those these there one ones a an the and or but so then again
+please about for of in on at to with from much many long soon often far time worth better best
+good right now just really any ok okay well hey hmm hm oh ah sorry up down off out back
+away over around through""".split())
+# The verb has to be there: "what about that" and "that one" are the pointer on its own, which
+# the composer answers, and this reading is for the ask that has one ("how do i do it").
+ASK_VERB = frozenset("""do does did make makes get gets take takes cost costs try use uses go goes
+work works need needs start starts keep keeps put puts cook cooks buy buys fix fixes help helps
+worth better eat eats drink drinks say says""".split())
+
+
+# A line that asks the bot to pick between things ("which one should i buy", "should i get this
+# one") names no subject either, but the answer it wants is the decision one - "that is yours to
+# weigh, not mine" - not "which thing are you pointing at". The decision readers own it, and this
+# reading must keep its hands off, or an ask anybody can be helped with gets a shrug about a
+# missing subject.
+A_CHOICE = re.compile(r"\bwhich\b[^?]*\b(?:should|better|best|instead)\b"
+                      r"|\bshould i\b[^?]*\b(?:buy|choose|pick|go for)\b", re.I)
+
+
+def points_at_a_word_alone(text):
+    """True for an ask whose only subject is a pointing word: "how do i do it".
+
+    "how do i do it" as the first line of a chat has no thing in it to answer: the "it" points
+    at something the chat has not got, and the turn was answered with a search hedge ("I'm not
+    sure about that one, sorry") while the honest reply is that there is nothing for "it" to be
+    yet. The words outside the asking words are what is tested, so a line that names a thing of
+    its own ("how do i fix a bike", "how long does a chicken take") is not this, and neither is
+    "what about that", which is the pointer with no ask around it.
+    """
+    low = " ".join(str(text or "").lower().replace("'", "").split()).strip(" .!?,")
+    words = re.findall(r"[a-z]+", low)
+    if not words or not POINTING_WORD.search(low):
+        return False
+    if A_CHOICE.search(low):
+        return False
+    other = [word for word in words if word not in ASK_WORD and word not in ASK_VERB]
+    if not other:
+        return any(word in ASK_VERB for word in words)
+    # One word outside the asking words is the verb, and it is read as the verb only when it acts
+    # on the pointing word, which is what puts it in front of it: "how do i stop it", "how do i
+    # warm it up". A word after the pointing word names the thing itself ("how do i cook this
+    # chicken"), and two words are a phrase the store cannot place, so neither is this.
+    if len(other) > 1:
+        return False
+    at = words.index(other[0])
+    return at + 1 < len(words) and bool(POINTING_WORD.fullmatch(words[at + 1]))
+
+
+# A line that asks what they said or were worried about, in their own words: "what was it i was
+# worried about", "what were we talking about", "what was it i said". The recall readers read the
+# slot ("what did i say her birthday was"), and a line naming no slot at all had no reader: "what
+# was it i was worried about" was read as a line about a worry and answered with advice about
+# worrying, to somebody who had said nothing yet.
+# Only the feelings and the thinking: "what was it i said" and "what were we talking about" name
+# the chat itself and already have a reader that answers them with the store's own words, so this
+# leaves those alone. What has no reader is the line that names a feeling the chat never heard.
+WHAT_I_SAID = re.compile(
+    r"\bwhat (?:was|were) (?:it )?(?:i|we) (?:(?:was|were|am|are|had been) )?"
+    r"(?:worried|upset|angry|annoyed|sad|unhappy|thinking|saying)(?: (?:about|of))?\b", re.I)
+
+
+def asks_what_i_said(text):
+    """True for an ask about what was said or felt in this chat, naming no slot of its own."""
+    return bool(WHAT_I_SAID.search(str(text or "")))
+
+
+def nothing_said(memory):
+    """True when no earlier line of theirs has carried a subject yet.
+
+    "hi" and then "same as before" is a chat with nothing to be the same as, and the same goes
+    for "ok" or "thanks" in front of it: a recap or a pointer needs a subject behind it, and a
+    greeting has none.
+    """
+    return not any(carries_subject(str(turn.get("user") or "")) for turn in _turns(memory))
 
 
 def _is_memory_line(reading):
@@ -966,7 +1091,14 @@ def restate(text):
             said = " ".join(_embed(words, names))
             clause = ("whether " + said) if first in AUX else said
     else:
-        clause = " ".join(_flip(words))
+        # A statement keeps its "you" unless the line's own doing landed on the bot: "i told you
+        # my sister is called emma" said back was "you told you your sister is called emma", and
+        # "sorry i snapped at you" was "sorry you snapped at you". `_to_the_bot` marks the one
+        # "you" a verb of saying or a preposition makes the bot (told, called, at, with), so the
+        # flip leaves it alone and it comes back as "me"; a "you" that is only the person being
+        # spoken to - "i think you should rest", "a thank you card", "talk to me whenever you
+        # like" - is not marked and stays as it was typed.
+        clause = _from_the_bot(" ".join(_flip(_to_the_bot(" ".join(words)).split())))
     clause = _conditional(clause)
     # The reading drops a possessive, so a line said back reads "your mum birthday" where the
     # person wrote "my mum's birthday". `_keep_possessives` puts back only the "'s" the line had.

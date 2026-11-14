@@ -124,6 +124,22 @@ HELPING_TROUBLE = ("sad", "sadness", "down", "upset", "unhappy", "miserable", "s
                    "shut down", "shutting down", "grieving", "lost their", "lost his",
                    "lost her", "whose", "died", "death", "ill", "unwell", "in hospital")
 
+# "how do you say goodbye in irish" is the phrasebook's line, and the exit card reads the same two
+# words. A line that puts the saying in a language is asking for the words, not for a script.
+_SAID_IN_A_LANGUAGE = re.compile(
+    r"\bin (?:welsh|cymraeg|irish|gaeilge|scots|gaelic|french|spanish|espanol|portuguese|italian|"
+    r"german|deutsch|dutch|polish|russian|greek|turkish|arabic|hebrew|hindi|urdu|bengali|punjabi|"
+    r"japanese|chinese|mandarin|cantonese|korean|thai|vietnamese|swedish|norwegian|danish|"
+    r"finnish|icelandic|latin)\b"
+    r"|\b(?:translate|translation|pronounce)\b")
+
+
+def said_in_a_language(understood):
+    """True when the line asks for the words in another language, which is study.py's question."""
+    text = (understood.get("clean") or understood.get("text") or "").lower()
+    return bool(_SAID_IN_A_LANGUAGE.search(text))
+
+
 ENTRIES = [
     # --- what a behaviour means, and what to say to it ----------------------------
     # "what does it mean when someone is passive aggressive" was a shrug: the answer is what the
@@ -193,15 +209,34 @@ ENTRIES = [
           # the one who owes, rather than the one who is owed, is the other direction
           avoid=("i owe", "i still owe", "owe my", "owe him", "owe her", "owe them",
                  "i cant pay", "i can t pay")),
+    # A person can be named by what they do for you rather than by the relation: "i havent paid
+    # the childminder" is money owed to a person as much as "i owe my mate" is, and without the
+    # trade in the key the line went looking for the noun it named - the going rate for a
+    # babysitter, the fault-finding card for a boiler - when what it is really about is a debt and
+    # how to say it. The rule is the same one the entry already follows: the deed is paying, and
+    # the second signal is a person, however the person is described.
     entry("owe-friend-money", (("i owe", "i still owe", "owe my friend", "owe my mate",
                                 "owe him", "owe her", "owe them", "cant pay it back",
                                 "can t pay it back", "cant pay back", "cant afford to pay",
                                 "cant pay", "can t pay", "pay my friend back", "pay him back",
-                                "pay her back", "pay them back"),
+                                "pay her back", "pay them back",
+                                "havent paid", "haven't paid", "havnt paid", "havent payed",
+                                "havent payed them", "not paid", "never paid",
+                                "still havent paid", "still not paid", "i still owe them",
+                                "owe them for", "owe him for", "owe her for"),
                                # the person is the second signal: money owed on a card or a
                                # council tax bill is a money domain question, not this one
                                ("friend", "mate", "him", "her", "them", "back", "borrowed",
-                                "lent", "tickets")),
+                                "lent", "tickets",
+                                # a person paid for a job, by the job they do
+                                "cleaner", "window cleaner", "milkman", "babysitter",
+                                "baby sitter", "childminder", "child minder", "nanny",
+                                "tutor", "dog walker", "dogwalker", "hairdresser", "barber",
+                                "gardener", "plumber", "electrician", "builder", "painter",
+                                "decorator", "carer", "sitter", "driving instructor",
+                                "piano teacher", "music teacher", "swimming teacher",
+                                "handyman", "odd job", "man who fixed", "woman who cleans",
+                                "tradesman", "roofer", "joiner", "locksmith", "mechanic")),
           "Say it before they have to ask, and bring a number, not just an apology: 'I haven't "
           "forgotten the money I owe you. I can't do it all at once, but I can give you some of it "
           "this month and the rest by the end of next.' Then do that — a small date you keep is "
@@ -210,6 +245,92 @@ ENTRIES = [
           # "cant pay": "i cant pay my friend back this month what do i say" was getting the
           # StepChange answer, and tests/test_knowledge_life says which direction it should go.
           bias=1),
+    # "should i forgive my brother" was "That's your call, not mine", "i cant forgive my sister"
+    # was "Got it", and "is forgiving the same as forgetting" was a search hedge: the whole
+    # forgiveness question had no row. What the card does is separate the three things people
+    # run together - forgiving, trusting and forgetting - because that separation is the answer
+    # to all of them, and then say who does it and by when.
+    # One key group, because every way of asking holds the act itself: "should i forgive my
+    # brother", "i cant forgive her", "is forgiving the same as forgetting", "forgive and
+    # forget", "how long does it take to forgive someone". A second group of people words sent
+    # the bare ones ("is it weakness to forgive", "should i forgive, he never said sorry") to
+    # nothing at all, so the act alone is the key and the other worlds are fenced off below.
+    entry("forgive-someone", ((
+        # the act, in every form people type it
+        "forgive", "forgiving", "forgiveness", "forgave", "forgiven", "forgives",
+        "forgiv", "4give",
+        # and the ways it comes with a question attached: with the act alone as the key,
+        # "should i forgive my brother" and "is it weakness to forgive" were "That's your
+        # call", because one bare word scores no more than a phrase's first word.
+        "should i forgive", "should i forgiv", "can i forgive", "do i forgive",
+        "could i forgive", "is it ok to forgive", "is it ok not to forgive",
+        "is it wrong to forgive", "is it weakness to forgive", "weak to forgive",
+        "how do i forgive", "how to forgive", "how can i forgive", "how do you forgive",
+        "cant forgive", "can t forgive", "cannot forgive", "wont forgive", "won t forgive",
+        "able to forgive", "not forgiving", "never forgive", "to forgive someone",
+        "forgive someone", "forgiving someone", "forgive and forget",
+        "forgiving and forgetting", "forgiving the same", "same as forgetting",
+        "forgiving mean", "means forgiving", "forgiveness mean", "worth forgiving",
+        "i forgave", "i have forgiven", "i cant forgive", "i can t forgive",
+        "i wont forgive", "i won t forgive", "i need to forgive", "i want to forgive",
+        "i should forgive", "i will forgive", "i never forgive",
+        "have to forgive", "must i forgive", "need to forgive", "to forgive",
+        "long to forgive", "take to forgive", "forgive my", "forgave my", "forgiving my",
+        # forgiving is nearly always the act plus the person, so those pairs are keys too:
+        # "i forgave him" and "forgiveness is hard" scored nothing with the act alone, because
+        # one word on its own is worth no points at all.
+        "forgive him", "forgive her", "forgive them", "forgive the", "forgive that",
+        "forgave him", "forgave her", "forgave them", "forgiving him", "forgiving her",
+        "forgiveness is", "is forgiveness", "forgiveness has", "forgiveness takes",
+        "hard to forgive", "forgive hard", "forgiving hard", "forgive someone who",
+        "forgive a person", "forgive people", "forgive the person",
+    )),
+          "Forgiving is not saying it was fine, and it is not trusting them again: it is "
+          "deciding to stop charging them for it, so the thing stops running your week. Do it as "
+          "a decision rather than waiting to feel warm about them, and say what you are dropping "
+          "- 'I am not bringing this up again, and I am not pretending it did not happen.' You "
+          "can forgive someone and still keep them at arm's length, and nobody is owed the words "
+          "back until they have said sorry.",
+          # The act in the line is the whole subject of it, so where a bare "forgive" ties with
+          # a neighbour row or a fallback this is the row that should answer: the card says
+          # which of forgiving, trusting and forgetting the person is asking about.
+          bias=1,
+          # forgiving yourself is a different question with a different answer, and so is the
+          # partner-cheating afterwards one (after-affair, in family.py), which owns the affair
+          # words: this card is about forgiving another person for something done to you
+          avoid=("myself", "my self", "for what i did", "for what i said", "i did it",
+                 "my fault", "my own fault", "hate myself",
+                 # the other worlds that say "forgiving": a plant, a pan, a cut of meat and a
+                 # recipe are described as forgiving, and a loan is the one other forgiveness
+                 # there is. None of them is a person's debt.
+                 "plant", "plants", "houseplant", "houseplants", "garden", "gardening",
+                 "recipe", "recipes", "pan", "pans", "saucepan", "meat", "chicken", "steak",
+                 "cake", "bread", "pastry", "oven", "loan", "loans", "debt", "debts", "tax",
+                 "parking", "fine", "fines", "student",
+                 # a partner who cheated has its own afterwards card (after-affair, family.py),
+                 # written for the months of rebuilding a relationship, and it is the better
+                 # answer to "i cant forgive my husband for cheating"
+                 "affair", "affairs", "cheat", "cheated", "cheating", "unfaithful",
+                 "slept with")),
+
+    # Forgiving yourself is the other half of the same question and it is not the same answer:
+    # "i cant forgive myself for what i did" was a punt ("Thanks for telling me"), and the card
+    # for forgiving another person would be wrong for it - there is no debt to drop and nobody
+    # to keep at a distance.
+    entry("forgive-yourself", ((
+        "forgive myself", "forgiving myself", "forgive yourself", "forgiving yourself",
+        "forgiveness myself", "cant forgive myself", "can t forgive myself",
+        "cannot forgive myself", "never forgive myself", "not forgive myself",
+        "let myself off", "forgave myself", "hate myself for", "beat myself up",
+    )),
+          "Forgiving yourself is not letting it slide: it is saying what you did plainly, making "
+          "the amends you can, and then treating the debt as paid instead of re-running the "
+          "court case every night. Pick the smallest real repair - the apology, the thing you "
+          "would do differently - do it this week, and say privately that the next time you "
+          "would act differently. If the same voice keeps going over it months later, that is "
+          "worth talking through with someone.",
+          bias=1),
+
     entry("friend-quiet", (("friend", "friends", "mate", "bestie"),
                            ("ignoring", "quiet", "not replying", "replying", "replied",
                             "not answered", "hasn t replied", "stopped replying", "distant",
@@ -224,7 +345,16 @@ ENTRIES = [
                             "wont speak to me", "won t speak to me", "stopped speaking to me",
                             "havent heard from", "haven t heard from", "not heard from",
                             "no word from", "gone silent", "blanked me", "blocked me",
-                            "has blocked me", "avoiding me", "off with me")),
+                            "has blocked me", "avoiding me", "off with me",
+                            # the same silence said as texting: "my mate hasnt text me back in a
+                            # week" was answered "Got it. Is there anything you'd like a hand
+                            # with?" and "my friend isnt texting me back" with a three-line
+                            # template for asking for something. Every phrase here is a silence,
+                            # not a reply - "my friend texted back finally" is a different row.
+                            "text me back", "texted me back", "text back", "texted back",
+                            "hasnt text", "havent text", "havent texted", "not texted",
+                            "not text back", "no text back", "not texting", "stopped messaging",
+                            "not messaged")),
           "Ask once, plainly and without accusation: 'I haven't heard from you in a while — are you "
           "okay?' Then give it time. People go quiet for their own reasons, and one warm message "
           "beats three worried ones.",
@@ -300,7 +430,24 @@ ENTRIES = [
                  # other", and the line then fell to meeting-the-new-baby, which offered the
                  # scan picture. A partner introduced to children is still two people being
                  # introduced; the baby row fences the partner in its own avoid instead.
-                 "stepchild")),
+                 "stepchild",
+                 # Two animals being introduced are the pets lane's question, and the singular
+                 # words were missing: "how do i introduce two dogs" was read as two people and
+                 # told to give each one a reason to be pleased to meet the other ("Sam, this is
+                 # Priya, she runs the same hill route as you"), which is nobody's dog. Only the
+                 # shapes that name an animal as the thing introduced are fenced, so a plan that
+                 # mentions a dog in passing ("introduce my new partner to my friends at the
+                 # dog park") keeps the two-people script.
+                 "a dog", "the dog", "our dog", "my dog", "two dogs", "dogs to", "my dogs",
+                 "our dogs", "the dogs", "a cat", "the cat", "our cat", "my cat", "two cats",
+                 "cats to", "my cats", "our cats", "the cats", "a puppy", "two puppies",
+                 "a rabbit", "the rabbits", "my rabbit", "a guinea pig", "a hamster",
+                 "a budgie", "a parrot", "a horse", "a pony", "two pets",
+                 # "a new pet to my kids" is a real question and none of the pet cards answers it
+                 # yet, so the bare word "pet" stays out of the fence: a wrong two-people script
+                 # is what it gets today, and a punt would be no better. The animal names above
+                 # are what the cards can answer.
+                 )),
     entry("better-listener",
           (("listener", "listen better", "listen well", "listening", "listen properly",
             "a better listener", "good listener", "bad listener", "interrupt", "interrupts",
@@ -614,7 +761,7 @@ ENTRIES = [
             "starting", "starter", "starters", "open", "opening", "awkward", "silence",
             "nothing to say", "run out of things", "run out of", "dries up", "stalls",
             "stranger", "strangers", "someone new", "new people", "new person", "ice breaker",
-            "icebreaker", "what do i say", "what should i say", "what can i say")),
+            "icebreaker")),
           "Ask about the answer you just got instead of starting a new subject - \"how did that "
           "go?\" or \"what was the best bit?\" - because a conversation usually dies from "
           "answering and moving on, not from having nothing to say. Give a little of yourself so "
@@ -713,9 +860,10 @@ ENTRIES = [
           # the fence wording.end-a-conversation keeps, and the same reason: "how do i stop
           # talking in class" got this row off the words "stop talking", and a script for getting
           # off the phone is not an answer about a classroom.
-          # "how do you say goodbye in gaelic" is a translation, and the word goodbye is the
-          # only thing in it that looks like a conversation ending: the languages stand the exit
-          # down, so the phrase table answers instead.
+          # "how do you say goodbye in irish" is the phrasebook's line: the word goodbye is the
+          # only thing in it that looks like a conversation ending, and the language stands the
+          # exit down so the phrase table answers instead.
+          guard=lambda understood: not said_in_a_language(understood),
           avoid=TALKING_IS_NOT_A_CHAT + (
                  "spanish", "espanol", "español", "french", "francais", "français", "italian",
                  "german", "deutsch", "welsh", "cymraeg", "irish", "gaeilge", "gaelic",
@@ -1040,6 +1188,38 @@ ENTRIES = [
 # ("I can't take that on this week"), which is the wrong thing entirely for a person who has just
 # asked you out. The phrases name the date, so an ordinary "no" keeps the row it had.
 ENTRIES += [
+    # Ignoring someone politely is not the same question as ending a chat: "how do i ignore
+    # someone without being rude" and "how do i avoid someone politely" were both a hedge, and the
+    # ending card's "name the thing you have to get to" is the wrong advice for a person you have
+    # to keep seeing. The answer is boring rather than absent, so it has its own card.
+    entry("polite-distance",
+          # The verb alone is not the question: "how do i avoid getting sick on a plane", "how do
+          # i avoid injury when running" and "how do i avoid a hangover" are the cards for those
+          # things, and a bare "avoid" in this key took all seven of them. Every phrase here ends
+          # in a person - someone, a neighbour, a colleague - so only a person is kept at a
+          # distance.
+          (("ignore someone", "ignoring someone", "ignore him", "ignore her", "ignore them",
+            "avoid someone", "avoiding someone", "avoid him", "avoid her", "avoid them",
+            "avoid a neighbour", "avoid my neighbour", "avoid a colleague", "avoid my colleague",
+            "avoid my in laws", "avoid my in-laws", "avoid a person", "dodge someone",
+            "dodge a neighbour", "dodge my neighbour", "dodge him", "dodge her", "dodging him",
+            "brush off", "brush them off", "brush him off", "brush her off", "sidestep someone",
+            "evade someone", "get away from someone", "keep someone at arm", "at arms length"),
+           ("rude", "politely", "polite", "without being", "nicely", "discreetly", "kindly",
+            "how do i", "how to", "without upsetting", "at work", "neighbour", "neighbor",
+            "colleague", "in law", "in laws", "someone")),
+          "Don't blank them - be brief, dull and busy, which is easier to keep up than avoidance "
+          "and gives them nothing to push against. Answer in a sentence, ask nothing back, do not "
+          "laugh at the jokes, and keep your hands occupied or your coat on. \"I can't stop, I'm "
+          "just heading in\" works every time, and stepping away while you say it ends the "
+          "exchange. If it is someone you cannot move away from, sit at the end of the row and "
+          "arrive a minute late rather than making a thing of it.",
+          avoid=("ignore my", "ignore him", "ignore the", "ignoring my", "text", "message",
+                 "call", "email", "notification", "warning light", "error", "dog", "baby",
+                 "toddler", "child", "customer complaint", "ignore a",
+                 # a question is dodged, not a person: "how do i sidestep a question politely"
+                 # was answered with how to keep a bore at arm's length
+                 "question", "questions", "answering", "answering the")),
     # the id is not `decline-a-date`: family.py has a row of that name since the dating questions
     # were done again there, and two rows with one id make the registry ambiguous. Both stand:
     # that one wins the plainest wording, this one the "not interested", "no spark" and "one date"
@@ -1097,3 +1277,24 @@ ENTRIES.append(entry(
     "though, tell someone who can.",
     ask=("you", "your", "u", "can i", "could i", "will you", "would you"),
     avoid=("surprise", "surprises", "birthday", "present", "gift", "keep it from", "keeping it from")))
+# --- a phrase people use about their own life ---------------------------------------------
+# "what is a midlife crisis" was a search hedge. It is not a fact so much as a word people are
+# handed, so the answer says what it means and then what to do with it. ("what is a boundary"
+# was the same shape and is answered by the limits row above, so there is no second row here.)
+ENTRIES.append(
+    entry("midlife-crisis",
+          (("midlife crisis", "mid-life crisis", "middle age crisis", "mid life crisis",
+            "midlife", "middle aged", "middle age"),
+           ("what is", "whats", "what does", "mean", "am i having", "having one", "signs",
+            "symptoms", "why", "when", "age", "cope", "deal with", "husband", "wife", "partner",
+            "mum", "dad", "he", "she", "my", "feel")),
+          ("A midlife crisis is the shake-up people often have roughly between 40 and 55, when "
+           "the shape of a life stops matching the person in it and the changes come in a rush: a "
+           "new car, a sudden hobby, a job left, a marriage questioned. It is not an illness and "
+           "it is not inevitable - the research says most people's wellbeing rises through midlife "
+           "- but the sense of time running out is real, and it is usually about mortality rather "
+           "than about youth. The useful move is to name what is actually missing (freedom, "
+           "friendship, a body that works, work that matters) and change that one thing rather "
+           "than the whole life at once."),
+          avoid=("menopause", "perimenopause", "hot flushes", "period", "hormone", "testosterone",
+                 "birthday", "40th", "50th")))

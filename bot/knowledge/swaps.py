@@ -105,7 +105,169 @@ def _the_chilli_swap(memory, reading):
             "the top.")
 
 
+# What to put in the place of a food the person has said they will not eat. A swap is the same
+# question whether the kitchen is out of a thing or the person cannot stand it: "i hate broccoli
+# what can i have instead" was a search hedge on main, and the onion, butter and cream swaps
+# beside it answered the shortage shape all along.
+TASTE_SAID = ("hate", "hates", "hated", "hateful", "dont like", "don't like", "do not like",
+              "doesnt like", "doesn't like", "does not like", "cant stand", "can t stand",
+              "can't stand", "cannot stand", "not a fan of", "not a fan", "not keen on",
+              "not fussed on", "dislike", "dislikes", "loath", "loathe", "cant eat", "can't eat")
+
+# The words that ask what to have instead. A taste with none of these in the line is the store's
+# to say back, so this tuple is the second gate on the row.
+ASKS_FOR_A_SWAP = ("instead", "what else", "anything else", "something else", "what can i have",
+                   "what could i have", "what should i have", "what can i eat", "what should i eat",
+                   "what do i eat", "else can i eat", "leave it out", "leave them out",
+                   "leave out", "skip it", "without", "what can i use", "what do i use",
+                   "what should i use", "substitute", "swap", "replace", "alternative",
+                   "what can i put", "what can i have on", "stand in")
+
+# The ask with no stand-in word in it: the line names the food and says it will not have it.
+LEAVE_OUT_ASK = ("leave it out", "leave them out", "leave out", "leaving it out", "skip it",
+                 "skip them", "go without", "do without")
+
+REFUSED_ASK = TASTE_SAID + ASKS_FOR_A_SWAP
+
+# The food, and what to put in its place. Written per food rather than as a template, because
+# what to say about a hated mushroom is about the savoury depth it was providing.
+REFUSED_FOR = {
+    "broccoli": ("Cauliflower does the same job in a bake or a curry, and beans, romanesco or "
+                 "frozen peas are the easy green on the side. If it is the sulphury smell you "
+                 "cannot stand, roast it hard with oil and a squeeze of lemon rather than "
+                 "boiling it - that takes the edge off."),
+    "calabrese": ("Cauliflower, romanesco or green beans stand in for it in a bake or a curry, "
+                  "and roasting it hard with oil and lemon softens the sulphury edge."),
+    "cauliflower": ("Broccoli, celeriac or roast carrots do the bulk in a bake, and a spoon of "
+                    "grain mustard in the cheese sauce covers the gap."),
+    "mushroom": ("Aubergine or courgette takes the same space in a bake or a sauce, and a splash "
+                 "of soy or a spoon of miso gives back the savoury depth they were there for. In "
+                 "a mince, a tin of lentils does it too."),
+    "mushrooms": ("Aubergine or courgette takes the same space in a bake or a sauce, and a splash "
+                  "of soy or a spoon of miso gives back the savoury depth they were there for. In "
+                  "a mince, a tin of lentils does it too."),
+    "tomato": ("Roast red peppers or a spoon of tomato puree in the base give the sweetness "
+               "without the pieces, and lemon or a dash of vinegar at the end gives back the "
+               "acidity. Raw in a salad or a sandwich, cucumber, radish or peppers give the "
+               "crunch and the juice. If it is the texture, passata is a different thing in the "
+               "mouth from a chopped tomato."),
+    "tomatoes": ("Roast red peppers or a spoon of tomato puree in the base give the sweetness "
+                 "without the pieces, and lemon or a dash of vinegar at the end gives back the "
+                 "acidity. Raw in a salad or a sandwich, cucumber, radish or peppers give the "
+                 "crunch and the juice. If it is the texture, passata is a different thing in "
+                 "the mouth from a chopped tomato."),
+    "onion": ("Leek is the closest, milder by weight and slower to soften; shallots are sweeter, "
+              "spring onions sharper and better raw, and a teaspoon of onion powder stands in for "
+              "one onion in a stew. Nobody will notice it gone from a sauce."),
+    "onions": ("Leek is the closest, milder by weight and slower to soften; shallots are sweeter, "
+               "spring onions sharper and better raw, and a teaspoon of onion powder stands in "
+               "for one onion in a stew. Nobody will notice it gone from a sauce."),
+    "garlic": ("Leave it out - nothing collapses. The greens of a leek or a spring onion give "
+               "the savoury note without the heat, and a pinch of asafoetida does it if you have "
+               "some. If it is the little bits you dislike rather than the taste, garlic oil or "
+               "a whole crushed clove fished out at the end gives the flavour and none of them."),
+    "peas": ("Sweetcorn, broad beans, edamame or fine green beans all go in at the same minute "
+             "at the end, and frozen sweetcorn is the one nobody argues with."),
+    "courgette": ("Green beans or spinach go in for the same bulk, and aubergine or peppers "
+                  "roast in the same tray. Courgette adds water, so whatever you use, use less "
+                  "stock."),
+    "aubergine": ("Courgette, peppers or big flat mushrooms roast in the same tray and take the "
+                  "same oil, and they do not need salting first."),
+    "spinach": ("Kale or chard wilt in the same minute, and frozen peas or a handful of beans go "
+                "in where the spinach was going. If it is the slime, wilt it for 30 seconds and "
+                "squeeze it dry in a sieve."),
+    "cabbage": ("Spring greens, kale or a bag of coleslaw mix do the same job, and they cook "
+                "faster than a hard white cabbage."),
+    "carrot": ("Butternut squash, parsnip or swede roast and mash in its place. If it is the raw "
+               "carrot in a salad, cucumber sticks or peppers give the crunch."),
+    "carrots": ("Butternut squash, parsnip or swede roast and mash in its place. If it is the raw "
+                "carrot in a salad, cucumber sticks or peppers give the crunch."),
+    "celery": ("Leek or fennel go in at the same point of a base, and a pinch of celery salt "
+               "gives the flavour where the stick was. If it is the strings, peel them off with a "
+               "potato peeler."),
+    "pepper": ("Courgette or mushroom takes the space in a tray bake, and a teaspoon of paprika "
+               "gives the sweetness people usually wanted from it."),
+    "peppers": ("Courgette or mushroom takes the space in a tray bake, and a teaspoon of paprika "
+                "gives the sweetness people usually wanted from it."),
+    "beetroot": ("Roast carrots or sweet potato sit in the same tray and mash the same way, "
+                 "without the earthiness you are trying to get away from."),
+    "fish": ("Chicken, eggs, beans or halloumi give you the protein the fish was for, and a white "
+             "fish is far milder than an oily one if it was the fishiness you could not take. "
+             "Fish cakes and fish pie with a white sauce and plenty of parsley are how most "
+             "people who say they hate fish eat fish."),
+    "coriander": ("Flat-leaf parsley does the same job in a salad or on top of a curry, and "
+                  "basil or mint if the dish leans that way. If it tastes of soap to you, that is "
+                  "the gene, not fussiness."),
+}
+
+
+def _asks_for_a_swap(understood):
+    """Whether the line asks what to have in the place of the food it names.
+
+    The gate on the row itself: a taste with no ask in it is somebody saying what they will not
+    eat, and the store answers that with a note, or the food's own "no onion then" plan row does.
+    Letting this row win those lines took the answer away rather than giving a better one.
+    """
+    text = " " + str((understood or {}).get("clean") or "").lower() + " "
+    if not any(phrase in text for phrase in ASKS_FOR_A_SWAP):
+        return False
+    # "what can i use instead of tomato puree" is the shortage question: the row for tomato
+    # puree answers it, and this row stands down before it can win the line and hand back
+    # nothing. The stand-down is here as well as in `_refused_food` because a callable reply
+    # that returns nothing still costs the line the row that was asked for.
+    for phrase in ("instead of", "in place of", "substitute for"):
+        at = text.find(phrase)
+        if at >= 0 and any(name in text[at:] for name in REFUSED_FOR):
+            return False
+    return True
+
+
+def _refused_food(memory, understood):
+    """What to put in the place of the food the line says it will not eat.
+
+    A line that names the food after "instead of" is the shortage question, not the taste: the
+    row for that food answers "what can i use instead of mushrooms" with tinned or frozen ones,
+    which is the right answer to a pantry and the wrong one to a person who cannot stand them.
+    This row stands down there and the food's own swap row takes the turn.
+    """
+    said = " " + " ".join(str(word).lower() for word in (understood.get("words") or [])) + " "
+    text = " " + str((understood or {}).get("clean") or "").lower() + " "
+    if not any(phrase in text for phrase in ASKS_FOR_A_SWAP):
+        # A taste on its own is the store's, which says it back and remembers it ("Noted: you
+        # don't like mushrooms on your pizza"). Only a line that asks what to have in its place
+        # is this row's, and then the swap is the answer rather than the note.
+        return None
+    for phrase in ("instead of", "in place of", "substitute for"):
+        at = text.find(phrase)
+        if at >= 0 and any(name in text[at:] for name in REFUSED_FOR):
+            return None
+    for name in sorted(REFUSED_FOR, key=len, reverse=True):
+        if (" " + name + " ") in said or said.strip() == name:
+            return REFUSED_FOR[name]
+    return None
+
+
+
 ENTRIES = [
+    # A food the person will not eat, and what to put there instead. The row is keyed on the
+    # food and gated on the refusal, so "i hate broccoli" alone is not this row's line, and a
+    # shortage of the same food keeps its own swap row above.
+    entry("swap-what-i-will-not-eat",
+          # The taste is the key, not the food: keying the twenty foods in REFUSED_FOR made the
+          # swap domain's own word list so much less rare that "what can i use instead of tomato
+          # puree" lost its row and got a hedge. "leave it out" is here because it is how the
+          # question is put with no stand-in word at all ("can i leave out the garlic").
+          (TASTE_SAID + LEAVE_OUT_ASK, REFUSED_ASK),
+          _refused_food, bias=2, guard=_asks_for_a_swap,
+          # the refusal is the ask here rather than a shortage, and "what else" is how the
+          # substitute is asked for after it
+          ask=SWAP_ASK + REFUSED_ASK,
+          avoid=NOT_A_SWAP + ("grow", "growing", "plant", "planting", "allotment", "recipe",
+                              "cook", "cooking", "kitchen", "job", "work", "monday", "school",
+                              "commute", "weather", "rain", "garden", "slug", "slugs", "pigeon",
+                              "pigeons", "cats", "cat", "dog", "child", "children", "toddler",
+                              "baby", "kids", "son", "daughter", "husband", "wife", "partner",
+                              "mum", "dad", "guests", "guest", "allergy", "allergic")),
     # The one that started this: on main the plain butter question reached the pan of spent
     # frying oil, because that row's ask holds "can i use" and its key holds "butter". The bake
     # and the pastry questions are cooking.py's own swap rows and are left alone here.
@@ -962,11 +1124,24 @@ def _fenced(row, said):
     another kind of the same ingredient.
     """
     own = {word for name in _names(row.key[0]) for word in str(name).lower().split()}
+    # The taste row below is the one that answers a food somebody will not eat, so the shortage
+    # rows for that food stand down on it: "i dont like mushrooms what can i use instead" was
+    # answered with tinned or frozen mushrooms, which is the pantry question and not the one
+    # asked.
+    taste_row = str(getattr(row, "id", "") or "") == "swap-what-i-will-not-eat"
 
     def answer(memory, understood):
         text = " " + str((understood or {}).get("clean") or "").lower() + " "
         swapped = _swapped_out(text)
         if swapped and not any(_same_word(word, mine) for word in swapped for mine in own):
+            return ""
+        # only when the taste row can answer it: a taste with no "instead" in the line is the
+        # store's note or the food's own "no onion then" answer, and standing that down left the
+        # line with a hedge ("i dont like onions what can i do" was "start the dish with a leek").
+        if not taste_row and any(phrase in text for phrase in TASTE_SAID) \
+                and any(phrase in text for phrase in ASKS_FOR_A_SWAP) \
+                and any((" " + str(name).lower() + " ") in text
+                        for name in _names(row.key[0]) if " " not in str(name)):
             return ""
         asking_for_a_dish = any(phrase in text for phrase in _MAKE_ASK)
         if asking_for_a_dish and not any(phrase in text for phrase in _SWAP_SAID):

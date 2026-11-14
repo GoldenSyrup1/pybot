@@ -27,6 +27,10 @@ line past the entry's avoid list, not even an ambiguous one ("brest" is a whole-
 question neither way).
 """
 import re
+try:  # the reading of a dream, so a dream of a thing is not the thing
+    from ..memory import dream as _DREAM
+except Exception:  # noqa: BLE001 - a reading that cannot be imported just adds no rule
+    _DREAM = None
 import string
 
 # Misspellings a domain lists as key words on purpose, mapped to the entries that list them, so its
@@ -106,7 +110,14 @@ def _asking_with(typed, at):
     """True when the word at `at` is the line's own question word, not a thing in it."""
     if typed[at] not in ASKING_MODALS:
         return False
-    return at + 1 < len(typed) and typed[at + 1] in ASKING_SUBJECTS
+    if at + 1 < len(typed) and typed[at + 1] in ASKING_SUBJECTS:
+        return True
+    # The modal follows its subject instead of opening the question: "whats the cheapest thing i
+    # can get", "the best one you can buy". A tin never follows a person that way - "i can" is
+    # somebody and a verb - and without this the form of "canned" is the bare word "can", so the
+    # frozen-and-tinned row took every line of that shape: "whats the cheapest funeral i can get"
+    # and "cheapest thing i can get" were both answered with frozen vegetables.
+    return at > 0 and typed[at - 1] in ASKING_SUBJECTS
 
 MIN_SCORE = 4          # below this the line is not really about the entry
 
@@ -289,6 +300,43 @@ def the_line(understood):
                     for key in ("clean", "norm_text", "plain")).lower()
 
 
+def said_text(understood):
+    """The line's own words as one string, from whichever reading has them.
+
+    A reading carries `words` and `norm` as *lists*. Joining one is right; taking a list as the
+    fallback for a string is not, and it failed quietly in a guard: `understood.get("words") or
+    understood.get("norm") or ""` handed a list to `finditer` on a line whose `words` were empty,
+    and the TypeError came out of the lookup, so the line lost its answer altogether - "What's
+    15% of 80?" got "I don't know enough" while "what is 15% of 80" was fine. This is the one
+    place that reads those two keys as text, so a row cannot make that mistake again.
+    """
+    if not isinstance(understood, dict):
+        return ""
+    for key in ("words", "norm"):
+        taken = understood.get(key)
+        if isinstance(taken, str) and taken.strip():
+            return taken
+        if isinstance(taken, (list, tuple)) and taken:
+            return " ".join(str(word) for word in taken)
+    return ""
+
+
+def guard_passes(item, reading):
+    """The entry's own test of the reading, run so that a broken one stands only itself down.
+
+    A guard is called from inside the matcher, once per row the line reaches, so an exception in
+    it used to take the whole lookup down and the line lost every answer it had, not just this
+    row's. A row that cannot read the line is a row that does not answer it.
+    """
+    guard = getattr(item, "guard", None)
+    if guard is None:
+        return True
+    try:
+        return bool(guard(reading))
+    except Exception:
+        return False
+
+
 def asks_how_often(understood):
     """True when the line asks the interval rather than the method.
 
@@ -296,6 +344,33 @@ def asks_how_often(understood):
     """
     said = understood if isinstance(understood, str) else the_line(understood)
     return any(word in said for word in HOW_OFTEN_WORDS)
+
+
+# Sanding is a job, not the bag. A key word is read through its endings, so "sanding" is a row's
+# "sand" and "how long do i need to leave filler before sanding" bought a 25kg bag of sand, with a
+# lesson in how many square metres it covers. The words cannot go in an avoid list: an avoid word
+# is read through its endings too, so "sanding" there stands down every real bag of sand - "how
+# much sand for a sandpit", "how much sharp sand under paving slabs" - which is half of the
+# material rows. So the verb is read off the line instead: a modal in front of it ("do i need to
+# sand", "should i sand it"), the tool ("sander", "sandpaper"), or the job's own words ("sand the
+# door", "sand before painting"). Nobody asks for a bag of sand that way.
+SANDING_JOB = re.compile(
+    r"\bsanding\b|\bsanded\b|\bsandpaper\b|\bsand paper\b|\bsander\b|\bsanders\b"
+    r"|\b(?:need|needs|needed|should|must|can|could|shall|will|would|got|better|have to|has to)"
+    r"\s+(?:i\s+)?(?:to\s+)?sand\b"
+    r"|\bto sand\b|\ba sand\b"
+    r"|\bsand (?:it|them|this|that|down|off|back|first|before|after|with"
+    r"|the wall|the walls|the wood|the floor|the door|the doors|the ceiling|the trim|the edges?)\b"
+    r"|\bfiller\b|\bfilled and sanded\b|\bpolyfilla\b|\bwood filler\b|\bfilling knife\b", re.I)
+
+
+def a_sanding_job(understood):
+    """True when the line is about sanding something down, not about buying a bag of sand.
+
+    Takes the reading (`memory["understood"]`) or the line already flattened by `the_line`.
+    """
+    said = understood if isinstance(understood, str) else the_line(understood)
+    return bool(SANDING_JOB.search(said))
 
 
 SAID_LEADS = ("im", "i am", "im really", "im so", "im very", "im all", "ive been", "ive got", "i have",
@@ -393,10 +468,10 @@ class Entry:
     """One fact or piece of advice, keyed by the meaning of a line."""
 
     __slots__ = ("id", "key", "reply", "avoid", "bias", "ask", "slips", "domain", "fault",
-                 "report", "guard", "shape", "explain", "lead")
+                 "report", "guard", "shape", "explain", "lead", "outcomes")
 
     def __init__(self, id, key, reply, avoid=(), bias=0, ask=(), slips=(), fault=False,
-                 report=False, guard=None, shape=(), explain=False, lead=""):
+                 report=False, guard=None, shape=(), explain=False, lead="", outcomes=()):
         self.id = id
         self.key = tuple(key)
         self.reply = reply
@@ -445,6 +520,16 @@ class Entry:
         # when the line wants the shape it gives, and leaves the row alone on every other line,
         # so one field serves every shape and every domain without a word of the card changing.
         self.lead = lead
+        # The sentence this row owes a line that asks how its subject turns out, when the card
+        # itself is already on screen: ("survives", "Yes, if you do not switch it on: most phones
+        # that get wet come back once they are dried out."). A follow-up like "will it be
+        # alright" after the phone went in the sink names no subject of its own, so the only
+        # answer is the row's, and the row's answer has been given already - read out again it
+        # repeats a paragraph the person is looking at, and the turn used to give up and point
+        # them at a search instead, over a subject the bot had just answered. The shapes are the
+        # ones `bot/memory/narrow.the_outcome_asked` reads ("survives", "serious", "next",
+        # "explain"), so the same reading decides which sentence is owed.
+        self.outcomes = tuple(outcomes)
 
     def __repr__(self):
         return f"<Entry {self.id}>"
@@ -795,6 +880,47 @@ GONE_STATE = frozenset("""black white blue green grey gray red pink yellow orang
     bright pale gold silver cracked wet""".split())
 
 
+# --- a machine that stopped is not a person who stopped working -----------------
+# "stopped working" is the phrase for a machine that died and for a person who gave up their job,
+# and the row about the year after work stops was reading both: "my oven has stopped working,
+# what do i do" was answered with "That lost feeling is the usual thing and it has a shape", and
+# the plug-and-fuse answer to the same line never got a hearing. The words cannot tell the two
+# apart, because they are the same words; what tells them apart is the thing the line is about.
+# The reading already types the nouns in it, so the test is on that type and on the phrase
+# together, and no list of machines is kept here: the next machine somebody names is covered.
+STOPPED_WORKING = ("stopped working", "stopped work", "stops working", "not working",
+                   "isnt working", "isn't working", "packed in", "wont work", "won't work",
+                   "wont start", "won't start", "wont come on", "won't come on",
+                   "dead", "died", "has gone")
+
+
+def a_thing_has_stopped(understood):
+    """True when what stopped working is a thing in the line, not the person saying it.
+
+    For "my oven has stopped working, what do i do" and "the washing machine has packed in" the
+    subject is the machine, and the answer is the plug, the fuse and the door switch. For "i have
+    stopped working", "i gave up work" and "im retired and feel lost" there is no thing in the
+    line, so nothing is taken away from the rows about a person's own working life. A machine the
+    person only mentions in passing ("i lost my job and the oven has stopped working") is not the
+    subject and does not count, because the subject has to be one of the things named.
+    """
+    reading = understood if isinstance(understood, dict) else {}
+    words = " ".join(str(word) for word in (reading.get("norm") or reading.get("words") or ()))
+    line = " " + (words or str(reading.get("clean") or reading.get("text") or "")).lower() + " "
+    line = line.replace(" | ", " ").replace("|", " ")
+    if not any(" %s " % phrase in line for phrase in STOPPED_WORKING):
+        return False
+    things = [str(entity.get("text") or "").lower()
+              for entity in (reading.get("entities") or ())
+              if isinstance(entity, dict) and entity.get("type") == "thing"]
+    if not things:
+        return False
+    subject = str(reading.get("subject") or "").lower()
+    if not subject:
+        return True
+    return any(thing and (thing in subject or subject in thing) for thing in things)
+
+
 def the_thing_has_gone(understood):
     """Whether "gone"/"went" is what the thing did, rather than the state it went into.
 
@@ -843,6 +969,14 @@ SMELL_VERBS = frozenset(("smell", "smells", "smelled", "smelt", "smelling", "sme
                          "stink", "stinks", "stank", "stinking"))
 # Said of the food itself, the state words are the whole question: "the milk has gone sour", "the
 # ham looks slimy".
+# The words between a food and "bad" that make it the food's condition rather than a verdict on
+# it: "the ham has gone bad", "this chicken smells bad", "my milk is bad". They are the state
+# verbs BEFORE_OFF already skips, plus the smell verbs that go with "bad" as their ending.
+_BAD_IS_A_STATE = frozenset((
+    "has", "have", "had", "is", "was", "are", "were", "been", "be", "being", "got", "gets",
+    "getting", "gone", "went", "go", "goes", "going", "looks", "looked", "looking",
+    "tastes", "tasted", "tasting", "smells", "smelled", "smelt", "smelling", "smelling"))
+
 OFF_SAID_OF_FOOD = frozenset((
     "sour", "soured", "souring", "slimy", "slime", "tacky", "sticky", "mouldy", "moldy",
     "rancid", "curdled", "curdling", "rotten", "putrid", "funny", "bad", "dodgy", "grey",
@@ -908,8 +1042,14 @@ def food_has_gone_off(understood):
         said = words[at]
         # "is ham processed meat bad for you" is a diet question: "bad" said *of* the food is a
         # smell, "bad for you" is the verdict a nutrition row gives.
-        if said == "bad" and words[at + 1:at + 2] == ["for"]:
-            continue
+        if said == "bad":
+            # "is ham processed meat bad" is a diet question and "bad for you" is its verdict,
+            # while "the ham has gone bad" and "this ham smells bad" are the smell. The words
+            # between the food and "bad" say which one it is: a state verb there makes it the
+            # food's condition, and nothing there makes it the verdict the nutrition rows give.
+            between = words[pos + 1:at + 1]
+            if not any(word in _BAD_IS_A_STATE for word in between):
+                continue
         if said in OFF_SAID_OF_FOOD:
             return True
         if said in SMELL_VERBS:
@@ -941,6 +1081,47 @@ JOB_GUARD = ("repair", "repairs", "repaired", "repairing", "fix", "fixes", "fixe
 # determiner: "we want to move flat before winter" has no "the" in it and still names a home,
 # and it reached the seasonal-mood card while "we want to move the flat" did not - one word
 # apart, opposite answers. "get my flat sorted" is the same home said as a job to do.
+# "money off" is two things and the words that settle it are in the line: a discount on a thing
+# ("money off a sofa", "money off my holiday") or money leaving a person ("money off my mum"). A
+# borrowing word settles it, and so does a person after "off". No price conversation has either
+# in it, so one test stands every price row aside and they all get the loan lines right together:
+# six of seven `should i / can i / how do i borrow money off my <relative>` lines were answered
+# with a shop's till script ("ask the person who can say yes, not the till ... offer about two
+# thirds and settle in the middle") because a bare "money off" in a price row's key met them.
+#
+# It is one guard rather than a word in each row's avoid list because the rule is about the
+# phrase, not about the row: every row that reads a price needs it, and a row that later adds
+# "money off" to its key gets it by passing the same name.
+_BORROWING_IN_THE_LINE = re.compile(
+    r"\b(?:borrow(?:s|ed|ing|er|ers)?|lend(?:s|ing)?|lent|loan|loans|owed?|owes|tide me over)\b")
+# A person, and not a thing, is what was asked off. "money off my holiday" and "money off my
+# order" are discounts and stay; the relatives are the loan.
+_OFF_A_PERSON = re.compile(
+    r"\b(?:money|quid|pounds?|cash|tenner|fiver|ton|grand|\d+)\s+off\s+(?:of\s+)?"
+    r"(?:a|an|my|our|your|his|her|their)\s+"
+    r"(?:mum|mam|mammy|mother|mam|dad|father|parents?|brother|brothers|sister|sisters|"
+    r"gran|granny|nan|nana|grandma|grandad|grandpa|son|daughter|child|kid|uncle|aunt|auntie|"
+    r"cousin|husband|wife|partner|boyfriend|girlfriend|mate|mates|friend|friends|neighbour|"
+    r"neighbours|boss|colleague|colleagues|workmate|flatmate|housemate|lodger|landlord)\b")
+
+
+def a_price_not_a_loan(understood):
+    """True when a price row may answer: the line is a discount and not money off a person.
+
+    `guard=` on every entry that reads a price, so the whole lane agrees on the one rule instead
+    of each row fencing its own phrases. "should i borrow money off my mum", "can i get twenty
+    quid off my dad", "is it ok to borrow money off my parents" and the six other ways of saying
+    it are the borrowing rows' lines, and they fall through to those rows when this says no.
+    """
+    said = understood if isinstance(understood, dict) else {}
+    text = str(said.get("text") or said.get("clean") or "")
+    if not text:
+        text = " ".join(str(one) for one in (said.get("words") or ()))
+    if not text:
+        return True
+    return not (_BORROWING_IN_THE_LINE.search(text) or _OFF_A_PERSON.search(text))
+
+
 _FLAT_YOU_LIVE_IN = re.compile(
     r"\b(?:my|the|our|this|that|their|his|her|a|one)\s+"
     r"(?:tiny\s+|small\s+|little\s+|new\s+|old\s+|top\s+floor\s+|ground\s+floor\s+|"
@@ -981,6 +1162,40 @@ def not_the_heat_of_an_argument(understood):
     if not said:
         said = " ".join(understood.get("words") or ())
     return not _THE_HEAT_OF_AN_ARGUMENT.search(str(said))
+
+
+# --- the ask that wants the order of steps -------------------------------------------------
+# "what should i do first", "what do i sort first" and "what should i pick first" ask for the
+# order of the steps, and the "should i" in them is the same two words as "should i move house".
+# The deciding rows read it as a decision and answer a yes/no about a thing the line never named
+# as one: "moving house what should i do first" got the move-or-not answer, and the same line
+# without the word "should" got the moving plan, which is the answer it wanted.
+#
+# The test is the object of the ask. A decision's object is the thing being decided ("should i
+# move house", "should i sell the car"), and the object here is the empty verb itself - do, sort,
+# pick, get - followed by a word that says the person wants an order: first, next, before.
+_ORDER_OF_STEPS = re.compile(r"""
+    \b what \s+ (?:should|shall|do|would|must|can) \s+ (?:i|we) \s+
+       (?: do|sort|pick|choose|get|buy|wash|clean|tackle|start|book|pack|fix|handle
+         | plan|change|replace|check|ask|say|look \s+ at|deal \s+ with|set \s+ up
+         | make|go \s+ for|put \s+ up )
+    \b .* \b (?:first|next|before|afterwards|after \s+ that) \b
+""", re.X | re.I)
+
+
+def the_ask_is_the_order_of_steps(understood):
+    """True when the line asks what to do first rather than whether to do a thing."""
+    if not isinstance(understood, dict):
+        return False
+    said = understood.get("text") or understood.get("clean") or ""
+    if not said:
+        said = " ".join(understood.get("words") or ())
+    return bool(said) and bool(_ORDER_OF_STEPS.search(str(said)))
+
+
+def not_the_ask_about_the_order(understood):
+    """For a row that answers a decision: an ask for the order is not a decision."""
+    return not the_ask_is_the_order_of_steps(understood)
 
 
 def not_the_flat_you_live_in(understood):
@@ -1040,8 +1255,277 @@ def not_the_flat_of_something_made(understood):
     return True
 
 
+# --- what a figure in years belongs to ---------------------------------------
+# "my bike is a carrera, about 4 years old" got the child's inside-leg measurement, "my bike is 3
+# years old and the gears slip" the same card instead of the gear adjustment, and "my phone is an
+# iphone, about 3 years old" the under-two screen limit. Rows key "year old" as a sign that a
+# child is in the line, which is right for a child and wrong for a machine: the figure is the age
+# of the thing the person owns. No avoid word can tell the two apart, because the words are the
+# same either way, so the line itself is read for which the figure belongs to.
+_YEAR_OLD_FIGURE = re.compile(r"\b(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven"
+                             r"|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen"
+                             r")\s*(?:years?|yrs?)\s+old\b", re.I)
+# The line says what is old: "my bike is a carrera, about 4 years old", "the boiler's 12 years old".
+_A_THING_SAID_IS = re.compile(
+    r"\b(?:my|our|your|his|her|their|the)\s+(?P<noun>[a-z][a-z' -]{0,40}?)\s*"
+    r"(?:is|was|are|were|'s|s)\b[^.!?]{0,40}$", re.I)
+# Or just names one, with the figure after it: "my bike 4 years old, is it worth a service",
+# "the boiler 15 years old worth fixing". One word of the thing, because a longer window starts
+# reading the article of a child's age: "is the frozen film ok for a 4 year old" is a film, not a
+# figure of a thing's. A person named there is the exception and is caught before this is asked:
+# "my son, 4 years old, is biting" is a child's age and stays one.
+_A_THING_JUST_BEFORE = re.compile(r"\b(?:my|our|the|his|her|their)\s+[a-z][a-z']{1,14}\s*,?\s*$",
+                                  re.I)
+# Or points at one as the subject of the age: "its about 4 years old", "that is 4 years old",
+# "they are 4 years old". The word has to carry the age, not sit in the asking: "is it normal that
+# a 5 year old cant write his name" is a child, and a bare "it" in front of it is not a thing.
+_A_THING_POINTED_AT = re.compile(
+    r"\b(?:it|its|it's|that|this|they|these|those)\s+"
+    r"(?:(?:is|was|are|were|'s|about|roughly|around|only|just|nearly|now|prob)\b[\s,]*){1,3}$",
+    re.I)
+# A person named near the figure: the figure is theirs, and the row is right to answer.
+_PEOPLE_AGED = re.compile(
+    r"\b(?:i|me|my son|my daughter|my child|my children|my kid|my kids|my boy|my girl|son"
+    r"|daughter|child|children|kid|kids|boy|girl|baby|toddler|teen|teenager|he|she|him|her"
+    r"|his|hers|mum|dad|mother|father|wife|husband|partner|friend|nephew|niece|grandson"
+    r"|granddaughter|grandchild)\b", re.I)
+
+
+def the_years_are_a_things(understood):
+    """True when every figure in years on the line belongs to a thing and not to a person."""
+    text = ""
+    if isinstance(understood, dict):
+        text = str(understood.get("text") or understood.get("clean") or "")
+        if not text:
+            text = " ".join(str(word) for word in (understood.get("words") or ()))
+    text = " ".join(text.lower().split())
+    if not text:
+        return False
+    figures = list(_YEAR_OLD_FIGURE.finditer(text))
+    if not figures:
+        return False
+    for found in figures:
+        window = text[max(0, found.start() - 60):found.start()]
+        if _PEOPLE_AGED.search(window):
+            return False
+        if not (_A_THING_SAID_IS.search(window) or _A_THING_JUST_BEFORE.search(window)
+                or _A_THING_POINTED_AT.search(window)):
+            return False
+    return True
+
+
+# The words a row uses when the figure in years is a child's: a person named beside the age. A row
+# that keys "year old" next to "child", "kid", "son" or "toddler" is asking whether there is a child
+# in the line, which is why the age of a machine was answered as one. A row that keys the age next
+# to a thing of its own - the fridge that is 12 years old and wants replacing - is asking about the
+# thing, and must keep it.
+_CHILD_WORDS = frozenset((
+    "child", "childs", "children", "kid", "kids", "son", "sons", "daughter", "daughters",
+    "boy", "boys", "girl", "girls", "baby", "babies", "toddler", "toddlers", "teen", "teens",
+    "teenager", "teenagers", "newborn", "newborns", "stepson", "stepdaughter", "grandchild",
+    "grandchildren", "grandson", "granddaughter", "nephew", "niece", "pupil", "pupils",
+))
+_CHILD_PHRASES = frozenset(("little one", "little boy", "little girl", "a child", "my child",
+                            "the child", "our child", "my kids", "school age child"))
+_A_YEARS_OLD = re.compile(r"\b(?:years?|yrs?) old\b", re.I)
+
+
+def _the_age_is_a_childs(item):
+    """True when a row's own key says the figure in years belongs to a child.
+
+    Rows that answer a parent's line carry the child in their key - `bike-child-seat` has "child",
+    "kid", "son", "daughter", "toddler", "boy", "girl" beside "year old" - and those rows are the
+    ones that read the age of the person's own bike or handset as a child's. Rows that answer a
+    thing's own line, a fridge that is 12 years old and wants replacing, name a thing and no
+    person, so the same test leaves them alone.
+    """
+    known = _CHILDS_AGE_ROWS.get(item.id)
+    if known is not None:
+        return known
+    words, phrases = set(), []
+    stack = list(item.key or ())
+    while stack:
+        part = stack.pop()
+        if isinstance(part, str):
+            plain = part.lower().replace("'s", "s")
+            words.update(plain.split())
+            phrases.append(plain)
+        elif isinstance(part, (tuple, list, frozenset, set)):
+            stack.extend(part)
+    a_person = bool(_CHILD_WORDS.intersection(words)) or any(
+        phrase in _CHILD_PHRASES for phrase in phrases)
+    answer = a_person and _key_says_years_old(item)
+    _CHILDS_AGE_ROWS[item.id] = answer
+    return answer
+
+
+def _key_says_years_old(item):
+    """True when any string in the row's key holds a figure in years."""
+    stack = list(item.key or ())
+    while stack:
+        part = stack.pop()
+        if isinstance(part, str):
+            if _A_YEARS_OLD.search(part):
+                return True
+        elif isinstance(part, (tuple, list, frozenset, set)):
+            stack.extend(part)
+    return False
+
+
+_CHILDS_AGE_ROWS = {}
+
+
+
+
+
+# "keep an eye out for a rash" and "keep an eye on his temperature" are watching and waiting:
+# the eye is the instrument of the watching, not the thing that hurts. Read as the word, it made
+# every row keyed on the eye answer a question about warning signs - "what should i keep an eye
+# out for with my son" was given the conjunctivitis card and "keep an eye on his temperature"
+# the "Got it" shrug. The same words are one idiom in every line they appear in, so the guard
+# lives here and both the eye rows use it, whatever else the line says.
+#
+# It is one idiom in either number, and the singular-only reading was the hole in it: people say
+# "keep my eyes open", "keep your eyes peeled", "keeps his eyes on the ball", and read with
+# `eye` alone none of those matched, so the plural fell through to the eye rows. "i can barely
+# keep my eyes open" was answered with the conjunctivitis card - bathe it with cooled boiled
+# water - when the line is a tired body and not an eye complaint at all.
+_KEEPING_AN_EYE = re.compile(
+    r"\b(?:keep|keeps|keeping|kept|have|has|having|had|get|gets|getting|got)\s+"
+    r"(?:a|an|one|my|your|his|her|their|our|both|the)?\s*eyes?\s*"
+    r"(?:out|on|peeled|open|skinned|glued|trained)\b"
+    # The eye first and the watching after it: "eyes peeled", "eyes on the road".
+    r"|\beyes?\s+(?:peeled|open\s+for|on\s+(?:the|him|her|them|it|that|this|what))\b"
+    r"|\bturn(?:s|ed|ing)?\s+a\s+blind\s+eye\b|\beyes?\s+in\s+the\s+back\s+of\b"
+    r"|\beye\s+contact\b|\beye\s+witness\b|\bprivate\s+eye\b|\beagle\s+eye\b",
+    re.IGNORECASE)
+
+
+def not_keeping_an_eye_on_it(understood):
+    """True unless the line's "eye" is the watching rather than the thing that hurts."""
+    if not isinstance(understood, dict):
+        return True
+    said = understood.get("text") or understood.get("clean") or ""
+    if not said:
+        said = " ".join(understood.get("words") or ())
+    return not _KEEPING_AN_EYE.search(str(said))
+
+
+# A body that is short of sleep says so without the word sleep and without any "can't": "i keep
+# nodding off at my desk", "my eyes keep closing on the bus", "im falling asleep at my laptop",
+# "i can barely keep my eyes open". Read as nothing about sleep, every one of those was answered by
+# whatever row happened to share a word with it - the chair and the screen height for a desk, the
+# 20-20-20 rule for eyes, the sleep timer of a laptop. It is one statement, so it is read once here
+# and the rows that are not about it stand down (`not_a_sleepy_body`), while the tired answer is the
+# one that takes the turn.
+SHORT_OF_SLEEP = re.compile(
+    # the verb alone is not sleep: "i keep falling over" is the falls, "i keep dropping things"
+    # is the hands. Only nodding and dozing stand on their own; falling and dropping want the
+    # asleep after them.
+    r"\b(?:keep|keeps|keeping|kept)\s+(?:(?:nodding|dozing)\s*(?:off|asleep)?|(?:falling|dropping)\s+(?:off|asleep))\b"
+    r"|\bnodd(?:ing|ed|s)?\s+off\b|\bdoz(?:e|es|ed|ing)\s+off\b"
+    r"|\beyes?\s+(?:keep|keeps|are|were)?\s*(?:closing|dropping|shutting)\b"
+    # "keep my eyes open" is the tiredness, unless the words say what they are being kept open
+    # FOR - "keep my eyes open for a bargain" is watching for one.
+    r"|\b(?:keep|keeps|keeping|kept)\s+(?:my|your|his|her|their|our|both)?\s*eyes?\s+open\b"
+    r"(?!\s+for\b)"
+    r"|\bf(?:all|ell)(?:ing|s)?\s+asleep\s+(?:at|in|on|during|over)\b"
+    # "i can barely keep up with the rent" is the rent: the shortest form of this shape caught
+    # it, and only the word after it says which one it is, so the sleep is asked for too.
+    r"|\bcan\s*(?:'?t|cant|not)?\s*(?:barely|hardly)\s+(?:keep|stay)\s+"
+    r"(?:(?:my|your|his|her|their|our|both)\s+)?(?:eyes?\s+open|awake|alert)\b",
+    re.IGNORECASE)
+
+
+# An eye that is closing because of pollen is the allergy, not a shortage of sleep: "my eyes are
+# closing up with hay fever" is answered by the hay-fever reading, and called tiredness it got a
+# kind word about bad nights and no mention of the thing that is actually wrong.
+NOT_TIRED_AFTER_ALL = re.compile(
+    r"\b(?:hay ?fever|allerg(?:y|ies|ic)|pollen|conjunctivitis|stye|sty|glued|"
+    r"swollen|puffy|watering|streaming)\b", re.IGNORECASE)
+
+
+# The thing that "keeps falling asleep" is not always a person. A laptop, a phone and a console
+# all do it, and their own rows answer it ("It is the power setting, not a fault"); read as a
+# sleepy body the power row stands down and the person is told about bad nights instead. What
+# decides it is the subject the words put in front of the sleeping, so the two lists are read
+# against each other up to the shape: "my laptop keeps falling asleep" is the laptop's line, and
+# "i keep falling asleep at my laptop" is the person's, with the laptop after the verb.
+A_DEVICE_THAT_SLEEPS = frozenset((
+    "laptop", "laptops", "computer", "computers", "pc", "pcs", "mac", "macs", "macbook",
+    "phone", "phones", "iphone", "android", "tablet", "tablets", "ipad", "monitor", "monitors",
+    "screen", "screens", "tv", "television", "televisions", "console", "consoles", "xbox",
+    "playstation", "kindle", "printer", "printers", "camera", "cameras", "watch", "fitbit",
+))
+# The subjects that make the sleeping a person's: the person, the body part that sleeps, and the
+# child a parent is talking about ("the kids keep falling asleep at the table").
+_A_PERSON_WHO_SLEEPS = frozenset((
+    "i", "im", "i'm", "me", "myself", "we", "us", "ourselves", "he", "him", "himself",
+    "she", "her", "herself", "they", "them", "themselves", "you", "eyes", "eye", "head",
+    "body", "kid", "kids", "child", "children", "baby", "son", "daughter", "boy", "girl",
+    "boy", "boys", "girls", "toddler", "lad", "lass", "teenager", "nan", "dad", "mum",
+))
+# The marks the words carry into this file; the line is split on spaces, so a plain strip is all
+# a possessive or a comma needs.
+_SLEEPY_MARKS = string.punctuation + "\u2019"
+
+
+def _the_device_is_the_one_falling_asleep(said, start):
+    """Whether the words in front of a sleep shape name a device rather than the person."""
+    device = person = -1
+    for index, word in enumerate(said[:start].split()):
+        bare = word.strip(_SLEEPY_MARKS).lower()
+        if bare in A_DEVICE_THAT_SLEEPS:
+            device = index
+        elif bare in _A_PERSON_WHO_SLEEPS:
+            person = index
+    return device >= 0 and device >= person
+
+
+def the_body_is_short_of_sleep(understood):
+    """Whether the line says the person's body is short of sleep, in the words that say it."""
+    said = _the_whole_line(understood)
+    if NOT_TIRED_AFTER_ALL.search(said):
+        return False
+    for shape in SHORT_OF_SLEEP.finditer(said):
+        if not _the_device_is_the_one_falling_asleep(said, shape.start()):
+            return True
+    return False
+
+
+def not_a_sleepy_body(understood):
+    """A `guard=` test: True unless the line is a body that is short of sleep.
+
+    For the rows that answer where somebody is sitting or what they are looking at. "i keep
+    nodding off at my desk" is not a chair problem and "my eyes keep closing at the screen" is not
+    eye strain, so those rows stand aside and the tired answer takes the turn.
+    """
+    return not the_body_is_short_of_sleep(understood)
+
+
+def all_of(*guards):
+    """One `guard=` test from several, true only when every one of them says the row may answer.
+
+    A row can have more than one thing to stand aside for - the chair row already keeps out of
+    place-shaped asks and now keeps out of a sleepy body too - and `entry()` takes one guard, so
+    they are combined here rather than by wrapping one in a lambda at the row.
+    """
+    def test(understood):
+        return all(bool(guard(understood)) for guard in guards if guard)
+    return test
+
+
+def _the_whole_line(understood):
+    """The line as the person typed it, in one string, for a guard on the whole reading."""
+    if not isinstance(understood, dict):
+        return str(understood or "").lower()
+    said = " ".join(str(understood.get(key) or "") for key in ("text", "clean"))
+    if not said.strip():
+        said = " ".join(understood.get("words") or ())
+    return said.lower()
+
 def entry(id, key, reply, avoid=(), bias=0, ask=(), slips=(), fault=False,
-          report=False, guard=None, shape=(), explain=False, lead=""):
+          report=False, guard=None, shape=(), explain=False, lead="", outcomes=()):
     """Build an Entry. key: words, phrases, or tuples of alternatives for one key.
 
     bias: a nudge when two entries fit a line equally well, for the more specific one
@@ -1079,7 +1563,152 @@ def entry(id, key, reply, avoid=(), bias=0, ask=(), slips=(), fault=False,
     way a stated complaint does.
     """
     return Entry(id, key, reply, _avoid_words(avoid), bias, ask, slips, fault, report, guard,
-                 shape, explain, lead)
+                 shape, explain, lead, outcomes)
+
+
+# ---------------------------------------------------------- what kinds a thing comes in
+# A line that asks which families a thing comes in - "what kinds of tea are there", "what types of
+# apple are there", "the different sorts of potato" - is not asking about one of them, and the rows
+# that answer about one of them (brewing a cup, choosing a potato for mash) answered it or gave a
+# shrug instead. The shape is the same for every subject, so it is read once here: a domain adds a
+# subject as data (`kinds_entries`), and every wording below reaches it.
+#
+# Two parts, because the words alone cannot tell the ask from a use:
+# - the kinds words, which the row needs as one of its two signals, and
+# - `asks_the_kinds`, the guard that stands the row down when the line names a use as well,
+#   because "what type of potato is best for mash" and "what kind of tea goes with cake" are
+#   questions about the use, and the row that answers that use is the one to answer.
+#
+# The shape is not invented here: `bot/compose/fit.py` reads these lines as `options` and
+# `bot/modules/intent.py` writes that name into `memory["understood"]["wants"]`, which is how the
+# follow-up below and the rows that lean on it agree on one reading.
+KINDS_WORDS = ("kinds of", "kind of", "types of", "type of", "sorts of", "sort of",
+               "varieties of", "variety of", "different kinds", "different types",
+               "different sorts", "different varieties")
+# The name `bot/compose/fit.py` gives the ask for a menu of kinds, which `bot/modules/intent.py`
+# writes into `memory["understood"]["wants"]`. Spelled here rather than imported: `bot.compose`
+# imports `bot.memory`, which imports `bot.knowledge`, so an import here would close a circle at
+# load time.
+KINDS_SHAPE = "options"
+# The words a follow-up opens on. They name no subject of their own, so pairing them with the
+# subject is what says "this line is about that thing" - the same shape as ASK_ABOUT above.
+KINDS_FOLLOW_UP_WORDS = ("and", "what", "how", "about", "same", "also", "then", "so")
+# The words that make the line a question about a use rather than about which ones there are. "for"
+# is the plainest of them, and no kinds question needs it: "what kinds of tea are there for a cold"
+# is a cold question, and the row that answers colds has more to say than the list of teas.
+# A line that asks the bot what it likes or does ("what kind of coffee do you like", "what sort of
+# tea do you drink", "what types of coffee can you make") carries a subject and a kinds word like
+# every ask above, and is still a question to the bot: the bot's own answer is the one to give, and
+# the families of coffee answer a different question. The second person is what says so.
+KINDS_ASKS_ME = re.compile(
+    r"\b(?:do|does|would|will|did|can|could|are|were)\s+(?:you|u)\s+"
+    r"(?:like|love|prefer|drink|eat|use|having|have|think|recommend|choose|watch|read|make|"
+    r"order|rate|enjoy)\b")
+# A line that says how things are instead of asking about them. The kinds words alone do not say
+# which: "there are so many kinds of tea" carries them exactly as "the different types of potato"
+# does, and the understanding lane reads both as a statement, so `kind` cannot separate them and
+# neither can the kinds word. What separates them is a predicate, and a noun phrase has none: a
+# subject with a copula, an auxiliary or a common doing-verb after it is the person telling the
+# bot something ("there are so many kinds of tea", "we tried three different types of rice last
+# week", "they stock three sorts of rice"), where the right answer is the mirror ack and not the
+# families. Only the words arm needs this fence: a question has `wants == "options"`, which is the
+# other arm, and a follow-up leans on that shape.
+# A predicate does not make a line a statement if it is the verb of asking. "i want to know the
+# types of tea", "i would like to see the different sorts of milk", "i am after a list of the kinds
+# of honey" are questions with the question word left out, and the families are the answer. These
+# are the verbs that want something said, and they are a short closed list: everything else with a
+# subject and a verb is the person telling the bot how things are.
+KINDS_ASKS_WITH_A_VERB = re.compile(
+    r"\b(?:want|wants|wanted|wanna|would like|like to|need|needs|needed|wonder|wondering|"
+    r"wondered|ask|asked|know|knowing|learn|find out|show|show me|tell|tell me|curious|"
+    r"after|looking for|interested|thinking of|choose|choosing|pick|picking|decide|deciding|"
+    r"recommend)\b")
+
+KINDS_SAYS_HOW_IT_IS = re.compile(
+    r"\b(?:i|we|you|they|he|she|it|there|people|everyone|someone|nobody|this|that|these|those|"
+    r"the|my|our|his|her|their)\b(?:\s+\w+){0,3}\s+"
+    r"(?:is|are|was|were|am|has|have|had|do|does|did|can|could|will|would|should|tried|try|tries|"
+    r"bought|buy|buys|made|make|makes|ate|eat|eats|cooked|cooks|keep|keeps|stock|stocks|sell|"
+    r"sells|sold|use|uses|used|prefer|prefers|like|likes|liked|love| loves|love|loved|hate|"
+    r"hates|hated|grow|grows|grew|got|get|gets|need|needs|want|wants)\b")
+
+KINDS_NAMED_A_USE = re.compile(
+    r"\b(?:for|best|better|good|right|make|makes|making|bake|baking|cook|cooking|roast|roasting|"
+    r"boil|boiling|mash|fry|frying|chips|salad|soup|sauce|crumble|pie|cakes?|bread|jam|chutney|"
+    r"keep|keeps|keeping|store|storing|freeze|frozen|buy|buying|cheap|cheapest|substitute|"
+    r"instead|replace|swap|goes|go|with|worth|healthy|"
+    # An occasion or a destination is a use too: "what sort of wine should i bring to dinner" was
+    # answered with the red, white and rose taxonomy when the person was choosing a bottle to take,
+    # and the pairing row already answers that. Which families exist is a question about the thing;
+    # "bring it to dinner", "take it to a party" is a question about which one to take there.
+    r"bring|brings|take|takes|serve|serves|serving|dinner|lunch|supper|party|picnic|barbecue|"
+    r"bbq|wedding|christmas|birthday|gift|present|occasion|hosting)\b")
+
+
+def asks_the_kinds(understood):
+    """True when the line asks which families a thing comes in.
+
+    Two ways a line asks it, and both are the same shape:
+
+    - in its own words, with a kinds word and no use named ("what kinds of tea are there",
+      "the different types of potato", "what sort of apple is there");
+    - leaning on the kinds question before it, which carries no kinds word of its own ("and
+      rice", "what about apples"). The shape is kept in `memory["understood"]["wants"]` by
+      bot/modules/intent.py, so no phrase list has to guess at it here.
+
+    One reading, used two ways: a kinds row answers on it, and the table that answers the next step
+    of a meal stands down on it (the dish follow-up answered "what types of potato are there" with
+    a recipe, because the turn before it had named a food).
+    """
+    if not isinstance(understood, dict):
+        return False
+    # The line as it was typed, not the reading of it: a two-line reading carries the words of the
+    # turn before ("what kinds of milk are there for coffee" then "which is easier to froth"), and
+    # a row that answered on those words would answer the wrong question.
+    said = str(understood.get("clean") or understood.get("text") or "")
+    if said and KINDS_ASKS_ME.search(said):
+        return False
+    if said and not KINDS_NAMED_A_USE.search(said):
+        words = " %s " % " ".join(said.lower().replace("[", " ").replace("]", " ")
+                                  .replace(",", " ").replace("'", " ").split())
+        # The words arm answers a noun phrase. A line that predicates something about the thing
+        # is the person saying it, not asking it, and the mirror ack is the answer to that.
+        lowered = " ".join(said.lower().split())
+        says_it = (understood.get("intent") == "news"
+                   or (understood.get("kind") != "question"
+                       and not KINDS_ASKS_WITH_A_VERB.search(lowered)
+                       and KINDS_SAYS_HOW_IT_IS.search(lowered)))
+        if not says_it and any(kind in words for kind in KINDS_WORDS):
+            return True
+    # The same ask carried by a follow-up that names no kinds of its own ("and coffee", "what
+    # about wine"). The shape on the turn before is what makes it one, and no phrase list has to
+    # guess at it here.
+    return (understood.get("wants") == KINDS_SHAPE
+            and not KINDS_NAMED_A_USE.search(said)
+            and not set(understood.get("asks") or ()) - {"what", "yesno"})
+
+
+def kinds_entries(rows):
+    """Build the `what kinds of X are there` answers for one domain.
+
+    `rows` is data: (the line's subject words, the subject for the row's id, the answer). The
+    answer opens on the families, because that is what was asked. The shape is the guard, not a
+    word in the key, so a follow-up that carries the shape ("and rice") reaches the same row, and a
+    line that names a use ("what type of potato is best for mash") reaches the row that answers the
+    use instead.
+    """
+    out = []
+    for subjects, name, answer in rows:
+        # The ask as it is worded: a kinds word and the subject.
+        out.append(entry("kinds-of-%s" % name, (KINDS_WORDS, subjects), answer,
+                         guard=asks_the_kinds, bias=2))
+        # The same row for a line that carries the shape and no kinds word ("and rice", "what
+        # about apples"): the words that make it a follow-up, and the subject. The guard is the
+        # same, and it is what keeps this row off every other line: it answers only when the shape
+        # was asked, which a follow-up has in `memory["understood"]["wants"]`.
+        out.append(entry("kinds-of-%s-told" % name, (KINDS_FOLLOW_UP_WORDS, subjects), answer,
+                         guard=asks_the_kinds, bias=2))
+    return out
 
 
 # The "-'s" words that are contractions of "is" or "has", never a possessive.
@@ -1179,6 +1808,7 @@ _FORMS_CACHE = {}
 _FORMS_CACHE_KEEP = 50000
 
 
+
 def _work_out_forms(word):
     """The forms of one word, worked out from the endings and the tables (see _forms)."""
     # The understanding layer supplies the words, so the curly-apostrophe repair has to
@@ -1249,7 +1879,13 @@ def _work_out_forms(word):
                 _add(forms, word[:-3])
         if word.endswith("ing") and len(word) > 5:
             stem = word[:-3]
-            _add(forms, stem + "e")
+            # The stem with an "e" is a word too, and for most of these it is the one the word
+            # was built from ("teething" is "teethe", "clothing" is "clothe"): that form stays.
+            # "Housing" is the exception - "house" is not what it was built from, it is a
+            # different noun that happens to end the same way, and a line about a house reached
+            # the housing card through it.
+            if word not in NOT_THE_STEM_WITH_E:
+                _add(forms, stem + "e")
             # The same trap as above: "biting" is "bite", not "bit", and "caring" is "care",
             # not "car". A verb whose base really has that short shape doubles its consonant
             # before "-ing" ("stopping"), and that doubled stem is stripped below, so nothing is
@@ -1266,7 +1902,7 @@ def _work_out_forms(word):
             # own: dropping a letter from "hiss" invented "his", and any key that said hissing
             # then matched every line with "his", which is how "my dad is tired of his job"
             # reached the puncture instructions.
-            if _doubles_for_an_ending(stem):
+            if _doubles_for_an_ending(stem) and word not in NOT_THE_DOUBLED_STEM:
                 _add(forms, stem[:-1])
     return forms
 
@@ -1305,7 +1941,18 @@ NOT_THE_STEM = frozenset(("teething", "sugaring", "evening", "stuffing",
                           # flat loaf was answered with a canal towpath - three separate lines
                           # ("the bread keeps coming out flat", "the loaf came out flat again").
                           # The row keeps "outing" and "outings"; it loses only the bare stem.
-                          "outing"))
+                          "outing",
+                          # The same shape, found by auditing every "-ing" key word in the
+                          # registry against the words the engine reads: each of these is a noun
+                          # of its own whose stem is a *different* everyday noun, so the stem is
+                          # never the row's meaning. "Weathering is rock being broken up where it
+                          # sits" answered "what will the weather be like" - every wording of it,
+                          # in Cornwall or anywhere else - because the weather row's key word
+                          # handed the matcher "weather". "A letter from the council" reached the
+                          # lettering card, and "boarding" is a plane as often as it is boards.
+                          # The word itself still reads; only the bare stem is held back.
+                          "weathering", "lettering", "wording", "boarding", "footing", "decking",
+                          "clothing", "housing", "marketing", "banking", "accounting"))
 
 # A word that ends in "s" whose shorter form is a different word, which no key means to meet.
 # "ages" is how long it has been - "i havent cooked in ages", "its been ages since i went out" -
@@ -1315,6 +1962,11 @@ NOT_THE_STEM = frozenset(("teething", "sugaring", "evening", "stuffing",
 # words where the strip invents a meaning, not of plurals in general.
 NOT_A_WORD_WITH_AN_S = frozenset(("ages",))
 
+
+# The "-ing" words whose stem plus an "e" is another everyday noun rather than the word they
+# were built from. "Housing" is not "house" with an ending on it: one is what the council
+# builds and the other is the thing you live in, and only one of them is this row's subject.
+NOT_THE_STEM_WITH_E = frozenset(("housing",))
 
 # The same shape as NOT_THE_STEM, but for a whole class of word rather than one at a time: a
 # particle is never the base of the "-ing" word in front of it. "Outing" is a trip out, and
@@ -1333,6 +1985,21 @@ NOT_A_BASE = frozenset(
     "about above across after against along among around at before behind below beneath "
     "beside besides between beyond by down for from in into near of off on onto out over "
     "past since through till to toward towards under until up upon with within without".split())
+
+
+# A few "-ing" words are not a verb with its ending on it, so the doubled stem is a different
+# noun rather than the base they were built from. "Bedding" is the linen; "bed" is the
+# furniture, or the plot in the garden. Keys that say "bedding" (bot/knowledge/cleaning.py,
+# clothing.py, cars.py, the drying-outside card in home_craft.py) therefore matched every line
+# with "bed" in it, and on main `7652cff82` the line of washing answered the sleep questions:
+#   "my son is 14 and wont get out of bed"       -> A dry, breezy day dries a normal load...
+#   "how do i get out of bed in the morning"    -> the same
+#   "he keeps getting out of bed"               -> the same
+#   "how often should i change my bed sheets"   -> Cover tender plants when frost is forecast
+#   "how do i protect my flower beds from frost" -> A dry, breezy day dries a normal load...
+# Only the doubled stem is held back, so a line that says "bedding" still reaches every one of
+# those cards.
+NOT_THE_DOUBLED_STEM = frozenset(("bedding",))
 
 
 def _add(forms, form):
@@ -1819,10 +2486,16 @@ def _engine_reads(word):
     "end", "else" and "either" ("my friend enid" got the after-a-breakup card), and "fella" and
     "bloke" as "fell" and "broke", so a line about who takes the credit at work was answered by
     the falls card for an elderly parent.
+
+    A colour is a word too, and the engine's own tables do not carry them: "white" is one letter
+    from "write", "grey" from "grow", "navy" from "naval", so wherever a row stays away from
+    the nearer word the colour stood the row down - "is white ok at a christening" scored nothing
+    at all because the christening card's own `avoid` holds "write", and a colour asked about a
+    service with a clothes answer got a shrug.
     """
     return (word in _COMMON or word in COMMON_WORDS or word in lexicon.CHAT
             or word in lexicon.EXPAND or _stem(word) in _STEMS
-            or word in lexicon.every_word())
+            or word in lexicon.every_word() or word in COLOUR_WORDS)
 
 
 def _typo_forms(word, vocabulary):
@@ -1848,11 +2521,22 @@ def _typo_forms(word, vocabulary):
     return forms
 
 
+# A few set phrases are plural and only plural: "the runs" is the stomach, and its singular is a
+# different word altogether - "my knees have been sore since the run" is about going for one.
+# `_forms` hands "runs" the singular "run" the way it hands "boxes" the singular "box", so the
+# diarrhoea row answered that line with "drink water with a little salt and sugar in it". A
+# phrase in here keeps every word it is written with and nothing else.
+PLURAL_ONLY_PHRASES = frozenset(("the runs", "the trots"))
+
+
 def _wanted(phrase):
     """The forms of each word of a key phrase, worked out once for every entry that says it."""
     got = _WANTED_CACHE.get(phrase)
     if got is None:
-        got = tuple(_forms(word) for word in phrase.lower().split())
+        if phrase.lower() in PLURAL_ONLY_PHRASES:
+            got = tuple(frozenset((word,)) for word in phrase.lower().split())
+        else:
+            got = tuple(_forms(word) for word in phrase.lower().split())
         if len(_WANTED_CACHE) >= _FORMS_CACHE_KEEP:
             _WANTED_CACHE.clear()
         _WANTED_CACHE[phrase] = got
@@ -1860,6 +2544,81 @@ def _wanted(phrase):
 
 
 _WANTED_CACHE = {}
+
+
+# The small words a key phrase uses to name a thing and a person does not have to type: "cold at
+# the top", "look after the battery", "past the date", "park at the airport". Leaving one out
+# does not say a different thing, but a key phrase has to be found whole, so the same line without
+# it reached nothing at all: "radiator cold at top" got the thermostat card instead of the bleed
+# answer, "past date yoghurt" and "park at airport cheaply" got a greeting, and "my phone wont
+# detect sim" got a shrug while "... the sim" got the fix. Only a whole word is dropped, only from
+# a phrase of two words or more, and at least two words have to be left, so no key is loosened to
+# a single word or brought nearer to another phrase than it was.
+_ARTICLE_WORDS = frozenset("""the a an""".split())
+
+
+# A phrase only loses its article when it is long enough to still name a thing without it. "park
+# at the airport" and "look after the battery" keep three words; "for a week" would fall to "for
+# week", which is nearer to a phrase of some other row than to the one it came from, and a first
+# try that dropped every article reordered whole families of answers - a film question reached the
+# planning row, a nurse on nights reached the nursing-careers row. Three words are what a phrase
+# needs to stay itself, so that is the line.
+_MIN_BARE_WORDS = 3
+
+
+# What such a phrase counts for. The phrase as it stands in the key is worth PHRASE_WEIGHT; the same
+# phrase with its article missing is worth one less, because the person has said slightly less than
+# the key says. That is what keeps the reading a tie-breaker rather than a claim: with the same
+# weight, "my baby wont take bottle" reached the under-three-months row above the bottle row and
+# answered a parent changing a feed with "ring 111 or your GP now". A line reaches the row it was
+# about first, and only then does the article-free reading settle what is left.
+BARE_WEIGHT = PHRASE_WEIGHT - 1
+
+
+def _wanted_bare(phrase):
+    """The forms of the phrase's words with its articles left out, or None when it has none."""
+    got = _WANTED_CACHE.get(("bare", phrase), ())
+    if got:
+        return got[0]
+    words = phrase.lower().split()
+    kept = [word for word in words if word not in _ARTICLE_WORDS]
+    bare = tuple(_forms(word) for word in kept) if len(kept) >= _MIN_BARE_WORDS and len(kept) < len(words) else None
+    if len(_WANTED_CACHE) >= _FORMS_CACHE_KEEP:
+        _WANTED_CACHE.clear()
+    _WANTED_CACHE[("bare", phrase)] = (bare,)
+    return bare
+
+
+_ARTICLE_FORMS = frozenset().union(*(_forms(word) for word in _ARTICLE_WORDS))
+
+
+def _phrase_span_bare(forms, wanted, seen):
+    """The span an article-free phrase covers on the line, where the line may keep its articles.
+
+    The words of the phrase have to sit in the line in order, as they do for the phrase itself,
+    and an article of the line may sit between any two of them: "how do i look after battery on my
+    phone" is the same question as "how do i look after the battery on my phone". Nothing else is
+    skipped, so the phrase still says what it said.
+    """
+    n = len(wanted)
+    last = len(forms) - 1
+    for start in range(len(forms)):
+        if not forms[start] & wanted[0]:
+            continue
+        span = [start]
+        here = start + 1
+        for j in range(1, n):
+            while here <= last and not (forms[here] & wanted[j]):
+                if not forms[here] & _ARTICLE_FORMS:
+                    break
+                here += 1
+            if here > last or not (forms[here] & wanted[j]):
+                break
+            span.append(here)
+            here += 1
+        else:
+            return tuple(span)
+    return ()
 
 
 def _shape(phrase):
@@ -2058,8 +2817,82 @@ def _phrase_span_between(forms, phrase, seen=None):
     return answer
 
 
+# A contraction and the two words it stands for are the same words in a phrase: the
+# understanding layer expands the spelling without the apostrophe ("wont" -> "will not",
+# lexicon.py EXPAND), so a row keyed on "won't sleep" or "won't start" never met a line that
+# wrote it out. "my 4 month old wont sleep in the cot" got the night-waking card and
+# "my 4 month old will not sleep in the cot" got a bare "Noted: your 4 month old will not sleep
+# in the cot"; the same for going to school, the boiler and a child who will not eat. The
+# match is made here, once, rather than by listing both spellings in every key.
+_ONE_SPELLING = (("won't", "will not"), ("wont", "will not"),
+                 ("can't", "cannot"), ("cant", "cannot"),
+                 ("shan't", "shall not"), ("dont", "do not"), ("don't", "do not"),
+                 ("doesnt", "does not"), ("doesn't", "does not"),
+                 ("isnt", "is not"), ("isn't", "is not"),
+                 ("arent", "are not"), ("aren't", "are not"),
+                 ("wasnt", "was not"), ("wasn't", "was not"),
+                 ("werent", "were not"), ("weren't", "were not"),
+                 ("didnt", "did not"), ("didn't", "did not"),
+                 ("hasnt", "has not"), ("hasn't", "has not"),
+                 ("havent", "have not"), ("haven't", "have not"),
+                 ("couldnt", "could not"), ("couldn't", "could not"),
+                 ("wouldnt", "would not"), ("wouldn't", "would not"),
+                 ("shouldnt", "should not"), ("shouldn't", "should not"))
+_ONE_SPELLING_EITHER_WAY = {}
+for _short, _long in _ONE_SPELLING:
+    _ONE_SPELLING_EITHER_WAY.setdefault(_short, set()).add(_long)
+    _ONE_SPELLING_EITHER_WAY.setdefault(_long, set()).add(_short)
+
+
+def _the_same_words(phrase):
+    """The same phrase in the other spelling, or nothing when it has no contraction in it."""
+    got = _PHRASE_OTHER_SPELLINGS.get(phrase)
+    if got is None:
+        got = _work_out_the_same_words(phrase)
+        if len(_PHRASE_OTHER_SPELLINGS) >= _OTHER_SPELLINGS_KEEP:
+            _PHRASE_OTHER_SPELLINGS.clear()   # a card of phrases, refilled on the next line
+        _PHRASE_OTHER_SPELLINGS[phrase] = got
+    return got
+
+
+_PHRASE_OTHER_SPELLINGS = {}
+_OTHER_SPELLINGS_KEEP = 4000
+
+
+def _work_out_the_same_words(phrase):
+    words = phrase.lower().split()
+    if not words:
+        return ()
+    out = []
+    for i, word in enumerate(words):
+        for other in _ONE_SPELLING_EITHER_WAY.get(word, ()):
+            if " " in other:
+                out.append(" ".join(words[:i] + other.split() + words[i + 1:]))
+            else:
+                out.append(" ".join(words[:i] + [other] + words[i + 1:]))
+    if len(words) > 1:
+        for i in range(len(words) - 1):
+            joined = words[i] + " " + words[i + 1]
+            for other in _ONE_SPELLING_EITHER_WAY.get(joined, ()):
+                if " " not in other:
+                    out.append(" ".join(words[:i] + [other] + words[i + 2:]))
+    return tuple(out)
+
+
 def _phrase_span_work(forms, phrase, seen):
     """The phrase's span on this line, with no phrase memo in front of it."""
+    end = _phrase_span_spelling(forms, phrase, seen)
+    if end:
+        return end
+    for other in _the_same_words(phrase):
+        end = _phrase_span_spelling(forms, other, seen)
+        if end:
+            return end
+    return ()
+
+
+def _phrase_span_spelling(forms, phrase, seen):
+    """The span of this exact spelling of the phrase."""
     wanted = _wanted(phrase)
     if not wanted:
         return ()
@@ -2163,8 +2996,16 @@ def _part_matches(part, forms, seen=None):
         if not isinstance(alternative, str) or not alternative.strip():
             continue
         span = _phrase_span(forms, alternative, seen)
+        bare_hit = False
+        if not span:
+            bare = _wanted_bare(alternative)
+            if bare is not None:
+                span = _phrase_span_bare(forms, bare, seen)
+                bare_hit = bool(span)
         if span:
             words, weight = _shape(alternative)
+            if bare_hit and weight > BARE_WEIGHT:
+                weight = BARE_WEIGHT
             found.append((weight, words, span))
     found.sort(key=lambda hit: (hit[0], not _only_the_frame(hit[1])), reverse=True)
     if seen is not None:
@@ -2528,6 +3369,29 @@ ASK_FRAME = frozenset("""
 # "nights" as often as "night", and "bedtime" because the hour before bed is asked about by the
 # name of the hour ("what should i do at bedtime") rather than by the word "night".
 WHEN_WORDS = frozenset(TIME_WORDS | {word + "s" for word in TIME_WORDS} | {"bedtime"})
+# A length word is how long a thing runs, not what the thing is: "how long does caffeine last",
+# "how long do leftovers keep". A row whose whole reach into the line is "how long" and "last" has
+# named nothing the line is about, and it answered every other line of that shape - "how long did
+# the hundred years war last" got the caffeine card (the history row names the war), "how long did
+# the cold war last" got the prawns. Read with the same rule as the two sets above: a row that
+# also names a subject is unaffected, which is every row that answers one.
+A_LENGTH_WORD = frozenset("""
+    long last lasts lasted lasting keep keeps kept take takes taking time times run runs
+    minute minutes hour hours day days week weeks month months year years
+    """.split())
+
+# A pronoun stands for the thing and never names it. "how long does it last" and "how long should
+# they last" name no subject at all: the thing is in the turn before, and the row that answered
+# was the one that also keys the pronoun - the state pension for a pair of headphones, the fridge
+# for a laptop battery. A row that names the thing as well is unaffected.
+A_STAND_IN = frozenset("""
+    it its itself they them their theirs this that these those you your we us our
+    """.split())
+
+# The four sets above together: a word here says how a thing is asked, when it happens, how long
+# it runs, or which thing is meant. None of them names anything, so a phrase made only of these is
+# not the line's own reach into an entry.
+A_SAYS_NOTHING = ASK_FRAME | WHEN_WORDS | A_LENGTH_WORD | A_STAND_IN
 # A mark taken off a thing: "how do i get tar off a jacket", "how do i get ink out of a shirt".
 # The words of that phrase are the ask's, not the thing's, and an entry must not reach MIN_SCORE
 # on them alone - see `_only_the_frame`.
@@ -3136,6 +4000,7 @@ def score(item, forms, typed=None, seen=None, frame=True, framed=False):
         return 0
     if not one_word and total < MIN_SCORE:
         return 0
+    parts_said = _body_parts(typed) if typed else None
     ask_forms = ask_seen = None
     for word in item.avoid:
         key = word.strip().lower() if isinstance(word, str) else ""
@@ -3145,7 +4010,14 @@ def score(item, forms, typed=None, seen=None, frame=True, framed=False):
             if _part_score(word, ask_forms, ask_seen):
                 return 0
         elif _part_score(word, forms, seen) or _phrase_span_between(forms, word, seen):
-            return 0
+            # A fence word is read the way the line means it. "back" is a part of the body in "a
+            # mole on my back" and the word that says the thing returned in "the mole in the
+            # garden is back", and the garden's mole row fences "back" to keep off the skin: that
+            # fence took the second line off its own answer and left it to a fitness card. The
+            # reading already tells the two apart (see `_body_parts`), so a fence word that names
+            # a part this line does not have is not a reason to stand the row down.
+            if not _a_part_the_line_does_not_have(word, parts_said):
+                return 0
     if typed and _misspelt_avoid(item, typed):
         return 0
     failing_at = _keeps_failing_at(forms, seen)
@@ -3260,6 +4132,19 @@ def _under_their_own_hands(item, typed):
 # in a line that wants something else ("what can i do this weekend, the weather looks bad" is a
 # plan), and the bare word would stand the useful answer down. What is left is the shapes that ask
 # for the reading itself: the thing named as a question, or "enough" said of it.
+# A house warms up too, and so does a bottle, a room and a pan. "my boiler is making a noise and
+# the heating isnt warming up, what should i check" got "Five minutes, in two parts: first
+# something easy that gets you slightly out of breath" and "my boiler is noisy and the heating is
+# cold, what do i do" got the cold remedy paragraph, because "warming up" and "cold" were the
+# whole of what those lines shared with a row about a body. This is the list of house and appliance
+# words that mean the room rather than the person, kept in one place so every row that reads
+# "warm up" stands down for them: a fence written per row is a fence that goes missing on the next
+# row (the gym's own warm-up row answered the boiler after the first two were fenced).
+A_HOUSE_WARMING_UP = ("heating", "boiler", "boilers", "radiator", "radiators", "thermostat",
+                      "central heating", "hot water", "immersion", "combi", "flue", "trv",
+                      "house", "the flat", "my flat", "our flat", "room", "rooms", "bathroom",
+                      "kitchen", "bedroom", "living room", "overnight", "no heat")
+
 A_WEATHER_ASK = ("weather like", "weather doing", "weather going to be", "weather forecast",
                  "what is the weather", "whats the weather", "what's the weather",
                  "wether like", "whats the forecast", "what's the forecast", "the forecast for",
@@ -3270,6 +4155,27 @@ A_WEATHER_ASK = ("weather like", "weather doing", "weather going to be", "weathe
                  "warm enough to", "cold enough to", "how cold is it", "how hot is it",
                  "how warm is it", "what is it like outside", "whats it like outside",
                  "what's it like outside")
+
+# A line that asks what to put on, pack or take is asking for a list, not for the science of why
+# the sky is doing it. "what should i wear in the rain" was the water-cycle note, "what do i need
+# to take if its snowing" and "what should i wear in the snow" were the note on how snow forms, and
+# "what should i wear in the wind" the one on pressure - the weather word is in every one of those
+# rows' keys and the ask, which decides what kind of answer the line wants, was in none of them.
+# Clothes cards already answer most of these lines ("what should i wear for a walk in the rain" is
+# the walking kit), so the explanation rows stand down here and the clothing rows get the line.
+#
+# These are phrases rather than the bare word "wear", because "wear" alone is in a dozen lines that
+# want the science: "why does my watch wear out", "what makes tyres wear", "why do clothes wear at
+# the knee". What is left is the ask itself, with a person in it or the word "to" after it.
+A_WHAT_TO_WEAR = ("what should i wear", "what do i wear", "what to wear", "what shall i wear",
+                  "what should i put on", "what do i put on", "what to put on",
+                  "what should he wear", "what should she wear", "what should they wear",
+                  "what should we wear", "what does he wear", "what does she wear",
+                  "what should i pack", "what do i pack", "what to pack", "what shall i pack",
+                  "what should i take", "what do i take", "what to take", "what should i bring",
+                  "what do i bring", "what to bring", "what do i need to take",
+                  "what do i need to bring", "what kit", "what clothes", "which clothes",
+                  "what should i put in my bag", "what do i need to wear")
 
 # A food a person keeps in the house, and asks about keeping. It is a short table on purpose: a
 # row that stands down for it is standing down for a line that is plainly about the food, so the
@@ -3301,6 +4207,39 @@ KEEPING_WORDS = ("store", "stores", "stored",
                  "gone hard", "goes soggy", "gone soggy", "fridge", "freezer", "freeze",
                  "freezing", "bin", "shelf life", "cold", "warm", "damp", "how long",
                  "longer", "longest", "keep fresh", "use by", "best before")
+
+
+# "How many eggs?" asks two different things. "how many eggs a day" asks the allowance, and it
+# is the reason "how many" is in the cholesterol rows' keys; "how many eggs go in an omelette"
+# asks the recipe, and "how many days do eggs keep" asks the box. The dish does not tell them
+# apart - "are eggs in a cake bad for you" names the same cake and is the allowance's question -
+# so the verb does: a count that "goes in" or is "put in" belongs to the dish, and a count of
+# days or a keeping verb belongs to the box. Nothing about a daily allowance goes in a cake or
+# keeps in a fridge.
+GOES_IN = re.compile(r"\b(?:go|goes|going|went)\s+(?:in|into)\b|\bputs?\s+in\b", re.I)
+# The verb is not always there: "how many eggs in a quiche" and "how many eggs for a cake" count
+# into a dish with no "go in" at all. What separates the dish from the allowance is what follows
+# the article - a dish or a batch is a container, and "a day", "a week" are the allowance. So a
+# count into something that is not a stretch of time belongs to the dish.
+COUNTED_INTO_A_THING = re.compile(
+    r"\bhow many\b[^?]*\b(?:in|into|for)\s+(?:a|an|the|my|one|two|three|four|six|\d+)\s+"
+    r"(?!days?\b|weeks?\b|months?\b|years?\b|mornings?\b|evenings?\b|sittings?\b|"
+    r"meals?\b|servings?\b|serving\b|portion\b|portions\b|time\b)", re.I)
+HOW_MANY_DAYS = re.compile(r"\bhow many (?:days|weeks|months)\b", re.I)
+KEEPS_OR_STORES = re.compile(
+    r"\b(?:keep|keeps|kept|keeping|store|stores|stored|storing|last|lasts|lasting|"
+    r"fridge|freezer|freeze|go off|gone off)\b", re.I)
+
+
+def not_a_count_for_the_box_or_the_dish(understood):
+    """False when a "how many" line counts into a dish or asks how long the food keeps."""
+    if not isinstance(understood, dict):
+        return True
+    text = " " + str(understood.get("clean") or understood.get("text") or "").lower() + " "
+    if (GOES_IN.search(text) or HOW_MANY_DAYS.search(text) or KEEPS_OR_STORES.search(text)
+            or COUNTED_INTO_A_THING.search(text)):
+        return False
+    return True
 
 
 def a_food_is_being_kept(understood):
@@ -3541,6 +4480,28 @@ def _the_whole_subject(part, forms, seen=None):
     return bool(wanted) and all(index in span for index in wanted)
 
 
+# The sounds a machine makes, in the forms people type them. `lookup` matches whole words rather
+# than stems, so a row that names "clicking" and not "click" answers only the lines that happen to
+# use the form it was written with: "my boiler clicks a lot" and "the boiler is clicking" were met
+# with "I'm listening", while the answer for a tick - the pipes expanding, felt where the pipe
+# passes a joist - was already written and reachable only through "the boiler wont stop clicking".
+# The rows that answer a noise read this list instead of writing their own, so the forms cannot
+# drift apart from the answers again. It lives here rather than in wording.py because wording.py
+# imports this module, so a list both of them need belongs on this side of that edge.
+MACHINE_SOUNDS = ("hum", "hums", "humming", "hummed", "buzz", "buzzes", "buzzing", "drone",
+                  "drones", "droning", "vibrate", "vibrates", "vibrating", "vibration",
+                  "whistle", "whistles", "whistling", "whine", "whines", "whining",
+                  "squeal", "squeals", "squealing", "squeak", "squeaks", "squeaking",
+                  "screech", "screeches", "screeching", "shriek", "shrieks", "shrieking",
+                  "hiss", "hisses", "hissing", "gurgle", "gurgles", "gurgling", "glug",
+                  "glugging", "bang", "bangs", "banging", "knock", "knocks", "knocking",
+                  "rumble", "rumbles", "rumbling", "clunk", "clunks", "clunking", "clank",
+                  "clanks", "clanking", "rattle", "rattles", "rattling", "tick", "ticks",
+                  "ticking", "tap", "taps", "tapping", "click", "clicks", "clicking",
+                  "thump", "thumps", "thumping", "roar", "roaring", "grind", "grinds",
+                  "grinding", "scrape", "scrapes", "scraping")
+
+
 def _rarity(entries):
     """{key word: how many entries use it}, so rare words can count for more."""
     counts = {}
@@ -3555,14 +4516,57 @@ def _rarity(entries):
     return counts
 
 
+_TAIL_ASK_WORDS = None
+
+
+def _the_tail_asks_about(forms):
+    """Where the line's last question starts, or -1 when it asks in one breath.
+
+    People put the reason first and the question last: "my nan is 80 next month and we want a
+    cake, what should i get her", "i have a christening sunday and it is meant to rain, what do i
+    wear". The words after that question word are what was asked.
+    """
+    global _TAIL_ASK_WORDS
+    if _TAIL_ASK_WORDS is None:
+        _TAIL_ASK_WORDS = frozenset().union(*(_forms(word) for word in (
+            "what", "whats", "which", "how", "where", "when", "who", "why", "should", "shall",
+            "could", "would", "can")))
+    ask_words = _TAIL_ASK_WORDS
+    for index in range(len(forms) - 1, 3, -1):
+        word = forms[index]
+        if word and (word & ask_words):
+            return index
+    return -1
+
+
 def _rank(item, forms, rarity, seen=None):
-    """Score plus specificity: a key word only a few entries use says more about the line."""
+    """Score plus specificity: a key word only a few entries use says more about the line.
+
+    A key part the line only reaches inside its last question, through the asking words alone
+    ("what","should" / "what","do","i","do"), is the asking of that question and not a thing the
+    row is about. The row that lists the asking was winning lines that put the reason first:
+    `babyfood-by-age` (key part "what should") took "my nan is 80 next month and we want a cake,
+    what should i get her" off `gift-mum`, and `telling-a-child-off` (key part "what do i do")
+    took "the boiler broke and the landlord is ignoring me, what do i do" off the landlord card.
+    The same part in the first clause is untouched, and so is any part that reaches a real word
+    of the question ("what should i bake", "what do i wear").
+    """
+    tail_from = _the_tail_asks_about(forms)
+    matched = [_part_match(part, forms, seen=seen) for part in item.key]
+    said = sum(weight for weight, words, span in matched
+               if weight and not (tail_from >= 0 and min(span) >= tail_from
+                                  and _only_the_frame(words)))
     total = 0
     says_what = False
     for part in item.key:
-        weight, words, _ = _part_match(part, forms, seen=seen)
+        weight, words, span = _part_match(part, forms, seen=seen)
+        if weight and said > 2 and tail_from >= 0 and min(span) >= tail_from \
+                and _only_the_frame(words):
+            # the same part `said` left out: the asking of the last question, not the subject
+            continue
         total += weight + sum(1 for word in words if rarity.get(word, 0) == 1)
-        if any(word not in ASK_FRAME and word not in WHEN_WORDS for word in words):
+        if any(word not in ASK_FRAME and word not in WHEN_WORDS and word not in A_LENGTH_WORD
+               and word not in A_STAND_IN for word in words):
             says_what = True
     if not says_what:
         # Every word this row reached the line with is how the line was asked or when the thing
@@ -3807,6 +4811,53 @@ def _read_the_adjective(words, forms, vocabulary):
     return gave
 
 
+# --- somebody has a thing --------------------------------------------------------------
+# A key that says "have" never met a line that says "has". The -s rule cannot reach it: "has" is
+# three letters, and a short stem is not a word the matcher will strip to. So "my mum has a
+# headache" met no key word at all beyond its subject, scored under MIN_SCORE, and was answered by
+# whichever card had a word about caring for a poorly person: "That's a worry when it's someone
+# you look after. Are they drinking and keeping it down?" - a question about vomiting, asked of a
+# headache.
+#
+# Handing "have" to every "has" in every line costs more than it buys. "my phone screen has a
+# green blotch" reached the rash row, whose key lists "have", and told them about a hydrocortisone
+# cream; "my dog has epilepsy" was answered with lamotrigine, a neurologist and the DVLA, where the
+# honest answer was to ask the vet. What the good lines have and the bad ones lack is the sense:
+# somebody having a thing. So the reading is fenced by the sentence around the word - a person
+# before it, and a thing after it rather than the rest of a verb.
+_A_PERSON = frozenset(PEOPLE_MALE) | frozenset(PEOPLE_FEMALE) | frozenset((
+    "friend", "mate", "friends", "partner", "child", "children", "kid", "kids", "baby",
+    "neighbour", "neighbor", "colleague", "boss", "teacher", "someone", "somebody", "cousin",
+    "person", "people", "they", "them", "we", "us", "you"))
+# "has to" is a modal and "has been", "has had" and "has it" are the rest of a verb phrase: none
+# of them is a thing the person has.
+_NOT_A_THING_HAD = frozenset(("to", "had", "been", "being", "it", "them", "not", "no", "never",
+                              "nothing", "none", "enough", "already", "yet"))
+
+
+def _read_a_thing_had(words, forms):
+    """Add "have" to a "has" that says somebody has a thing, in place.
+
+    Only the possession sense: "my mum has a headache" and "my wife has got a bad back" read as
+    "have", and "he has to get two buses", "it has to be quick" and "my phone screen has a green
+    blotch" do not. Four words back is enough to find the person, because a relation is said
+    before the verb ("my mum", "my wife's brother") and nothing else in the line can be the thing
+    the line is about.
+    """
+    for index, word in enumerate(words):
+        if str(word).lower() != "has":
+            continue
+        after = str(words[index + 1]).lower() if index + 1 < len(words) else ""
+        if after in _NOT_A_THING_HAD:
+            continue
+        if after == "got" and index + 2 < len(words) and str(words[index + 2]).lower() == "to":
+            continue                            # "has got to go" is a duty, not a possession
+        before = [str(word).lower() for word in words[max(0, index - 4):index]]
+        if not any(word in _A_PERSON for word in before):
+            continue
+        forms[index] |= _forms("have")
+
+
 def _read_typos(words, forms, vocabulary, known):
     """Add the key word each misspelt line word is a single slip away from, in place.
 
@@ -3966,6 +5017,112 @@ def _feeling_occasion(words):
 # row that says where a thing is kept ("where do i keep my passport") is answering a different
 # line and is untouched.
 _WHERE_I_PUT = re.compile(r"\bwhere\s+(?:did|have|has|had)\s+i\s+(?:put|leave)\b")
+# A line that asks *where* a thing is kept is the keeping row's question, and a row that helps
+# choose one is not the answer: "where should i keep my winter jumpers" was answered with which
+# fibre to buy, and "where should i keep my duvet in summer" with the tog ladder. The frame is the
+# word "where" and not the word "keep", because "keep" also means "which jumper keeps me warm" -
+# a buying question, which must stay one.
+_WHERE_TO_KEEP = re.compile(
+    r"\bwhere\s+(?:should|shall|do|can|could|would|will|might|am\s+i\s+to)?\s*(?:to\s+)?"
+    r"(?:i\s+|we\s+|you\s+)?(?:keep|store|stow|put\s+away|pack\s+away)\b")
+# What a row's key says when it is the keeping of a thing rather than the choosing of one.
+_KEPT_SOMEWHERE = frozenset("""
+keep keeps keeping kept store stores stored storing storage stow stows stowed stowing
+away loft wardrobe moth moths cedar
+""".split())
+
+
+def _the_kept_rows():
+    """Every row whose key names keeping a thing somewhere."""
+    from . import entries as all_entries  # the registry, to avoid an import cycle
+    return [item for item in all_entries() if _key_names(_KEPT_SOMEWHERE, item)]
+
+
+
+# A price card can only answer a line that judges a price if it is holding a price. The general
+# test of the line lives with the price rows (`prices.a_price_is_judged`); this is the half about
+# the answer, and it sits in the one place every card is chosen, so a card written next year is
+# covered without remembering to consult anything.
+_HOLDS_MONEY = re.compile(r"\u00a3\s?\d|\b\d+(?:\.\d+)?\s?(?:p|pence|pounds?|quid)\b|"
+                          r"\b\d+\.\d{2}\b|\bpounds?\b")
+
+
+def _a_price_judged_is_not_answered_here(understood, found):
+    """True when the line judges a price and this entry's answer holds no price.
+
+    "is 4 pounds a lot for a chicken" reached the card for the minutes a four-pound bird takes in
+    the oven, because four pounds is also a weight, and "is £4 a lot for a pint of milk" reached
+    the card about what milk does for you. Neither says anything about money, and the question is
+    entirely about money.
+    """
+    from .prices import a_price_is_judged
+    text = str(understood.get("clean") or understood.get("text") or "")
+    if not a_price_is_judged(text):
+        return False
+    reply = getattr(found, "reply", None)
+    if callable(reply):
+        try:
+            reply = reply({}, understood)
+        except Exception:  # noqa: BLE001 - a card that needs the chat says nothing here
+            return False
+    if reply is None:
+        reply = ""      # an entry that turns the line down is not answering it either
+    if _HOLDS_MONEY.search(str(reply)):
+        return False    # this card is about the money, so it is answering the question
+    # And only when the base can say what the thing usually costs: "is 20 pounds each way cheap
+    # for a train" has no fare row to hold the figure against, and the card about how to get a
+    # cheap train is the better answer, so it keeps the line.
+    return _a_range_for_the_thing(text, understood) is not None
+
+
+# The thing after "for" in a line judging a price: "is 4 pounds a lot for a chicken" names the
+# chicken, and the base is asked what a chicken costs.
+_THE_THING_JUDGED = re.compile(r"\bfor\s+((?:a|an|the|my|our|this|that|these|those)\s+)?"
+                               r"([a-z][a-z' ]{1,40})$", re.I)
+
+# A word that points at the thing instead of naming it. "is 4 pounds a lot for one", asked while a
+# chicken is on the table, is about the chicken.
+_POINTS_AT_IT = frozenset("""
+    one ones it that this these those them they him her he she the thing things that one this one
+""".split())
+
+
+def _the_thing_the_chat_is_on(understood):
+    """The thing the conversation is on, from the reading of the line (memory["understood"])."""
+    understood = understood if isinstance(understood, dict) else {}
+    ref = understood.get("ref")
+    if isinstance(ref, dict):
+        for key in ("it", "that", "they", "them"):
+            thing = ref.get(key)
+            if thing and str(thing).lower() not in _POINTS_AT_IT:
+                return str(thing)
+    subject = understood.get("subject")
+    if subject and str(subject).lower() not in _POINTS_AT_IT:
+        return str(subject)
+    return ""
+
+
+def _a_range_for_the_thing(text, understood=None):
+    """The answer the base gives to "how much is <the thing>", when it holds a price."""
+    found = _THE_THING_JUDGED.search(str(text or "").strip().rstrip("?.!"))
+    said = found.group(2).strip() if found else ""
+    if said.lower() in _POINTS_AT_IT or not said:
+        # No thing named: the thing the chat is on is the one the figure is being judged against.
+        said = _the_thing_the_chat_is_on(understood)
+    if not said:
+        return None
+    thing = " ".join((found.group(1) or "a ").split() + said.split()) if found else "a " + said
+    for question in ("how much is %s" % thing, "how much does %s cost" % thing):
+        entry = find({"clean": question, "words": question.split()})
+        reply = getattr(entry, "reply", None)
+        if callable(reply):
+            try:
+                reply = reply({}, {"clean": question, "words": question.split()})
+            except Exception:  # noqa: BLE001 - a row that needs the chat answers nothing here
+                continue
+        if reply and _HOLDS_MONEY.search(str(reply)):
+            return str(reply)
+    return None
 
 
 def find(understood, entries=None, reject=None, use_context=False):
@@ -3988,11 +5145,37 @@ def find(understood, entries=None, reject=None, use_context=False):
     head lice, and the comb is the answer - while a line that already has its card ("my baby is
     teething" is the teething card) is answered by it exactly as before.
     """
+    if _DREAM is not None and _DREAM.told_as_a_dream(
+            understood.get("clean") or understood.get("text") or ""):
+        # A line that tells a dream is the dream, whatever it is about: "i dreamt i failed my
+        # exam" was answered with what to do on results day, "i dreamt my teeth fell out" with
+        # milk teeth, "i had a dream my mother died" with REM sleep. One rule here covers every
+        # entry in every domain, rather than an avoid word in each row that happens to be about
+        # something people dream about. The dreams module answers the scene; a question about
+        # dreams in general ("why do we dream", "what do dreams mean") names no dream of the
+        # person's own and reaches its entry exactly as before.
+        return None
     if entries is None and _WHERE_I_PUT.search(
             " ".join(tokens(understood.get("clean") or understood.get("text") or ""))):
         # The answer is the composer's loss pool, and it is the same for every thing.
         return None
+    if entries is None and _WHERE_TO_KEEP.search(
+            " ".join(tokens(understood.get("clean") or understood.get("text") or ""))):
+        # Where a thing is kept is a keeping row's line, whether or not that row would have won
+        # the line on its own: only those rows are read, so a line that names an object and how
+        # it wants it kept cannot be answered by a row about choosing one. When no keeping row
+        # fits, the line is read exactly as it is on any other turn.
+        kept = _the_best_entry(understood, _the_kept_rows(), reject, use_context)
+        if kept is not None:
+            return kept
     found = _the_best_entry(understood, entries, reject, use_context)
+    if found is not None and _a_price_judged_is_not_answered_here(understood, found):
+        # The line brings a figure in money and asks whether it is dear, and this card answers
+        # the thing itself: what a chicken takes in the oven, what milk does for you, what the
+        # flour costs to make a loaf. One card that answered its own subject is the whole shape,
+        # so no card is tried again for it: the price verdict is the answer, and it is put
+        # against the range the same thing sells at.
+        return None
     if found is not None:
         return found
     for again in _what_is_wrong_with_them(understood):
@@ -4003,7 +5186,42 @@ def find(understood, entries=None, reject=None, use_context=False):
         found = _the_best_entry(again, entries, reject, use_context)
         if found is not None:
             return found
+    for again in _without_the_place(understood):
+        found = _the_best_entry(again, entries, reject, use_context)
+        if found is not None:
+            return found
     return None
+
+
+# Where a thing is, on the body, is not what the line is about: "the mole on my arm is sore",
+# "my mole on my back has grown", "the lump on my neck is bigger". No card is keyed on the place,
+# so the words spent on it stood the card down and the line reached nothing - "the mole on my arm
+# is sore" got "I'd rather not guess. A quick search online ..." while "my mole is sore" got the
+# two-week card. The same re-read as the two readers above: the line without the place is the ask
+# about the thing it named. Only a part of the body, so "the leak in my kitchen" and "the price of
+# a pint in my local" keep every word of what they said.
+_A_PLACE_ON_THEM = re.compile(
+    r"(?:,?\s*(?:on|in|under|near|around|behind|above|below|beside|by|at|just (?:above|below|"
+    r"under|behind|over|beside|next to))\s*(?:the\s+)?(?:my|his|her|their|our|your|its|this|"
+    r"that)?\s*(?:left|right|inner|outer|lower|upper|front|back of the|top of the|side of the)?"
+    r"\s*([a-z]+))\b", re.I)
+
+
+def _without_the_place(understood):
+    """The same reading with a part of the body the thing sits on taken out, or an empty list."""
+    if not isinstance(understood, dict):
+        return []
+    clean = understood.get("clean") or understood.get("text") or ""
+    said = _A_PLACE_ON_THEM.search(clean)
+    if not said or said.group(1).lower() not in lexicon.BODY_PARTS:
+        return []
+    left = (clean[:said.start()] + clean[said.end():]).strip(" ,.;:!?")
+    if len(left.split()) < 2:
+        return []
+    shaped = dict(understood)
+    shaped["clean"] = left
+    shaped["words"] = tokens(left)
+    return [shaped]
 
 
 # A thing reported as not gone is a thing still there, and it is the commonest way people say a
@@ -4118,6 +5336,225 @@ def _without_the_ruled_out(understood):
     return read
 
 
+# "degrees" is a measure of heat in "35 degrees" and a qualification in "a 2:1 degree".
+_THE_DEGREE_WORDS = frozenset("degree degrees".split())
+_THE_HEAT_OF_THE_DAY = frozenset("""
+    hot cold warm cool heat heating temperature weather forecast oven fan oven thermometer summer
+    winter sunny degrees
+""".split())
+
+
+def _the_degrees_are_a_temperature(understood):
+    """Whether the line says how hot it is in degrees.
+
+    The reading keeps the numbers the line names with the words they were written with, so "35
+    degrees" is a measure of heat and "a 2:1 degree" is not. The same word, read from what sits in
+    front of it.
+    """
+    numbers = understood.get("numbers")
+    if not isinstance(numbers, list) or not numbers:
+        return False
+    # Where the word "degrees" sits differs between readings: it can be inside the number's own
+    # text ("35 degrees") or a word of its own beside it ("35"), so both are read - the number is
+    # what makes a temperature, and the degree word is what says the figure is heat.
+    said = []
+    for number in numbers:
+        if isinstance(number, dict):
+            said.extend(str(number.get("text") or "").lower().split())
+    words = understood.get("norm")
+    if isinstance(words, list):
+        said.extend(str(word).lower() for word in words)
+    for word in said:
+        if "degree" in word:
+            return True
+        if any(sign in word for sign in ("\u00b0c", "\u00b0f", "\u00ba", "\u00b0", "\u00b0c")):
+            return True
+    return False
+
+
+def _answers_a_qualification(item):
+    """Whether this card answers a degree you study for, which a 35-degree day is not."""
+    key = _key_words(item)
+    if not key & _THE_DEGREE_WORDS:
+        return False
+    return not bool(key & (_THE_HEAT_OF_THE_DAY - _THE_DEGREE_WORDS))
+
+
+# The words a person asks with when the ask is a clause of its own: "..., what do i wear".
+_THE_WH_WORDS = frozenset("what whats why how when where which who whose whom".split())
+
+# The words an ask shares with every ask of its shape: the question word, the helper and the
+# person. A card that answers the ask matches a word of it that is not one of these - "what should
+# i bake" is answered by a card that holds "bake", and the card about why a craving comes holds
+# only "what", so it is the setting clause's words that took the line.
+_ASK_FRAME = frozenset("""
+    what whats why how when where which who whose whom do does did should shall can could will
+    would may might must i me my we our us you your the a an is are was were be been being to
+    for of in on at it that this these those there here and or but if so then also just
+""".split())
+
+
+# A place a person lives is not the person. "flat" is a home in "my flat is freezing" and a mood in
+# "i feel flat"; "cold" is the radiators in "the flat is cold" and a symptom in "im always cold".
+_PLACES_PEOPLE_LIVE_IN = frozenset("""
+    flat house home room rooms kitchen bedroom bathroom lounge hall hallway office classroom
+    conservatory garage shed caravan cabin attic loft basement studio cottage
+""".split())
+_COLD_WORDS = frozenset("cold freezing frozen chilly baltic perishing".split())
+# The words that sit between the place and the cold, kept to the few a person types: "the flat is
+# so cold", "my room is freezing", "the kitchen was really cold all weekend".
+_BETWEEN_A_PLACE_AND_ITS_COLD = frozenset("""
+    is was are were get gets got been be feels feel really very so too absolutely
+    bit little always still
+""".split())
+
+
+_HOW_A_PERSON_IS_COLD = frozenset("""
+    shiver shivers shivering shivery chilled freezing numb goosebumps
+""".split())
+_SAYS_OF_THEMSELVES = frozenset("i im ive id iam me myself".split())
+
+
+def _the_person_says_they_are_cold(typed):
+    """Whether the line says the person themselves is cold or shivering.
+
+    "the office is cold and i keep shivering" is about the office, and the shivering is the person
+    in it: both cards answer something the line asked, so the place does not take it from them.
+    """
+    for at, word in enumerate(typed):
+        if word not in _HOW_A_PERSON_IS_COLD and word not in _COLD_WORDS:
+            continue
+        for before in typed[max(0, at - 4):at]:
+            if before in _SAYS_OF_THEMSELVES or before in ("feel", "feeling", "feels", "keep",
+                                                          "keeps", "kept", "being", "got", "get"):
+                return True
+    return False
+
+
+def _the_place_the_line_says_is_cold(typed):
+    """The place the line predicates the cold of, or None.
+
+    "the flat is freezing and the heating is on, why is it so cold" is about the flat: the cold is
+    said of the place, so a card about a person who feels the cold is not the answer to it. Only a
+    cold said of the place counts, because "im always cold and my flat is freezing" says both.
+    """
+    for at, word in enumerate(typed):
+        if word not in _PLACES_PEOPLE_LIVE_IN:
+            continue
+        for next_word in typed[at + 1:at + 4]:
+            if next_word in _COLD_WORDS:
+                return word
+            if next_word not in _BETWEEN_A_PLACE_AND_ITS_COLD:
+                break
+    return None
+
+
+def _answers_the_cold_of_a_person(item, place=None):
+    """Whether this card answers how cold a person feels rather than how cold a place is."""
+    if item.domain not in FEELING_DOMAINS:
+        return False
+    key = _key_words(item)
+    if not key & _COLD_WORDS:
+        return False
+    # A card that carries the place itself ("the flat", "the room") is about the place, whichever
+    # module it is filed in: warm the room you are sitting in is a home card, and the health module
+    # is listed among the feeling domains too.
+    return place is None or place not in key
+
+
+def _answers_the_cold_of_a_place(item, place):
+    """Whether this card is about the place itself being cold, which is what the line asks."""
+    if _answers_the_cold_of_a_person(item, place):
+        return False
+    key = _key_words(item)
+    return place in key and bool(key & _COLD_WORDS)
+
+
+def _the_card_for_the_place_first(place, reached):
+    """The place's own card before a card about a person, when the line says the place is cold.
+
+    "the flat is freezing and the heating is on, why is it so cold" reached the card about lifting a
+    low mood - "flat" and "why" are its words - and the flat's own answer, warm the room you are
+    sitting in, ranks under it. A card for the place is only put first when one reached the line;
+    nothing is dropped, so a line that says only how cold the person is keeps its card.
+    """
+    if not reached:
+        return reached
+    for at, row in enumerate(reached):
+        if at and _answers_the_cold_of_a_place(row[5], place):
+            return [row] + reached[:at] + reached[at + 1:]
+    return reached
+
+
+def _the_ask_reading(understood, ask):
+    """The reading cut down to the ask clause: what the setting said does not come with it.
+
+    The ask is read from a copy of the line's reading, and a copy carries what the clause before
+    it said. "my mum is 80 next week and we want a cake, what should i bake" kept the 80 in it,
+    and after the Italy wedding line a ferry question kept the 35 degrees: a money card, a date
+    card and a degree card can each win on a figure the ask never had. So the copy holds the
+    ask's own words and only the numbers, the things and the subject written inside them.
+    """
+    asked = dict(understood)
+    said = set(str(word).lower() for word in ask)
+    asked["clean"] = " ".join(ask)
+    asked["words"] = list(ask)
+    asked["norm"] = list(ask)
+    numbers = []
+    for number in understood.get("numbers") or ():
+        if not isinstance(number, dict):
+            continue
+        written = str(number.get("text") or "").lower().split()
+        if set(written) & said or str(number.get("value")) in said:
+            numbers.append(number)
+    asked["numbers"] = numbers
+    for key in ("entities", "things"):
+        kept = []
+        for thing in understood.get(key) or ():
+            text = thing.get("text") if isinstance(thing, dict) else thing
+            if isinstance(text, str) and set(text.lower().split()) & said:
+                kept.append(thing)
+        if key in understood:
+            asked[key] = kept
+    subject = understood.get("subject")
+    asked["subject"] = subject if isinstance(subject, str) and subject.lower() in said else None
+    return asked
+
+
+def _the_ask_on_its_own(understood):
+    """The ask clause's words when the line says the setting first and asks second, or None.
+
+    "wedding in italy and 35 degrees, what do i wear", "my mum is 80 next week and we want a cake,
+    what should i bake", "playing five a side sunday, what should i eat before": the words before
+    the ask say where and when, and the ask is what the person wants answered. The understanding
+    engine has already cut the line at its clauses and hands the ask over in `focus`, so this is
+    the ask alone - and None when the line is one clause, or when its ask is the whole line.
+    """
+    focus = understood.get("focus")
+    clauses = understood.get("clauses")
+    if not isinstance(focus, list) or not isinstance(clauses, list) or len(clauses) < 2:
+        return None
+    ask = [str(word) for word in focus if isinstance(word, str) and word.strip()]
+    if len(ask) < 2:
+        return None
+    # The ask has to be the end of the line and not all of it: "how long before a ferry should i
+    # arrive" cuts at "before", and its second half is not a new subject - only a line that says
+    # something and then asks ends in its ask.
+    whole = understood.get("norm") or understood.get("words")
+    if not isinstance(whole, list):
+        return None
+    line = [str(word).lower() for word in whole if isinstance(word, str)]
+    tail = [word.lower() for word in ask]
+    if len(tail) >= len(line) or line[-len(tail):] != tail:
+        return None
+    # The ask has to ask with its own question word. "how long before a ferry should i arrive at
+    # the port" is cut at "before", and its second half ("should i arrive at the port") is not a
+    # new subject but the same question - only "..., what do i wear" is a setting and an ask.
+    if tail[0] not in _THE_WH_WORDS:
+        return None
+    return ask
+
+
 def _the_best_entry(understood, entries=None, reject=None, use_context=False):
     """The best Entry for this reading of a line, or None when nothing fits."""
     if not isinstance(understood, dict):
@@ -4226,6 +5663,17 @@ def _the_best_entry(understood, entries=None, reject=None, use_context=False):
         words = _without_a_cooking_that_is_a_name(words)
         stripped = stripped or len(words) != len(original)
     words = _with_the_child_by_place(words, clean)
+    if a_colour_is_worn(understood):
+        # "is white ok for a wedding" is "what do i wear to a wedding" said with the colour in
+        # place of the word "wear", so the line is read as saying it (see `a_colour_is_worn`).
+        # The colour word itself is left out for the same reason the colour a line used as a
+        # colour is left out: here it is not the name of a thing, and a row keyed on the bare
+        # word ("white" the rice, "brown" the rice) would otherwise answer a question about
+        # clothes - "should i wear white to a wedding" reached the brown-rice row, which keys
+        # both colours alone, on a par with the wedding row and sorted above it.
+        words = [word for index, word in enumerate(words)
+                 if not (isinstance(word, str) and word.lower() in COLOUR_ASKED_WORDS
+                         and not _a_dress_code(words, index))] + ["wear"]
     forms = [_forms(w) for w in words]
     if entries is None:
         from . import entries as all_entries  # the registry, to avoid an import cycle
@@ -4235,6 +5683,7 @@ def _the_best_entry(understood, entries=None, reject=None, use_context=False):
     if about_the_chat(understood.get("text") or clean):
         return None      # "how did this chat start" is the memory store's line, not a fact
     _read_typos(typed, forms, every, known)
+    _read_a_thing_had([str(word).lower() for word in words], forms)
     # An advice ask names its subject once and spends the rest of the line asking, so the subject
     # is the whole subject and is read first: "what should i do about slugs" was answered with the
     # tablespoons card, because "slug" is also how a cook says a small splash.
@@ -4242,6 +5691,9 @@ def _the_best_entry(understood, entries=None, reject=None, use_context=False):
     whole = _best(understood, words, clean, forms, typed, entries, by_domain, every, reject)
     whole = _the_answer_the_colour_dragged_in(
         whole, understood, words, clean, entries, by_domain, every, reject)
+    if a_colour_is_worn(understood):
+        whole = _the_card_for_the_occasion_asked(
+            whole, understood, words, clean, forms, typed, entries, by_domain, every, reject)
     item = None
     if wrapped:
         item = _the_ask_it_wraps(understood, wrapped, whole, entries, by_domain, every, reject)
@@ -4261,6 +5713,15 @@ def _the_best_entry(understood, entries=None, reject=None, use_context=False):
         item = _best(bare, kept, bare["clean"], [_forms(word) for word in kept],
                      [word.lower() for word in kept if isinstance(word, str)],
                      entries, by_domain, every, reject)
+    ask = _the_ask_on_its_own(understood)
+    if ask:
+        asked_for = set(word.lower() for word in ask) - _ASK_FRAME
+        if item is None or not (asked_for & _key_words(item)):
+            asked = _the_ask_reading(understood, ask)
+            found = _best(asked, ask, asked["clean"], [_forms(word) for word in ask],
+                          [word.lower() for word in ask], entries, by_domain, every, reject)
+            if found is not None:
+                item = found
     # Taking the "dead" out is a reading, not a deletion. "the car is dead slow to start" says
     # the car is very slow to start, and the car's own answer is keyed on the word that was
     # taken out, so with the word gone the line reaches nothing and a thing with a known fault
@@ -4720,8 +6181,7 @@ def _defines(understood, forms, typed, entries, reject=None):
         # bridge" is a river crossing as often as a section of a song, and the entry that says
         # which sense it is about was being asked below anyway. A definition line names one
         # thing and asks nothing else, so it is the one reader with no second signal to lean on.
-        guard = getattr(item, "guard", None)
-        if guard is not None and not guard(understood):
+        if not guard_passes(item, understood):
             continue
         if not _the_key_names_the_thing(item, thing):
             continue
@@ -4779,6 +6239,58 @@ def _names_one(item, named):
 POINTS_BACK = frozenset("""it its it's that this these those there them they he she him her""".split())
 
 
+# A follow-up whose own words are all asking or pointing adds no subject of its own: "will it be
+# alright", "what happens now", "is that bad", "how long do i wait". Such a line is about the
+# subject before it, which is why it leans, and the entry the earlier line reached is its answer
+# even though the line touches none of the entry's own words. The gate above was refusing exactly
+# those: "will it be alright" after "i dropped my phone in the sink" left the phone-in-water card
+# unread and the person got "that's beyond what I know well, sorry", and the deck has the same
+# shape for a boiler losing pressure, a flat mood, a tax return and a house guest.
+FOLLOW_ON_WORDS = frozenset("""
+about actually alright anyway bad better change good happen happens idea instead mean means meant
+now okay otherwise question really safe suppose then thing think true wait worse wrong
+common dangerous fine fix fixed happening happened knackered normal repair repaired ruined ruin
+salvage salvaged save saved serious survive survived survives worrying worried worth next
+""".split())
+
+
+def _only_asking_about_it(understood, leans):
+    """True when the line names nothing the line before it had not already named.
+
+    Only the content words count: what the line adds of its own is the subject, and a line that
+    adds none of its own is asking about the line before it. "what about a large one" adds
+    "large", so it is not this - the earlier card answers it only when the two lines complete a
+    key between them, as they do for a chicken.
+    """
+    earlier = set(tokens(str((leans or {}).get("clean") or (leans or {}).get("text") or "")))
+    earlier.update(str(word).lower() for word in ((leans or {}).get("words") or ())
+                   if isinstance(word, str))
+    now = tokens(str(understood.get("clean") or understood.get("text") or ""))
+    if not now:
+        return False
+    for word in now:
+        if word in earlier or word in GRAMMAR_ONLY or word in POINTS_BACK:
+            continue
+        if word in FOLLOW_ON_WORDS or word.isdigit():
+            continue
+        return False
+    return True
+
+
+def names_nothing_of_its_own(understood):
+    """True when the line asks about the subject of the line before it and adds no subject.
+
+    "will it survive", "is that bad" and "what happens now" carry an ask and nothing else, so
+    the only subject they can be about is the one the last answer was about. A line that adds a
+    content word of its own ("what about a large one") is not this: the word it adds is what it
+    is asking about.
+    """
+    leans = understood.get("leans_on")
+    if not isinstance(leans, dict):
+        return False
+    return _only_asking_about_it(understood, leans)
+
+
 def leans_on_a_subject(understood):
     """True when the line leans on the subject before it, rather than saying something itself.
 
@@ -4818,6 +6330,12 @@ _ROWS_KEEP = 40
 # line asked rather than what the line mentioned on the way there.
 ASK_NAME_CAP = 40
 
+# ... and the cap on the same reading of a question half that holds no rare word at all, where
+# the ordinary words are all the ask has to go on. Higher, because the words it lets in are the
+# ones a card keys on as its subject somewhere ("place", "live", "cost"), not the vocabulary of
+# asking, which is left out below.
+ASK_PLAIN_CAP = 400
+
 
 def _the_names_in_the_ask(understood, every):
     """The words of the question half that the knowledge base treats as a name for something.
@@ -4850,6 +6368,28 @@ def _the_names_in_the_ask(understood, every):
         if every.get(low, 0) > ASK_NAME_CAP or low in names:
             continue
         names.append(low)
+    # A yes/no question about a situation is usually about that situation: "i left the chicken
+    # out all night, can i still cook it" is a question about the chicken, and reading its ask
+    # as the subject put a curry recipe in front of the row that says to bin it. So the ordinary
+    # words of an ask are only read as its subject where the line asks what to do about it.
+    plain = "yesno" not in (understood.get("asks") or ())
+    if not names and plain:
+        # A question half made only of common words is still the half that was asked. "how do i
+        # find a place to live" has no rare noun in it, so the cap above left the ask with no
+        # names at all and the row for the month in the situation - "i start a new job in
+        # manchester in september" reached the garden-jobs row - won the line. With nothing else
+        # to go on, the ordinary words of the ask are the ask: they are compared against a card
+        # that answered the situation, and the ask's own words are left out above, so the whole
+        # base cannot come in on "what" or "get".
+        for word in focus:
+            if not isinstance(word, str):
+                continue
+            low = word.lower()
+            if len(low) < 3 or low in _NOT_A_SUBJECT or low in ASK_FRAME_WORDS:
+                continue
+            if every.get(low, 0) > ASK_PLAIN_CAP or low in names:
+                continue
+            names.append(low)
     return tuple(names)
 
 
@@ -5174,6 +6714,23 @@ def _inside(part, other):
     return False
 
 
+# A body word beside a cut of meat is the joint on the board, not a part of a person: "how long
+# should i rest a leg of lamb" is the roast and not a leg, and "pork shoulder" is the cut. The
+# rows keyed on a cut that is also a part ("shoulder", "ribs") were standing down for every line
+# that named a body part, which is how the resting question reached no meat row at all.
+_CUT_BESIDE = frozenset((
+    "lamb", "beef", "pork", "chicken", "turkey", "duck", "goose", "gammon", "veal", "venison",
+    "meat", "steak", "joint", "roast", "roasting", "brisket", "mince", "sausage", "sausages",
+    "ham", "bacon", "chops", "chop", "fillet", "breast", "thigh", "drumstick", "wing"))
+
+
+def _a_cut_of_meat(words, index):
+    """True when the body word at `index` sits beside a cut of meat, so it names the cut."""
+    near = [str(words[at]).lower() for at in (index - 2, index - 1, index + 1, index + 2)
+            if 0 <= at < len(words)]
+    return any(word in _CUT_BESIDE for word in near)
+
+
 def _body_parts(words):
     """The body parts the line names, without a "back" that only says the thing returned."""
     parts = set()
@@ -5184,6 +6741,8 @@ def _body_parts(words):
         if word == "back" and index and str(words[index - 1]).lower() in RETURNED_AFTER:
             continue
         if word in GENERAL_BODY:
+            continue
+        if _a_cut_of_meat(words, index):
             continue
         parts.add(word)
     return parts
@@ -5202,6 +6761,19 @@ def _key_body_parts(item):
             if isinstance(alternative, str):
                 parts |= _body_parts(alternative.lower().split())
     return parts
+
+
+def _a_part_the_line_does_not_have(word, parts_said):
+    """Whether this fence word names a body part the line says as something other than a part.
+
+    Only a single word that is a part can: a fence written on a phrase ("a mole on my back", "bad
+    back") says what it means, and is left alone. The word is only asked here after it was found
+    in the line, so it is in the line - the question is whether it is the part.
+    """
+    key = str(word).strip().lower() if isinstance(word, str) else ""
+    if not key or " " in key or key not in BODY_WORDS:
+        return False
+    return key not in (parts_said or ())
 
 
 def _another_part(item, line_parts):
@@ -5270,6 +6842,19 @@ def _asks_if_it_is_still_good(typed):
     return bool(_STILL_GOOD_ASHERS.intersection(str(word).lower() for word in typed))
 
 
+# A keeping answer gives a length, and the commonest way it gives one is the plural verb: "Raw
+# eggs keep about three weeks past the date on the box", "Carrots keep for weeks in the fridge".
+# The phrase list above can only hold " keeps " and " keep it ", so a card that said "keep about"
+# was not a keeping row at all: on a line saying how long a thing had been kept and asking if it
+# was still good, `keep-eggs` stood down while a plan follow-up that turned the line down took it,
+# and "is it ok to eat eggs thats been in the fridge 4 days" was the search hedge. Read the verb
+# and the length it gives instead of the phrase.
+_A_KEEP_AND_A_LENGTH = re.compile(
+    r"\bkeep(?:s)?\s+(?:about|for|up to|until|till|roughly|around|no more than|"
+    r"a day|a week|a fortnight|a month|a year|"
+    r"two|three|four|five|six|seven|eight|ten|twelve|\d)")
+
+
 def _a_keeping_row(item):
     """True when the entry answers how long a thing keeps, where to keep it, or if it is fit."""
     reply = getattr(item, "reply", "") or ""
@@ -5280,7 +6865,8 @@ def _a_keeping_row(item):
     if not reply:
         return False
     reply = " " + " ".join(reply.lower().split()) + " "
-    return any(phrase in reply for phrase in _KEEPING_ANSWER)
+    return any(phrase in reply for phrase in _KEEPING_ANSWER) or bool(
+        _A_KEEP_AND_A_LENGTH.search(reply))
 
 
 def _a_keeping_key(item):
@@ -5319,6 +6905,156 @@ A_COLOUR_USED = re.compile(
     r"all\s+|still\s+|now\s+)?(?P<colour>[a-z]+)\b", re.IGNORECASE)
 
 
+# A colour of something worn is the question "what should I wear to it". Every occasion row in
+# the clothes domain is keyed on the wearing words (wear, outfit, clothes, put on) and on the
+# occasion, because that is how the question is usually put: "what do i wear to a wedding". A
+# person who names the colour instead has still asked the same thing - "is white ok for a
+# wedding", "is black ok at a christening" - and without these words the wedding row lost to the
+# hotel-booking row on the word "wedding", the christening row scored nothing at all and the turn
+# got a shrug, and "should i wear white to a wedding" reached the rice row on "white". Three
+# things are needed, and the third is what keeps it honest: a colour, a wearing word or an
+# occasion people dress for, and a line that ASKS. Clothes are bought, worn and reported, so a
+# colour a person mentions is usually not a question about clothes at all: "i bought a black
+# dress for my mums funeral" is a loss, "she was buried in a green dress" is news, and read as an
+# ask both of them got dressing instructions instead of the condolence they were owed.
+#
+# The ask is read the way people put it, and from the whole line rather than one word: the engine
+# already says whether a line is a question, and on top of that an opener that asks, a judgement
+# word the colour is being held up to (ok, alright, suitable, appropriate, "is it rude", "too
+# much"), a colour offered against another ("white or navy for an interview"), or a question mark
+# makes a colour the subject. A colour that is only reported has none of those.
+ASKING_FIRST = frozenset("""is are am was can could should would will shall may might do does did
+    what which any anything how""".split())
+# A colour being held up to a judgement, or offered against another colour, is the question even
+# when the line is written without an opener the list above knows: "ok to wear cream", "would
+# navy be too much", "white or navy for an interview".
+A_COLOUR_ASKED = re.compile(
+    r"\b(?:is|are|am|was|can|could|should|would|will|shall|may|might|do|does|did)\b[^.?!]{0,30}?"
+    r"\b(?:ok|okay|alright|all right|fine|suitable|appropriate|respectful|acceptable|allowed|"
+    r"rude|too much|not done|or|colour|color)\b"
+    r"|\b(?:what|which|any|anything|something)\b[^.?!]{0,30}?"
+    r"\b(?:wear|wearing|put on|outfit|clothes|colour|color|dress)\b"
+    r"|\b(?:%s)\b[^.?!]{0,12}?\b(?:or|vs|versus)\b[^.?!]{0,12}?\b(?:%s)\b"
+    % ("|".join(sorted(COLOUR_WORDS)), "|".join(sorted(COLOUR_WORDS))), re.IGNORECASE)
+# The words that make a colour one of the clothes: what a person says instead of "wear".
+# A person who says "what colour should i wear to the funeral" has not named a colour at all, and
+# has asked the same question as the one who says "is black ok": the word "colour" stands in for
+# the colour. It is kept out of COLOUR_WORDS, which decides when a colour a line *names* is the
+# colour rather than the name of a thing, because "the colour was orange" says the thing was
+# orange and not that something was worn.
+COLOUR_ASKED_WORDS = COLOUR_WORDS | frozenset(("colour", "color", "colours", "colors"))
+WEARING = frozenset("""wear wearing wore worn outfit outfits clothes clothing dressed dress dresses
+    suit suits tie frock gown hat hats shirt blouse trousers shoes heels""".split())
+# An occasion people dress for. A colour named against one of these is a clothes question with or
+# without any other wearing word: "is black ok at a funeral". Only occasions the knowledge base
+# has a clothes answer for are listed, because the list decides which card the line reaches, and
+# an occasion with no card would turn an answer into a shrug - "is black ok at a cremation" is
+# answered today by the card that says whether to go at all, and stays there.
+OCCASION = re.compile(
+    r"\b(?:weddings?|funerals?|wakes?|memorial service|christenings?|baptisms?|naming ceremony|"
+    r"proms?|graduations?|black tie|cocktail|interviews?)\b", re.IGNORECASE)
+
+
+# "black tie" and "white tie" name a dress code, and the code has a row of its own: "black tie
+# wedding what do i wear" is the dinner-jacket answer, and it was the one line the colour rule
+# broke (found by tests/test_a_dress_code_is_not_the_office.py). The colour there is the first
+# word of a name, not the subject of the question, so it is neither a reason to read the line as
+# a wearing question nor a word to leave out of it.
+A_DRESS_CODE_AFTER = ("tie",)
+
+
+def _a_dress_code(words, index):
+    """True when the colour at *index* is the first word of a dress code ("black tie")."""
+    return (index + 1 < len(words) and words[index] in ("black", "white")
+            and str(words[index + 1]).lower() in A_DRESS_CODE_AFTER)
+
+
+# The word after a colour says whether the colour is what the line is about or an adjective on a
+# thing. "is white ok for a wedding" asks about white; "is a white cake ok at a christening" asks
+# about the cake, and a clothes card answered it. Found by ready-fig reading pr:14043: "can i take
+# my black dog to the wedding", "is red meat ok at a christening lunch" and "is a white cake ok at
+# a christening" all reached a clothes card. The first three groups are the words that leave the
+# colour as the subject; anything else is a noun that owns it.
+AFTER_A_COLOUR_STANDS = frozenset("""
+    ok okay alright fine acceptable allowed appropriate suitable good bad wrong safe rude risky
+    smart casual formal warm cool nice better best right darker lighter brighter
+    to for at in on with and or too not is was are were should would could can will shall must
+    the a an this that there it i we they he she my our their his her
+    be been being have has had do does did
+    """.split())
+# Something worn, read as the next word: "a white shirt", "black boots", "a grey suit". Wider than
+# WEARING, because this list only decides the word *after* a colour, never whether a line asks
+# about clothes at all.
+WORN_AFTER_A_COLOUR = frozenset("""
+    wear outfit dress dresses frock gown suit suits tie ties shirt shirts blouse top tops trousers
+    pants skirt skirts jeans shorts leggings socks tights boots shoes trainers sneakers sandals
+    heels flats hat hats cap jumper jumpers cardigan hoodie coat coats jacket blazer scarf gloves
+    cotton linen silk wool satin lace leather denim velvet chiffon knit cashmere
+    ring rings necklace bracelets earrings jewellery jewelry band watch
+    """.split())
+
+
+def _the_colour_is_the_whole_ask(words, index):
+    """True when the colour at *index* is the subject, not the adjective of a thing.
+
+    Read from the word after it: a verdict carries the ask on the colour ("is white ok"), a
+    function word hands the ask on to what comes later ("should i wear white to a wedding"), and
+    something worn or another colour makes the colour an adjective of clothes ("a white shirt",
+    "black and white"). Any other noun takes the colour with it ("a white cake", "a black dog"),
+    and then the line is not a question about what to wear.
+    """
+    if index + 1 >= len(words):
+        return True          # the colour ends the line: "what about navy"
+    after = index + 1
+    # "a white t-shirt" is read as "t" and "shirt", and the letter is not the thing the colour is
+    # an adjective of: a word of one letter is skipped for the word that carries it.
+    if len(str(words[after])) == 1 and after + 1 < len(words):
+        after += 1
+    word = str(words[after]).lower().strip(string.punctuation)
+    if not word:
+        return True          # "is white ok?" - the ask ends with the colour in front of it
+    return (word in AFTER_A_COLOUR_STANDS or word in WORN_AFTER_A_COLOUR
+            or word in COLOUR_WORDS)
+
+
+def a_colour_is_worn(understood):
+    """True when the line asks about a colour of something worn, so it asks what to put on.
+
+    Read from the line as typed, like `asks_what_to_wear`, and it takes either the line as a
+    string or the reading: the reading's own words carry the conversation's topic along with
+    them, and a carried topic is what made a colour question about the garden.
+    """
+    if isinstance(understood, str):
+        understood = {"text": understood}
+    if not isinstance(understood, dict):
+        return False
+    said = str(understood.get("text") or understood.get("clean") or "")
+    if not said:
+        words = understood.get("words")
+        said = " ".join(str(word) for word in words) if isinstance(words, (list, tuple)) else ""
+    typing = tokens(said)
+    typed = set(typing)
+    if not typed & COLOUR_ASKED_WORDS:
+        return False
+    if not any(word in COLOUR_ASKED_WORDS and not _a_dress_code(typing, index)
+               and _the_colour_is_the_whole_ask(typing, index)
+               for index, word in enumerate(typing)):
+        # every colour in the line is half of a dress code, or the adjective of a thing the line
+        # is really about ("is a white cake ok at a christening" is the cake)
+        return False
+    # the words in the order they were typed, because an occasion can be two words and "memorial
+    # service" read out of order is neither: "is black ok at a memorial service" was the one
+    # occasion in a 44-line probe that the rule did not reach.
+    if not (WEARING & typed or OCCASION.search(" ".join(typing))):
+        return False
+    if understood.get("kind") == "question" or "?" in said:
+        return True
+    # The opener is the first word of the line that says something, and "so" is how a person
+    # starts a question after a pause: "so is white ok for a wedding".
+    first = next((word for word in tokens(said) if word != "so"), "")
+    return bool(first in ASKING_FIRST) or bool(A_COLOUR_ASKED.search(said))
+
+
 def _the_words_without_a_colour(clean, words):
     """The line's words with a colour it used as a colour taken out, or None when it used none."""
     said = {match.group("colour").lower() for match in A_COLOUR_USED.finditer(str(clean or ""))}
@@ -5352,6 +7088,67 @@ def _the_key_words(entry):
             for one in part:
                 said.update(str(one).lower().split())
     return said
+
+
+# The occasion a line names decides which of the clothes cards answers it. "is white ok at a
+# funeral" and "is white ok at a wedding" reach the same two rows, and the wearing word the colour
+# stands for carries the ask while the occasion carried nothing: at a funeral the reply named a
+# wedding, which reads as the bot not having heard the line. The families are the words an entry
+# may be keyed on, not the words a person types: "memorial service" is a funeral card.
+THE_SAME_OCCASION = {
+    "funeral": frozenset("funeral funerals wake wakes memorial burial cremation".split()),
+    "wedding": frozenset("wedding weddings married marriage".split()),
+    "christening": frozenset("christening christenings baptism baptisms naming".split()),
+    "prom": frozenset(("prom", "proms")),
+    "graduation": frozenset(("graduation", "graduations")),
+    "interview": frozenset(("interview", "interviews")),
+}
+
+
+def _the_occasion_family(phrase):
+    """The family a matched occasion belongs to, or "" when it has no clothes card of its own."""
+    word = str(phrase or "").lower().strip()
+    for family, members in THE_SAME_OCCASION.items():
+        if word in members or word.startswith(family):
+            return family
+    return ""
+
+
+def _the_occasion_words(typed):
+    """The words an entry may be keyed on, for the occasion this line names itself.
+
+    Read from the line as typed: an occasion carried over from an earlier turn is not what the
+    person named this time, and a card for it would answer a question they did not ask.
+    """
+    said = " ".join(str(word) for word in typed if isinstance(word, str))
+    found = set()
+    for match in OCCASION.finditer(said):
+        family = _the_occasion_family(match.group(0))
+        if family:
+            found |= THE_SAME_OCCASION[family]
+    return found
+
+
+def _the_card_for_the_occasion_asked(found, understood, words, clean, forms, typed, entries,
+                                     by_domain, every, reject):
+    """The clothes card for the occasion the line names, when it is not the card reached.
+
+    Only a colour asked about what to wear gets here (see `a_colour_is_worn`), and only a clothes
+    entry that is keyed on the occasion can take the turn: the line still has to reach it, so a
+    row that does not fit is no answer and the line keeps the one it had.
+    """
+    asked = _the_occasion_words(typed)
+    if not asked:
+        return found
+    if found is not None and (_the_key_words(found) & asked):
+        return found
+    for_this = [entry for entry in entries
+                if str(getattr(entry, "domain", "")) == "clothing"
+                and (_the_key_words(entry) & asked)]
+    if not for_this:
+        return found
+    again = _best(understood, words, clean, forms, typed, for_this, by_domain, every, reject)
+    return again if again is not None else found
 
 
 def _the_answer_the_colour_dragged_in(found, understood, words, clean, entries, by_domain, every,
@@ -5403,12 +7200,27 @@ def _best(understood, words, clean, forms, typed, entries, by_domain, every, rej
     ask_names = _the_names_in_the_ask(understood, every)
     ask_said = _the_ask_in_order(understood)
 
+    # A number in front of "degrees" is a temperature, not a qualification: "a wedding in italy at
+    # 35 degrees, what do i wear" was answered with the pass mark for a degree.
+    degrees_are_heat = _the_degrees_are_a_temperature(understood)
+    # A figure in years that belongs to a thing is not a child in the line, so no row that reads
+    # the age as a child's can answer it (see the_years_are_a_things).
+    aged_a_thing = the_years_are_a_things(understood)
+    # The place the line says is cold, if any: a card about a person who feels the cold answers a
+    # different line, and only when the line does not say how the person feels.
+    cold_place = None
+    if not _speaker_is_feeling(typed) and not _the_person_says_they_are_cold(typed):
+        cold_place = _the_place_the_line_says_is_cold(typed)
+
     def rank(reading, filter_keeping):
         """The entries the line reaches, with the keeping-only rule on or off."""
 
         def stands_down(item):
-            guard = getattr(item, "guard", None)
-            if guard is not None and not guard(reading):
+            if not guard_passes(item, reading):
+                return True
+            if degrees_are_heat and _answers_a_qualification(item):
+                return True
+            if aged_a_thing and _the_age_is_a_childs(item):
                 return True
             if filter_keeping and not _a_keeping_row(item):
                 return True
@@ -5446,6 +7258,11 @@ def _best(understood, words, clean, forms, typed, entries, by_domain, every, rej
         ranked_items, plain = rank({k: v for k, v in understood.items() if k != "kept"}, False)
     if not ranked_items:
         return _other_reading(understood, words, clean, entries, reject)
+    # A row that reached the line only through the frame (a length word, a pronoun) has not named
+    # anything the line is about, and it scored 1 for it: it is not a candidate.
+    ranked_items = [row for row in ranked_items if row[1] > 1]
+    if not ranked_items:
+        return _other_reading(understood, words, clean, entries, reject)
     # an asked entry before a wanted one; then the best score; on a tie the entry that answers a
     # line asking to plan; then the entry that names the thing the line named; then the more
     # specific key; the rest keep the registry's order. A name is the subject of the question,
@@ -5453,15 +7270,48 @@ def _best(understood, words, clean, forms, typed, entries, by_domain, every, rej
     # Tower" is about the tower, not about steps a day, but "help me plan a trip to Paris" is
     # about the plan, not about Paris.
     ranked_items.sort(key=_row_order, reverse=True)
+    if cold_place is not None:
+        ranked_items = _the_card_for_the_place_first(cold_place, ranked_items)
     carried = _the_subject_the_line_leans_on(understood)
+    # One line can set a scene and then ask about something else: "we have a cat and a baby,
+    # what should we feed the dog" sets a scene (a cat, a baby) and asks about a dog, and "got
+    # a suit for the wedding, what should i wear to the interview" names a wedding and asks
+    # about an interview. The reading says which thing was said in the clause that carries the
+    # ask (`ask_subject`) and which one was only the scene (`setting`), so a card that is about
+    # the scene and names nothing of the thing asked is answering the half of the line before
+    # the comma. One rule for the whole shape, in words or not: "my mum is 80 next week and we
+    # want a cake, what should i bake" names no thing in its ask, so its card is not held back.
+    ask_thing = understood.get("ask_subject")
+    scene = understood.get("setting")
+    scene_only = (isinstance(ask_thing, str) and isinstance(scene, str)
+                  and ask_thing != scene and not _says_what_is_missing(understood)
+                  # A scene that names a person is a fact about them the ask leans on, not a
+                  # rival thing: "my wife is vegetarian, what should i cook for dinner" is one
+                  # question about dinner, and the vegetarian card is the answer to it.
+                  and _is_a_person(understood, ask_thing) == _is_a_person(understood, scene))
     turned_down = set()
-    for _asked, _ranked, _plans, _named, _keys, item, _on_ask in ranked_items:
-        if reject is not None and reject(item):
-            turned_down.add(item.id)
-            continue
-        if _the_subject_it_avoids(item, forms, carried):
-            continue
-        return item
+    # A card that answers both halves of the line is not the answer to the half that asks when a
+    # card about the asked thing alone is there: "we have a cat and a baby, what should we feed
+    # the dog" reached a cat-or-dog comparison ("Dogs, by a whisker") because it names the cat as
+    # well as the dog, and that card outranked feeding the dog. The both-card is kept for the
+    # second pass, so a line whose only answer speaks of both halves still gets it.
+    for whole_line_first in (True, False):
+        for _asked, _ranked, _plans, _named, _keys, item, _on_ask in ranked_items:
+            if reject is not None and reject(item):
+                turned_down.add(item.id)
+                continue
+            if _the_subject_it_avoids(item, forms, carried):
+                continue
+            if not scene_only:
+                return item
+            says_ask = about(item, ask_thing)
+            says_scene = about(item, scene)
+            if says_scene and not says_ask:
+                continue        # an answer about the scene, not about the thing asked
+            if says_scene and whole_line_first:
+                continue        # about both halves; the second pass comes back for it
+            return item
+        turned_down.clear()
     if plain is not None:
         # Every entry the line reached with its frame clause emptied has turned it down, so the
         # answer is in the clause itself: "how do i cut an onion without crying" is about the
@@ -5590,6 +7440,13 @@ def _touches(item, forms, rarity=None):
         rarity = {}
     for part in item.key:
         for _, words, _ in _part_matches(part, forms):
+            if words and all(word in A_SAYS_NOTHING for word in words):
+                # "how long" is a phrase and it is in the line, but it says how long and names
+                # nothing: it is not the line's own reach into the entry. After "my headphones
+                # stopped working", "how long does it last" touched the state pension through
+                # "how long" alone, while the row's other half - "stop working" - is the row
+                # reading the earlier line as somebody leaving a job.
+                continue
             # A figure is specific however many keys hold one: "hes 13" says which child and
             # which answer, and counting "13" as an ordinary word because the knowledge base
             # has entries for five-, eight- and ten-year-olds lost that follow-up.
@@ -5728,8 +7585,7 @@ def _following_on(understood, entries, forms, typed, by_domain, every, known=(),
         # the line before it. Without this, "he asked me a question" after "she gave me a
         # question to answer" reached the quiz row through the words they share, and a
         # general-knowledge question went to somebody who was talking about someone else.
-        guard = getattr(item, "guard", None)
-        if guard is not None and not guard(understood):
+        if not guard_passes(item, understood):
             continue
         ranked = _rank(item, together, by_domain.get(domain) or every, seen)
         # The subject of the earlier line is what this line leans on, so an entry that names
@@ -5740,10 +7596,28 @@ def _following_on(understood, entries, forms, typed, by_domain, every, known=(),
             ranked += 100
         if ranked > best_score:
             best, best_score, best_domain = item, ranked, domain
+    if _only_asking_about_it(understood, leans):
+        # The follow-up names nothing of its own, so the row that answers it is the row the
+        # person's own line reached, not whichever row the two lines together score highest.
+        # Read as one text, "i feel flat all the time" and "how long do i wait before seeing
+        # someone" reach `plan-followup`, and "she is staying with us for a week" and "what
+        # should i have in" reach `choosing-between` - both rows from a field neither line is
+        # about, both winning on a shared word. The tokens of a follow-up are all ask and point
+        # words, so their contribution is noise about the subject rather than a second subject.
+        # Unless the two lines complete one key between them, a part each: "i washed my wool
+        # jumper hot" then "is it ruined" is one question about a felted jumper, and the row the
+        # second line adds a part to answers it better than the row the first line reached on its
+        # own. The lean takes the first line's row only where the follow-up adds nothing to it.
+        back = _the_best_entry(leans, entries, reject, False)
+        if back is not None and not (best is not None and best is not back
+                                     and _parts_across(best, carried_forms, forms)):
+            best, best_domain = back, getattr(back, "domain", "") or ""
     if best is not None and not _touches(best, forms, by_domain.get(best_domain) or every):
         # The earlier line alone chose it, and the line says nothing about it - unless the two
-        # lines complete one key between them, a part each (see `_parts_across`).
-        if not _parts_across(best, carried_forms, forms):
+        # lines complete one key between them, a part each (see `_parts_across`), or the line
+        # asks about the subject before it without naming anything of its own.
+        if not _parts_across(best, carried_forms, forms) \
+                and not _only_asking_about_it(understood, leans):
             return None
     # The follow-up's own words can name what the entry is about with one specific word:
     # "she says it hurts when it bites" after a wobbly tooth, and "should i raise it with her"
@@ -5814,7 +7688,7 @@ def asks_what_to_wear(understood):
         if not said:
             words = understood.get("words")
             said = " ".join(str(word) for word in words) if isinstance(words, (list, tuple)) else ""
-    return bool(_WEAR_ASK.search(" ".join(tokens(said))))
+    return bool(_WEAR_ASK.search(" ".join(tokens(said)))) or a_colour_is_worn(understood)
 
 
 def _topic_domains(understood, entries=None):
@@ -5870,6 +7744,40 @@ def about_the_topic(item, understood):
     the same conversation's fact.
     """
     return _in_topic(item, understood)
+
+
+# The words that say something is not there: "i havent got a blender, can i still make soup" is
+# not a line that sets a scene and then asks about soup - the blender it has not got is the
+# condition the soup is asked under, so the answer is about blending without one.
+MISSING_WORDS = re.compile(
+    r"\b(?:no|not|without|havent|hasnt|hadnt|dont|doesnt|didnt|cant|cannot|isnt|arent|wasnt|"
+    r"wont|lack|lacks|lacking|empty|none|nothing|ran out|run out|out of)\b")
+
+
+def _is_a_person(understood, word):
+    """True when the line named this word as a person rather than as a thing."""
+    for ent in (understood or {}).get("entities") or ():
+        if isinstance(ent, dict) and str(ent.get("text", "")).lower() == str(word).lower():
+            return ent.get("type") == "person"
+    return False
+
+
+def _says_what_is_missing(understood):
+    """True when the half of the line before the ask says something is not there.
+
+    A clause in front of the question is usually a scene, and the ask is about the thing after
+    it. But a clause that says a thing is missing is a condition on the ask, not a scene: "i
+    havent got a blender, can i still make soup" asks how to make soup without one, so the card
+    keyed on the blender is the answer and the thing the ask names is not what to answer about.
+    """
+    focus = list((understood or {}).get("focus") or ())
+    for clause in (understood or {}).get("clauses") or ():
+        if list(clause) == focus:
+            continue
+        text = " ".join(str(word) for word in clause if isinstance(word, str))
+        if MISSING_WORDS.search(text):
+            return True
+    return False
 
 
 def _reaches(item, forms):
@@ -6010,3 +7918,72 @@ def _the_subject_alone(subject, entries, by_domain, every, reject=None):
                  typed, entries, by_domain, every, reject,
                  framed=names_one_thing(
                      [word for word in words if word not in _SUBJECT_POINTS], every))
+
+
+# The signs that say the food in front of them is going or gone, in people's own words. A line
+# carrying one of these is asking whether it is safe to eat, whatever else it says, and the meal
+# tables in `meals.py` and `cooking.py` have to stand down on it: "my mince smells a bit is it
+# still ok" was answered with a ragù and "my bacon smells funny is it ok" with a curry, because
+# naming a food is all a dish table needs. A recipe for a suspect ingredient is worse than no
+# recipe, so the sign is read before anything is suggested.
+GONE_OFF_SIGNS = ("smells", "smell", "smelly", "smelling", "stinks", "stinking", "slimy",
+                  "gone off", "went off", "going off", "has gone off", "have gone off",
+                  "gone bad", "has gone bad", "has gone slimy", "have gone slimy",
+                  "out of date", "past its date", "past the date", "past their date",
+                  "use by", "use-by", "best before", "still ok", "still good", "still fine",
+                  "ok to eat", "safe to eat", "is it off", "mouldy", "moldy", "funny smell",
+                  "off smell", "bin it", "bin them", "throw it away", "throw them away",
+                  "throw it out", "throw them out")
+
+
+def says_it_has_gone_off(clean):
+    """True when the line says the food has gone off, or asks whether it has.
+
+    `clean` is the line as the reading hands it over. The words are matched inside the line
+    because "smells" and "gone off" are said as part of a longer phrase ("it smells a bit",
+    "the mince has gone off"), and a word-by-word test would miss them.
+    """
+    low = " %s " % str(clean or "").lower()
+    return any((" %s " % sign) in low or (" %s" % sign) in low
+               for sign in GONE_OFF_SIGNS)
+
+
+def said_in_this_line(understood, memory=None):
+    """The line's own words, with any earlier line put back out of it.
+
+    A follow-up is read with the line before it in front of it ("can i freeze it" after "im
+    making a chilli tonight" reads as "im making a chilli tonight can i freeze it"), which is what
+    lets "how long does it need" reach the dish at all. The cost is that a row keyed on a word
+    from the earlier line answers a line that never said it: the cooked pot's question was handed
+    to the row about freezing the *vegetable*. A row that has to be about what this line names
+    reads the line through here instead of `clean`.
+
+    Two shapes carry an earlier line: `leans_on` (the reading says which line it leans on) and
+    `said_now` (a module wrote the subject of the conversation into the line and kept the typed
+    line beside it).
+    """
+    if isinstance(memory, dict):
+        # the line as it arrived, kept by the module that reads the conversation
+        typed = memory.get("asked_now")
+        if isinstance(typed, str) and typed.strip():
+            return typed.strip()
+    if not isinstance(understood, dict):
+        return ""
+    typed = understood.get("said_now")
+    if isinstance(typed, str) and typed.strip():
+        return typed.strip()
+    # A line that describes something and then asks ("im making a chilli tonight, can i freeze
+    # it") keeps the situation in `setup` and the question in `focus`, and a reading that had an
+    # earlier line written into it has the same shape. Either way the question half is the part
+    # being asked, so it is the part this reader looks at.
+    focus = understood.get("focus")
+    if understood.get("setup") and isinstance(focus, list) and focus:
+        return " ".join(str(word) for word in focus).strip()
+    text = str(understood.get("clean") or understood.get("text") or "")
+    leans = understood.get("leans_on")
+    carried = str(leans.get("text") or "") if isinstance(leans, dict) else ""
+    if carried:
+        low, carried = text.lower(), carried.lower()
+        if carried in low:
+            text = low.replace(carried, " ")
+    return text.strip()

@@ -9,7 +9,9 @@ answer without either of them naming a chilli variety.
 """
 import re
 
-from .lookup import entry
+from . import lookup
+from . import lookup
+from .lookup import entry, said_in_this_line
 
 ANSWERS = ("cooking", "food-and-drink")
 
@@ -23,6 +25,62 @@ DISH = ("con carne", "con carni", "bolognese", "chilli beef", "stew", "recipe", 
 # slice them still frozen", which is nonsense for a stew. These words name the cooked dish, so
 # the cooked-dish row below answers instead. "leftover" is not here: it is a key word above.
 COOKED = (" pot ", "pot of", "a pot", "batch", "cooked", "already made", "made it")
+# A follow-up says "it", and the chilli it leans on can be either the vegetable or the dish: after
+# "im making a chilli tonight" and "how long does it need", "can i freeze it" was answered "Freeze
+# them whole in a bag and slice them still frozen", which is nonsense for a stew. The reading that
+# reaches these rows carries the dish word from an earlier line, so the ingredient rows have to see
+# the word in the line itself: anything that only refers back is the dish's keeping question, which
+# the cooked-dish row answers.
+_CHILLI_IN_THE_LINE = ("chilli", "chillies", "chile", "chiles", "jalapeno", "jalapenos",
+                       "habanero", "scotch bonnet", "birds eye")
+
+
+def _the_vegetables_or_the_pot(memory, understood, vegetable_answer, pot_answer):
+    """The vegetable's answer, or the cooked dish's when this line is only pointing at one.
+
+    "im making a chilli tonight", "how long does it need", and then "can i freeze it" was answered
+    "Freeze them whole in a bag and slice them still frozen", which is a bag of peppers, not a pot
+    of stew. The last line names nothing, so the thing being asked about is the dish the talk is
+    on, and the answer for a cooked dish is one this base already keeps: the dish's own plan
+    sentence, or the freezing table in `bot/knowledge/cooking_entries.py`. Both are imported
+    rather than said again here, and a chat with no dish in it still gets the vegetable's answer.
+    """
+    if _a_chilli_in_this_line(memory, understood):
+        return vegetable_answer
+    if isinstance(memory, dict) and _a_dish_in_the_chat(memory, understood):
+        pot = pot_answer(memory, understood)
+        if isinstance(pot, str) and pot.strip():
+            return pot
+    return vegetable_answer
+
+
+def _a_dish_in_the_chat(memory, understood):
+    """True when the conversation is on a dish, so "it" is a pot and not a bag of peppers."""
+    from . import dishes  # imported here: the dish tables build on this module's neighbours
+    try:
+        return bool(dishes.dish_for(memory, understood))
+    except Exception:  # noqa: BLE001 - the vegetable's own answer is the safe one
+        return False
+
+
+def _the_plans_keeping_answer(memory, understood):
+    """The dish's own keeping sentence, for a pot the conversation is already on."""
+    from . import dishes  # imported here: the dish tables build on this module's neighbours
+    return dishes.follow_up(memory, understood)
+
+
+def _the_cooked_dish_freezing_answer(memory, understood):
+    """The freezing answer for a cooked dish, from the table that keeps them all."""
+    from .cooking_entries import freeze_cooked_answer  # imported here: a neighbour's table
+    return freeze_cooked_answer(memory, understood)
+
+
+def _a_chilli_in_this_line(memory, understood):
+    """True when this line names the vegetable rather than leaning on a dish said earlier."""
+    text = said_in_this_line(understood, memory).lower()
+    return any(word in text for word in _CHILLI_IN_THE_LINE)
+
+
 # The verbs that name a pan. A chilli in a pan is the dish, and the keeping row is about a box in
 # the drawer: "how long should i simmer a chilli for" got the box.
 HEAT_WORDS = ("simmer", "simmering", "simmered", "cook", "cooking", "boil", "boiling", "fry",
@@ -99,6 +157,55 @@ def _curry_heat(memory, understood):
             % CURRY_ORDER_LINE)
 
 
+# The bean word in the line can be the thing somebody already has rather than the thing they
+# are asking about: "got mince and kidney beans but no chopped tomatoes" is a question about the
+# tomatoes, and it was answered with the beans card. A shortage names the subject of the line, so
+# this stands the beans row down unless what is missing is itself a bean.
+_SHORTAGE = re.compile(
+    r"\b(?:but no|and no|no|without|short of|missing|havent got|haven't got|not got"
+    r"|ran out of|run out of)\s+((?:[a-z']+\s*){0,3})")
+_BEAN_STEMS = ("bean", "kidney", "pinto", "cannelli", "haricot", "baked", "black")
+
+
+def _short_of_something_else(understood):
+    """False when the line says what it has run out of and that thing is not a bean."""
+    # the reading's words are a list, so they go through the one helper that joins them: taken as
+    # the fallback for a string they put a list into `finditer` (see lookup.said_text)
+    for match in _SHORTAGE.finditer(lookup.said_text(understood)):
+        near = match.group(1).split()[:3]
+        if not any(word.startswith(_BEAN_STEMS) for word in near):
+            return False
+    return True
+
+
+# What a pot of it keeps, and the one stand-down the keeping row cannot say in a word list.
+# "how long" is a keeping word in this file, and a pan of it can be either question: on the hob it
+# is the cooking time, in the fridge it is the keeping time. A bare word cannot tell those apart -
+# `pan` in the avoid list stood the row down for the keeping question and the boiler answered it -
+# and a bare `cook` in the avoid list is loose-matched, so it eats its own past participle and
+# takes "how long does cooked chilli keep" with it. The line's verb and the cues beside it are
+# what tell them apart, so the reply reads its own line: a cook verb with nothing that keeps is
+# the cooking question and this row returns nothing, which hands the line to the cook-time card.
+A_COOK_CLOCK_VERB = re.compile(r"\b(?:take|takes|taking|simmer|simmering|boil|boiling|fry|frying|"
+                               r"bake|baking|roast|roasting|cook|cooks|cooking|poach|steam|grill)\b")
+A_KEEPING_CUE = re.compile(r"\b(?:keep|keeps|keeping|kept|last|lasts|lasting|store|stored|fridge|"
+                           r"freezer|freeze|frozen|good for|leftover|left over|reheat|reheats|"
+                           r"out of date|use by|still good|safe to eat|night|tomorrow)\b")
+A_POT_OF_CHILLI_KEEPS = (
+    "A pot of chilli keeps 3 days in the fridge, in a sealed box, once it has cooled within "
+    "two hours of cooking; it freezes for 3 months and it is better the next day anyway. "
+    "Reheat it once, until it is piping hot right through, and don't leave it out on the "
+    "hob overnight.")
+
+
+def _the_pot_keeps(memory, understood):
+    """The pot's keeping clock, or nothing when the line asks how long a pan takes to cook."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if A_COOK_CLOCK_VERB.search(said) and not A_KEEPING_CUE.search(said):
+        return ""
+    return A_POT_OF_CHILLI_KEEPS
+
+
 ENTRIES = (
     # "how do i use up chillies", "how do i store chillies" and "how long do chillies last" were
     # answered by the chilli con carne method, and "how do i keep chillies fresh" by a keeping row
@@ -108,10 +215,13 @@ ENTRIES = (
             "scotch bonnet"),
            ("use up", "keep", "keeping", "store", "storage", "how long", "last", "left over",
             "leftover", "glut", "plenty of")),
-          "Loose in the fridge drawer they keep a week or two, and longer in a paper bag than in "
-          "plastic: the bag holds the moisture that turns them soft. A glut is better frozen or "
-          "dried than left to go wrinkly - both keep the heat - and a handful also becomes chilli "
-          "oil, which is the fastest way to use up twenty at once.",
+          lambda memory, understood: _the_vegetables_or_the_pot(
+              memory, understood,
+              "Loose in the fridge drawer they keep a week or two, and longer in a paper bag than "
+              "in plastic: the bag holds the moisture that turns them soft. A glut is better "
+              "frozen or dried than left to go wrinkly - both keep the heat - and a handful also "
+              "becomes chilli oil, which is the fastest way to use up twenty at once.",
+              _the_plans_keeping_answer),
           # "my chilli is too dry" is a fault in the dish, not a question about keeping them:
           # the state word is what tells the two apart. Freezing and drying have their own rows,
           # because each is asked on its own and the first sentence has to be about that.
@@ -122,7 +232,14 @@ ENTRIES = (
                                      "tastes dry",
                         "came out dry", "too wet", "plant", "grow", "growing", "sow", "seedling",
                         "powder", "flakes", "paste", "freeze", "frozen", "drying", "dry them",
-                        "instead of", "substitute", "swap", "replace", "oil") + COOKED,
+                        "instead of", "substitute", "swap", "replace", "oil",
+                        # "take" rather than "how long does it take": the follow-up is written out
+                        # with its subject first ("how long does the chilli take"), so the phrase
+                        # the person typed no longer appears by the time the row is asked. A
+                        # keeping question says "last"; a duration of doing says "take".
+                        # "and how long does it take" after "im making chilli tonight" was told
+                        # "loose in the fridge drawer they keep a week or two".
+                        "take", "takes", "taking") + COOKED,
           bias=1),
     # A pot of it is a cooked dish with its own keeping answer: "how long is a pot of chilli good
     # for" reached the box-in-the-drawer card, and with that card stood down it reached the
@@ -132,15 +249,23 @@ ENTRIES = (
           (("chilli", "chillies", "chilli con carne", "chilli beef"),
            ("keep", "keeps", "keeping", "good for", "last", "lasts", "how long", "store",
             "fridge", "freezer", "freeze", "leftover", "left over")),
-          "A pot of chilli keeps 3 days in the fridge, in a sealed box, once it has cooled within "
-          "two hours of cooking; it freezes for 3 months and it is better the next day anyway. "
-          "Reheat it once, until it is piping hot right through, and don't leave it out on the "
-          "hob overnight.",
+          _the_pot_keeps,
           ask=(" pot ", "pot of", "a pot", "batch", "cooked", "made", "leftover", "left over",
-               "con carne"),
+               "con carne", " pan ", "pan of", "a pan"),
           # "chilli con carne" has its own keeping row, which says the same thing in one line.
+          # A cooking time is not a keeping time, and the dish is where that matters most:
+          # "how long does it take to cook a chilli" was told "A pot of chilli keeps 3 days in
+          # the fridge". The row keeps "how long" as a key, which a duration also says, so the
+          # cooking words have to stand it down - the same list the vegetable's keeping row uses.
+          # The pan is not one of them. `pan` itself stood this row down for "how long does a pan
+          # of chilli keep", which is the keeping question asked of a pan, and the boiler's
+          # appliance row answered it ("Turn the water off at the isolation valve"). A pan words
+          # the dish, not the hob: the hob, the oven and the heat verbs are in the list and the
+          # pan is in the ask, so the reply decides on the verb the line actually used.
           avoid=("plant", "grow", "growing", "seedling", "sow", "powder", "flakes", "paste",
-                 "how hot", "too spicy", "too dry", "instead of", "con carne", "con carni"),
+                 "how hot", "too spicy", "too dry", "instead of", "con carne", "con carni",
+                 "take", "takes", "taking", "simmer", "simmering", "boil", "boiling", "fry",
+                 "frying", "oven", "hob", "how long to cook", "cooking time"),
           # cooking.py's cooked-mince row carries "chilli" too and asks for "leftover", so a
           # leftover chilli keeps the mince answer, which is the same clock and the same box.
           bias=1),
@@ -158,21 +283,47 @@ ENTRIES = (
                  "child", "kids", "plant", "grow", "seedling", "powder", "flakes", "paste"),
           # "how hot is a jalfrezi" was answered with the week's weather
           bias=1),
+    # A curry is finished with something cooling, and the question "do i need to add yoghurt" was
+    # answered by nothing at all while the same line written with "too spicy" in it reached the
+    # heat card. The dish and the thing stirred into it are the two halves, so the row reads both
+    # and answers the finishing (when to add it, how not to split it) rather than the heat scale.
+    entry("curry-yoghurt",
+          (("curry", "curries", "dal", "daal", "dhal", "tikka", "masala", "korma",
+            "rogan josh", "balti"),
+           ("yoghurt", "yogurt", "dahi", "cream", "coconut milk", "raita", "creme fraiche",
+            "crème fraîche", "soured cream", "sour cream")),
+          "Yes - a spoonful of yoghurt stirred in at the end is the usual finish: it cools the "
+          "heat and rounds off a sharp or bitter edge. Take the pan off the heat first and stir "
+          "the yoghurt into a spoonful of the sauce in a cup before it goes back in, so it does "
+          "not split; full-fat or Greek yoghurt splits less than low-fat, and a splash of cream "
+          "or coconut milk does the same job.",
+          # a pot that has split, a pot that is too runny and a diet question are all other rows
+          avoid=("split", "splits", "splitting", "curdled", "curdle", "curdling", "grainy",
+                 "seized", "too thick", "too thin", "watery", "runny", "calories", "healthy",
+                 "how many", "protein", "freeze", "frozen", "mouldy", "out of date", "gone off"),
+          bias=1),
     # "can i freeze fresh chillies" was answered by the storage row, whose second sentence is
     # about freezing: the answer has to start with the thing that was asked.
     entry("chilli-freeze",
           (("chilli", "chillies", "chilli pepper", "jalapeno", "jalapenos", "habanero",
             "scotch bonnet"),
            ("freeze", "frozen", "freezing", "bag up", "ice cube")),
-          "Freeze them whole in a bag and slice them still frozen: they go soft, so they are for "
-          "cooking rather than for a salad, but the heat survives a few months. Chopped into an "
-          "ice-cube tray with a little oil is the other way, one cube per curry, and there is no "
-          "need to blanch them first.",
+          lambda memory, understood: _the_vegetables_or_the_pot(
+              memory, understood,
+              "Freeze them whole in a bag and slice them still frozen: they go soft, so they are "
+              "for cooking rather than for a salad, but the heat survives a few months. Chopped "
+              "into an ice-cube tray with a little oil is the other way, one cube per curry, and "
+              "there is no need to blanch them first.",
+              _the_cooked_dish_freezing_answer),
+          # cooking.py's freeze-cooked row carries the bare word "chilli" too, and so does the
+          # garden's frost row through "freezing", so the nudge is what settles this against
+          # them. A pot that is already made is a different question with its own row - "can i
+          # freeze leftover chilli" lost its cooked-mince answer to a bigger nudge - so leftover
+          # is fenced here rather than weighed.
           avoid=DISH + ("too spicy", "too hot", "too dry", "is dry", "plant", "grow", "growing",
-                        # not "freezer": word forms fold it onto "freeze", this row's own key
-                        "sow", "not working", "broken", "instead of", "oil") + COOKED,
-          # cooking.py's freeze-cooked row carries the bare word "chilli", so it scores the same
-          # on this line: the nudge decides it, and freeze-cooked keeps every cooked dish
+                        "sow", "not working", "broken", "instead of", "oil",
+                        "leftover", "left over", "cooked", "already made", "batch")
+          + COOKED,
           bias=1),
     # the same for drying: "how do i dry chillies" was answered by the fridge drawer.
     entry("chilli-dry",
@@ -185,7 +336,13 @@ ENTRIES = (
           "them whole and they keep a year in a jar; grind them for flakes once they are crisp.",
           avoid=DISH + ("too spicy", "too hot", "too dry", "is dry", "tastes dry", "came out dry",
                         "too wet", "plant", "grow", "growing", "sow", "tumble dryer",
-                        "washing", "instead of", "oil"),
+                        "washing", "instead of", "oil",
+                        # "the chilli boiled dry" is a pan on the hob, not a chilli to hang:
+                        # the pot-dry words are the dish's rescue, and a chilli that is being
+                        # dried on a string is never boiled
+                        "boiled dry", "boils dry", "boil dry", "boiling dry", "boiled away",
+                        "boils away", "caught on the bottom", "stuck to the bottom",
+                        "saucepan", "in the pan", "in the pot"),
           # the "too dry" fault row and the dry-dish advice score on "dry" as readily as this
           # one does, and the chilli names say which is meant
           bias=1),
@@ -264,4 +421,34 @@ ENTRIES = (
           avoid=DISH + ("chop", "deseed", "seed", "pith", "how hot", "how spicy", "too spicy",
                         "less spicy", "store chillies", "freeze", "instead of", "substitute",
                         "plant", "grow", "sow")),
+    # Whether a chilli has beans in it is the one question about the dish that the recipe is the
+    # wrong answer to: "should i add beans to my chilli" was handed the whole method from "fry
+    # 500g of mince", "do i need beans in chilli" reached the green-vegetables row (a bean on a
+    # plate, not a bean in a pot) and "what beans for chilli" got nothing at all. A person asking
+    # this has the pot on already, so the answer is which beans, how many and what to do without.
+    entry("chilli-beans",
+          (("chilli", "chili", "chilli con carne", "chili con carne", "chillies"),
+           ("beans", "bean", "kidney beans", "kidney bean", "black beans", "pinto beans",
+            "cannellini", "baked beans", "haricot", "tin of beans", "tinned beans")),
+          "Beans are optional, and it is a regional thing rather than a rule: Tex-Mex chilli "
+          "usually has none, and most home versions have kidney beans. If you want them, a 400g "
+          "tin of kidney or black beans, drained and rinsed, goes in with the tomatoes so it "
+          "simmers the last 30 minutes - about one tin to 500g of mince, and no longer, because "
+          "they go floury. Without them, keep the mince at 500g and add an extra onion or a "
+          "handful of red lentils with the stock so it does not go dry and sharp. Baked beans are "
+          "the sweet one: they work, but they want less sugar and a splash of vinegar in the pot.",
+          # a bean on a plate, a bean to grow and a bean to soak are three other answers, and the
+          # recipe is a fourth: the dish words stand this row down when the line wants the method
+          ask=("chilli", "chili"),
+          avoid=("how do i make", "how do you make", "recipe", "green beans", "runner beans",
+                 "broad beans", "soak", "soaking", "dried beans", "grow", "plant", "sow",
+                 "beans on toast", "side", "salad"),
+          # a line that is short of something else is a question about that thing
+          guard=_short_of_something_else,
+          # "how does chilli get its heat" and "how many chillies for four" are the spice row,
+          # and it is reached from the dish word plus an amount word. A line that says beans as
+          # well is the pot, so this row has to outrank it: "how many beans in chilli" was
+          # answered with how much chilli to use for four people.
+          bias=6),
 )
+

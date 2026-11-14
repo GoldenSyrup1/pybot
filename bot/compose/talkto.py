@@ -57,7 +57,21 @@ BLANK_SUBJECTS = frozenset((
 ))
 # The words that are not part of the thing named: "i want to talk about my job with you".
 _SUBJECT_TAIL = re.compile(
-    r"\s+(?:with|to)\s+(?:you|me)\s*$|\s+(?:again|please|now|today|tonight|later)\s*$")
+    r"\s+(?:with|to)\s+(?:you|me)\s*$|\s+(?:again|please|now|today|tonight|later|tomorrow|"
+    r"sometime|soon|this\s+(?:evening|afternoon|morning|weekend)|next\s+week)\s*$")
+# A time said between the verb and the thing is not part of the thing: "can we talk tomorrow about
+# the rent" is the same ask as "can we talk about the rent", said by somebody with a day in mind.
+# It is dropped before the frames are matched, because every frame wants the preposition straight
+# after the verb and the whole line is matched as one pattern.
+# The times people name, in one place: a day, a part of a day, or "when you have a minute". Both
+# the reader below and the bare-invitation frame are built from it, so a time added here is read in
+# both places rather than in one.
+_WHEN = (r"(?:again|now|today|tonight|tomorrow|later|sometime|soon|"
+         r"this\s+(?:evening|afternoon|morning|weekend)|next\s+week|"
+         r"when\s+(?:you\s+)?(?:have|get|'ve\s+got)\s+a\s+(?:minute|mo|moment))")
+_A_TIME_BEFORE_THE_THING = re.compile(
+    r"\b(talk|chat|speak|think|work)\s+(?:to\s+(?:you|me)\s+)?"
+    r"(?:" + _WHEN + r"\s+)+(?=(?:about|through|out)\b)")
 _SUBJECT_HEAD = re.compile(r"^(?:the|that|this)\s+thing\s+(?:about|with)\s+")
 # "can we talk about something else, films maybe" names the new thing after the one it is not: the
 # person has said what they want to talk about, and saying "something else" back to them is the
@@ -84,6 +98,30 @@ _HEDGED_END = re.compile(r"\s*,?\s*(?:maybe|perhaps|i\s+think|i\s+reckon|if\s+th
 
 # "my job" is "your job" when the bot says it back; "our" is "your" too, and a name stays as it is.
 _OWNERS = (("my", "your"), ("our", "your"))
+
+# An ask for the bot's ear with a time on it and no thing named - "can we talk tomorrow", "can i
+# talk to you later" - is an invitation, and the only answer it wants is a yes and the question.
+# Nothing else in the bot reads it: the frames below want a thing after "about", so the line fell
+# to the search hedge, which tells somebody who asked for a conversation to go and search for one.
+_A_BARE_INVITATION = re.compile(
+    _LEAD + r"(?:(?:can|could|may|shall|should)\s+(?:i|we)\s+" + _POLITE +
+    r"|(?:i|we)\s+" + _VERB + r"\s+(?:to\s+)?|" + _POLITE + r")"
+    r"(?:talk|chat|speak)(?:\s+(?:to|with)\s+(?:you|me))?"
+    r"(?:\s+" + _WHEN + r")+\s*[?.!]*$")
+# The same words have to carry an ask: a modal or a "want" in front of the verb, or a question mark
+# at the end. "chat to you soon", "talk later", "speak tomorrow" are how a person ends a
+# conversation, and answering one with "what do you want to talk about?" is talking over a goodbye.
+_A_LEAD_IN_FRONT = re.compile(
+    _LEAD + r"(?:(?:can|could|may|shall|should)\s+(?:i|we)\s+" + _POLITE +
+    r"|(?:i|we)\s+" + _VERB + r"\s+(?:to\s+)?)"
+    r"(?:talk|chat|speak)")
+# Each one is a yes and the question that starts it - STYLE.md's one short question - so a person
+# who asked whether they can talk gets to talk.
+INVITED = (
+    "Yes - I'm here whenever you are. What's on your mind?",
+    "Any time. What is it you want to talk about?",
+    "Of course. What's going on, and where do you want to start?",
+)
 
 POOL = (
     "Of course. Tell me about {thing} - what's the part that's bothering you most?",
@@ -124,9 +162,20 @@ def _as_typed(line):
 _TYPED_SHORT_DICT = dict(_TYPED_SHORT)
 
 
+def the_line_as_read(text):
+    """The line the frames are matched against: chat-speak spelled out, a named day dropped.
+
+    `bot/modules/talkto.py` looks the line up in the knowledge base to see whether a card answers
+    the thing named, and it has to ask about the same line this reader read - otherwise a day in
+    the ask ("can we talk tomorrow about my mum") makes the lookup miss the carers card and this
+    module takes a turn a card answers better.
+    """
+    return _A_TIME_BEFORE_THE_THING.sub(r"\1 ", _as_typed(text))
+
+
 def _subject(text):
     """The thing named after the talk frame, or "" when none is named."""
-    text = _as_typed(text)
+    text = the_line_as_read(text)
     for pattern in TALK_ASKS:
         found = pattern.match(text)
         if not found:
@@ -161,6 +210,11 @@ def answer_for(text, memory):
         return ""
     subject = _subject(line)
     if not subject:
+        # A time and nothing else is an invitation rather than a thing to talk about.
+        typed = _as_typed(line)
+        if _A_BARE_INVITATION.match(typed) and (_A_LEAD_IN_FRONT.match(typed)
+                                               or typed.rstrip().endswith("?")):
+            return pick(INVITED, memory or {}, text)
         return ""
     if set(subject.split()) & WEIGHING_WORDS:
         return pick(WEIGHING, memory or {}, text)

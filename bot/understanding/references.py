@@ -335,8 +335,71 @@ WITHOUT_THE_APOSTROPHE = {"he": ("hes", "hed", "hisself"), "she": ("shes", "shed
 ANIMAL_NAMES = frozenset("""dog dogs puppy puppies cat cats kitten kittens""".split())
 
 
+def _the_breed_in(text):
+    """The animal a breed word in the line names, or "" when the line names none.
+
+    "we got a rescue greyhound on saturday" and then "she wont eat in the day" is a question
+    about the dog: the breed is the only animal word in the thread, and the pronouns a person
+    uses for a dog are the same ones they use for a cat. The table of breeds and the frames that
+    make one an animal (not a bus, not a race) is `breeds.py`'s, so this asks it rather than
+    keeping a second list of dog names here.
+    """
+    from .breeds import BREED_KIND, the_animal_a_breed_is
+    # What the pronoun was resolved to is often the animal's name and nothing else
+    # ("greyhound", "maine coon"), which is no longer a line to read a frame in: the frame was
+    # read the turn before.
+    whole = str(text or "").strip().lower()
+    if BREED_KIND.get(whole):
+        return BREED_KIND[whole]
+    said = re.findall(r"[a-z']+", str(text or "").lower())
+    if not said:
+        return ""
+    filled = the_animal_a_breed_is(list(said))
+    if not isinstance(filled, list) or len(filled) <= len(said):
+        return ""
+    index = 0
+    for piece in filled:
+        if index < len(said) and piece == said[index]:
+            index += 1
+            continue
+        return str(piece).lower()
+    return ""
+
+
 def _the_pronouns(name):
     return frozenset(PRONOUNS[name]) | frozenset(WITHOUT_THE_APOSTROPHE.get(name, ()))
+
+
+# An animal word said two lines back is still what a pronoun in this line points at, as long as
+# the line names no animal of its own: "we are getting a rescue greyhound" / "she wont eat in the
+# day" / "and whats the best way to walk her". The third line's own words say nothing about a dog,
+# so the only place the animal can come from is the chat.
+THIRD_PERSON = frozenset(word for name in PRONOUNS for word in PRONOUNS[name])
+# "and my back hurts" points at the speaker's own body, not at the animal: a line that says whose
+# thing it is with "my" or "our" is about that thing, whatever else the line carries.
+MINE = frozenset("""my mine our ours""".split())
+
+
+def the_animal_the_chat_is_on(words, last_read):
+    """The animal the line before had in hand, when this line only points at it.
+
+    A pronoun in this line has to point at something, and a line that names no animal of its own
+    is pointing at the one the chat has been about. A line that makes the speaker its subject
+    ("i've got a headache too") or that names another animal keeps what it says.
+    """
+    if not isinstance(last_read, dict):
+        return ""
+    animal = str(last_read.get("animal_in_hand") or "").lower()
+    if not animal:
+        return ""
+    bare = set()
+    for word in words or ():
+        bare.add(str(word).lower().strip(string.punctuation + "\u2019").split("'")[0])
+    if bare & ANIMAL_NAMES or bare & MINE:
+        return ""
+    if not bare & THIRD_PERSON:
+        return ""
+    return animal
 
 
 def the_animal_in_hand(ref, words):
@@ -357,9 +420,13 @@ def the_animal_in_hand(ref, words):
     for name in PRONOUNS:
         if not bare & _the_pronouns(name):
             continue
-        animal = ANIMALS_IN_HAND.search(str(ref.get(name) or ""))
+        said = str(ref.get(name) or "")
+        animal = ANIMALS_IN_HAND.search(said)
         if animal:
             return animal.group(0).lower()
+        breed = _the_breed_in(said)
+        if breed:
+            return breed
     return ""
 
 

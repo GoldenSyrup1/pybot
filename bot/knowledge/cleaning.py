@@ -12,12 +12,51 @@ stain, bleach on wool), and a number where a number helps.
 """
 import re
 
-from .lookup import (FOOD_SUBJECT, HOW_OFTEN_WORDS, entry, food_has_gone_off, the_line,
+from .lookup import (FOOD_NAMED, FOOD_SUBJECT, HOW_OFTEN_WORDS, entry, food_has_gone_off,
+                     the_line,
                      the_thing_has_gone)
 
 # The topics this domain answers (bot/understanding/topics.py). Cleaning is a home job in
 # this bot's reading, so it joins home.py's topic and answers.py declares the union.
 ANSWERS = ("home-and-diy",)
+
+# A room or a fixture that keeps its own answer, said on its own in a follow-up: "how often
+# should i clean my house" then "and the bathroom", or "how do i clean a whole house" then
+# "what about the kitchen". The avoid list stands this row down for a single line that names
+# one of them, but a follow-up is read against the guard and not the avoid list, so the same
+# words have to be a guard as well or the follow-up gets this card's middle again.
+_ROOM_WITH_ITS_OWN_CARD = (
+    "kitchen", "kitchens", "bathroom", "bathrooms", "toilet", "toilets", "loo", "bath",
+    "shower", "sink", "basin", "oven", "fridge", "freezer", "washing machine", "dishwasher",
+    "microwave", "kettle", "carpet", "carpets", "rug", "rugs", "mattress", "sofa", "curtain",
+    "curtains", "blind", "blinds", "window", "windows", "grout", "skirting", "cupboard",
+    "cupboards", "wardrobe", "garage", "garden", "gutter", "gutters", "roof", "patio",
+    "decking", "driveway", "fence", "conservatory", "gutter", "gutters", "roof",
+)
+
+
+def _not_a_room_with_its_own_card(understood):
+    """True unless the reading names a room or a fixture that has its own card.
+
+    `understood` may be None (a caller reading a line with no reading), and a guard that cannot
+    take that takes the whole turn down rather than one row.
+    """
+    if not understood:
+        return True
+    words = understood.get("words") or ()
+    if not words:
+        return True
+    said = {str(word).lower() for word in words}
+    line = " " + " ".join(str(word).lower() for word in words) + " "
+    line += str(understood.get("plain") or understood.get("text") or "").lower() + " "
+    for word in _ROOM_WITH_ITS_OWN_CARD:
+        if " " in word:
+            if word in line:
+                return False
+        elif word in said:
+            return False
+    return True
+
 
 def _bleach_down_the_drain(memory, understood):
     """A capful of thin bleach in a drain is fine; it will not clear a blockage.
@@ -89,6 +128,43 @@ def _dust_is_on_a_thing(understood):
         tail = match.group(1).strip()
         if not _A_PLACE.search(tail):
             return False
+    return True
+
+
+
+# A knee, an elbow and a heel are garment words and body words at once, and "worn" is how a joint
+# is described: with `worn` in the mending row's first key and `knee` in its second, "my knee is
+# worn out" got the darning card, and that is the one answer a person with a worn knee must not
+# get. The avoid list cannot fix it, because `knee` has to stay in the second key for "my jeans
+# have gone at the knee". So the row asks a question of the whole reading instead (the repo's own
+# `guard=`, for where the reading rather than a word says the key means something else): a line
+# that says a joint is worn and names no garment is about the joint, and a line where the joint
+# hurts is about the joint whether or not a garment is named too.
+_BODY_JOINT = re.compile(
+    r"\b(?:knees?|elbows?|shoulders?|hips?|ankles?|wrists?|joints?|spine|backs?|neck|heels?|"
+    r"toes?|thumbs?|fingers?)\b", re.I)
+_A_WEAR_WORD = re.compile(
+    r"\b(?:worn|wear|wearing|wore|frayed|fraying|fray|threadbare|rubbed|"
+    r"gone\s+at|gone\s+through)\b", re.I)
+_THE_GARMENT = re.compile(
+    r"\b(?:jeans|trousers|shorts|skirt|dress|shirts?|t-?shirts?|tops?|coat|jacket|jumper|"
+    r"cardigan|hoodie|sweatshirt|socks?|stockings?|sleeves?|cuffs?|hems?|seams?|lining|"
+    r"pockets?|gloves?|mittens?|boots?|shoes?|trainers?|slippers?|pyjamas?|dressing gown)\b",
+    re.I)
+_A_HURTING_JOINT = re.compile(
+    r"\b(?:hurt|hurts|hurting|ache|aches|aching|sore|painful|pain|stiff|swollen|swelling|"
+    r"kneel|kneeling)\b", re.I)
+
+
+def a_worn_thing_is_a_garment(understood):
+    """False when the line's worn thing is a joint rather than a garment (`mend-hole`)."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if not _BODY_JOINT.search(said):
+        return True
+    if _A_WEAR_WORD.search(said) and not _THE_GARMENT.search(said):
+        return False
+    if _A_HURTING_JOINT.search(said):
+        return False
     return True
 
 
@@ -352,6 +428,50 @@ _WIPE_THE_GLASS = ("clean", "cleaning", "cleaned", "wipe", "wiping", "wipe off",
                    "washing", "dry", "drying", "towel", "cloth", "bicarbonate", "vinegar")
 
 
+# "Glass" is the same word to the reader whether it is a pane or a pair of spectacles: the loose
+# forms of "glass" and "glasses" are one set, so a fence holding "glasses" out of this row held
+# every window that is called by its glass out too - "my window glass is streaky" was a punt while
+# "my windows are streaky" had its card. The fence cannot tell them apart by the word, so the
+# guard does it: a line that names spectacles or a drinking glass, and names no window, is not a
+# window to wash.
+#
+# Naming the drinking glasses one by one does not work: a list of nouns only holds the nouns
+# someone wrote down, and the singular of a name that went in as a plural ("wine glasses" but not
+# "wine glass") came through the bare glass and was washed with a squeegee. What the row can rely
+# on is the *kind* of thing: a glass you drink from is named by the drink in it, or by the vessel
+# it is. So the guard asks that instead of reading a list of glasses.
+_GLASSWARE = ("glasses", "sunglasses", "spectacles", "specs", "lens", "lenses", "varifocals",
+              "bifocals", "contact lens", "contacts", "glassware", "cutlery", "goggles",
+              "dishwasher")
+# the drink, which is what a drinking glass usually gets called by: "my beer glass", "a wine
+# glass", "the gin glass" - and no window is ever named by what is in it
+_A_DRINK = ("beer", "lager", "ale", "cider", "stout", "wine", "prosecco", "champagne", "gin",
+            "vodka", "whisky", "whiskey", "rum", "brandy", "cocktail", "juice", "lemonade",
+            "squash", "cordial", "soda", "cola", "fizz", "smoothie", "milkshake", "milk",
+            "coffee", "tea", "espresso", "cappuccino", "latte", "cup of", "glass of", "glasses of",
+            "pint of", "bottle of", "top of")
+# and the vessel, for the times the drink is not named at all
+_A_VESSEL = ("cup", "cups", "mug", "mugs", "tumbler", "tumblers", "pint", "pints", "flute",
+             "flutes", "goblet", "goblets", "tankard", "tankards", "jug", "jugs", "pitcher",
+             "carafe", "decanter", "jar", "jars", "vase", "vases", "bottle", "bottles",
+             "decorative bottle", "plant pot", "bowl", "bowls")
+_A_WINDOW_NAMED = ("window", "windows", "windowpane", "window pane", "pane", "panes", "mirror",
+                   "mirrors", "patio door", "patio doors", "windscreen", "windshield",
+                   "glass door", "glass doors", "conservatory", "skylight", "glazing",
+                   "window glass", "french door", "french doors", "shower screen")
+
+
+def _glass_in_the_line_is_a_window(understood):
+    """False when the glass the line names is a pair of spectacles or a drinking glass."""
+    said = " %s " % str(understood.get("text") or "").lower()
+    if any(" %s " % word in said or word in said for word in _A_WINDOW_NAMED):
+        return True
+    for words in (_GLASSWARE, _A_DRINK, _A_VESSEL):
+        if any(" %s " % word in said or word in said for word in words):
+            return False
+    return True
+
+
 def _a_dirty_window_not_a_wet_one(understood):
     """False when the line is about water on the glass rather than dirt on it."""
     said = " %s " % str(understood.get("text") or "").lower()
@@ -386,6 +506,43 @@ def _the_back_of_a_screen(understood):
         return True
     return not any((" %s " % word) in text for word in _A_SCREEN)
 
+# The patch answer, used by the row that names the mess and by the follow-up that only names the
+# place: "i have a cat and she keeps weeing on the sofa" ... "so what do i do about the sofa".
+PET_ACCIDENT_REPLY = (
+    "Soak up what you can, then wash the patch with a warm solution of biological laundry "
+    "detergent, blot and rinse well; the enzymes in it break down the smell. Never use bleach "
+    "or ammonia cleaners, which smell like urine to a cat and invite a repeat.")
+
+
+# The place a pet used, named a turn after the accident. The accident itself is two turns back by
+# then and the line only says where it happened, so the mess row above cannot see it: the person
+# got the litter-tray and the vet-check answers, then "so what do i do about the sofa" and was
+# told "I don't know enough to answer that honestly". The chat decides, and the rule is the one
+# the pet rows keep: somebody else's accident is not this card.
+_PET_NAMED = re.compile(r"\b(cat|cats|kitten|kittens|dog|dogs|puppy|puppies|rabbit|rabbits|"
+                        r"hamster|hamsters|guinea pig|pets?|pet's)\b", re.I)
+_AN_ACCIDENT = re.compile(r"\b(pee|peed|peeing|pees|wee|weed|wees|weeing|urine|urinated|"
+                          r"sprayed|spraying|poo|pooed|pooing|mess|messes|accident|accidents|"
+                          r"vomit|vomited|sick|stain|stains|stained|soaked)\b", re.I)
+_A_PLACE_TO_WASH = re.compile(r"\b(sofa|sofas|settee|couch|armchair|armchairs|carpet|carpets|"
+                              r"rug|rugs|mattress|upholstery|chair|chairs|stool|bed|bedding|"
+                              r"duvet|blanket|blankets|curtain|curtains|floor|floors|stairs|"
+                              r"seat|seats|spot|spots|patch|patches|room|rooms|hallway|"
+                              r"landing|passage|corridor)\b", re.I)
+
+
+def _the_place_a_pet_used(memory, understood):
+    """The patch answer for a line that names only where the mess was."""
+    text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if not _A_PLACE_TO_WASH.search(text):
+        return None
+    for turn in reversed(((memory or {}).get("turns") or [])[-3:]):
+        line = (turn.get("user") or "").lower() if isinstance(turn, dict) else ""
+        if _PET_NAMED.search(line) and _AN_ACCIDENT.search(line):
+            return PET_ACCIDENT_REPLY
+    return None
+
+
 # A loaf word, then a verb of going off, then the mould word: the loaf went off in the bin, and
 # `bread-mouldy` in cooking_entries answers it. Kept here rather than in the key because "bread
 # bin" is a bin and it is the bin that is mouldy in "my bread bin is mouldy".
@@ -399,6 +556,35 @@ _THE_LOAF_WENT_OFF = re.compile(
 def _the_loaf_went_off(understood):
     """True when the line says the bread went off, rather than the bin it was kept in."""
     return bool(_THE_LOAF_WENT_OFF.search(the_line(understood)))
+
+
+# "bin" is two words: the thing in the kitchen, and the verb for throwing something away. "Can I
+# cut the mould off cheese or should I bin it" is a question about the cheese, and the answer to it
+# was the wheelie bin's wash. A "bin" that does the throwing has the thing thrown after it, or is
+# asked of the person ("should I bin it", "can I bin this cheese"), so the line says which "bin"
+# it is by how it is used. It is not an `avoid` phrase: the phrases are matched with the
+# punctuation stripped, so "bin it" also matches "bin, it", and the bin's own line - "how do I
+# clean my bin, it stinks" - lost its card to a shrug.
+_BIN_IS_A_VERB = re.compile(
+    r"\b(?:to|should|shall|can|could|do|must|will|would|might|need to|have to|going to|i'll|i'd|"
+    r"or|and|then|just)\s+(?:i\s+)?bin\b"
+    r"|\bbinned\b|\bbinning\b"
+    r"|\bbin\s+(?:it|that|them|those|this|the rest|the lot|all of it|everything)\b", re.I)
+
+
+def _the_food_was_binned(understood):
+    """True when the "bin" in the line is a food being thrown away, not the bin in the kitchen.
+
+    A mouldy wedge, a loaf, a ham: the thing in the person's hand decides the answer, and the
+    bin's washing card is not it. The bin's own line stays here - "my bin smells, should I bin it
+    and get a new one" asks the same throwing word and names no food, and washing it out is the
+    answer to that one.
+    """
+    said = the_line(understood)
+    if not _BIN_IS_A_VERB.search(said):
+        return False
+    words = set(re.findall(r"[a-z']+", said.lower()))
+    return any(word in FOOD_NAMED for word in words)
 
 
 def _a_colour_can_have_run(understood):
@@ -427,7 +613,83 @@ def _not_the_dryer_alone(understood):
     return not (_A_DRYER.search(said) and not _A_WASHING_MACHINE.search(said))
 
 
+# A line that asks how long a job takes, or how often it wants doing, is a schedule question and
+# the card that answers with a time owns it. The two cleaning plans below say what to do and in
+# what order, which is not that question, so they stand down for these words.
+_HOW_LONG = ("how long", "how many hours", "how much time", "how often", "how frequently",
+             "how regularly", "once a week", "every week", "every day", "how many times",
+             # a speed word is the same kind of ask: "how do i tidy my bedroom quickly" has a
+             # ten-minutes-a-day card that says how to keep on top of it, and a plan that says
+             # what to pick up first is not that answer
+             "quickly", "fast", "quick", "in a hurry", "in ten minutes", "ten minutes")
+
+# One kitchen, one order to work in. Two rows say it: the room itself, and the job a person is left
+# with after they cook ("how do i clean up after baking" was the first-step-into-baking card,
+# because "baking" is an activity and nothing in this module asked the question). One text, so the
+# two answers cannot drift apart.
+_KITCHEN_ORDER = (
+    "Clear the surfaces, then work clockwise so you do not double back: hot soapy water on the "
+    "surfaces and the sink, the hob while it is still warm, and the floor last so the crumbs "
+    "you drop land on it. Daily is a wipe round, weekly is the hob and the sink, monthly is "
+    "the oven and the inside of the fridge. Where grease has built up, hot water with a good "
+    "squeeze of washing-up liquid lifts it and cold water only smears it, and a paste of "
+    "bicarbonate on a cloth takes the film off tiles, the splashback and the top of the "
+    "cupboards. Most of the work is not letting things dry on, "
+    "because a wipe while the pan is still warm beats an hour of scrubbing.")
+
+# "mop first or hoover first" was answered "Work it out rather than guess: whatever makes a mess for
+# the other step to clear up goes first", and "should i hoover before mopping" with "Not mine to
+# decide": two cleaning steps named with an order word is a question with an answer, and it is the
+# same one every time - dry before wet, and top before bottom. The room row cannot take it, because
+# its first key group is room words and these lines name no room.
+#
+# The two steps are the whole shape of the question, so the row is fenced twice: the line has to
+# name two different steps, and it has to name no object with a row of its own. Without the first
+# fence "how do i mop a floor" and "how do i polish a wooden table" were both this answer, and
+# without the second, "do i wipe the skirting boards before hoovering" lost its own card.
+_STEP_WORDS = {"hoover": "dry", "hoovering": "dry", "vacuum": "dry", "vacuuming": "dry",
+               "sweep": "dry", "sweeping": "dry", "swept": "dry", "dust": "dry",
+               "dusting": "dry", "dusted": "dry", "brush": "dry", "brushing": "dry",
+               "mop": "wet", "mopping": "wet", "mopped": "wet", "scrub": "wet",
+               "scrubbing": "wet", "wipe": "wet", "wiping": "wet",
+               # "sweep it out first or clear the shelves" was answered "Work it out rather than
+               # guess ... Which job is it?": a floor cannot be swept while it is still full,
+               # so clearing out is the step that comes before the rest and it counts as one.
+               "clear": "clear", "clearing": "clear", "cleared": "clear", "empty": "clear",
+               "emptying": "clear", "emptied": "clear", "tidy": "clear", "tidy up": "clear",
+               "tidying": "clear"}
+_STEP_OBJECTOWN = ("skirting", "table", "tables", "window", "windows", "worktop", "worktops",
+                   "hob", "tile", "tiles", "bath", "sink", "mirror", "mirrors", "curtain",
+                   "curtains", "blind", "blinds", "picture", "pictures", "sofa", "carpet",
+                   "carpets", "rug", "rugs", "mattress", "oven", "fridge", "freezer", "toilet",
+                   "loo", "living room", "lounge", "bedroom", "bedrooms", "kitchen", "bathroom",
+                   "hall", "hallway", "stairs", "garage", "car")
+
+
+def _two_steps_in_order(understood):
+    """Only a line that names two cleaning steps and asks which comes first."""
+    # `text`, not `clean`: the understanding engine rebuilds `clean` from the line, so a guard
+    # that reads it can be met by words the person did not say this turn. The line itself is
+    # what a fence has to stand on.
+    text = str((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
+    if any(word in text for word in _STEP_OBJECTOWN):
+        return False
+    return sum(1 for word in _STEP_WORDS if word in text) >= 2
+
+
 ENTRIES = [
+    entry("dry-before-wet",
+          (("hoover", "hoovering", "vacuum", "vacuuming", "sweep", "sweeping", "swept", "dust",
+            "dusting", "dusted", "mop", "mopping", "mopped", "scrub", "scrubbing", "brush",
+            "brushing", "wipe", "wiping"),
+           ("first", "before", "after", "order", "comes first", "goes first", "or")),
+          "Dry before wet, and top before bottom: hoover or sweep first, dust from the ceiling down "
+          "so the floor catches what falls, and mop last - a mop over grit just pushes the mud "
+          "about. On a wooden floor the dry mop goes over first and the wet one is barely damp. "
+          "And clear the floor, the worktops and the shelves first: a broom cannot reach a floor "
+          "that is still full, and a cloth cannot wipe a ledge with things still on it.",
+          guard=_two_steps_in_order,
+          bias=1),
     entry("gum-off-a-hard-surface",
           # "how do i get chewing gum off the pavement" reached the dentist, because the only
           # answers keyed on chewing gum were the mouth, the hair and the clothes, and a hard
@@ -565,7 +827,15 @@ ENTRIES = [
                  # with a conditioner soak the way a jumper does, and this row was answering
                  # "my jeans are too tight" with the jumper method.
                  "jeans are too tight", "jeans too tight", "jeans are tight",
-                 "jeans are a bit tight", "jeans are snug", "jeans too snug")),
+                 "jeans are a bit tight", "jeans are snug", "jeans too snug",
+                 # A garment that is too small and asked about being altered is clothing.py's
+                 # "a garment that no longer fits": the conditioner soak is the fix for a thing
+                 # that came out of a wash smaller, and it stole "my trousers are too tight
+                 # round the waist can they be let out" and "my dress is too tight can it be
+                 # altered". The words a person alters with are the fence.
+                 "let out", "let it out", "letting out", "taken in", "take it in", "take in",
+                 "taken out", "altered", "alter it", "alteration", "alterations",
+                 "tailor", "tailors")),
     entry("wool-wash", (("wool", "woollen", "jumper", "knitwear", "cashmere", "merino", "cardigan"),
                          ("wash", "washing", "machine", "hand", "dry")),
           "By hand in cool water with a wool wash or a little shampoo, squeeze rather than rub, "
@@ -717,6 +987,13 @@ ENTRIES = [
           avoid=("rum", "gin", "vodka", "whiskey", "whisky", "tequila", "brandy", "cocktail",
                  "cocktails", "drink", "drinks", "tonic", "mixer", "mixers",
                  "egg", "eggs", "yolk", "yolks", "meringue", "baking", "recipe",
+                 # washing a food is a kitchen instruction, and once the water rows stopped
+                 # taking "wash the rice until the water runs clear" this row took it: the
+                 # second group's "runs" and the form of "washing" were all it needed. Sorting
+                 # a wash is about garments, so a food names its own rows.
+                 "rice", "pasta", "spaghetti", "noodles", "lentils", "quinoa", "chickpeas",
+                 "beans", "greens", "spinach", "lettuce", "vegetables", "veg", "fruit",
+                 "water runs clear", "runs clear",
                  # "how do i clean behind the washing machine" is the place, not the sorting:
                  # the appliance word made this row answer it
                  "behind", "underneath", "at the back of", "the back of",
@@ -794,15 +1071,38 @@ ENTRIES = [
           # answer that honestly" - so only the words that name the body keep it out.
           avoid=("quads", "quad", "thigh", "thighs", "calf", "calves", "hamstring",
                  "hamstrings", "muscle", "muscles")),
-    entry("mend-hole", (("hole", "holes", "tear", "torn", "darn", "darned"),
+    entry("mend-hole", (("hole", "holes", "tear", "torn", "darn", "darned",
+                          # Worn through is the same morning as a hole, said a day earlier, and
+                          # it was reaching nothing: "my coat has worn out at the cuffs" and "my
+                          # jeans have gone at the knee" got the floor's "Got it. Is there anything
+                          # you'd like a hand with?", and "the cuffs on my shirt are frayed" got the
+                          # grey-collar card, which is a stain answer to a garment that is wearing
+                          # through. The wear words belong to the thing they are wearing on, so the
+                          # garment word in the second key is what keeps them here: a tyre, a
+                          # brake and a person can all be worn out, and none of those is mending.
+                          "worn", "worn out", "worn through", "worn thin", "wearing thin",
+                          "wearing out", "rubbed through", "frayed", "fraying", "fray",
+                          "threadbare", "gone at the", "gone through"),
                          ("jeans", "jumper", "sock", "socks", "shirt", "cardigan", "knee", "patch",
-                          "mend", "repair", "fix")),
+                          "mend", "repair", "fix", "cuff", "cuffs", "hem", "elbow", "elbows",
+                          "sleeve", "sleeves", "coat", "jacket", "trousers", "shorts", "skirt",
+                          "dress", "hoodie", "sweatshirt", "linen", "seam", "seams", "lining",
+                          # the heel and the toe are where a sock and a boot go first, and
+                          # without them "my socks have worn through at the heel" reached the
+                          # floor's nod. Both are body words too, which is what the guard above
+                          # is for.
+                          "heel", "heels", "toe", "toes", "pocket", "pockets", "glove", "gloves")),
           "Fix it before it grows: turn the garment inside out and darn across the hole with small "
           "running stitches, then across them at right angles, in thread close to the colour. A "
           "knee or a jeans pocket takes an iron-on patch on the inside, which is invisible and "
           "takes five minutes.",
-          # a wall, a ceiling or a floorboard is not a garment
+          guard=a_worn_thing_is_a_garment,
+          # a wall, a ceiling or a floorboard is not a garment, and "worn out" is also how a
+          # person, a tyre and a brake pad are described: those are not mending jobs.
           avoid=("tights", "stockings", "ladder", "wall", "walls", "ceiling", "plaster",
+                 "worn out from", "i am worn out", "im worn out", "i'm worn out", "tired",
+                 "exhausted", "knackered", "brake", "brakes", "tread", "battery", "carpet",
+                 "rug", "sofa", "cushion", "cushions", "mattress", "roof", "gutter", "gutters",
                  "plasterboard", "drywall", "skirting", "floorboard", "floorboards", "pavement",
                  "road", "roof", "roofs", "tyre", "tyres", "tube", "inner tube")),
     entry("swimwear", (("swimsuit", "swimming costume", "bikini", "swimwear", "trunks", "wetsuit"),
@@ -1097,8 +1397,10 @@ ENTRIES = [
           # The bread in the bin is the bread's question, and this entry washed out the bin:
           # "how do i stop bread going mouldy in a bread bin" was told to line it. "my bread bin
           # is mouldy" is the bin's own line and stays here, and the phrases in `avoid` above
-          # cannot tell the two apart, so the guard reads which thing went off.
-          guard=lambda read: not _the_loaf_went_off(read)),
+          # cannot tell the two apart, so the guard reads which thing went off. Nor can they tell
+          # the bin from a food going in it - "can i cut the mould off cheese or should i bin it"
+          # - so the guard reads that too.
+          guard=lambda read: not (_the_loaf_went_off(read) or _the_food_was_binned(read))),
     # A tub that keeps its smell is not the bin: the plastic has taken the smell in, and hot
     # soapy water on its own does not lift it out. "how do i stop tupperware smelling" and "how
     # do i get a smell out of a lunchbox" had no answer at all.
@@ -1204,8 +1506,33 @@ ENTRIES = [
                  "brushing my hair", "brushing your hair", "brush my own hair",
                  "brush wet hair", "brushing wet hair", "wet hair", "brush it wet",
                  "how often should i brush my hair", "should i brush my hair")),
-    entry("windows-streak", (("windows", "window", "glass", "mirror", "mirrors"),
-                              ("clean", "streak", "streaks", "smear", "smears", "inside",
+    # A pane of glass is a window however it is hung, and the row only knew the words window,
+    # glass and mirror: "how do i clean patio doors" was answered with how to lift a spill out of
+    # upholstery, "how do i clean french doors" was told to learn French, and "my windscreen is
+    # smeary" and "my skylight is streaky" were punts. The words are the things the glass is in,
+    # never the bare "door" - a door is also wood and paint, and the draught and the paint rows
+    # are the answers there.
+    entry("windows-streak", (("windows", "window", "glass", "mirror", "mirrors",
+                              "windowpane", "window pane", "pane", "panes", "patio door",
+                              "patio doors", "french door", "french doors", "glass door",
+                              "glass doors", "skylight", "skylights", "conservatory",
+                              "conservatory roof", "windscreen", "windscreens", "windshield",
+                              "glazing", "window glass"),
+                              # The fault said as an adjective rather than as a noun. A key made of
+                              # "streak" and "smear" only answered the job ("how do i clean a
+                              # streaky window") and the complaint ("my windows are streaky"), and
+                              # left "my window glass is streaky" a punt: the subject matched
+                              # twice, once per word, and no second part was ever said.
+                              # "fingerprints" is the same complaint and the same cloth.
+                              ("clean", "streak", "streaks", "streaky", "streaked", "streaking",
+                               "smear", "smears", "smeary", "smeared", "smudge", "smudges",
+                               "smudgy", "smudged", "filmy", "film", "fingerprint", "fingerprints",
+                               "fingermarks", "finger marks", "water marks", "watermarks",
+                               # the plain complaint, which had no card at all: "my windows are
+                               # dirty" and "my conservatory roof is dirty" were both punts
+                               "dirty", "dirt", "grubby", "dusty", "dust", "grime", "grimy",
+                               "filthy", "greasy", "sooty", "smoky", "smokey", "cloudy",
+                               "inside",
                                # A mark on a mirror is a mark on glass: "how do i get hairspray
                                # off the mirror" was answered with the physics of reflection,
                                # and "white marks on the mirror" with road salt on leather boots.
@@ -1215,7 +1542,7 @@ ENTRIES = [
           "Wash with warm water and a drop of washing-up liquid, then squeegee or wipe with a cloth "
           "and buff dry straight away with a dry cloth or newspaper. Work top to bottom and out of "
           "direct sun, which dries the glass before you can polish it.",
-          avoid=("glasses", "spectacles", "specs", "dishwasher", "cutlery", "wine glass",
+          avoid=("spectacles", "specs", "dishwasher", "cutlery", "wine glass",
                  "drinking glass", "shower", "goggles",
                  # a table, a hob and a screen are glass-like but their marks are their own
                  # answers, and none of them wants a squeegee
@@ -1230,7 +1557,8 @@ ENTRIES = [
                  "condensation on", "condensation in", "condensation every", "condensation each",
                  "condensation builds", "condensation runs", "condensation running",
                  "condensation forms", "condensation from", "condensation is"),
-          guard=_a_dirty_window_not_a_wet_one),
+          guard=lambda understood: (_a_dirty_window_not_a_wet_one(understood)
+                                    and _glass_in_the_line_is_a_window(understood))),
     # Washing up by hand had no card at all: "how do i wash dishes by hand" and "do i need to
     # rinse dishes after washing up" were the search shrug on main, and "how hot should the water
     # be for washing dishes" reached the laundry dial, which is a different wash.
@@ -1255,6 +1583,10 @@ ENTRIES = [
           # things people wash that are not dishes
           avoid=("dishwasher", "machine", "blocked", "unblock", "drain", "smelly", "smell",
                  "filter", "rinse aid", "salt", "tablet", "buy", "how much",
+                 # water that has landed is not a wash: "wet patch under the sink after washing
+                 # up" was answered with the order to wash the glasses first, and the person is
+                 # asking where the water came from
+                 "wet patch", "puddle", "leak", "leaking", "dripping", "soaked", "flood",
                  "cost", "price", "install", "my hands", "face", "hair", "laundry",
                  "clothes", "clothing", "car", "window", "glasses", "spectacles", "wine glass",
                  "sponge", "dishcloth", "cloth", "cloth is", "tea towel", "scourer", "brush",
@@ -1645,13 +1977,101 @@ ENTRIES = [
                  # a screen is not always a shower: "how do i remove a scratch from my phone
                  # screen" is the phone's own card, and vinegar on a phone is bad advice
                  "phone", "mobile", "iphone", "tablet", "laptop", "computer", "tv",
-                 "television", "watch")),
+                 "television", "watch",
+                 # Swapping the bath for a shower is a builder's question: "is it worth replacing
+                 # a bath with a shower" was reaching this card for the bath in it, and cleaning
+                 # advice is not an answer to whether to have the work done.
+                 "replace", "replacing", "replaced", "swap", "swapping", "swapped",
+                 "install a shower", "installing a shower", "fit a shower", "fitting a shower",
+                 "fitted a shower", "shower over the bath")),
     # A room that is a mess is not a room that needs cleaning: people say it as a statement,
     # there is no verb in it, and every room row keys on the job instead ("needs a clean", "how
     # do i clean"), so "the kitchen is a mess", "my room is a mess" and "the house is a mess"
     # reached the sympathy line and nothing else. The key is a place plus the state it is in, so
     # one answer covers every room, and a dirt that has a job of its own (the oven, the drain, a
     # leak, a smell, a pest) keeps its card.
+    # The job said with its plain verb is the same request as the state said as an adjective, and
+    # this row only knew the state: "how do i tidy my bedroom", "how do i clean the living room",
+    # "how do i clean up my room" and "how do i tidy my flat" were a hedge or the storage card,
+    # while "how do i tidy up my bedroom" was answered, because "tidy up" happened to be a word of
+    # the row and "tidy" alone was not. A room plus the verb names the job.
+    #
+    # A kitchen and a bathroom are left out on purpose: each has a card of its own that says the
+    # job in the right order (surfaces then floor, dry before wet), and a general plan that also
+    # matched them would take `how do i clean my kitchen` and `how do i clean my bathroom` off
+    # those cards. A house, a flat and a home are left out for the same reason: the clear-out
+    # plan in plans.py already answers the whole home ("one room at a time, three bags").
+    # The whole home said with a cleaning verb, which nothing answered: "how do i clean my house",
+    # "how do i clean the flat", "how do i clean my home" and "how do i clean my whole house" were
+    # all a hedge. The clear-out row in plans.py keys "tidy my house" and its neighbours, but its
+    # avoid list carries "cleaning" and "clean the" as word families, so a cleaning verb can never
+    # reach it; a room row would have taken the kitchen and the bathroom off their own cards. The
+    # whole home is its own job, so it is its own row.
+    # An evening's cooking leaves a job behind, and the line rarely says "kitchen": "how do i clean
+    # up after baking", "how do i clean the kitchen after cooking", "how do i clean up after
+    # dinner" and "how do i clear up after a roast" were the first-step-into-baking card (the
+    # activity and a "how do i"), a bread recipe or a heat card. The job after cooking is the
+    # kitchen's own order to work in, and "after" is what says so.
+    entry("the-job-after-cooking",
+          (("clean up after", "cleaning up after", "clear up after", "clearing up after",
+            "wash up after", "washing up after", "tidy up after", "the mess after", "mess after",
+            "clean after", "wipe down after", "after baking", "after cooking", "after i cook",
+            "after i bake", "after dinner", "after a roast", "after a meal", "after making"),
+           ("bake", "baking", "baked", "cook", "cooking", "cooked", "roast", "roasted", "dinner",
+            "meal", "fry", "fried", "frying", "kitchen", "oven", "hob", "pans", "pots", "supper",
+            "tea", "lunch", "breakfast", "curry", "cake", "biscuits", "bread")),
+          _KITCHEN_ORDER,
+          # the stain, the smell, the oven and the drain keep their own cards, and a line about
+          # what to cook after something is a recipe question
+          avoid=("stain", "stains", "smell", "smells", "smelly", "stink", "drain", "drains",
+                 "blocked", "mould", "mold", "damp", "oven cleaner", "burnt on", "burned on",
+                 # the things with a cleaning answer of their own keep it: "how do i clean the
+                 # oven after a roast" is the oven's, not the order to work round the room in
+                 "oven", "ovens", "hob", "hobs", "fridge", "freezer", "microwave", "dishwasher",
+                 "cooker", "extractor", "bin", "bins", "washing machine", "hoover", "vacuum",
+                 "carpet", "floor", "floorboards", "sink", "dishes", "plates", "pans washed",
+                 "what can i cook", "what should i cook", "what shall i cook", "recipe",
+                 "recipes", "what to cook", "meal plan", "meal idea", "meal ideas")),
+    entry("a-whole-home-to-clean",
+          (("house", "home", "flat", "apartment", "whole house", "whole flat", "the house",
+            "the flat", "the home", "my house", "my flat", "our house", "our flat"),
+           ("clean my", "clean the", "clean this", "clean our", "clean up my", "clean up the",
+            "clean out", "deep clean", "spring clean", "springclean", "spring cleaning")),
+          "Start with what is on the floor: pick it all up into one basket, take the cups and "
+          "plates out to the kitchen and bin the rubbish, because clothes, cups and paper are most "
+          "of a mess and that alone makes a room look tidy. Then wipe the one surface you use most "
+          "- the worktop, the table or the bedside - and give the rest one room a day rather than "
+          "all of it in a panic.",
+          avoid=("oven", "hob", "fridge", "freezer", "microwave", "dishwasher", "kettle",
+                 "drain", "drains", "blocked", "leak", "leaks", "leaking", "damp", "mould",
+                 "mold", "limescale", "pest", "pests", "mice", "mouse", "rats", "ants", "smell",
+                 "smells", "smelly", "stain", "stains", "carpet", "rug", "sofa", "couch",
+                 "curtain", "curtains", "mattress", "paint", "painting", "decorate", "decorating",
+                 "wall", "walls", "garden", "bin", "bins", "washing machine", "hoover", "vacuum",
+                 "screen", "phone", "laptop", "computer", "tv", "windows", "window",
+                 # how long a job takes is a length, and the cards that answer with a length
+                 # ("a whole house done properly is most of a day...", "about four hours") own
+                 # these lines: "how long does it take to clean the house" got this plan instead
+                 *_HOW_LONG)),
+    entry("a-room-with-a-job-to-do",
+          (("bedroom", "bedrooms", "room", "rooms", "living room", "lounge", "sitting room",
+            "front room", "dining room", "hall", "hallway", "landing", "stairs", "playroom",
+            "study", "office", "desk", "utility room", "spare room", "basement", "bedsit"),
+           ("tidy my", "tidy the", "tidy this", "tidy our", "tidy up my", "tidy up the",
+            "clean my", "clean the", "clean this", "clean our", "clean up my", "clean up the")),
+          "Start with what is on the floor: pick it all up into one basket, take the cups and "
+          "plates out to the kitchen and bin the rubbish, because clothes, cups and paper are most "
+          "of a mess and that alone makes a room look tidy. Then wipe the one surface you use most "
+          "- the worktop, the table or the bedside - and give the rest one room a day rather than "
+          "all of it in a panic.",
+          avoid=("oven", "hob", "fridge", "freezer", "microwave", "dishwasher", "kettle",
+                 "drain", "drains", "blocked", "leak", "leaks", "leaking", "damp", "mould",
+                 "mold", "limescale", "pest", "pests", "mice", "mouse", "rats", "ants", "smell",
+                 "smells", "smelly", "stain", "stains", "carpet", "rug", "sofa", "couch",
+                 "curtain", "curtains", "mattress", "paint", "painting", "decorate", "decorating",
+                 "wall", "walls", "garden", "bin", "bins", "washing machine", "hoover", "vacuum",
+                 "screen", "phone", "laptop", "computer", "tv",
+                 *_HOW_LONG)),
     entry("a-room-that-is-a-mess",
           (("kitchen", "kitchens", "bathroom", "bathrooms", "bedroom", "bedrooms", "living room",
             "lounge", "sitting room", "front room", "dining room", "hall", "hallway", "landing",
@@ -1660,6 +2080,15 @@ ENTRIES = [
             "utility room", "spare room", "loft"),
            ("mess", "messy", "a tip", "is a tip", "a right tip", "a proper tip", "a total tip",
             "an absolute tip", "shambles", "disaster", "in a state", "right state",
+            # The state of a room is said with a dirt word as well as with the mess words, and the
+            # row knew none of them: "my kitchen is filthy", "the bathroom is dirty", "the flat is
+            # dirty", "the house is disgusting" and "my room is grim" were a listening line or a
+            # "Got it." - the plainest way of saying a room needs cleaning, unanswered. The place
+            # is still the other half of the key, so a dirty carpet, a filthy oven and dirty
+            # clothes keep their own cards, and the dirt with a job of its own (a stain, a drain,
+            # a smell) is in the avoid list below.
+            "filthy", "dirty", "grimy", "grubby", "minging", "disgusting", "manky", "unhygienic",
+            "filthy dirty",
             "needs a tidy", "needs tidying", "needs sorting", "tidy up", "tidying up", "clear up",
             "clear it up", "where do i start", "where to start", "where do we start",
             "dont know where to start", "don't know where to start", "overwhelmed", "out of hand",
@@ -1704,12 +2133,33 @@ ENTRIES = [
                  # is a mess" have their own answers, and this row is only about places
                  "life", "head", "mind", "mental", "relationship", "marriage", "money", "debt",
                  "finances", "career", "job", "hair", "skin",
+                 # "where do i start" is a phrase that opens any big job, and the buying rows
+                 # keep it as their ask (first-home-steps: save + where do i start) - so "i want
+                 # to save for a house deposit, where do i start" matched a room here on "house"
+                 # and was told to pick the clothes up off the floor. The subject is the money,
+                 # and the money words are what stand this row down for it.
+                 "deposit", "deposits", "house deposit", "mortgage", "down payment",
+                 "save up for", "save for a house", "saving for a house", "save for a deposit",
+                 "saving for a deposit", "house price", "stamp duty",
+                 # and the buying itself, because "im 29 and want to buy a flat, where do i
+                 # start" says the flat and no money word at all
+                 "buy a flat", "buying a flat", "buy a house", "buying a house", "to buy a",
+                 "first flat", "first home", "property", "houses for sale", "buy property",
                  # clearing a place out is the declutter card's line ("one room at a time, three
                  # bags on the floor"), and it is the better answer for a garage, a loft or a
                  # cupboard however the mess is worded
                  "clear out", "clearing out", "clear it out", "sort out", "sorting out",
                  "declutter", "decluttering", "get rid of", "throwing out", "throw out",
                  "skip", "car boot", "donate", "donation", "charity shop", "tip run",
+                 # A house being moved out of is the move's question, not a room to tidy: "tips
+                 # for moving house" was this row's answer ("pick it all up into one basket")
+                 # because "house" is the room and "tips" is the ask, and the timeline with the
+                 # van, the council and the boxes is what the person wanted. The words below are
+                 # only ever said by a move, so a tidy-up line keeps the row.
+                 "moving house", "moving home", "moving flat", "move house", "move home",
+                 "move flat", "moving out", "house move", "home move", "moving next month",
+                 "packing up", "packing the house", "pack the house", "unpacking",
+                 "movers", "removals",
                  # a mess somebody else makes is a thing to say to them, not a cleaning job:
                  # "our flat is a tip because my flatmate never tidies up" wants the talking
                  # answer, and the plan for what to pick up first is no help with a person
@@ -1805,14 +2255,7 @@ ENTRIES = [
                                # or a cupboard still reaches those cards, which are in the
                                # avoid list below.
                                "grease", "greasy", "degrease", "degreasing")),
-          "Clear the surfaces, then work clockwise so you do not double back: hot soapy water on the "
-          "surfaces and the sink, the hob while it is still warm, and the floor last so the crumbs "
-          "you drop land on it. Daily is a wipe round, weekly is the hob and the sink, monthly is "
-          "the oven and the inside of the fridge. Where grease has built up, hot water with a good "
-          "squeeze of washing-up liquid lifts it and cold water only smears it, and a paste of "
-          "bicarbonate on a cloth takes the film off tiles, the splashback and the top of the "
-          "cupboards. Most of the work is not letting things dry on, "
-          "because a wipe while the pan is still warm beats an hour of scrubbing.",
+                    _KITCHEN_ORDER,
           avoid=("oven", "fridge", "freezer", "hob", "cooker", "microwave", "kettle", "drain",
                  "smell", "smells", "smelly", "stink", "extractor", "bin", "dishwasher",
                  # a greasy kitchen is this card's own job: "grease" sat in this list and the
@@ -1825,6 +2268,13 @@ ENTRIES = [
                  # wiping one: "how long does a kitchen take to fit" got the order to work in
                  "renovation", "renovating", "refurb", "refit", "fitted", "fitting", "install",
                  "installing", "installed",
+                 # the same stand-down said the way people say it: "my kitchen is being redone in
+                 # march what should i pick first" was the order to wipe a kitchen in, because
+                 # being redone is a building job and none of the words above spell it.
+                 "redone", "redo", "redoing", "done up", "doing up", "gutted", "being gutted",
+                 "replaced", "replacing", "replacement", "getting a new kitchen",
+                 "having a new kitchen", "having work done", "getting work done",
+                 "work starts", "work starting", "new kitchen in",
                  # bare "how long" stood this row aside for any kitchen duration, including
                  # "how long does it take to clean the kitchen", which is the routine's own
                  # question. What the row must not take is the fitting: "how long does a kitchen
@@ -1946,10 +2396,88 @@ ENTRIES = [
     # A drain that is slow or blocked is home.py's plunger and the bleach question is the
     # bleach card, so what is left is the ordinary job: keeping a drain that runs fine from
     # turning into one that smells. It was a shrug on main.
+    # A living room, a bedroom, a hall and a whole house are one question - what order do I do
+    # this in - and on main cef460d all of them were a punt: "how do i clean my living room",
+    # "how do i clean a bedroom", "how do i clean a hallway", "how do i clean a whole house",
+    # "how do i clean the house fast", "how do i clean a whole flat in a day", "what order should
+    # i clean a house in" and "how do i deep clean a room" were the search hedge. The kitchen and
+    # the bathroom already had their own routines, and every single fixture keeps its own row.
+    entry("cleaning-a-room-and-a-house",
+          (("living room", "lounge", "front room", "sitting room", "bedroom", "bedrooms",
+            "spare room", "box room", "study", "dining room", "hall", "hallway", "hallways",
+            "landing", "whole house", "whole flat", "whole home", "the whole house",
+            "every room", "all the rooms", "the rooms", "a room", "rooms", "house", "flat",
+            # bare "home" is in half the lines people type, and "how do i compost at home" was
+            # this row's answer because of it: the house, the flat and the rooms are the
+            # subjects, and "home" only counts when the line says whose.
+            "my home", "whole home", "in my home", "at home to stay", "housework"),
+           ("clean", "cleaning", "cleaned", "tidy", "tidy up", "tidying", "deep clean",
+            "deep cleaning", "spring clean", "hoover", "hoovering", "vacuum", "dust", "dusting",
+            "what order", "order", "where do i start", "where to start", "start", "first",
+            "next", "fast", "quickly", "quick", "in a day", "properly", "best way", "routine",
+            "checklist")),
+          "Twenty minutes a room on a timer, top to bottom, floor last: a bin bag for the rubbish "
+          "and a basket for everything that lives somewhere else, then dust from the ceiling down "
+          "(corners, the tops of pictures, lamp shades), then wipe the marks, then hoover. For a "
+          "whole house, do the rooms visitors see in the order they see them - hall, loo, "
+          "kitchen, sitting room - and shut the doors on the rest. How often: the kitchen and the "
+          "bathroom twice a week for the loo, the basin and the worktops, bedding weekly, the "
+          "rest when it looks like it needs it, and a deep clean - skirting boards, inside the "
+          "windows, behind and under the furniture - once a season.",
+          # the kitchen and the bathroom have routines of their own, and every single fixture,
+          # appliance and soft furnishing is a different answer: the room word alone is not
+          # enough for any of those.
+          avoid=("kitchen", "kitchens", "bathroom", "bathrooms", "toilet", "loo", "bath",
+                 "shower", "sink", "oven", "fridge", "freezer", "washing machine", "dishwasher",
+                 "microwave", "kettle", "carpet", "carpets", "rug", "rugs", "mattress", "sofa",
+                 "curtain", "curtains", "blind", "blinds", "window", "windows", "grout",
+                 "skirting", "cupboard", "cupboards", "wardrobe", "garage", "garden", "car",
+                 # the outside of a house is its own set of jobs, and a follow-up inherits the
+                 # words of the line before it: "how do i clean the gutters on my house" then
+                 # "and how often" reached this row through the context of the first line
+                 "gutter", "gutters", "guttering", "downpipe", "downpipes", "roof", "roofs",
+                 "brick", "bricks", "patio", "decking", "driveway", "drive", "paving",
+                 "fence", "fences", "shed", "conservatory", "moss", "weeds", "weeding",
+                 # a compost heap, a wormery and a recycling bin are "at home" jobs too, and a
+                 # clean house is not what their lines ask for
+                 "compost", "composting", "compost bin", "wormery", "food waste", "recycling",
+                 "recycle", "allotment", "rubbish collection", "bin day", "water butt",
+                 "drainpipe", "outside", "outdoor", "path", "footpath", "window cleaner",
+                 # a floor has its own answer (sweep, then mop, and the water changed), and
+                 # "how do i clean a hall floor" was that card on main and the room order here
+                 "floor", "floors", "mop", "mopping", "mop the", "sweep", "sweeping",
+                 "stairs", "stair carpet", "wall", "walls", "ceiling", "ceilings",
+                 "bbq", "barbecue", "bin", "bins", "grease", "greasy", "mould", "mold",
+                 "mildew", "limescale", "drain", "drains",
+                 # a house being painted, fitted, sold, bought, moved into or rented is another
+                 # question: "how do i clean my house" is this row, "how do i sell my house" is
+                 # not, and "how do i clean my house after builders" is a dust job of its own.
+                 "paint", "paints", "painting", "painted", "repaint", "decorate", "decorating",
+                 "decorated", "renovation", "renovating", "refurb", "refit", "install",
+                 "installing", "sell", "selling", "buy", "buying", "rent", "renting", "landlord",
+                 "deposit", "mortgage", "move", "moving", "moved in", "builders", "builder",
+                 "flood", "flooded", "fire", "smoke damage",
+                 # guests are a hosting question (what to have ready, not the order to clean in)
+                 "guests", "guest", "visitors", "visitor", "coming to stay", "family coming",
+                 # a bug or a sick pet is a disinfecting job, not a tidy one
+                 "bug", "norovirus", "vomiting", "sick", "diarrhoea", "diarrhea", "covid",
+                 "dog", "cat", "puppy", "kitten", "pet", "pets"),
+          # A follow-up arrives as its own line with the room named in it and nothing else -
+          # "how often should i clean my house" then "and the bathroom" - and the avoid list is
+          # not what a follow-up is read against: the guard is. The room that has a routine of
+          # its own keeps its own answer, and a bare "and the bathroom" is the bathroom's.
+          guard=_not_a_room_with_its_own_card),
     entry("drain-clean", (("drain", "drains", "shower drain", "sink drain", "bath drain",
                            "waste pipe", "waste pipes"),
                           ("clean", "cleaning", "freshen",
-                           "gunk", "slime", "scum", "often", "once a week", "how")),
+                           "gunk", "slime", "scum", "often", "once a week",
+                           # A bare "how" here was a second key word for any line with "drain" in
+                           # it, which is how "how do i drain broccoli" and "how do i drain
+                           # chickpeas" got the kettle down the waste pipe. The line has to carry
+                           # the cleaning as well as the drain, so the how is spelled out.
+                           "how do i clean", "how to clean", "how do i freshen",
+                           "how to freshen", "how often", "how do i keep", "how to keep",
+                           "look after", "keep on top of")),
           "Once a week pour a full kettle of boiling water down it, which melts the fat and soap "
           "that hold the smell, and once a month follow with half a mug of bicarbonate of soda and "
           "a mug of white vinegar, leave it 15 minutes and flush it through with hot water. Hair "
@@ -1971,9 +2499,19 @@ ENTRIES = [
                  # clean a drain outside" was the leaves-and-silt answer before this row existed
                  "outside", "outdoors", "outdoor", "gully", "gulley", "manhole", "drain cover",
                  "yard", "driveway", "patio", "pavement", "garden drain", "outside drain",
+                 # "how" is in the key above as the bare way-ask, so a price asked about a
+                 # drain came here: "how much does a drain company charge" was answered with
+                 # the weekly kettle of boiling water. A price is the cost table's question.
+                 "how much", "how much does", "how much is", "cost", "costs", "price",
+                 "prices", "charge", "charges", "quote", "callout", "call out", "company",
                  "pasta", "spaghetti", "noodles", "rice", "potato", "potatoes", "veg",
                  "vegetables", "colander", "cooking", "cook", "sauce", "tin", "tinned", "bean",
-                 "beans", "spinach", "food", "boil", "boiling", "friend", "friends", "sister",
+                 "beans", "spinach", "food", "boil", "boiling",
+                 # a tin being drained is food, not a plughole: "how do i drain a can of tuna"
+                 # was told to pour a kettle of boiling water down the drain
+                 "can of", "tin of", "tuna", "sweetcorn", "sweet corn",
+                 "chopped tomatoes", "tinned tomatoes", "coconut milk",
+                 "friend", "friends", "sister",
                  "brother", "mum", "mom", "dad", "partner", "husband", "wife", "boyfriend",
                  "girlfriend", "family", "flatmate", "housemate", "colleague", "coworker",
                  "someone", "person", "people", "relative", "mother in law", "relationship",
@@ -2257,7 +2795,7 @@ ENTRIES = [
           "Put cleaner under the rim and leave it 10 minutes, then scrub right round the bowl with a "
           "toilet brush, including under the rim, and flush. A limescale ring at the waterline comes "
           "off with a citric acid or vinegar soak overnight."),
-    # The smell the animal leaves is the same job whether the line says "pee" or "pet smell":
+# The smell the animal leaves is the same job whether the line says "pee" or "pet smell":
     # "how do i get rid of a pet smell in the carpet" and "my carpet smells of dog" named no
     # accident at all, and the first was answered with the breeder and the second was echoed.
     entry("pet-accident", (("cat pee", "cat peed", "dog pee", "dog peed", "urine", "weed", "peed",
@@ -2267,9 +2805,7 @@ ENTRIES = [
                             "smell of dog", "smell of cat", "dog wee", "cat wee"),
                             ("carpet", "sofa", "smell", "smells", "remove", "rug", "mattress",
                              "stain", "car", "seat", "seats", "upholstery", "room", "house")),
-          "Soak up what you can, then wash the patch with a warm solution of biological laundry "
-          "detergent, blot and rinse well; the enzymes in it break down the smell. Never use bleach "
-          "or ammonia cleaners, which smell like urine to a cat and invite a repeat.",
+          PET_ACCIDENT_REPLY,
           # "my cat smells" is not a stain: with a bare "cat smell" in the key the prefix matched and
           # the patch-and-detergent answer was given to a line about an animal that wants the tray or
           # the vet. The card wants a place or an accident named, not just the animal and the smell.
@@ -2296,6 +2832,23 @@ ENTRIES = [
                  "garden", "driveway", "drive", "paving", "patio", "lawn", "grass", "slabs",
                  "slab", "decking", "path", "pathway", "yard", "gravel", "concrete", "tarmac",
                  "weeds", "weeding", "flower bed", "borders", "plant", "plants", "planting")),
+    # Where the mess is, asked a turn later. The key needs the place and the job, and the reply
+    # reads the chat: with no animal and no accident behind it this is a sofa-cleaning line and
+    # the ordinary upholstery rows answer it.
+    entry("the-place-a-pet-used",
+          (("sofa", "sofas", "settee", "couch", "armchair", "carpet", "carpets", "rug", "rugs",
+            "mattress", "upholstery", "chair", "chairs", "bedding", "duvet", "blanket",
+            "blankets", "curtain", "curtains", "floor", "floors", "stairs", "seat", "seats",
+            "spot", "spots", "patch", "patches", "hallway", "landing"),
+           ("clean", "cleaning", "cleaned", "wash", "washing", "get rid", "get out", "remove",
+            "smell", "smells", "what do i do", "what now", "now what", "what about",
+            "deal with", "sort out")),
+          _the_place_a_pet_used,
+          # a gardening, decorating or buying line names a place and a job and is not this
+          avoid=("weed", "weeds", "weeding", "driveway", "drive", "paving", "patio", "lawn",
+                 "grass", "decking", "path", "garden", "buy", "buying", "cheap", "cheapest",
+                 "price", "cost", "paint", "painting", "varnish", "sanding", "shampoo",
+                 "hire", "hiring", "rent", "machine")),
     # "skirting" was a key here, which made a mark on a skirting board a question about blinds.
     # The word is gone: a skirting board is a wall, and `wall-mark` answers for it.
     # No bare "how" in the second part: the question word alone matched, so "how do i stop my
@@ -2440,6 +2993,8 @@ ENTRIES = [
           "and rinse, or use a proper kitchen degreaser on tiles and a splashback.",
           avoid=("paint", "painting", "painted", "wallpaper", "wallpapering", "crack", "cracks",
                  "cracked", "hole", "holes", "drill", "shelf", "shelves", "hang", "damp",
+                 # a nail or a screw in the wall is a fixing, not a grease film
+                 "nail", "nails", "screw", "screws", "rawplug", "rawlplug", "rawl plug",
                  "mould", "mold", "condensation", "outside", "exterior", "render", "paper",
                  "peeling", "strip", "stripping", "plaster", "skim", "brick", "garden",
                  # a plant growing on a wall is a plant, not a wall to wipe: the ivy and bramble
@@ -2471,6 +3026,10 @@ ENTRIES = [
                  "dog", "dogs", "puppy", "pup", "cat", "cats", "kitten", "rabbit",
            "yapping", "whine", "whines", "whining", "growl", "growls", "growling",
            "meow", "meows", "meowing", "miaow", "miaows",
+                 # getting in through a door is not a mark on it: "i cant get in my front door"
+                 # matched "get" and "door" and was told how to rub a scuff off matt emulsion
+                 "get in", "get out", "getting in", "getting out", "get back in", "locked out",
+                 "locked in", "locked", "spare key", "keys", "locksmith", "keyhole",
                  "black marks", "black spots",
                  "grease", "greasy",
                  "mould", "mold", "damp", "condensation", "crack", "cracks", "cracked", "hole",
@@ -2485,6 +3044,10 @@ ENTRIES = [
                  "won't stay", "wont stay", "curtain rail", "curtain pole", "curtain rod",
                  "curtain track", "rail", "bracket", "brackets", "fixing", "fixings",
                  "rawl plug", "rawlplug", "hollow wall", "plasterboard",
+                 # a nail or a screw in the wall is a fixing, not a mark on the paint: "how do
+                 # i remove a nail from a wall" holds "remove" and "wall", and was told to fetch
+                 # a pencil rubber. home_craft.py's nail row is the one for it.
+                 "nail", "nails", "nailed", "nailing", "screw", "screws", "screwed",
                  "wallpapering", "strip", "stripping", "plaster", "skim", "brick", "ceiling",
                  "outside", "exterior", "render", "car", "cars", "windscreen", "screen", "leather",
                  "sofa", "shoe polish", "floor", "floors", "wood", "window", "windows",
@@ -2617,7 +3180,11 @@ ENTRIES = [
                  "can i bleach", "should i bleach", "need bleach", "bleach for")),
     # The other side of the same word: a question about using bleach, not about a bleach mark.
     entry("bleach-use", (("bleach", "thin bleach", "bleach solution"),
-                         ("can i put", "can i use", "should i use", "how much", "add", "in with",
+                         # The second group has to be a thing the bleach goes on or into. It used
+                         # to hold "can i use" and "can i put" as openers, and an opener is a way
+                         # of asking, not a subject: "can i use bleach on a cut" and "can i use
+                         # bleach on my hair" came here for a ten-minute soak for white towels.
+                         ("how much", "add", "in with",
                           "towels", "whites", "wash", "washing", "sink", "soak", "dilute",
                           # "bleach on my white shirt" and "bleach on whites" ask how to use it,
                           # and the mark row above holds those phrases out, so the phrase has to
@@ -3900,6 +4467,37 @@ OFF_COMES_OFF = re.compile(
     r"pulled|peel|peels|peeling|peeled|soak|soaks|soaking|soaked|dab|dabs|dabbing|dabbed|"
     r"brush|brushes|brushing|brushed)\b[^.!?]{0,60}\boff\b")
 
+# ...but "off the car" is also how every other kind of taking is said, and none of them is a
+# mark: "we paid off the car" was told a hard surface wants lifting and wiping, "he took off his
+# coat" was told to blot up what it can with kitchen paper, and "i knocked off work", "signed off
+# the job" and "switched off the boiler" read the same way. A mark coming off has a mark in the
+# line - "get tar off a car", "get ink off the sofa" - or a pronoun standing in for one ("get it
+# off", "wipe that off"), so the "off" phrase only counts when the line names one of those. The
+# nouns come from the base's own tables: the marks with a soft-surface answer above, the marks
+# that already have a card, and the few everyday ones those miss.
+_A_MARK_NOUNS = frozenset(
+    [word for words, _ in SOFT_STAINS for word in words]
+    + list(STAIN_HAS_A_CARD)
+    + ["stain", "stains", "stained", "smudge", "smudges", "smudged", "splodge", "splodges",
+       "splat", "blob", "blobs", "patch", "patches", "dirt", "grime", "filth", "soot", "ash",
+       "residue", "scum", "spill", "spills", "spilled", "spilt", "mess", "crumb", "crumbs",
+       "dust", "scuff", "scuffs", "fingerprint", "fingerprints", "mark", "marks", "marked",
+       "bolognaise", "lasagne", "lasagna", "beetroot", "blueberry", "raspberry", "strawberry",
+       "chocolate", "cheese", "sauce", "chips", "butter", "milk", "cola", "coke", "red bull",
+       "suncream", "sun cream", "sunscreen", "fake tan", "hair oil", "baby oil", "engine oil",
+       "white spirit", "primer", "undercoat", "gloss", "emulsion", "wood stain", "superglue",
+       "blu tack", "bluetack", "plasticine", "playdough", "play dough", "slime", "silly putty"])
+_A_MARK_NAMED = re.compile(
+    r"\b(?:" + "|".join(sorted((re.escape(word) for word in _A_MARK_NOUNS), key=len,
+                                reverse=True)) + r")\b")
+_A_PRONOUN_BEFORE_OFF = re.compile(
+    r"\b(?:it|that|this|them|those|these|one)\s+(?:all\s+)?off\b")
+
+
+def _names_a_mark(text):
+    """True when the line says what the mark is: "get tar off a car"."""
+    return bool(_A_MARK_NAMED.search(text))
+
 # A mark is also said by where it is, which is the other half of how people put it: "ive got egg
 # on my shirt", "there's soy sauce on my top", "i got honey on my jeans". None of those says
 # "off" or "out of", so they were read as a sentence about food - the omelette card for the egg,
@@ -3946,9 +4544,20 @@ def _says_how_it_comes_off(understood):
     same question: the food was named and the garment was named.
     """
     text = " " + str((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
-    return (any(phrase in text for phrase in COMES_OFF) or bool(OFF_COMES_OFF.search(text))
+    comes_off = bool(OFF_COMES_OFF.search(text)) and bool(
+        _A_PRONOUN_BEFORE_OFF.search(text) or _names_a_mark(text))
+    return (any(phrase in text for phrase in COMES_OFF) or comes_off
             or landed_on_a_thing(understood))
 
+
+# A state of a surface is not a mark on it. "how do i get rid of the shine on my face" and the same
+# line about the hands are not a stain, and both were told to use a soft nail brush and hand cream,
+# because the key of a mark row is a part of a person plus a getting word - which is every "how do
+# i get X off my hands" line there is - and the getting word was the whole of the evidence. The
+# shiny states are one class, and each of them has an answer of its own: the skin's is oily-skin's,
+# a garment's or a shoe's is garment-shine's. Every row that answers a mark stands down on them.
+A_STATE_OF_A_SURFACE = ("shine", "shines", "shiny", "shinier", "shiniest", "sheen", "gleam",
+                        "gleaming", "glow", "glowing")
 
 def _stain_nobody_taught_it(memory, understood):
     """The first move for a mark the base has no card for, by what made it and what it is on."""
@@ -3963,6 +4572,13 @@ def _stain_nobody_taught_it(memory, understood):
                                             "bath", "sink", "basin", "toilet", "hob", "glass",
                                             "mirror", "window", "windows", "fridge", "cupboard",
                                             "door", "car", "car seat"))
+    # A shine is a state of the skin, not a substance on it, so there is no mark to take off: the
+    # method for a mark is soap and a brush, which is the wrong thing to do to skin that is only
+    # shining. It is the same class garment-shine fences the face with, and a shine on a part of a
+    # person with no card of its own gets the honest hedge instead. A shiny table, worktop or floor
+    # is a surface, and its method is unchanged - the rule is only about skin.
+    if on_skin and not on_hard and any(" %s " % w in " %s " % text for w in A_STATE_OF_A_SURFACE):
+        return None
     # A chewing gum is picked off rather than washed: water does nothing to it, and on skin it
     # takes the hairs with it. "how do i get chewing gum off my hands" was the dentist's answer.
     if any(word in text for word in ("chewing gum", "chewed gum", "gum", "bubble gum")):
@@ -4224,11 +4840,22 @@ MARK_ON_THE_PERSON = A_PART_OF_A_PERSON + (
 A_MARK_WORD = ("stain", "stains", "stained", "mark", "marks", "marked", "off", "out of",
                "rid of", "remove", "clean", "cleaner", "shift", "lift", "scrub", "splashed",
                "covered in", "splattered")
+# The parts of a person that are not skin to be scrubbed: an eye, an ear, the mouth and the nose
+# are rinsed or seen by someone. See `_a_mark_on_the_person`.
+NOT_A_SKIN_MARK = ("eye", "eyes", "eyelid", "eyelids", "eyeball", "eyeballs", "eyelash",
+                   "eyelashes", "ear", "ears", "eardrum", "eardrums", "mouth", "lip", "lips",
+                   "gums", "tongue", "nostril", "nostrils", "inside my nose", "throat")
 
 
 def _a_mark_on_the_person(understood):
     """True when the line is a mark on a person rather than a condition or a way of getting."""
     text = " %s " % str((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
+    # An eye, an ear, the mouth and the nose are not a patch of skin. Each is rinsed or looked at
+    # rather than scrubbed, oiled or sponged with cold water, so the skin method is the wrong
+    # advice there and each has a card of its own: "get the water out of my eye" was answered
+    # here with "rinse the mark from the back of the fabric ... leave it fifteen minutes".
+    if any(" %s " % part in text for part in NOT_A_SKIN_MARK):
+        return False
     if not any(" %s " % part in text for part in MARK_ON_THE_PERSON):
         return False
     return any(phrase in text for phrase in A_MARK_WORD)
@@ -4272,6 +4899,11 @@ ENTRIES.append(entry(
            # do i get hair dye off my skin" were both answered better before this row existed.
            "dye", "dyes", "hair dye", "hairdye", "henna", "bleach", "hair colour",
            "hair color", "toner",
+           # a graze is a wound, and a fall is not a mark to scrub: "i came off my bike and
+           # grazed my knee" and "the cyclist came off his bike and is holding his arm" were both
+           # sent to the nail brush. A mark is something on the skin, not skin taken off.
+           "graze", "grazes", "grazed", "gravel rash", "road rash", "scrape", "scrapes",
+           "scraped", "came off", "fell off", "fell", "fall", "landed",
            # a chemical that burns on the skin is a first aid question and it has its own card
            # in this file: "how do i get acid off my skin" is water and a phone call, and the
            # mark answer here is the one that sends a person away from the tap.
@@ -4846,3 +5478,25 @@ ENTRIES.append(entry(
     ask=("whats a good", "what is a good", "what's a good", "good", "best", "recommend",
          "suggest", "what should i do", "look like", "how often", "where do i start",
          "keep on top")))
+
+# White linen goes yellow with use and with sweat, and no row held the question: "how do i
+# whiten yellowed sheets" was a *spreadsheet* answer, because "sheets" is a Google Sheet, and the
+# pillowcase rows answer a pillow, not a bed. The washing-whites row in clothing.py is about
+# shirts and its key has no linen in it, so this is the bed's version of the same wash.
+ENTRIES.append(entry(
+    "whiten-linen",
+    (("sheets", "bed sheets", "bedsheets", "fitted sheet", "fitted sheets", "sheet",
+      "pillowcase", "pillowcases", "linen", "towels", "towel", "duvet cover"),
+     ("whiten", "whiter", "white again", "yellowed", "yellowing", "yellow", "grey", "gray",
+      "dingy", "dull", "brighter", "bleach")),
+    "Wash them at the hottest the label allows - 60C for cotton - with a scoop of oxygen bleach "
+    "rather than chlorine, which yellows elastic and poly-cotton. Soak overnight in a bucket of "
+    "hot water with a scoop of oxygen bleach and a scoop of biological detergent if the yellow is "
+    "old, then wash as normal. Dry them in daylight: sunlight lifts yellowing better than "
+    "anything in a bottle, and a white cotton sheet left out for an afternoon comes back "
+    "visibly brighter.",
+    # The general stain method owns a stain on a sheet ("how do i get curry out of a sheet"), and
+    # how often to change them is the bedding row's question.
+    avoid=("curry", "bolognese", "gravy", "ketchup", "blood", "sick", "vomit", "wine",
+           "coffee", "tea", "sweat", "how often", "how long", "fold", "folding", "store",
+           "storing", "buy", "buying", "size", "iron", "ironing")))

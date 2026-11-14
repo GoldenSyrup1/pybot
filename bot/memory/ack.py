@@ -32,16 +32,18 @@ from ..compose import loss, negated, pick, trouble
 from ..compose.badnews import reads_as_bad_news, reads_for_a_pet, reads_like_a_symptom
 from ..compose.goodnews import reads_as_good_news, reads_as_settled, worry_on_the_table
 from ..understanding import understand as understanding
-from ..understanding.kinds import SHIFT_EARLY, SHIFT_LATE
+from ..understanding.kinds import SHIFT_EARLY, SHIFT_LATE, VERBISH
+from ..understanding.topics import NUMBER_WORDS
 from ..understanding.normalize import (LEFT_OFF_CONTRACTION, LEADERS,
                                        opens_without_subject,
                                        without_a_leading_exclamation)
 from . import last_user, there_is_a_chat
+from . import opening
 from . import you as say_it_back
 from . import facts, hours as hours_after, named, narrow, not_a_trip, taste, topics
 from . import stuck as stuck_line
 from .facts import DAYS, MONTHS, a_limit_on_the_plan
-from .relations import _person_from_pronoun
+from .relations import _person_from_pronoun, _pronoun_fits
 from .store_lines import CHILD, PERSON_GROUP
 
 # The keys of facts.extract() that mean "the store learned something about them".
@@ -254,6 +256,191 @@ def _the_pronoun(relation):
     return ""
 
 
+def _the_ages_held(memory):
+    """{relation: age} for the people the chat has already been given an age for."""
+    from . import others as the_others
+    held = {}
+    for entry in (the_others(memory) or []):
+        if isinstance(entry, dict) and entry.get("age") is not None:
+            held[str(entry.get("who") or "").lower()] = entry.get("age")
+    return held
+
+
+def _people_in_chat(memory):
+    """"the youngest" and "the other one" are people only in a chat that has people in it."""
+    if not isinstance(memory, dict):
+        return False
+    user = memory.get("user") or {}
+    if isinstance(user, dict) and (user.get("people") or user.get("kids")):
+        return True
+    from . import others as the_others
+    if the_others(memory):
+        return True
+    for turn in (memory.get("turns") or [])[-4:]:
+        said = str((turn or {}).get("user") or "").lower() if isinstance(turn, dict) else ""
+        if any(re.search(r"\bmy\s+" + re.escape(one) + r"\b", said) for one in facts.RELATIONS):
+            return True
+    return False
+
+
+def a_person_named_alone(text, memory):
+    """The question a person named on its own asks for, or "".
+
+    "and my son", "the twins", "same for my daughter": the line is a person and no fact, so there
+    is nothing to say back and one thing to ask. The store may already hold the age, and then the
+    age is not the question - what they are into is.
+    """
+    if not isinstance(text, str):
+        return ""
+    # The little words a person puts in front of the person - "and my son", "and what about my
+    # sister", "same for my daughter" - are read off by the same frames every other ask about a
+    # person uses (`named.the_one_asked_about`), so a line is a person named on its own however it
+    # is said. Read here, "and what about my sister" kept its "what about" and matched nothing at
+    # all: the turn had no reply in the whole bot and the person got "Hello!".
+    only = named.the_one_asked_about(text) or " ".join(text.split())
+    match = A_PERSON_ALONE.match(" ".join(only.split()))
+    if not match:
+        return ""
+    said = " ".join(match.group("what").lower().split()).strip(" .,;:!?'")
+    said = WHICH_ONE.sub("", said)
+    # The line says "my son" or "the twins" and the reply says it back their way: "your son" and
+    # "the twins", never "the son" for a person who said "my son".
+    ours = match.group("det").lower() in ("my", "our")
+    word = said[:-1] if said.endswith("s") and said[:-1] in facts.RELATIONS else said
+    several = said.endswith("s") and said[:-1] in facts.RELATIONS
+    # A person named by the place they hold rather than by a relation word: "the youngest", "the
+    # second one", "and a baby", "my other half". The line is one of their family and no fact, so
+    # the same question is what is left to ask - and "the other one" is only a person when the chat
+    # is already about people, because two sofas have an other one too.
+    place = A_POSITION.get(" ".join(match.group("what").lower().split()))
+    if place:
+        # "the youngest" is a person in any chat, and "the other one" is a person only in a chat
+        # that already has people in it: two sofas have an other one as well.
+        if place in A_POSITION_MAYBE_A_THING and not _people_in_chat(memory):
+            return ""
+        pool = A_POSITION_LINES.get(place) or A_PERSON_ALONE_LINES
+        who = ("Your " if ours else "The ") + place
+        return (pick(pool, memory, said).replace("{Who}", who)
+                    .replace("{they}", "they").replace("{them}", "them").replace("{do}", "do"))
+    group = A_GROUP_ALONE.get(said) or (said[:-1] + "s" if several else "")
+    if group:
+        who = ("Your " if ours else "The ") + group
+        return pick(A_GROUP_ALONE_LINES, memory, said).format(Who=who)
+    relation = _a_relation(word)
+    if not relation:
+        return ""
+    return _the_question_about(relation, said, ours, memory)
+
+
+def _the_question_about(relation, said, ours, memory, name=""):
+    """The question a friend asks about this person, said back their way.
+
+    "your son" for a person who said "my son", and the name when the chat has one: "Jack - what
+    does he get up to?" rather than "your son" for somebody whose name was already given.
+    """
+    pronoun = _the_pronoun(relation)
+    they, them = (pronoun, "him" if pronoun == "he" else "her") if pronoun else ("they", "them")
+    who = name or (("Your " if ours else "The ") + relation)
+    known = relation in _the_ages_held(memory)  # an age they gave is not the question
+    pool = A_KNOWN_AGE_LINES if known else A_PERSON_ALONE_LINES
+    line = pick(pool, memory, said)
+    return (line.replace("{Who}", who).replace("{they}", they).replace("{them}", them)
+                .replace("{do}", "does" if they in ("he", "she") else "do"))
+
+
+# A person pointed at rather than named: "what about him", "and her", "what about the two of
+# them". The chat already said who the last person was, so the line is a person and nothing else
+# and the same question about them is owed - said here, "what about him" after "my son jack is 6"
+# got the search hedge, which is a shrug about a person whose name the bot was just given.
+A_POINTED_AT = re.compile(r"^(?:him|her|them|they|that one|this one|those two|the two of them|"
+                          r"both of them|the pair of them)$")
+
+
+def a_person_pointed_at(text, memory):
+    """The question about the person a "him" or "her" or "them" points at, or ""."""
+    if not isinstance(text, str):
+        return ""
+    only = named.the_one_asked_about(text)
+    if not only or not A_POINTED_AT.match(" ".join(only.lower().split())):
+        return ""
+    word = only.lower().strip()
+    # "the two of them" and "both of them" are two people, and the chat has to hold two before the
+    # phrase means anybody: a chat with one son and "what about the two of them" is a question the
+    # bot cannot answer, and answering about the one son is not what was asked.
+    if word not in ("him", "her", "them", "they", "that one", "this one") \
+            and _how_many_people(memory) < 2:
+        return ""
+    if word not in ("him", "her", "them", "they", "that one", "this one"):
+        all_named = _the_people_pointed_at(memory)
+        if len(all_named) >= 2:
+            who = " and ".join(all_named[:2])
+            # The ages the chat already has are not the question - "Jack and Emma - how old are
+            # they?" asked two children whose ages were the two lines before it.
+            pool = A_TWO_ALONE_LINES if all(_an_age_held(memory, one) for one in all_named[:2]) \
+                else A_GROUP_ALONE_LINES
+            return pick(pool, memory, who).format(Who=who)
+    person = _the_person_pointed_at(word, memory)
+    if not person:
+        return ""
+    relation, name = person
+    return _the_question_about(relation, relation, True, memory, name)
+
+
+def _how_many_people(memory):
+    """How many people of theirs the chat holds."""
+    from . import others as the_others
+    return sum(1 for entry in (the_others(memory) or [])
+               if isinstance(entry, dict) and str(entry.get("who") or "").lower() in facts.RELATIONS)
+
+
+def _the_people_pointed_at(memory):
+    """The names of the people the chat holds, in the order they were given, named only."""
+    from . import others as the_others
+    names = []
+    for entry in the_others(memory) or []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("who") or "").lower() not in facts.RELATIONS:
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name or not name[:1].isalpha():
+            continue
+        name = name[0].upper() + name[1:]
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _an_age_held(memory, name):
+    """Whether the chat already has an age for the person of this name."""
+    from . import others as the_others
+    for entry in the_others(memory) or []:
+        if not isinstance(entry, dict):
+            continue
+        held = str(entry.get("name") or "").strip().lower()
+        if held == name.strip().lower() and entry.get("age"):
+            return True
+    return False
+
+
+def _the_person_pointed_at(word, memory):
+    """(relation, name) for the person the word points at, or None when the chat has nobody."""
+    from . import others as the_others
+    wanted = {"him": facts.HE, "her": facts.SHE}.get(word)
+    people = [entry for entry in (the_others(memory) or []) if isinstance(entry, dict)]
+    for entry in reversed(people):
+        relation = str(entry.get("who") or "").strip().lower()
+        if relation not in facts.RELATIONS:
+            continue
+        if wanted is not None and relation not in wanted:
+            continue
+        name = str(entry.get("name") or "").strip()
+        if name and name[:1].isalpha():
+            name = name[0].upper() + name[1:]
+        return relation, name
+    return None
+
+
 def a_second_person(text, memory):
     """The ask for the date of the fact this line leaves out, or "".
 
@@ -290,6 +477,68 @@ def a_second_person(text, memory):
         return "And " + said + " \u2014 when's " + pronoun + " " + verb.group("verb").lower() + "?"
     return "And " + said + " \u2014 when is that?"
 
+
+# A line that names a person and nothing else is half a thought: "and my son", "the twins",
+# "same for my daughter". With a dated fact before it, `a_second_person` asks for the date that
+# was left out. With nothing before it - the first line of a chat - there is no fact to carry
+# over at all, and the echo said the noun back: "and my son" was answered "Noted: your son.",
+# which is a receipt for something nobody said. The line itself is a person, so the reply asks
+# the one thing a friend asks about a person they have just been told about.
+A_PERSON_ALONE = re.compile(
+    r"^\s*(?:(?:and|also|plus|or|what\s+about|how\s+about|same\s+for|and\s+same\s+for|"
+    r"same\s+as|and\s+so\s+does|and\s+so\s+is)\b[\s,]*)?"
+    r"(?P<det>my|our|the|a|an)\s+(?P<what>[a-z][a-z '-]{1,24}?)\s*[.!]*\s*$", re.I)
+# The words that say which one of several, in front of the person: "my other son" is a son.
+WHICH_ONE = re.compile(r"^(?:other|second|third|first|eldest|oldest|youngest|little|big|"
+                       r"older|younger|new|baby|step|half|adopted|foster)\s+")
+# The several-people words, and the question for them is about all of them at once.
+A_GROUP_ALONE = {"kids": "children", "children": "children", "childs": "children",
+                 "twins": "twins", "boys": "boys", "girls": "girls", "sons": "sons",
+                 "daughters": "daughters", "parents": "parents", "brothers": "brothers",
+                 "sisters": "sisters", "grandkids": "grandchildren",
+                 "grandchildren": "grandchildren", "grandparents": "grandparents"}
+# The place a person holds in the family, said instead of a relation: "the youngest", "my other
+# half", "and a baby". A line that names one of these and nothing else is a person and no fact,
+# and the question about them is what the reply owes.
+A_POSITION = {
+    "youngest": "youngest", "youngest one": "youngest", "eldest": "eldest",
+    "eldest one": "eldest", "oldest": "oldest", "oldest one": "oldest",
+    "middle one": "middle one", "middle": "middle one", "second one": "second one",
+    "third one": "third one", "little one": "little one", "littlest": "little one",
+    "small one": "little one", "other one": "other one", "baby": "baby",
+    "new baby": "baby", "little baby": "baby", "other half": "other half", "half": "other half",
+    "partner": "other half",
+}
+# The places that could also be a thing: "the other one", "the second one", "the middle one" are
+# a person only once the chat is about people.
+A_POSITION_MAYBE_A_THING = frozenset(("other one", "second one", "third one", "middle one"))
+A_POSITION_LINES = {
+    "baby": ("{Who} \u2014 how many months?",
+             "{Who} \u2014 boy or girl, and how old?",
+             "{Who} \u2014 tell me about {them}."),
+    "other half": ("{Who} \u2014 how long have you two been together?",
+                   "{Who}. What {do} {they} do?",
+                   "{Who} \u2014 tell me about {them}."),
+}
+A_PERSON_ALONE_LINES = (
+    "{Who} \u2014 how old is {they}?",
+    "{Who}. What {do} {they} get up to?",
+    "{Who} \u2014 tell me a bit about {them}.",
+)
+A_KNOWN_AGE_LINES = (
+    "{Who} \u2014 what is {they} into at the moment?",
+    "{Who}. How is {they} getting on?",
+)
+# Two people the chat named, both with their ages given: the age is not the question.
+A_TWO_ALONE_LINES = (
+    "{Who} \u2014 what are they into at the moment?",
+    "{Who}. How are they getting on?",
+)
+A_GROUP_ALONE_LINES = (
+    "{Who} \u2014 how old are they?",
+    "{Who}. How are they getting on?",
+    "{Who} \u2014 tell me about them.",
+)
 
 FRAMES = (
     "{Thing} \u2014 noted.",
@@ -420,6 +669,19 @@ A_DOING = re.compile(
     r"|class|club|football|rugby|school|concert|payday|pay day|rent|bill|deadline|review"
     r"|christening|funeral|service|checkup|check-up|surgery|midwife|health visitor)\b", re.I)
 A_FIGURE = re.compile(r"\b\d{3,}\b")
+# A want or a plan that is turned down is not a day coming. "i dont want pasta tonight" and
+# "i dont want curry tomorrow" were answered "You don't want pasta tonight - coming round
+# quickly, then": the day word made the line a date, and `want` is in A_DOING, so a refusal was
+# filed as an appointment to look forward to. The negation is in front of the verb the day hangs
+# on, which is what makes it a refusal rather than a thing happening.
+A_DOING_TURNED_DOWN = re.compile(
+    r"\b(?:dont|don'?t|do not|doesnt|doesn'?t|didnt|didn'?t|wont|won'?t|wouldnt|wouldn'?t|"
+    r"cant|can'?t|cannot|not|never|no longer|no way)\s+(?:\w+\s+){0,2}?"
+    r"(?:want|wants|wanted|need|needs|fancy|go|goes|going|have|has|having|do|doing|"
+    r"come|comes|coming|came|stay|staying|work|working|eat|eating|drink|drinking|see|seeing|"
+    r"happen|happening)\b")
+
+
 # The same again for the thing being a state rather than an appointment: "he's much worse
 # today" and "my son is pale today" are the news of a day that is happening, not one
 # still to come, and "she is quite tall for 7" is a seven-year-old, not a time of day.
@@ -484,6 +746,8 @@ def _a_day_coming(clean):
     if A_DAY_ASKED.search(said) or DAY_BEEN_AND_GONE.search(said):
         return None
     if DAY_JUST_A_STATE.search(said) or A_FIGURE.search(said):
+        return None
+    if A_DOING_TURNED_DOWN.search(said):
         return None
     if not A_DOING.search(said):
         return None
@@ -1115,6 +1379,88 @@ _OPENS_WITH_AN_ASK = re.compile(
     r"^\s*(?:what|which|how|where|when|who|why|should|shall|can|could|would|will|do|does|"
     r"did|is|are|was|were|any|anyone|anything|tell me|give me|suggest|recommend)\b", re.I)
 
+# A stated like is not something to file and read back. "i love pizza" was answered "Noted: you
+# love pizza." - the filing cabinet, on the one kind of line where the person has just told you
+# what they are like and given you an opening. The dislike said out loud is answered with a
+# question about the thing ("Fair enough. What is it about mushrooms?"), so the like gets the same
+# shape turned round: the person's own words said back with one question about the thing. Not
+# every ending asks, because a question at the end of every reply reads as an interview, and the
+# thing is the whole echo rather than the bare noun, so "i love the sea" keeps its "the" and "i
+# love my dog" keeps its "my" - "Sea - what is it you like about it?" is the bot talking about a
+# sea in general. A like that carries a second half ("i love pizza but the price is mad") keeps
+# the plain frame, because the half is a fact of its own to answer (see a_liked_thing).
+LIKES_FRAMES = (
+    "{Thing} \u2014 what is it you like about it?",
+    "{Thing} \u2014 what is it about it that gets you?",
+    "{Thing}. Good to know \u2014 what do you like best about it?",
+    "{Thing} \u2014 that goes in the keep pile. I'll remember it.",
+)
+# A like with a second half in it ("i love pizza but the price is mad") is not one thing named,
+# and the thing comes out of the store with the second half still on it: "Pizza but the price is a
+# good one" is a sentence about nothing. Only a thing of a few words with nothing that joins two
+# clauses gets the like's own endings; anything longer keeps the plain frame it had.
+A_LIKE_OF_ONE_THING = re.compile(r"^(?!(?:.*\b(?:and|but|because|so|though|although|when|if|"
+                                 r"which|that)\b)).{2,40}$", re.I)
+
+
+# The endings above say "it", so the line has to name one thing the person likes and nothing else
+# that could be the "it": a line with two tastes in it ("you don't like fish but you love prawns"),
+# somebody else's taste ("she likes crime dramas, you like comedy"), a second clause ("you love
+# cooking, you do it most nights"), a comparison ("you like food more than churches") or a choice
+# ("the one you like is 650") is answered by the plain frame, which claims nothing about a thing.
+# The whole echo is tested rather than the stored thing, because the echo is what the reply says.
+A_LIKE_ECHO = re.compile(
+    r"^(?:you|we)\s+(?:really\s+|absolutely\s+|just\s+|still\s+|also\s+|do\s+|both\s+)?"
+    r"(?:love|like|adore|enjoy|prefer)\s+(?P<thing>[^,;]+)$", re.I)
+A_LIKE_WITH_TWO_HALVES = re.compile(
+    r"\b(?:and|but|because|so|though|although|when|if|which|that|than|too)\b", re.I)
+# Somebody they like is a person, and "what is it you like about it" turns them into a thing.
+A_PERSON_LIKED = re.compile(
+    r"\b(?:girl|boy|man|woman|guy|bloke|lad|lass|person|someone|somebody|people|they|them|him|her"
+    r"|his|hers|theirs)\b", re.I)
+
+
+def _a_like_of_one_thing(clean, memory=None):
+    """Whether the line's whole echo is one thing the person likes."""
+    echo = _echo(clean, memory)
+    match = A_LIKE_ECHO.match(echo or "")
+    if not match:
+        return False
+    thing = match.group("thing")
+    if A_LIKE_WITH_TWO_HALVES.search(thing) or A_PERSON_LIKED.search(thing):
+        return False
+    return not any(re.search(r"\b" + re.escape(word) + r"\b", thing, re.I)
+                   for word in (facts.RELATIONS or ()))
+
+
+def _only_a_liking(found):
+    """Whether the line filed a like and nothing else worth an answer of its own.
+
+    The same guard as `_just_a_liking`, but a pet said in the like ("i love my dog") is not a
+    second thing to answer: the store files the animal and then answers "Noted: you love your
+    dog." A name, a job or a limit in the same line is a fact of its own and keeps its own ending.
+    """
+    rest = {key for key, value in (found or {}).items()
+            if value and key not in ("tastes", "pets") and not key.endswith("_frame")}
+    return bool((found or {}).get("tastes")) and not rest
+
+
+def a_liked_thing(found):
+    """The thing a stated like is about, or "" when the line filed no like.
+
+    Only "how" of "yes" is a like: "i hate mushrooms" files the same shape with "no", and the
+    dislike is answered by the composer's own question about the thing.
+    """
+    for entry in (found or {}).get("tastes") or []:
+        if not isinstance(entry, dict) or str(entry.get("how") or "") != "yes":
+            continue
+        thing = " ".join(str(entry.get("thing") or "").split()).strip(" ,.:;!?")
+        if (thing and "{" not in thing and "}" not in thing
+                and len(thing.split()) <= 4 and A_LIKE_OF_ONE_THING.match(thing)):
+            return thing
+    return ""
+
+
 # A limit on what a person can do needs no plan to be about: "she is 8 months pregnant and cant
 # walk far" is the walking, and the plan is whatever comes next.
 _AN_ABILITY = re.compile(
@@ -1198,11 +1544,46 @@ def _a_plan_on_the_table(memory, clean=""):
     return False
 
 
+# How much of the person's own line is worth saying back. "she cant manage stairs" and "no long
+# walks" name the limit itself, and naming it is what confirms the bot heard the right thing. "my
+# nan is 90 and she cant do stairs" is a whole sentence: said back in front of the advice it is the
+# person's own words plus the filing cabinet, and the reply is better starting with what it will
+# do. The same advice, without the name.
+#
+# Only the limits whose reply is about what the bot will keep out of the plan (feet, money, a
+# stay): a job in hand is the other way round, where naming the thing IS the answer - "i still have
+# the school run to sort" has to come back saying the school run goes first - so those families
+# keep their frames however long the line is.
+SAID_BACK_WORDS = 7
+
+LIMIT_AFTER_THE_LINE = {
+    "move": (
+        "So anything I suggest stays short and flat, with somewhere to sit.",
+        "Then nothing I put to you needs hours on your feet, and there is a seat at the end of it.",
+    ),
+    "money": (
+        "So I'll keep what I suggest to what costs nothing.",
+        "Then nothing I put to you needs paying up front.",
+    ),
+    "move_stay": (
+        "Then it is the downstairs room or a bed moved down, a chair in the shower rather than a "
+        "step over the bath, and the outings one at a time.",
+        "Then book the bed that needs no stairs, and keep the week's outings short and near a seat.",
+    ),
+}
+
+
 def _a_limit_reply(clean, family, memory):
     """The limit said back, with what the bot will do with it."""
     body = _echo(clean) or clean
     if family == "move" and _the_plan_in_hand(memory, clean) == "stay":
         family = "move_stay"
+    if len(body.split()) > SAID_BACK_WORDS:
+        # A whole sentence is not a label for the limit: saying it back puts their words in front
+        # of the answer, so the reply starts with what it will do with the limit instead.
+        after = LIMIT_AFTER_THE_LINE.get(family)
+        if after:
+            return _pick_ending(after, memory)
     frames = LIMIT_FRAMES.get(family) or LIMIT_FRAMES["other"]
     return _pick_ending(frames, memory, thing=body, Thing=body[:1].upper() + body[1:])
 
@@ -1264,6 +1645,64 @@ SEPARATION = re.compile(
 # How many turns back a death or a separation still sets the tone. Three is about as long as
 # people stay on it before a turn about something else.
 HEAVY_TURNS = 3
+
+# A hurt somebody is doing to the person, not a loss and not a marriage ending: "my son is being
+# bullied at school", "he hits me", "my boss is horrible to me". A fact told in that room is not a
+# form to be filed either - "Got it - he's 11" after "my son is being bullied" is the same clerk
+# with a different receipt - so the room is set by the last few turns here too.
+# Every phrase names a person doing it, because the words themselves are ordinary: a knee hurts
+# me, the play was a hit, a film was violent, she pushed me to try again. A body part is not a
+# person, and a past participle with no one in front of it is not happening now.
+_NOT_A_BODY_PART = (r"(?<!\b(?:my|his|her|their|your|our)\s)(?<!\b(?:the|a)\s)"
+                    r"(?<!\b(?:knee|back|leg|legs|arm|arms|head|shoulder|shoulders|neck|foot|"
+                    r"feet|hip|hand|hands|stomach|tooth|teeth|ear|ears|eye|eyes|chest|ankle|"
+                    r"wrist|joint|joints|muscle|muscles)\s)")
+_BULLIED = re.compile(
+    r"\b(?:bull(?:y|ies|ied|ying))\b|\bpick(?:s|ed|ing)?\s+on\b|\bpicked\s+on\b|"
+    r"\bpicks\s+on\b|\bmean\s+to\s+(?:me|him|her|them|us|my\b)|"
+    r"\bpicked\s+on\s+(?:me|him|her|them|us)\b", re.I)
+# A person (the one the line names) doing the verb to someone: "he hits me", "my son hits me",
+# "they shout at him at school", "she swears at the kids".
+HURTS_A_PERSON = re.compile(
+    r"\b(?:he|she|they|my\s+\w+|his\s+\w+|her\s+\w+|the\s+\w+)\s+"
+    r"(?:(?:hit|hits|hit(?:ting)?|punch\w*|kick\w*|shov\w*|"
+    r"slap\w*|smack\w*|threaten\w*)\s+"
+    r"(?:me|him|her|them|us|the\s+(?:kids|children|baby|little\s+one))\b"
+    # "beats me" is also how everybody says they lost: a game word after the verb means the
+    # person is telling you about a match, not about harm. "my son beats me at chess" was read
+    # as cruelty and answered "I'm sorry it's all coming at once", which is sorry for somebody
+    # over a chess result. Bare "he beats me" keeps its reading, and the other verbs are not
+    # guarded because "hit me in the face" is exactly where a place word follows them.
+    r"|(?:beat|beats|beating)\s+"
+    r"(?:me|him|her|them|us|the\s+(?:kids|children|baby|little\s+one))\b"
+    r"(?!\s*(?:at|in|on)\s+(?:the\s+|a\s+|his\s+|her\s+|their\s+)?[a-z]))"
+    r"|\b(?:shout|shouts|shouting|swear|swears|swearing|yell|yells|yelling)\s+"
+    r"(?:at|at)\s+(?:me|him|her|them|us|the\s+(?:kids|children|baby|little\s+one))\b"
+    r"|\b(?:is|are|was|were|being)\s+horrible\s+to\s+(?:me|him|her|them|us)\b"
+    # "my husband was violent last night", "abel was violent": the violence is the whole clause,
+    # so it needs a person as its subject and nothing after it that makes it a film or a match.
+    r"|\b(?:he|she|they|my\s+\w+|his\s+\w+|her\s+\w+)\s+(?:was|is|were|are|"
+    r"has\s+been|had\s+been|got)\s+violent\b"
+    r"|\b(?:violent|violence)\s+(?:to|towards|with|at)\s+(?:me|him|her|them|us)\b"
+    r"|\b(?:was|were|am|is|being|been)\s+harass\w*\s+(?:at|on|in)\b", re.I)
+# "abel was violent last night": a person is the whole subject of the clause, so the line opens
+# with the name - and people type names in lower case. What keeps "the match was violent" and
+# "the night was violent" out is not a list of things but the word in front: a determiner means
+# the subject is a thing, and a name has none.
+A_NAME_WAS_VIOLENT = re.compile(
+    r"^\s*(?!(?:the|a|an|it|there|this|that|these|those|my|his|her|their|your|our|we|i|you|he|"
+    r"she|they)\b)[a-z][a-z'\u2019-]*\s+"
+    r"(?:was|is|were|are|has\s+been|had\s+been|got)\s+violent\b", re.I)
+
+
+def reads_as_cruelty(said):
+    """Whether this line says somebody is doing the person harm."""
+    text = " ".join(str(said or "").split())
+    if not text:
+        return False
+    if _BULLIED.search(text) or A_NAME_WAS_VIOLENT.search(text):
+        return True
+    return bool(HURTS_A_PERSON.search(text))
 
 # After a death or a separation, a fact said plainly is not a form to be filed. "She took the
 # kids to her mums" answered with "noted" is colder than the general line it replaced: the
@@ -1668,7 +2107,9 @@ BODY = re.compile(
 # answer.
 BODY_STATE_WORDS = frozenset("""faint faintish fainting woozy dizzy giddy groggy wobbly shaky
 clammy sweaty queezy queasy nauseous nauseated bilious sickly bunged sniffly sniffles sniffing
-croaky hoarse congested sneezing lightheaded""".split())
+croaky hoarse congested sneezing lightheaded
+pale pallid ashen grey gray greyish grayish mottled blotchy spotty puffy bloated flushed
+feverish shivery tender husky snotty""".split())
 BODY_STATE_PHRASES = frozenset(("light headed", "bilious", "bunged up", "blocked up"))
 # What can follow the state and leave the state the whole of the line: "im bunged up now",
 # "im shaky again".
@@ -1959,9 +2400,16 @@ CORRECTED_ALONE = (
 # "times", "per", "every" and "a" are left out on purpose: they start a measure rather than being
 # one, so "i do yoga twice a week" then "change it to three times" still needs the "a week" of the
 # line before it and answers "Three times a week, got it."
+# "day" and "days" belong here and were the one pair missing: "the course runs 3 days" then
+# "actually make it 4 days" answered "4 days days, got it." on main `c4eceacd`, while "6 weeks",
+# "6 nights" and "3 hours" were all right, because every other unit the store reads was in the
+# list. "ft", "meter(s)" and "yard(s)" were missing too. The set is not written by hand here any
+# more: the test beside this module fails if a unit in `A_MEASURE` - the table that says what each
+# unit measures - is missing from it, so the next unit added is read the same day it is added.
 VALUE_UNIT_WORDS = frozenset("""km k mile miles kilo kilos kg kgs g gram grams stone stones lb
-    lbs foot feet inch inches cm m metre metres liter litre liters litres ml pint pints hour hours
-    hr hrs minute minutes min mins week weeks wk month months year years time
+    lbs foot feet ft inch inches cm m metre metres meter meters yard yards
+    liter litre liters litres ml pint pints hour hours
+    hr hrs minute minutes min mins day days week weeks wk month months year years time
     pound pounds quid dollar dollars euro euros
     morning evening night weekend cup cups spoon spoons egg eggs""".split())
 VALUE_UNIT_GLUED = re.compile(r"^\d[\d,]*(?:\.\d+)?([a-z]{1,5})$", re.I)
@@ -1993,16 +2441,26 @@ A_MEASURE = {
 }
 
 
+# A frequency said as a single word is a whole measure on its own: "three times a week" then
+# "sorry, twice" is "Twice, got it." and never "Twice times a week". "three times" is not one -
+# "times" starts a measure - so that shape still takes the "a week" of the line before.
+WHOLE_FREQUENCY = frozenset("""once twice thrice daily nightly weekly fortnightly monthly
+    quarterly yearly annually hourly""".split())
+
+
 def _the_values_measures(value):
     """The kinds of measure the value is already said in: "10 km" -> {"distance"}.
 
     A unit word anywhere in the value counts, not only the last one, because "4 miles each way"
     carries its miles in the middle and appending "miles" to it said the unit twice. "three times"
     names none: "times" starts a measure rather than being one (see VALUE_UNIT_WORDS), so the
-    "a week" of the line before is still needed to finish it.
+    "a week" of the line before is still needed to finish it. "twice" does name one, and so does
+    "daily": a frequency said in one word needs nothing put after it.
     """
     found = set()
     for word in str(value or "").split():
+        if word.strip(".,!?;:'\u2019").lower() in WHOLE_FREQUENCY:
+            found.add("time")
         word = word.strip(".,!?;:'\u2019").lower()
         glued = VALUE_UNIT_GLUED.match(word)
         if glued:
@@ -2038,6 +2496,73 @@ def _the_unit_is_said_twice(value, unit):
     return False
 
 
+# The words people put in front of a figure they are taking back, and the words they put after it.
+# A correction with no verb is a frame around a figure - "sorry 1150, i got it wrong", "1150 sorry",
+# "hang on, 1150", "no its 1150", "1150, not 1200", "sorry, i got it wrong, 1150" - so the frame is
+# peeled off both ends and what is left has to be a figure. One reader for all of them: on main the
+# shapes with no "make it" in them were answered as news ("What was it like?") or with a stall
+# ("I'm listening - say more if it helps."), one line after the person had put their figure right.
+PUT_RIGHT_LEAD = (
+    ("i", "got", "it", "wrong"), ("got", "it", "wrong"), ("i", "made", "a", "mistake"),
+    ("i", "was", "wrong"), ("my", "mistake"), ("silly", "me"), ("i", "mean"), ("i", "meant"),
+    ("hang", "on"), ("hold", "on"), ("correction",), ("actually",), ("sorry",), ("wait",),
+    ("nope",), ("nah",), ("no",), ("its",), ("it's"),
+    # "and", "so", "oh", "well" and "ok" are not openers here on their own: "i walk 5 km" then
+    # "and 40 minutes" is a second measure, not a figure taken back.
+
+)
+PUT_RIGHT_TAIL = (
+    ("i", "got", "it", "wrong"), ("got", "it", "wrong"), ("i", "made", "a", "mistake"),
+    ("i", "was", "wrong"), ("my", "mistake"), ("silly", "me"), ("i", "mean"), ("i", "think"),
+    ("thanks",), ("sorry",), ("actually",), ("then",), ("right",), ("though",),
+)
+
+
+def _without_a_frame(words, phrases, back=False):
+    """The words left when a frame phrase is taken off one end, and whether one was taken."""
+    words = list(words)
+    took = False
+    while words:
+        for phrase in phrases:
+            end = words[-len(phrase):] if back else words[:len(phrase)]
+            said = tuple(word.lower().strip(".,!?;:'\u2019") for word in end)
+            if said == phrase:
+                words = words[:-len(phrase)] if back else words[len(phrase):]
+                took = True
+                break
+        else:
+            break
+    return words, took
+
+
+def _without_a_not(words):
+    """The words with a trailing "not <figure>" taken off, which is the figure being taken back."""
+    if len(words) >= 3 and words[-2].lower().strip(".,!?") == "not" \
+            and re.search(r"\d", words[-1]):
+        return words[:-2], True
+    return list(words), False
+
+
+def _the_bare_value(clean):
+    """The figure a correction names when it has no verb in it, or "" when it is not one.
+
+    The frame has to be there - a figure on its own ("1150") answers a question as often as it
+    corrects a line - and the figure is what is left between the frame in front and the one
+    behind. "1150, not 1200" keeps 1150: the figure after "not" is the one being taken back.
+    """
+    words = [word for word in re.split(r"[\s,]+", (clean or "").strip(" .!?")) if word]
+    if not words:
+        return ""
+    words, led = _without_a_frame(words, PUT_RIGHT_LEAD)
+    words, _ = _without_a_not(words)
+    words, tailed = _without_a_frame(words, PUT_RIGHT_TAIL, back=True)
+    if not (led or tailed):
+        return ""
+    if not words or len(words) > 4:
+        return ""
+    return " ".join(words).strip(" .,!?")
+
+
 def value_put_right(clean, memory):
     """The correction said back, or "" when the line is not one that only puts a value right.
 
@@ -2049,16 +2574,27 @@ def value_put_right(clean, memory):
     is the one thing the store's correction refuses (see FalseFactTest in tests/test_memory.py).
     """
     match = MAKE_A_VALUE.match(clean or "")
+    bare = ""
     if not match:
-        return ""
+        bare = _the_bare_value(clean or "")
+        if not bare:
+            return ""
     if not _the_line_before(memory):
         return ""  # nothing said before it, so there is no value to put right
-    value = " ".join(match.group("value").split()).strip(" .")
+    value = " ".join((match.group("value") if match else bare).split()).strip(" .")
     if not value or len(value.split()) > 4:
         return ""
     words = [word.lower().strip(".,!?'\u2019") for word in value.split()]
-    if not (re.search(r"\d", value) or all(word in VALUE_WORDS or word in DAYS or word in MONTHS
-                                           for word in words)):
+    if bare:
+        # A correction with no verb has to be a figure or a frequency said plainly: a bare word
+        # like a month or a weekday is the rest of a sentence ("my trip is 3 days in june" then
+        # "sorry, june" is not "June days in june, got it.").
+        if not (re.search(r"\d", value)
+                or all(word in VALUE_WORDS or word in WHOLE_FREQUENCY for word in words)):
+            return ""
+    elif not (re.search(r"\d", value) or all(word in VALUE_WORDS or word in DAYS
+                                              or word in MONTHS or word in WHOLE_FREQUENCY
+                                              for word in words)):
         return ""
     unit = _the_unit_before(memory)
     if not unit:
@@ -2066,6 +2602,7 @@ def value_put_right(clean, memory):
         # the bot can name: "im tired" then "make that 800" is not a correction of anything, and a
         # figure said back would be the bot claiming it holds a number it does not.
         return ""
+    unit = _without_a_unit_already_in_the_value(value, unit)
     if _the_unit_is_said_twice(value, unit):
         # The unit of the line before would be a second measure of the same thing, so the value
         # is said back as it was given: "10 km, then."
@@ -2073,6 +2610,24 @@ def value_put_right(clean, memory):
             value=value, Value=value[:1].upper() + value[1:])
     return pick(CORRECTED_WITH_UNIT, memory, seed_text=clean).format(
         value=value, Value=value[:1].upper() + value[1:], unit=unit)
+
+
+def _without_a_unit_already_in_the_value(value, unit):
+    """The unit of the line before with the word the value already ends in taken off.
+
+    "i swim 3 times a week" then "sorry 5 times" is "5 times a week" - the value carries the
+    "times" and the line carries the "a week" - and it was "5 times times a week, then." because
+    the unit of the line before is read from after its figure, "times a week", and put on a value
+    that had just said "times" itself.
+    """
+    unit_words = str(unit or "").split()
+    value_words = str(value or "").split()
+    if len(unit_words) < 2 or not value_words:
+        return unit
+    last = value_words[-1].strip(".,!?;:'\u2019").lower()
+    if last == unit_words[0].strip(".,!?;:'\u2019").lower():
+        return " ".join(unit_words[1:])
+    return unit
 
 
 def _the_line_before(memory):
@@ -2418,6 +2973,15 @@ def reply(text, memory):
     from ..compose import fallback as compose_fallback
     if compose_fallback._the_morning_has_a_clock(clean.lower()):
         return None
+    # A line that takes the last thing back is not a fact to file: "forget about the whole thing"
+    # was answered "Forget about the whole thing — noted.", which is the coldest line in
+    # STYLE.md spent on a withdrawal - the person has just said they are done with it, and the
+    # echo hands it back to them as news. The pool that answers a dismissal is the composer's
+    # (bot/compose/fallback_data.py, NEVER_MIND), so the saying back stands aside and the line
+    # reaches it.
+    from ..compose.fallback_data import A_DISMISSAL
+    if A_DISMISSAL.match(clean):
+        return None
     # "i told you my interview is in june" is the fact said again with a frame around it, and the
     # store files the fact without the frame, so the note drops it too: "Noted: your interview is
     # in june.", never "Noted: you told me your interview is in june." A report of something that
@@ -2434,6 +2998,13 @@ def reply(text, memory):
     # so a report of something done keeps its note ("my mum says i got the job").
     understood = memory.get("understood") if isinstance(memory, dict) else None
     if isinstance(understood, dict) and understood.get("suggestion"):
+        return None
+    # An errand asked of the bot is not a fact of theirs to say back. "we are going to lanzarote in
+    # may" then "look up the flights for me" was answered "Got it — look up the flights for you.",
+    # which is a receipt for something the bot has just said it cannot do - the one reply worse
+    # than the honest limit. The line is read by bot/understanding/__init__.py as an errand, so the
+    # store's own saying back stands aside and the composer's limit keeps the turn.
+    if isinstance(understood, dict) and understood.get("errand"):
         return None
     read = _repaired(clean, memory)
     # The name in "my name is Priya" is a capital, and a capital is part of the reading, so these
@@ -2460,6 +3031,13 @@ def reply(text, memory):
         # verdict on (see PAST_JOB). Asked here, before the day and echo paths, so the line
         # cannot be read as an event that has happened.
         return had
+    # A line that names a person of theirs and nothing else is a person to ask about however it is
+    # worded: "what about the little one" is the same line as "and the little one", and it was read
+    # as an ask about a thing and handed a search hedge. The named-alone pattern is anchored to the
+    # whole line, so a real question about a person ("what about my sons school") never gets here.
+    alone = a_person_named_alone(clean, memory)
+    if alone:
+        return alone
     if WANTS_ANSWER.search(read) and not facts.RELATION_WHOS_AGE.search(read):
         # "idk what to get my dad" is asking, not telling. The "who" clause is the one "whos"
         # that is not an ask: "my daughter whos 9" says the same thing as "my daughter is 9",
@@ -2659,11 +3237,12 @@ def reply(text, memory):
     if not found or (not more and not _tells_it(clean, found)):
         said = _a_thing_they_have(clean, memory)
     if said:
-        return said
+        return _the_opening_instead(said, clean, memory) or said
     if not found or (not more and not _tells_it(clean, found)):
         # Nothing in the line to file, or a fact that cannot be said back ("my partner and i do
         # a quiz on a thursday"): a habit still gets said back, and everything else declines.
-        return _plain(clean, memory)
+        plain = _plain(clean, memory)
+        return _the_opening_instead(plain, clean, memory) or plain
     pets = found.get("pets") if isinstance(found, dict) else None
     # "my cat has kidney failure" is a line about the illness, not about having a cat: the pet
     # tail's "how long has it been with you?" asks about the wrong thing, and the vet's line
@@ -2714,7 +3293,15 @@ def reply(text, memory):
         return _pick_ending(plan, memory,
                             thing=thing, Thing=thing[:1].upper() + thing[1:],
                             food=CONDITION_FOOD.get(str(found.get("condition") or "").lower(), "that"))
-    return _pick_ending(_frames(found, _heavy(memory), clean, memory), memory,
+    frames = _frames(found, _heavy(memory), clean, memory)
+    if frames is FRAMES:
+        # The first line of a chat has no earlier turn for a receipt to be a detail of, so the
+        # plain frames are swapped for the question a friend asks about the fact itself
+        # (bot/memory/opening.py). A limit, a pet, a workplace and a plan already ask their own.
+        opened = opening.the_opening(thing, clean, memory)
+        if opened:
+            return opened
+    return _pick_ending(frames, memory,
                         thing=thing, Thing=thing[:1].upper() + thing[1:],
                         food=CONDITION_FOOD.get(str(found.get("condition") or "").lower(), "that"))
 
@@ -2833,8 +3420,46 @@ REMARK_PRICE_AHEAD = (
 # answers a decision they have not made. Those keep the ordinary path.
 REMARK_TWO_SIDED = re.compile(r"\b(?:but|though|although|however|except|apart from|other than"
                               r"|worse|less|harder|longer|slower)\b", re.I)
+# A figure is a fact about the thing, not a complaint about its price. "is it worth getting a
+# bike" ... "it costs 400" is the person telling the bot what the bike in front of them costs, and
+# the answer to that is whether the figure is fair - but the expense remark read "costs" alone and
+# replied "They never are.", agreeing with a complaint nobody made. So the expense kind needs a
+# word of judgement in the line ("expensive", "a fortune", "not cheap", "a lot", "over budget"),
+# and a line that carries only a figure is left to the ordinary path, which answers the figure.
+REMARK_JUDGES_THE_PRICE = re.compile(
+    r"\b(?:expensiv\w*|pricey|pricier|dear|dearer|a\s+fortune|a\s+bomb|a\s+packet|not\s+cheap|"
+    r"cheap\s+enough|money\s+pit|over\s+(?:the\s+)?budget|cost(?:s|ing)?\s+(?:me\s+)?a\s+lot|"
+    r"cost\s+me|too\s+much|so\s+much|that\s+much|a\s+lot\s+of\s+money|loads|rip[-\s]*off|"
+    r"overpriced|adds?\s+up|worth\s+it|not\s+worth|daylight\s+robbery|steep)\b", re.I)
+
+# The other half of an expense remark: the number and nothing said about it. "it costs 400" is the
+# person answering "is it worth it" with the figure they are looking at, so the reply has to be
+# about that number - what it would take to get it back - and not the endings above, which agree
+# with a complaint nobody made ("They never are."), and not an echo ("Got it - it costs 400.").
+REMARK_FIGURE = re.compile(
+    r"(?:£|\$|€)\s*\d|\b\d{2,}\b|\b\d+\s*(?:quid|pounds?|euros?|dollars?|grand|k)\b", re.I)
+REMARK_FIGURE_REPLIES = (
+    "Then it comes down to what you get for it, and a second price usually moves the figure.",
+    "That is the number to weigh up against what doing nothing would cost you.",
+    "Worth checking that against one more quote before you commit to it.",
+)
+
 REMARK_KINDS = ((REMARK_EXPENSE, "expense"), (REMARK_LONG, "long"), (REMARK_BETTER, "better"),
                 (REMARK_HARD, "hard"), (REMARK_WORK, "work"), (REMARK_GONE, "gone"))
+
+
+def _the_opening_instead(said, clean, memory):
+    """The question about the fact, where a receipt of the line is all the reply would be.
+
+    On the first line of a chat a receipt is the filing cabinet: nothing comes back about the
+    two jobs or the six-year-old. bot/memory/opening.py asks the question a friend asks about
+    the fact instead, and stands aside for every line that is not that shape."""
+    if not said or not reads_as_a_receipt(said):
+        return None
+    thing = _echo(clean, memory)
+    if not thing:
+        return None
+    return opening.the_opening(thing, clean, memory)
 
 
 def _a_hand_back(reply, memory):
@@ -2885,6 +3510,13 @@ def _a_remark_on_what_was_said(clean, memory):
             continue
         if kind == "gone" and not GROWING.search(body + " " + topic_text):
             continue
+        if kind == "expense" and not REMARK_JUDGES_THE_PRICE.search(body):
+            # A figure on its own is not a remark about money: "it costs 400" says what the thing
+            # costs, and "They never are." answers a complaint the person did not make. A line
+            # that is the figure and nothing else is answered as the figure.
+            if not REMARK_FIGURE.search(body):
+                continue
+            return pick(REMARK_FIGURE_REPLIES, memory, seed_text=body)
         options = REMARK_REPLIES[kind]
         if kind == "expense" and _a_price_still_to_come(body, topic_text):
             options = REMARK_PRICE_AHEAD
@@ -4484,7 +5116,11 @@ A_COUNT_OF_THEM = re.compile(
 # about the day and claims nothing about the store. The same figure with no day ("hes 9") is the
 # one that was noted back as a fact nobody had kept.
 A_DATE_STILL_TO_COME = re.compile(
-    r"\b(?:next|this)\s+(?:week|month|year|weekend|summer|christmas|spring|autumn|winter)\b"
+    # "shes turning 6" is a birthday still to come with no day said for it: the word "turning" is
+    # the countdown itself. Read as a plain figure it was a fact nobody had kept, so a line whose
+    # whole point was the coming birthday was answered "Who's 6?".
+    r"\b(?:turning|turns)\s+(?:\d{1,3}|[a-z]+)\b"
+    r"|\b(?:next|this)\s+(?:week|month|year|weekend|summer|christmas|spring|autumn|winter)\b"
     r"|\b(?:in|by|until|till)\s+(?:the\s+)?(?:new\s+year|summer|christmas)\b", re.I)
 
 
@@ -4514,6 +5150,28 @@ def _the_pronoun_points_at_somebody(low, memory):
     theirs = held.get("user") if isinstance(held.get("user"), dict) else {}
     if any(isinstance(pet, dict) for pet in (theirs.get("pets") or [])):
         return True
+    # A "he"/"she"/"his"/"her" points at the person the chat has already named, whether or not the
+    # store has a fact about them yet. "i cant get my kid to sleep" then "hes 3" was answered
+    # "Who's 3?" - the age asked whose it was two turns after the person said whose it was, and the
+    # one thing the answer needed was already in the chat. The person words are read off the last
+    # few turns the person typed, and a pet word counts with them ("my cat has stopped eating" then
+    # "shes 12" is the cat, which is the reading the docstring above promises).
+    fits = None
+    if re.search(r"\b(?:she|shes|she's|her)\b", low or "", re.I):
+        fits = facts.SHE
+    elif re.search(r"\b(?:he|hes|he's|his)\b", low or "", re.I):
+        fits = facts.HE
+    if fits:
+        said = " ".join(str((turn or {}).get("user") or "").lower()
+                        for turn in (held.get("turns") or [])[-4:])
+        for word in sorted(PERSON_WORDS.union(CHILD), key=len, reverse=True):
+            if not re.search(r"\b" + word + r"\b", said):
+                continue
+            # The pronoun has to be one the person named can carry: "my mum is 60" then "hes 9" is
+            # still a he nobody in the chat fits, and the question that asks whose age it is is
+            # right. A word that names no gender ("kid", "toddler", "baby") carries either.
+            if _pronoun_fits(word, fits):
+                return True
     if not re.search(r"\b(?:they|theyre|they're|them|their|theirs|those|these)\b", low or "", re.I):
         return False
     words = set(re.findall(r"[a-z']+", low or ""))
@@ -4524,6 +5182,20 @@ def _the_pronoun_points_at_somebody(low, memory):
             return True
     return any(str(entry.get("who") or "").strip() and not str(entry.get("who")).endswith("s")
                for entry in (held.get("others") or []) if isinstance(entry, dict))
+
+
+def _somebody_was_being_hurt(memory):
+    """Whether the line before this one said somebody is doing the person harm.
+
+    "the kids at school pick on her" is a line about one person, and the store keeps nobody from
+    it because she is only "her" - so the next line's "she" points at that person and at nobody
+    else. This is the same room `_heavy` reads, for a line that names a figure instead of a fact.
+    """
+    turns = [turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)] \
+        if isinstance(memory, dict) else []
+    if not turns:
+        return False
+    return reads_as_cruelty(str(turns[-1].get("user") or ""))
 
 
 def _who_the_figure_is(found, memory, low):
@@ -4551,6 +5223,18 @@ def _who_the_figure_is(found, memory, low):
             continue
         if entry.get("pronoun") and _the_pronoun_points_at_somebody(low, memory):
             return None  # somebody in the chat fits the pronoun, so this is a fact about them
+        if entry.get("pronoun") and _somebody_was_being_hurt(memory):
+            # The chat holds no person to name because the line before named one by pronoun only:
+            # "the kids at school pick on her" then "shes 7" was answered "7 - who's that?", which
+            # asks the person to introduce their own child in the middle of saying what is
+            # happening to her. The room says there is exactly one person this is about - the one
+            # being hurt - so the age is hers and is answered as hers.
+            pron = str(entry.get("pronoun") or "").strip().lower()
+            said = ("%s's %s" % (pron, figure)) if isinstance(figure, int) else ""
+            if said:
+                return pick(HEAVY_FRAMES, memory, seed_text=low).format(
+                    thing=said, Thing=said[:1].upper() + said[1:])
+            return None
         if isinstance(figure, int) and figure:
             return pick(WHO_THE_FIGURE_IS, memory, seed_text=low).format(
                 figure=str(figure), Figure=str(figure))
@@ -4574,6 +5258,139 @@ def _what_the_pointer_is(read, memory):
         return pick(WHAT_OF_THEM, memory, seed_text=read).format(
             Count=counted[:1].upper() + counted[1:])
     return pick(WHICH_ONES, memory, seed_text=read)
+
+# A condition they only wonder about is a question, not a fact. "i think i have diabetes" was
+# said straight back - "Noted: you think you have diabetes" - which is the coldest reply there is
+# and no answer at all, and "i think i have depression" came back a turn later in "what do you
+# know about me". The line is asking whether it is diabetes, so it is answered: the thing is
+# named, and the answer says who can actually tell them and what to take to the appointment.
+A_WONDERED_CONDITION = re.compile(
+    r"\bi\s+(?:think|believe|reckon|suspect|might|may)\b[^.!?,;]{0,30}?\b"
+    r"(?:i(?:['\u2019]?ve|\s+have)?\s+)?(?:have|got)\s+(?P<thing>[a-z][a-z'\u2019 \-]{2,30})",
+    re.I)
+# The same line saying no: "i don't think i have depression" is not a worry to answer.
+A_WONDER_SAID_NO = re.compile(
+    r"\b(?:don'?t|do not|didn'?t|did not|never|not)\s+(?:think|believe|reckon|suspect)\b"
+    r"|\bnot sure\b|\bno idea\b", re.I)
+# An article in front of the thing is often a thing rather than a condition ("i think i have a
+# meeting at 3", "a parcel coming", "a bill"), so a phrase that takes one has to earn its place: a
+# condition kind at the end of it ("an eating disorder", "a chest infection") or one of the sets
+# of initials a condition is known by, which no errand ever is.
+WITH_AN_ARTICLE = frozenset("a an the some any my our his her their this that these those".split())
+A_CONDITION_KIND = re.compile(r"(?:disorder|syndrome|disease|infection|deficiency|condition|"
+                              r"intolerance|allergy|virus|ulcer|fracture|clot|itis|concussion|"
+                              r"hernia|mole|reaction|abscess|boil|polyp|stones?)$")
+# The conditions that go by their initials. A short word with an odd vowel in it is no signal on
+# its own - "a bill", "a cyst", "a milk" - so the ones that are initials are named, and they are
+# written back in capitals because that is how they are written.
+CONDITION_INITIALS = frozenset("""sti dvt uti hiv ibs ocd adhd ptsd ms me cf ibd copd gerd pnd
+    tmj pcos""".split())
+# Where to send them depends on what is being wondered about, because the way in is what the
+# person actually needs: an assessment, a test, or a GP. A condition names its own family; none
+# of this is written for one phrasing.
+CONDITION_FAMILIES = (
+    (re.compile(r"\b(?:depression|depressed|anxiety|ptsd|adhd|autism|autistic|bipolar|ocd|"
+                r"eating|anorexi\w*|bulimi\w*|burnout|self.?harm)\b"), (
+        "Whether it's {thing} isn't something I can judge from a chat - that takes a proper "
+        "assessment, and the way in is a GP appointment or a self-referral to talking therapy. "
+        "Say how long it has been like this and what has changed; that is where the assessment "
+        "starts.",
+        "I can't diagnose {thing} and a guess would be no use to you. Book a GP appointment and "
+        "ask about a referral; with something like this the waiting list is the annoying part, "
+        "so the useful move is to get in the queue now rather than when it gets worse.")),
+    (re.compile(r"\b(?:sti|hiv|chlamydia|gonorrhoea|gonorrhea|herpes|syphilis|thrush|warts|"
+                r"piles|haemorrhoids|hemorrhoids)\b"), (
+        "I can't tell you from here whether it's {thing}. Get it checked: a sexual health "
+        "clinic sees you without a GP referral, the test is quick and usually free, and they "
+        "can treat it there too.",
+        "Whether it's {thing} is a test question, not a chat one. Clinics do free, confidential "
+        "testing and you can walk in without a referral - go sooner rather than later, because "
+        "most of these are easy to sort once you know what it is.")),
+    (None, (
+        "Whether it's {thing} is a doctor's call, not something a chat can settle. Book an "
+        "appointment and take a note of when it started and what has changed - that is what "
+        "turns a hunch into an answer.",
+        "I can't tell you whether you have {thing}, and a guess would be worse than no answer. "
+        "Get it looked at - a GP or a walk-in clinic - and write down how long it has been going "
+        "on first, because that is the first thing they ask.",
+        "Whether it's {thing} is not something I can say from here - that needs someone who can "
+        "examine you or run a test. Book it, and take three things: when it started, what has "
+        "changed, and what you want out of the appointment.")),
+)
+
+
+def _the_route_for(thing):
+    """The frames that suit the kind of condition being wondered about."""
+    low = thing.lower()
+    for family, frames in CONDITION_FAMILIES:
+        if family is not None and family.search(low):
+            return frames
+    return CONDITION_FAMILIES[-1][1]
+
+
+def _the_entry_names(entry, head):
+    """Whether the entry that answered the line is about this thing at all.
+
+    "i think i have an eating disorder" reached an entry about cities, so a card being in reach
+    is not the same as the card being about the worry. An entry that will not say is taken at its
+    word.
+    """
+    keys = getattr(entry, "key", ())
+    if not keys:
+        return True
+    if head in keys:
+        return True
+    for word in keys:
+        if len(word) > 3 and (word[:4] == head[:4] or word[:5] == head[:5]):
+            return True
+    return False
+
+
+def _a_condition_they_wonder_about(clean, memory=None):
+    """The answer to "i think i have <condition>", or "" when this is not that line.
+
+    Only the lines nothing else can answer come here: a line the knowledge base has an entry
+    for is answered from it ("i think i have gout" is answered about gout), and a symptom word
+    is the bad-news or chat pool's turn ("a chest infection" keeps its own answer).
+    """
+    if not clean or A_WONDER_SAID_NO.search(clean):
+        return ""
+    match = A_WONDERED_CONDITION.search(clean)
+    if not match:
+        return ""
+    words = " ".join(match.group("thing").lower().split()).strip("-' ").split()
+    if not words:
+        return ""
+    article = words[0] if words[0] in WITH_AN_ARTICLE else ""
+    if article:
+        words = words[1:]
+    if not words:
+        return ""
+    head = words[-1]
+    if head in NOT_A_THING or head.isdigit():
+        # "i think i have time", "i think i have a meeting at 3": not a condition at all.
+        return ""
+    if any(word in NUMBER_WORDS for word in words) or any(ch.isdigit() for ch in head):
+        # "i think i have two left": a count, not a thing they have.
+        return ""
+    if any(word in VERBISH for word in words) and not A_CONDITION_KIND.search(head):
+        # "i think i have left my keys at work", "a parcel coming": the phrase has a verb in it,
+        # so it is something they did or are doing, not a condition they are wondering about.
+        return ""
+    initials = head in CONDITION_INITIALS
+    if article and not (A_CONDITION_KIND.search(head) or initials):
+        return ""
+    if reads_like_a_symptom(clean.lower()):
+        return ""
+    entry = topics.an_entry_for(clean)
+    if entry is not None and _the_entry_names(entry, head):
+        # An entry already answers this line, and it knows more about the condition than a line
+        # about who can tell them does.
+        return ""
+    phrase = " ".join([head.upper() if initials else word for word in words])
+    if article:
+        phrase = article + " " + phrase
+    return pick(_the_route_for(phrase), memory, phrase).format(thing=phrase)
 
 
 def _a_thing_they_have(clean, memory=None):
@@ -4695,6 +5512,12 @@ def _frames(found, heavy=False, clean="", memory=None):
     coming = _a_day_coming(clean)
     if coming:
         return coming
+    if _only_a_liking(found) and a_liked_thing(found) and _a_like_of_one_thing(clean, memory):
+        # Which ending is the line's own, the way the workplace pool rotates: the first turn of a
+        # chat has no history for bot.compose.pick to vary on, and one ending for every like in
+        # the deck reads as a script.
+        step = len(clean or "") % len(LIKES_FRAMES)
+        return LIKES_FRAMES[step:] + LIKES_FRAMES[:step]
     return FRAMES
 
 
@@ -4792,7 +5615,7 @@ def _just_a_liking(found):
 
 
 def _heavy(memory):
-    """Whether the last few turns hold a death or a separation.
+    """Whether the last few turns hold a death, a separation or harm somebody is doing.
 
     Only the recent turns: a funeral six turns ago has been answered, and a fact told now is
     not still being said through it. A line that is itself a loss or bad news is guarded where
@@ -4804,7 +5627,7 @@ def _heavy(memory):
         said = " ".join(str(turn.get("user") or "").split())
         if not said:
             continue
-        if loss.reads_as_loss(said) or SEPARATION.search(said.lower()):
+        if loss.reads_as_loss(said) or SEPARATION.search(said.lower()) or reads_as_cruelty(said):
             return True
     return False
 
@@ -5432,13 +6255,14 @@ def _another_of_what_we_said(clean, memory):
 # scooter" came back as "Got it - no, a scooter", which hands the person their correction back
 # instead of the thing they settled on. The opener is only a "no"/"nope" (with an optional
 # "actually"/"oh"/"sorry" in front of it) whose whole tail is the thing.
-A_CORRECTION_OPENER = re.compile(
-    r"^\W*(?:(?:actually|oh|sorry|ok|okay|well|right|wait)\s+[,.]?\s*)*(?:no|nope)\b[\s,.!-]*$",
-    re.I)
-
-
 def _only_the_correction_in_front(kept, body):
-    """True when `kept` is `body` with nothing in front of it but the correction's own "no"."""
+    """True when `kept` is `body` with nothing in front of it but the correction's own opener.
+
+    The opener is read by the correction reading itself (`facts.is_a_correction_opener`), so every
+    word that announces a correction there - "no", "no wait", "sorry", "actually", "scratch that" -
+    is an opener here too. This list used to be its own pattern that only gave way to a "no", so
+    "wait, four brothers" was said back whole and the person got their own opener handed to them:
+    "Got it - wait, four brothers."."""
     kept = " ".join(str(kept or "").split())
     body = " ".join(str(body or "").split())
     if not kept or not body or kept == body:
@@ -5446,7 +6270,7 @@ def _only_the_correction_in_front(kept, body):
     if not kept.lower().endswith(body.lower()):
         return False
     front = kept[:len(kept) - len(body)]
-    return bool(front.strip() and A_CORRECTION_OPENER.match(front))
+    return bool(front.strip() and facts.is_a_correction_opener(front))
 
 
 # The person's contraction, kept in the bot's wording: "you've got", never "you have got".
@@ -5665,9 +6489,23 @@ the_rest_of_a_question = _the_rest_of_a_question
 # and buries the thing that was put right. The forms above all need a comma or a verb; this one
 # needs the rest of the line to open on the person or the thing itself, so "no onions", "no
 # heating since tuesday" and "no hot water" keep the word that carries their meaning.
-NO_THEN_A_LINE = (r"no\s+(?=(?:i|im|i'm|i\s+am|hes|he's|shes|she's|its|it's|thats|that's|"
-                  r"theyre|they're|we're|were|youre|you're|he\s+is|she\s+is|it\s+is|"
-                  r"that\s+is|they\s+are|we\s+are|you\s+are|my|our|your|his|her|their)\b)")
+NO_THEN_A_LINE = (
+    r"no\s+(?=(?:"
+    # The person or the thing, as the subject of what follows, and its contraction: "no hes 9",
+    # "no it was my idea not the kids", "no we went in june", "no the quiet is the best bit of
+    # it", "no not the boiler the pump". Written as the words themselves rather than as every
+    # phrase they can start, because the list of phrases had only the present tense in it and
+    # missed the rest: "no it was my idea not the kids" came back as "Got it - no it was your
+    # idea not the kids", the person's own contradiction handed back to them as the fact.
+    r"i|im|i'm|we|we're|were|you|youre|you're|he|hes|he's|she|shes|she's|it|its|it's|"
+    r"they|theyre|they're|this|that|thats|that's|these|those|there|"
+    # And the thing named with its own word instead of a pronoun, or the right thing in front of
+    # the wrong one: "no the blue one", "no my sister", "no our lass", "no not the boiler".
+    # People write "no wifi" and never "no the wifi", so the article or the possessive is what
+    # makes this the correction rather than the sentence.
+    r"the|not|my|our|your|his|her|their"
+    r")\b)")
+
 NO_THEN_A_LINE_ONLY = re.compile(r"^\s*" + NO_THEN_A_LINE, re.I)
 NO_LEAD = re.compile(
     r"^\s*(?:(?:"

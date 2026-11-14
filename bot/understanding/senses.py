@@ -31,7 +31,10 @@ so a word added here is a row's guard away from fixing every line about it.
 # One word must not cue two senses of the same word, or the line it is meant to settle reads as a
 # tie and nothing is reported.
 CUES = {
-    # The space in a place, against a bed for the night.
+    # The space in a place, against a bed for the night. A size word says the space when the person
+    # is talking about the room they have ("our hotel room is tiny"), and says nothing about it when
+    # they are asking for one ("i need a small hotel room"), so the words for wanting one are cues
+    # on the booking side along with the place and the luggage a bed for the night comes with.
     "room": {
         "space": frozenset("""
             kitchen kitchens bedroom bedrooms bathroom bathrooms cupboard cupboards wardrobe
@@ -39,12 +42,15 @@ CUES = {
             landing flat house home drawer drawers shelf shelves cupboard worktop bench desk
             storage store storing put fit fits fitting tidy tidier tidy-up clutter stuff boxes
             box cupboard space cramped clutter pots pans utensils microwave toaster kettle
+            small tiny little cramped narrow cramped squeeze squashed poky pokey tight
             """.split()),
         "booking": frozenset("""
             hotel hotels motel hostel guest house booking bookings booked book reservation
             reservations reception receptionist desk check checkin check-in concierge night
             nights twin double suite ensuite en-suite overbooked upgrade holiday stay staying
-            traveller traveler luggage suitcase abroad airport flight trip refunded
+            need needs needed want wants wanted prefer rather looking searching
+            traveller traveler luggage suitcase suitcases case cases bags abroad airport
+            flight trip refunded
             """.split()),
     },
     # A wooden thing for a ball, against the animal.
@@ -100,6 +106,31 @@ CUES = {
             turnaround corner corners bend bends slope sloped incline gradient
             """.split()),
     },
+    # Late for something, against late in the cycle. One word, and the rest of the line says
+    # which: a boss, a bus, a meeting and a deadline are things a person is late *for*, while a
+    # period, a test and a pill are the cycle. Without it the cycle card answered "they fired me
+    # for being late every day" with the advice for a period that has not come, which is the
+    # opposite of what the line was about - and "im late for work again" with it too.
+    #
+    # The two lists are the named things only. "days" and "weeks" are out of it, and so are a
+    # bare "again" and "every day": "every day" is the shape of a job ("fired for being late
+    # every day") as much as of a cycle, and "two days late" is a parcel as often as a period.
+    # A line that says nothing either way keeps no reading, so every row that asks this question
+    # answers it exactly as it did before.
+    "late": {
+        "time": frozenset("""
+            work job boss manager office meeting interview deadline shift roster rota overtime
+            colleague bus buses train tram tube flight plane ferry fired sacked redundant
+            school class lesson nursery childcare pickup collection homework exam detention
+            court dentist hairdresser barber cinema theatre match kickoff traffic jam queue
+            road motorway accident closed cancelled overslept alarm form
+            """.split()),
+        "cycle": frozenset("""
+            period missed pregnant pregnancy test bleed bleeding spotting cramp pill
+            contraceptive ovulate ovulating ovulation conceive conceiving conception cycle
+            womb trimester midwife
+            """.split()),
+    },
 }
 
 # A measure word with a figure in front of it is the measure, and only the measure: "its 35
@@ -146,6 +177,17 @@ def _the_words(line):
     return {form for word in words for form in _forms(word)}
 
 
+def _how_many_words(cues, words):
+    """How many of the line's words one sense accounts for, each one counted once.
+
+    A cue list is written in the forms a person types, so it often holds a word and its plural
+    beside each other ("hotel hotels", "kitchen kitchens"). Counting the list rather than the
+    words then lets one word said once outvote a line that says two other things: "my hotel room
+    is too small" scored booking 2 and space 1 on the word `hotel` alone.
+    """
+    return len({form for cue in cues for form in (_forms(cue) & words)})
+
+
 def senses(line):
     """`{word: sense}` for each two-sense word whose sense the whole line supports.
 
@@ -162,7 +204,7 @@ def senses(line):
     for word, by_sense in CUES.items():
         if not (_forms(word) & words):
             continue
-        scored = sorted(((sum(1 for cue in cues if _forms(cue) & words), sense)
+        scored = sorted(((_how_many_words(cues, words), sense)
                          for sense, cues in by_sense.items()), reverse=True)
         if len(scored) < 2:
             continue

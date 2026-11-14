@@ -58,7 +58,12 @@ ILL_OR_HURT = ("ill", "illness", "sick", "sickness", "flu", "fever", "cold", "co
 # is the same and the subject is not a return. The row already fenced a tap, a bath, an engine and
 # a car one at a time; this is the rest of the family that runs.
 RUNS_BUT_IS_NOT_YOU = (
-    "toilet", "cistern", "flush", "ballcock", "faucet", "sink", "drain", "plughole",
+    # A loo runs, and it is the commonest thing in a house that does: "the loo wont stop running"
+    # was answered with the run-walk plan. The toilet, the cistern and the flush were all here;
+    # the word people use for it was not, so the row never stood down. The other houses that run
+    # are a lav and a wc, and so is a nose, which is the same miss one body over.
+    "toilet", "loo", "loos", "lav", "lavatory", "wc", "bog", "cistern", "flush", "ballcock",
+    "faucet", "sink", "drain", "plughole",
     "shower", "hose", "sprinkler", "irrigation", "boiler", "radiator", "heater",
     "aircon", "air conditioning", "fridge", "freezer", "dishwasher", "washing machine",
     "tumble dryer", "hoover", "vacuum", "dyson", "generator", "compressor",
@@ -78,20 +83,62 @@ RUNS_BUT_IS_NOT_YOU = (
 # injury landed on the wrong question. Running and cycling already had a comeback card; a team
 # sport is the third, and it is the one where the match is the thing people come back to too early.
 # Only the sports whose natural return is training-then-match are here: the row is about the order
-# of the two, and a swimmer or a runner has no match to hold back from.
+# of the two, and a swimmer or a runner has no match to hold back from. A racket sport is the same
+# shape as a team sport - you train, then you play a game - and leaving it out meant the sports
+# with the largest adult comeback (tennis, padel, table tennis) had no answer at all:
+# "im 52 and want to take up tennis again, anything i should know" was a fallback line about a
+# result still coming.
 TEAM_SPORTS = ("football", "rugby", "netball", "hockey", "basketball", "soccer", "gaelic",
-               "lacrosse", "cricket", "squash", "badminton", "five a side", "5 a side")
+               "lacrosse", "cricket", "squash", "badminton", "five a side", "5 a side",
+               "tennis", "table tennis", "ping pong", "padel", "volleyball", "rounders",
+               "softball", "baseball", "handball", "racketball", "racquetball")
+# The ones left off the list are games with no match in them - a bowls rink, a frisbee in the
+# park, korfball and dodgeball at a club night - and taking one up is not coming back to
+# anything, so "i want to take up bowls" keeps the beginning card it had; the advice about match
+# pace is not about it. The row is for the train-then-play shape, which every sport above has.
 # The return words the other two rows use, plus the phrases a team-sport line uses in place of
-# "run again".
+# "run again". "take up" is how most adults say it: "want to take up tennis again" names the
+# return with "take up" and "again" and none of the running words, so it was read as nothing.
 TEAM_RETURN_WORDS = RETURN_WORDS + ("play again", "playing again", "playing football again",
                                     "play football again", "back playing", "back to training",
-                                    "training again", "back on the pitch", "back on the field")
+                                    "training again", "back on the pitch", "back on the field",
+                                    "take up", "take it up", "took up", "took it up", "pick it up", "pick up a racket",
+                                    "havent played", "haven't played", "not played",
+                                    "stopped playing", "since school", "since i was",
+                                    "when i was", "back to playing", "start playing again")
 # A club search, a match ticket and watching a game are other questions with their own answers,
 # and they are what the taster-session card was written for.
 CLUB_SEARCH = ("club", "clubs", "join", "joining", "near me", "taster", "trial", "trials",
                "where can i", "find a team", "find a club", "local team", "local club",
                "watch", "watching", "ticket", "tickets", "on telly", "sky sports", "fixture",
                "fixtures", "league table", "how much", "price", "cost")
+
+
+# A person saying who they are without the pronoun, which is how half of these lines are typed:
+# "used to play squash twice a week, want to start again" has no "i" in it at all, so the guard's
+# first-person test turned the row off and a laptop's update card answered it instead. A wanting or
+# a used-to is the person, whichever words surround it.
+_FIRST_PERSON_WITHOUT_THE_PRONOUN = re.compile(
+    r"\b(?:want|wants|wanting|used to|thinking (?:of|about)|hoping to|planning to|trying to|"
+    r"decided to|going to start|back in|back on|took (?:it )?up|picked (?:it )?up|"
+    r"started playing|havent|haven't|not played|since school|since college|since uni|"
+    r"years off|out of the habit|lapsed)\b")
+
+# A child in the line is someone else's question - a parent asking about their kid's team, a
+# children's class, an under-8s side - unless the childhood is the speaker's own: "havent played
+# cricket since i was a kid, can i still play" was stood down by the bare word "kid" and answered
+# with the low-mood card, which is about as wrong as a reply gets. "my kid" is still the parent's.
+A_CHILD = re.compile(r"\b(?:kids?|child|children|toddler|son|daughter|under-?\d+|junior|schoolboy|schoolgirl)\b")
+MY_OWN_CHILDHOOD = re.compile(
+    r"\b(?:since|when|as) i was (?:a )?(?:kid|young|little|small|a boy|a girl|\d+)")
+
+
+# A beginning is not a return, and "take up" says both: "i want to take up bowls" is somebody
+# starting something, while "want to take up tennis again" is the same person coming back. The
+# return itself is one of these words, and taking something up only counts beside one of them.
+_A_RETURN_WORD = ("again", "back", "used to", "since", "havent", "haven't", "not played",
+                  "stopped", "years off", "out of the habit", "lapsed", "restart",
+                  "any more", "no longer")
 
 
 def _a_return_to_team_sport(reading):
@@ -108,7 +155,15 @@ def _a_return_to_team_sport(reading):
         return False
     if any(word in said for word in CLUB_SEARCH):
         return False
-    return bool(re.search(r"\b(?:i|im|i'm|ive|i've|we|my)\b", said))
+    if A_CHILD.search(said) and not MY_OWN_CHILDHOOD.search(said):
+        return False
+    # "take up bowls", "taking up running": a beginning, and the row's answer is about coming
+    # back. The return word has to be there for the row to answer at all.
+    if not any(word in said for word in _A_RETURN_WORD):
+        return False
+    if re.search(r"\b(?:i|im|i'm|ive|i've|we|my)\b", said):
+        return True
+    return bool(_FIRST_PERSON_WITHOUT_THE_PRONOUN.search(said))
 
 
 ENTRIES = [
@@ -177,12 +232,24 @@ entry("team-sport-again", (TEAM_SPORTS, TEAM_RETURN_WORDS),
       "an injury that stopped you, the date is the physio's and not the calendar's: the usual guide "
       "is a week of easy training for every week you were out, and nothing at match pace until you "
       "can sprint and turn without thinking about it.",
-      bias=3,
       ask=TEAM_RETURN_WORDS,
+      # A return named ("took up ... again", "used to") beside a sport word can only be the sport,
+      # and the butternut squash card keys "last" - how long a squash lasts - so it took "took up
+      # squash again last month and my arm aches" on that one word. The row has to outbid the food
+      # card's tie, which is what this raises.
+      bias=5,
       guard=_a_return_to_team_sport,
       # an injury with a bone, a cast or a physio in the line is the healing answer, and a club, a
       # ticket or the telly is not a comeback question at all
+      # "kid" and "child" came off this list and went into the guard above, which can tell a
+      # parent's child from the speaker's own childhood; the rest here cannot be a comeback.
+      # "squash" is a racket sport and also a vegetable, and the vegetable had this row beaten
+      # until these words were here: "took up squash again last month and my arm aches" - an
+      # obvious return - was answered by the butternut squash card.
       avoid=ILL_OR_HURT + CLUB_SEARCH +
-      ("kids", "kid", "child", "children", "toddler", "son", "daughter", "school",
-             "playstation", "xbox", "video game", "fantasy", "betting", "bet")),
+      ("playstation", "xbox", "video game", "games console", "fantasy", "betting", "bet",
+             "school team", "school match", "school sports day",
+             "butternut", "roast", "roasted", "soup", "eat", "eaten", "eating", "cook",
+             "cooked", "cooking", "recipe", "bake", "baked", "grow", "grown", "growing",
+             "seeds", "chips")),
 ]

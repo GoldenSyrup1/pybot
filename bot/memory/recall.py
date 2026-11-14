@@ -157,8 +157,8 @@ HOW_OLD = re.compile(r"\bhow old\b", re.I)
 # The whole picture is only asked for in these shapes: "what should I say?" is a request for
 # advice about the conversation, not a question about what you know of the person.
 ME = re.compile(
-    r"\babout me\b|\bof me\b|\bwhat have i (?:told|said)\b|\bhave i told you\b|"
-    r"\bdid i (?:tell|say)\b|\bsummar(?:y|ise|ize)\b|\brecap\b|\brun me through\b"
+    r"\babout me\b|\bof me\b|\bwhat have i (?:told|said|mentioned)\b|\bhave i (?:told|mentioned)\b|"
+    r"\bdid i (?:tell|say|mention)\b|\bsummar(?:y|ise|ize)\b|\brecap\b|\brun me through\b"
     # The same ask about the thing the chat is on rather than the person: seven turns into a
     # wedding chat, "what do you remember about it" is the wedding, and the wedding is here. Read
     # as no recall at all, it was answered with the card about nothing carrying over to a new
@@ -357,6 +357,22 @@ WANTS_THE_FACT = re.compile(
 # the British possessive "me" is a statement - "me cat is ill", "me dog is ok", "me job is fine" -
 # and read as a question it went to the store, which answered "You haven't told me about a pet
 # yet" over the cat the line had just named.
+# A time span is the one thing a recall ask can add to its frame without naming anything to
+# answer: "what did i tell you last week", "what did i say yesterday", "and what did i mention a
+# minute ago". Read as content, the span was a thing to look up in the store, nothing is filed
+# for it, and the ask fell through to the composer's hedge - the person asked for their own words
+# and got "A quick search online will get you a solid answer". The span decides when, not what, so
+# it is dropped and the ask is read as the recall it is. The reply still makes no claim about the
+# span: the store says what it holds and nothing about when.
+TIME_WORDS = frozenset("""
+week weeks weekend weekends month months year years day days today tonight tomorrow yesterday
+morning mornings afternoon afternoons evening evenings night nights midnight noon
+minute minutes hour hours second seconds ago fortnight fortnightly daily weekly monthly yearly
+monday tuesday wednesday thursday friday saturday sunday
+january february march april may june july august september october november december
+earlier lately recently sometime once
+""".split())
+
 QUESTION_START = frozenset("""
 what what's whats which who whom whose how when whens where why is are was were am do does did have
 has can could would should will remind remember know tell say anything
@@ -513,7 +529,8 @@ def ask(text, why=False):
     if re.search(r"\bdate of birth\b|\bbirth date\b", line, re.I):
         return "birthday"
     content = [word for word in low
-               if word not in SCAFFOLD and len(word) > 1 and not REMEMBERING.match(word)]
+               if word not in SCAFFOLD and word not in TIME_WORDS and len(word) > 1
+               and not REMEMBERING.match(word)]
     if content and not WANTS_THE_FACT.search(line) \
             and all(word in EMPLOYER_WORDS for word in content):
         # "can my employer fine me", "does my employer have to give me a contract": the only thing
@@ -588,3 +605,121 @@ def ask(text, why=False):
 
 
 __all__ = ["ask", "SUBJECTS", "SCAFFOLD", "PEOPLE", "ME", "ADVICE"]
+
+
+# ---------------------------------------------------------------------------------------------
+# "Is there an earlier turn?" - one check for the whole bot, not one per module.
+#
+# Every reply that comes out of what the person said has to answer the same question first: is
+# this line pointing back at something already said, and at what? It has been asked in dozens of
+# places with dozens of cue lists - "again", "remind me", "did i say", "what was my", "you said",
+# "back to" - so each new wording of the same ask was fixed in whichever module was reached first
+# and missed in every other one. "remind me how many nights" was answered from the pool because
+# the cue named the person ("did i") and a reminder names the bot.
+#
+# This is the one reader. Three parts, each general:
+#
+#   cue    the words that make a line look back: again, remind, remember, recall, forget,
+#          did I, what was my, you said, told me, earlier, before, back to, same again.
+#   thing  what it points at: the fact key the store knows (`ask`), or failing that the line's
+#          own content words with the asking frame stripped ("how many nights" -> "nights").
+#   turn   the earlier user turn carrying those words, newest first, plural and singular folded
+#          ("nights" finds "four nights").
+#
+# A look-back with no earlier turn carrying its thing is not a look-back: nothing said it, so the
+# modules go on as they are and the store's "I don't know it yet" stays the answer.
+LOOKS_BACK = re.compile(
+    r"\b(?:again|remind|reminds|reminded|reminding|remember|remembers|remembered|"
+    r"recall|recalls|recalled|forget|forgets|forgot|forgotten)\b"
+    r"|\b(?:did|do|does|was|were|am|are|have|has|had)\s+(?:i|we)\b"
+    r"|\bwhat\s+(?:was|were)\s+(?:my|our)\b"
+    # "whats my current salary" is the present tense of the same ask, and it was not a cue at all:
+    # "whats my budget" after "we have 3000 for it" was answered by the composer, whose reply
+    # said nothing the store knew. The figure reader still decides whether it can answer.
+    r"|\bwhat(?:'s|s|\s+is)\s+(?:my|our)\b"
+    r"|\bhow\s+(?:many|much)\b"
+    r"|\b(?:was|were)\s+(?:that|it|they|those|these)\b"
+    r"|\b(?:you|u)\s+(?:said|told)\b|\btold\s+me\b"
+    r"|\b(?:earlier|before)\b|\bback\s+to\b|\bsame\s+(?:again|one)\b", re.I)
+
+# The asking frame, which says nothing about what is wanted back: "remind me how many nights"
+# points at the nights, not at the reminding.
+_ASKING_FRAME = frozenset("""
+again remind reminds reminded reminding remember remembers remembered recall recalls recalled
+forget forgets forgot forgotten me my our us we i you u your yours the a an and or so but
+how many much what which who when where why was were is are am do does did done have has had
+long far old big tall heavy short wide deep high low often soon much
+said say says saying tell told telling earlier before back to same one ones that this it
+please pls can could would will about of for in at on with by any anything something thing
+""".split())
+
+
+def looks_back(text):
+    """The words that make this a look-back line, or "" when the line stands on its own."""
+    if not isinstance(text, str):
+        return ""
+    found = LOOKS_BACK.search(" ".join(text.lower().split()))
+    return found.group(0).strip() if found else ""
+
+
+def _stems(said):
+    from .topics import stem
+    return {stem(word) for word in words(said) if word}
+
+
+def the_earlier_turn(text, memory=None):
+    """The earlier turn a look-back line points at: {"cue", "thing", "said"} or None.
+
+    This is the check every reply from memory goes through, and it answers the question the way it
+    should be asked: *is there an earlier turn carrying the thing this line names?* There is no
+    look-back when there is nothing behind it, so None is returned both for a line that stands on
+    its own and for one that points at something never said ("remind me how many nights in
+    portugal" when no night in portugal was ever mentioned).
+
+    The thing is the line's own content words with the asking frame stripped - "remind me how many
+    nights" points at the nights, "what was my deposit again" at the deposit - and a turn counts
+    when it carries every one of them, so a line that adds a word never said is not pointed at the
+    turn that lacks it. `said` is the person's own earlier lines that carry the thing, newest
+    first, at most three.
+    """
+    cue = looks_back(text)
+    if not cue:
+        return None
+    thing = " ".join(word for word in words(text) if word not in _ASKING_FRAME)
+    want = _stems(thing)
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list):
+        return None
+    if not want:
+        # A line with nothing but the frame ("what did i say again") points at the last turn.
+        said = [str((turn or {}).get("user") or "") for turn in turns[::-1]
+                if isinstance(turn, dict) and (turn or {}).get("user")]
+        said = said[:3]
+        return {"cue": cue, "thing": ask(text) or "", "said": said} if said else None
+    # The words nobody in the chat has said are not part of the thing: "and how much am i putting
+    # away each month" asks about "im putting 400 a month towards a 20 grand deposit", and "away"
+    # is a word of the ask that is in no line at all. Requiring every word made the ask point at
+    # nothing, so the store stayed quiet and a plan card took the turn instead of "You said 400.".
+    # A word that is in some other line is a real part of the thing, and still has to be carried.
+    everywhere = set()
+    for turn in turns:
+        if isinstance(turn, dict):
+            everywhere |= _stems(str(turn.get("user") or ""))
+    unsaid = want - everywhere
+    said = []
+    for turn in reversed(turns):
+        line = str((turn or {}).get("user") or "") if isinstance(turn, dict) else ""
+        have = _stems(line) if line else set()
+        if len(want & have) >= 2 and (want - have) <= unsaid:
+            # Two words of the ask carried by the line, and whatever it does not share is a word
+            # nobody said: "putting away each month" reaches the line that says "putting 400 a
+            # month". One word shared is not enough - "how many nights in portugal" shares only
+            # "nights" with a turn that never mentions portugal, and it points at nothing.
+            said.append(line)
+        elif line and want <= have:
+            said.append(line)
+        if len(said) == 3:
+            break
+    if not said:
+        return None
+    return {"cue": cue, "thing": thing, "said": said}

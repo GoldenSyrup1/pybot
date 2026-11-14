@@ -340,6 +340,146 @@ DO_LINES = (
     "Worth doing rather than worrying about. Sort it out; if it keeps coming back, that's when "
     "it's somebody else's job.",
 )
+# A follow-up asking whether the step just given is the fix: "and does that fix the pressure
+# too", "will that sort it out", "does that cure it". The step is in the answer the person was
+# given a turn ago, so the honest reply is whether doing it fixes the thing and how they will
+# know - not the same paragraph again. The answers entry hands back a slice of its own paragraph
+# word for word on this ask ("my boiler keeps losing pressure" then "and does that fix the
+# pressure too"), which is the same answer twice with nothing said about the question it asked.
+# The shape is what is read, never the topic: any step, any subject.
+FIX_ASKED_LINES = (
+    "Give it a day or two and see whether it holds. If the same thing comes back, the step was "
+    "not the fix and it wants a proper look.",
+    "Do it and give it a few days. Coming back after that is the sign it is not something the "
+    "step sorts out on its own.",
+    "Try it and watch what happens next. If it stays away, that was the whole of it; if it "
+    "does not, the thing behind it needs seeing to.",
+)
+# ...and the same question about a step whose answer arrives at once. A blocked bath trap is
+# answered by running the tap: "do it and give it a few days" is wrong advice for it, because the
+# person knows in a minute. So the wait is read off the step the answer gave, and a step that names
+# no wait gets the verdict now. The test in the line is the one the person already used to decide
+# the thing was broken.
+FIX_ASKED_NOW_LINES = (
+    "Do it now and check it the way you checked before. If nothing has changed at all, that step "
+    "was not the fix and the next thing to look at is further in.",
+    "Try it straight away. If it does what it should, that was the fix; if it behaves the same, "
+    "the step was not the answer and something else is doing it.",
+    "Do it and look again straight after. Unchanged means the step was not the fix, rather than "
+    "that it needs longer.",
+)
+# The wait a step can name for itself: "leave it overnight", "check after a week", "within a few
+# days". Minutes are not a wait - "you will know in a minute" is the step answering at once.
+A_WAIT_IN_THE_STEP = re.compile(
+    r"\b(?:after|within|for|over|in|another)\s+(?:a|an|the|two|three|four|five|six|few|couple|"
+    r"several|\d+)\s+(?:day|days|week|weeks|night|nights|month|months)\b"
+    r"|\bovernight\b|\bnext day\b|\bthe following (?:day|week)\b"
+    r"|\bleave it (?:to|for)\b", re.I)
+# The ask itself: a modal or an "is/does", a pointing word, and a word for fixing. Kept short,
+# because a long line brings its own subject and is a new question rather than a question about
+# the answer just given.
+_ASKS_ABOUT_A_STEP = re.compile(
+    r"\b(?:does|do|will|would|should|can|could|is|was)\b(?:\s+\w+){0,3}\s+(?:that|this|it)\b", re.I)
+# The asks that want the step itself rather than a word on whether one will work: "how do i fix
+# it", "what should i do about it". They are the same words as the follow-up and the opposite
+# question, which is why they are read first.
+_ASKS_FOR_THE_STEP = re.compile(r"^\s*(?:how|what|where|when|which|who|why)\b", re.I)
+_A_FIX_WORD = re.compile(
+    r"\b(?:fix|fixes|fixed|sort|sorts|sorted|solve|solves|cure|cures|work|works|help|enough|"
+    r"stop|stops|clear|clears|do the trick|make a difference)\b", re.I)
+
+
+# Answers that are not a job the person tries and watches for a few days: a body, a pregnancy, a
+# baby, an animal, or somebody to ring. "my baby is not feeding" is answered with "a baby under
+# three months who stops feeding needs looking at today", and "does that fix it" was told to
+# "give it a few days", which is the one thing that answer must never say. The knowledge base
+# already says which module an answer came from (`last_answer["domain"]`), so the reading is the
+# module and not a phrase: a boiler in a chat about a baby is still a boiler, because the boiler
+# answer came from `home`. The words are the fallback for an answer with no module behind it, and
+# they are kept to the ones no DIY or cooking answer uses - "bleed" is a radiator here.
+NOT_A_STEP_TO_WATCH = frozenset((
+    "health", "pregnancy", "babyfood", "body", "caring", "complaints", "crisis_replies",
+    "pharmacy", "pets", "animals", "family", "friends", "sleep",
+))
+NOT_A_STEP_TO_WATCH_WORDS = re.compile(
+    r"\b(?:baby|babies|infant|newborn|toddler|pregnan\w*|napp(?:y|ies)|rash|fever|"
+    r"vomit\w*|diarr\w*|breathless|symptom\w*|seizure|dehydrat\w*|allerg\w*|asthma|"
+    r"inhaler|epipen|insulin|diabet\w*|medicin\w*|medication|antibiotic\w*|paracetamol|"
+    r"ibuprofen|painkiller\w*|gp|gps|doctor|doctors|nurse|midwife|pharmac\w*|hospital|"
+    r"a&e|ambulance|111|999|911|dentist|vet)\b", re.I)
+
+
+def _a_job_somewhere(reply):
+    """True when any clause of a reply is an instruction, not only the first one.
+
+    `opens_on_a_job` reads the opening because a bare "what do i do" wants the reply that starts
+    with the job. The step a follow-up points at is not always the opening one: the boiler answer
+    that ends "..." / "ok and what about the radiators, they're cold at the top" answers with
+    "Radiators that are hot at the bottom and cold at the top have air in them: open the bleed
+    valve at the top with a radiator key ...", which opens on a fact and carries its job after
+    the colon. "and does that fix the pressure too" after it still means the bleeding, so the
+    job has to be read wherever it is in the line.
+    """
+    flat = _flat(reply)
+    if not flat:
+        return False
+    for clause in re.split(r"[:;.!?]|,?\s+and\s+", flat):
+        words = _WORD.findall(clause.strip(" ,-"))
+        if not words or words[0] not in IMPERATIVES:
+            continue
+        if len(words) > 1 and words[1] in ("me", "us"):
+            continue
+        if len(words) > 1 and words[1] in _AFTER_A_NOUN:
+            continue
+        return True
+    return False
+
+
+def the_fix_asked(clean, memory):
+    """A line for "and does that fix the pressure too", or "" when the line is not that ask.
+
+    Read by the chat module: the step was given a turn ago and the question is whether doing it
+    is the fix. Two things have to hold, and each of them is a way of leaving the turn alone:
+
+    * the last thing the bot said opens on a job (`opens_on_a_job`) - there is a step for "that"
+      to point at, and the person has already read it;
+    * the line is short and asks about fixing - a long line brings its own subject, and a line
+      that asks what to do next, how long it takes or why it happens is another question that
+      the answers entry or the verdict line answers better.
+    """
+    flat = _flat(clean)
+    if not flat:
+        return ""
+    words = flat.split()
+    if len(words) > 10:
+        return ""
+    if not _ASKS_ABOUT_A_STEP.search(flat) or not _A_FIX_WORD.search(flat):
+        return ""
+    if _ASKS_FOR_THE_STEP.match(flat):
+        # "how do i fix it" asks for the step and has not been given one yet, so the answer is the
+        # entry's own ("Pull the hair and soap out of the trap"), not a line about watching one.
+        return ""
+    last = _last_reply(memory)
+    if not last or not (opens_on_a_job(last) or _a_job_somewhere(last)):
+        return ""
+    if str((memory.get("last_answer") or {}).get("domain") or "").lower() in NOT_A_STEP_TO_WATCH:
+        return ""
+    if NOT_A_STEP_TO_WATCH_WORDS.search(last):
+        # An answer about a person's body, an animal or a trade is not a step the person tries
+        # and watches for a few days. "my baby is not feeding" is answered with "a baby under
+        # three months who stops feeding needs looking at today", and "does that fix it" was told
+        # to "give it a few days", which is the one thing that answer must never say. The guard
+        # reads the answer, not the chat, so a boiler in a chat about a baby is still a boiler.
+        return ""
+    if A_WAIT_IN_THE_STEP.search(last):
+        # The step said how long it takes to know, so the line about watching it holds.
+        return _say(FIX_ASKED_LINES, memory, flat)
+    # No wait in the step: the answer comes when they try it, so the line asks them to look
+    # straight away. "Give it a day or two" over a blocked bath trap is advice that cannot be
+    # followed - the tap tells them in a minute.
+    return _say(FIX_ASKED_NOW_LINES, memory, flat)
+
+
 # An answer whose care is fenced by an "if" is not a warning about the thing itself: "my arm
 # aches after gardening" ends "See a GP if the arm is weak or numb", and a bare "is that bad"
 # asks about the ache. The honest verdict is the answer's own line: this is ordinary on its own,
@@ -560,7 +700,7 @@ def _the_person_for(who, quick):
 # what to watch.
 A_PLAN = re.compile(
     r"\b(?:i'm|im|i am|we're|were|we are)\s+(?:going|off|flying|driving|sailing|heading|"
-    r"travelling|traveling|moving|booking|booked)\b"
+    r"travelling|traveling|moving|booking|booked|selling|buying|renting)\b"
     r"|\b(?:i|we)\s+(?:want|wanna|hope|plan|intend|need|'d like|would like)\s+to\b"
     r"|\b(?:i'm|im|i am|we're|were|we are)\s+(?:about to|planning to|thinking (?:of|about)|going to)\b")
 # The other line that is not a fault: one that asks how to do something. Its "is that ok" is
@@ -610,6 +750,42 @@ METHOD_DOUBT = re.compile(
     r"^(?:and |so |but |ok |okay |well )*(?:will|would|does|do|did|can|could) "
     r"(?:that|this|it) (?:actually |really |even |still )?"
     r"(?:work|help|be enough|do the job|do it)(?: then| though)?$")
+# The whole family, not five phrasings of it: the same check is asked as "would that be worth
+# it", "does that actually work", "is that the right thing to do" and "shall i try that", and
+# each of those was left to the card it was checking, which said itself again.
+A_CHECK_ASK = re.compile(
+    r"^(?:and |so |but |ok(?:ay)?[, ]+)?(?:do you think\s+)?"
+    r"(?:will|would|does|do|did|should|shall|could|can|is|was)\s+(?:that|this|it|they|those)\s+"
+    r"(?:actually |really |even )?(?:be\s+)?"
+    r"(?:work|works|help|helps|fix it|fix that|do it|do the trick|do any good|"
+    r"make a difference|sort it|be enough|enough|ok|okay|fine|right|worth it|worth doing|"
+    r"worth a go|worth the money|the right thing|the right thing to do|the right way|"
+    r"the done thing|the usual way)"
+    r"(?: then| though| at all| for me| for us| for them| really)?\s*$"
+    # the same check with the person as the subject: "shall i try that", "should i give it a go",
+    # "do i do it that way"
+    r"|^(?:and |so )?(?:shall|should|could|can|do)\s+i\s+(?:try|do|use|go with|give)\s+"
+    r"(?:(?:that|this|it)\s+)?(?:a\s+)?(?:go|try|shot)"
+    r"|^(?:and |so )?(?:shall|should|could|can|do)\s+i\s+(?:try|do|use|go with)\s+"
+    r"(?:that|this|it)(?:\s+then)?\s*$"
+    # the plain form, subject first: "that will work", "do you think that is enough"
+    r"|^(?:and |so )?(?:do you think\s+)?(?:that|this|it)\s+(?:will|would|does|is|'s)?\s*"
+    r"(?:be enough|enough|work|help|be worth it|be ok|be fine)\s*$"
+    # and the version that names the question rather than the effect
+    r"|^(?:and |so )?(?:is|was)\s+(?:that|this|it)\s+the\s+"
+    r"(?:right|best|proper|usual|sensible|standard)\s+"
+    r"(?:thing|way|way to do it|order|approach|method|call)(?:\s+to\s+do)?\s*$")
+
+# The ask about whether the method does anything, rather than about whether it is the right one:
+# "will that work" / "will that help" / "would that fix it" / "is that enough" / "do you think
+# that is enough". Kept apart from BARE because the thing being checked is the answer's effect,
+# not the fault in the thing, and apart from A_HOW_TO_ASK because the how-to ask comes before it.
+# A line that says the person is still weighing a thing up rather than asking how to do it: the
+# answer to it is the bot's view of the choice, and a check on that answer is not a check on a
+# method.
+A_THINKING_ABOUT = re.compile(r"\bthinking (?:about|of)\b|\bwondering\b|\bconsidering\b|"
+                              r"\bnot sure (?:if|whether)\b")
+
 # Said back to a person checking the method they have just been given.
 # The lines do not answer "is that bad" with a yes in front of them, because the same pool answers
 # "is that ok" and "is that bad": "It is, yes" after "is that bad" reads as a verdict that the
@@ -618,6 +794,96 @@ METHOD_OK_LINES = (
     "Nothing there is a problem - that is how I would do it too.",
     "That is how I would go about it, and there is nothing in it to worry about.",
     "Done that way, it needs no one else: that is the method I would use.",
+)
+# A check on the effect of the method just given: "will that work", "will that help", "is that
+# enough". It is the same ask as "is that ok" about a method, said about whether the method does
+# anything, and the answer above is the bot's own method, so the reading is the answer's own: it
+# is the standard thing to try, and what the person does next is watch it. Told instead "Not a
+# call I can make for you. Say what you would lose either way" - the line for a choice the bot
+# has no view on - a person asking about advice the bot had just given was handed the question
+# back, and told "Alright then - good luck with it" the conversation was closed on them.
+# The two pools are split by whether the answer named something to watch for, for the same reason
+# the method pool is: "will that help" over the back-pain answer must not drop the line about
+# getting it looked at if it is no better.
+CHECK_WORKS_LINES = (
+    "It is the right thing to try first, and it works for most people. Give it a week or two and "
+    "tell me how it goes.",
+    "Yes - that is the standard way, so it is the one I would count on to start with. What changes "
+    "after you have tried it is what tells us the next step.",
+    "That is the usual way to go at it and it tends to do the job. If nothing has moved in a "
+    "week, say so and we will go a step further.",
+    "That is what I would do myself, so yes - it is worth a run. A fortnight of it is usually "
+    "enough to know.",
+)
+# The check after a method with no length to it: "how do i cook rice" / "will that work". Rice is
+# cooked tonight, so "if nothing has moved in a week" is not true of it - the same sentence would
+# land on a stain, a blocked drain or a flat tyre. This pool answers the check and says nothing
+# about how long the thing is meant to take, because the answer above gave it no time at all.
+CHECK_ONCE_LINES = (
+    "That is the standard way of doing it and it works - tell me how it goes and we will take it "
+    "from there.",
+    "Yes, that is how it is done. Do it that way and tell me how you get on.",
+    "That way of doing it is the right one, so go ahead - tell me if it does not do the trick.",
+)
+# The answer above says how long the thing takes to show ("give it a week", "two to six weeks",
+# "if it has gone on for weeks"), so a check on it can talk about that length. A method with no
+# length in it is a one-off job, and the pool above is the one for it.
+# Only a length a week of trying it can be measured against counts: days, a few weeks, a
+# fortnight. "Ten weeks" was a length too, and the check over it said "give it a week or two and
+# tell me how it goes" about a passport application (snappy-net, #8488) - the length was read out
+# of the answer and then a different one was invented over it. A month or a year is the same
+# fault, so the numbers stop at four and the long units are out: the answer with ten weeks in it
+# is a one-off job as far as this pool is concerned, and the pool with no time in it answers.
+A_LENGTH_IN_THE_ANSWER = re.compile(
+    r"(?<![a-z])(?:a|one|two|three|four)(?: or (?:more|so))? "
+    r"(?:day|days|week|weeks|night|nights|hour|hours|fortnight|fortnights)(?![a-z])"
+    r"|(?<![a-z])a few (?:days|weeks|nights)(?![a-z])|(?<![a-z])fortnight(?![a-z])")
+CHECK_WATCH_LINES = (
+    "That is the thing to try first, and most people do well on it. If it is no better in a week "
+    "or two, that is when it wants someone to look rather than more of the same.",
+    "Yes, that is worth doing first. If it stops helping, or it goes the wrong way, that is the "
+    "point to get it looked at rather than wait.",
+)
+# The pools above are about a remedy - "most people do well on it", "give it a week or two" - and
+# that is only true of a body or a habit. A job that is not a remedy is a price, a form, a wait or
+# a quote, and the remedy wording is about nothing there: "what does a dentist cost" / "will that
+# help" got "most people do well on it" over an answer whose job was to ask which band the
+# treatment falls in, "how long does a passport take" / "will that work" was told to give it a
+# week or two over an answer that says ten weeks, and "my car is 12 years old" / "will that help"
+# was told it tends to do the job over "get an insurance quote before you buy". This pool answers
+# the check and claims nothing about how long the job takes or how it usually goes, because the
+# answer said neither (snappy-net, #8488).
+# The words that make a remedy pool's claims true: a body part or a symptom. Only these, and not
+# the clinician words - "what does a dentist cost" names a dentist and asks about money, and the
+# answer to it has no body in it at all (snappy-net, #8488).
+try:  # the body and symptom words the composer already knows
+    from .fallback_data import BODY_PARTS as _BODY_PARTS, SYMPTOM_WORDS as _SYMPTOM_WORDS
+except Exception:  # noqa: BLE001 - a reading that cannot be imported just leaves the neutral pool
+    _BODY_PARTS = _SYMPTOM_WORDS = frozenset()
+_A_BODY_WORD = frozenset(_BODY_PARTS) | frozenset(_SYMPTOM_WORDS) | frozenset((
+    # the words the order of a sentence hides: "my back is killing me", "i feel sick"
+    "sick", "unwell", "ill", "nauseous", "sore", "soreness", "swollen", "swelling"))
+
+
+def _about_a_body(*texts):
+    """True when one of these lines names a body part or a symptom.
+
+    Callers pass the line the person typed, not the answer: an answer says "back the files up",
+    and read as a body that made the laptop answer a remedy ("give it a week or two" over "leave
+    it two days"). The line the person typed is what the check is about.
+    """
+    for text in texts:
+        words = re.findall(r"[a-z'-]+", str(text or "").lower())
+        if any(word in _A_BODY_WORD for word in words):
+            return True
+    return False
+
+
+CHECK_JOB_LINES = (
+    "That is how I would go about it, and it is the right thing to do first. Tell me how you get "
+    "on and I will pick it up from there.",
+    "Yes, do it that way - it is the sensible order to do it in. Say how it goes.",
+    "That is the right first move, and what comes back from it decides the next step.",
 )
 # A choice the answer made for them ("what should i cook tonight" -> three dinners, "should i get a
 # dog" -> the test to apply) and its "is that ok?" is a question about the suggestion, not about a
@@ -653,6 +919,79 @@ NOTHING_WARNED_LINES = (
     "It is a job to do rather than a sign of how bad it is. Do that, and the thing to watch is it "
     "getting worse or not settling.",
 )
+
+# A doubt asked over money is not a doubt about a symptom, and the "fix with no warning" pool
+# above answers it as one: "i cant pay the rent this month" / "is that bad" was told "It is the
+# usual handling of a thing like that rather than a warning about it. What would matter is it
+# getting worse or not shifting", which is a thing that might settle rather than a month with a
+# hole in it. The rent, a card, a fine and a bill all get that same sentence, and none of them is
+# something the person can watch for a week.
+#
+# What is true of all of them: the number is the problem rather than a fault in the person or the
+# thing, and the date on the next letter is what makes it urgent. Nothing here says how it ends or
+# what they can afford, and nothing here calls it their fault.
+MONEY_TROUBLE_LINES = (
+    "Nothing here is broken - it is the money that does not stretch, and that is a thing letters "
+    "and calls fix faster than waiting does. What is the first date you have to meet?",
+    "It matters, and it is the sort of thing that shrinks as soon as somebody official is told "
+    "about it. Ring the one the answer named before the next payment date, not after.",
+    "That is a real hole in the month rather than a fault in you. Start with the one the answer "
+    "named, and tell me what they say.",
+    "It is a squeeze, not a sign that you have done something wrong, and it is the kind that gets "
+    "smaller once it is written down. What is the number you cannot meet?",
+)
+# The words a money line is made of. A noun alone is not a trouble ("i got a pay rise" has wages
+# in it), so the line needs one of these and a word that says something is not being met.
+MONEY_NOUN_WORDS = frozenset((
+    "rent", "money", "bill", "bills", "debt", "debts", "owe", "owed", "arrears", "overdue",
+    "loan", "loans", "credit", "card", "cards", "mortgage", "council", "tax", "fine", "fines",
+    "energy", "electric", "electricity", "gas", "heating", "water", "payment", "payments",
+    "payday", "wages", "pay", "savings", "overdraft", "afford"))
+MONEY_NOT_MET = re.compile(
+    r"\b(?:cant|can'?t|couldnt|couldn'?t|no|not|nothing|never|behind|missed|miss|late|overdue"
+    r"|short|stuck|struggling|struggle|afford|owe|owed|debt|debts|arrears|skint|going down"
+    # A fine or an arrears letter is the trouble itself, so it needs no other word: "i got a
+    # parking fine for 120 quid" is a month that has just got worse, not a fault to be watched.
+    r"|cut|reduced|behind on|fine|fines|fined|penalty|penalties|repossession|evicted|eviction"
+    # A card turned down at the till is the money failing in public, and it was told to watch it.
+    r"|bailiffs|declined|decline|refused|bounced|overdrawn|overdraft)\b")
+# "pay" is in the noun list because "i cant pay my mate back" is money, and the one verb it belongs
+# to that is not money is "pay attention": that line was answered "That is a real hole in the month
+# rather than a fault in you", which is a sentence about a person's bank balance.
+NOT_MONEY_PAY = re.compile(r"\bpay(?:s|ing|ed)?\s+(?:attention|heed|respects?|tribute|homage|"
+                           r"lip\s+service|a\s+visit|a\s+call|compliments)\b", re.I)
+# Somebody else's money is theirs: "my son has run up a bill" is still a money doubt, so this is
+# only used to keep a doubt about somebody's health off the money pool.
+A_BODY_IN_THE_LINE = re.compile(
+    r"\b(?:pain|ache|hurts?|hurting|sore|swollen|rash|bleeding|lump|cough|fever|temperature|"
+    r"vomiting|sick|dizzy|breathless|doctor|gp|hospital|ambulance)\b", re.I)
+
+
+# Any number at all, for the gate that hands a money line with a figure in it to the comparison.
+_A_NUMBER = re.compile(r"\d")
+
+
+def _a_doubt_about_money(memory):
+    """True when the doubt this turn is about money, or "".
+
+    Read off the person's own line one turn back, not off the answer: the answer over a money
+    line is a knowledge card about rent or a card or a bill, and its own "what would matter is it
+    getting worse" is the thing this replaces.
+    """
+    said = _flat(_last_person_line(memory) or "")
+    if not said or len(said.split()) > 16:
+        return ""
+    words = set(_words(said))
+    if not words & MONEY_NOUN_WORDS:
+        return ""
+    if not MONEY_NOT_MET.search(said):
+        return ""
+    if A_BODY_IN_THE_LINE.search(said):
+        return ""
+    if NOT_MONEY_PAY.search(said):
+        return ""
+    return said
+
 
 # The answer put a timescale on watching it, and the person has already been living with it longer
 # than that. "i wake up soaked in sweat every night for months" / "is that bad" was told "Not the
@@ -1036,8 +1375,8 @@ NEUTRAL_ASK_LINES = (
 # what the person is checking is that wanting it is allowed. So these name the thing as a thing
 # they want and ask for the part that is being weighed.
 A_PLAN_DOUBT_LINES = (
-    "There is nothing for me to rule on there - it is not a fault to check. What is the bit you "
-    "are unsure about?",
+    "Nothing in that sounds wrong: it is a plan rather than a fault to check. Which part of it are "
+    "you unsure about?",
     "Say which part you are unsure about and we can weigh it up together.",
     "That is yours to decide rather than something to worry about. What is the bit you keep going "
     "over?",
@@ -1207,7 +1546,10 @@ STEP = re.compile(
     r"|what " + _FILL + r"(?:do|should) " + _FILL + r"i " + _FILL
     + r"(?:try|do) " + _FILL + r"(?:first|next)$"
     r"|how " + _FILL + r"do " + _FILL + r"i " + _FILL
-    + r"(?:fix|sort|deal with) " + _FILL + r"(?:it|that|this)$)"
+    + r"(?:fix|sort|deal with) " + _FILL + r"(?:it|that|this)$"
+    r"|what " + _FILL + r"(?:should|do|can|could) " + _FILL + r"i " + _FILL
+    + r"(?:put|use|apply|try) " + _FILL + r"(?:on|to|for) " + _FILL
+    + r"(?:it|that|this)(?: then)?$)"
 )
 # The same ask when it is about speaking up: "should i say something", "shall i mention it",
 # "do you think i should bring it up" want the step the last answer already gave - "Claim it in
@@ -1256,22 +1598,37 @@ SEE = re.compile(
 HOW_TO = re.compile(
     r"^(?:and |so |ok |okay |well )?how (?:do|should|can|would|might|will) i "
     r"(?P<doing>[a-z]+)"
-    r"(?: (?:it|that|this|them|for it|for that|for this|with it|with that|about it|about that)"
-    r"(?: (?:on (?:friday|monday|tuesday|wednesday|thursday|saturday|sunday)|then))?)?$")
+    r"(?P<obj>(?: (?:[a-z]+ ){0,2}(?:it|that|this|them)"
+    r"(?: (?:on (?:friday|monday|tuesday|wednesday|thursday|saturday|sunday)|then|now|first|"
+    r"out|off|down|up|again|properly|safely))?)?)$")
 # The doings that mean "the thing in hand" and take no object of their own. A verb of making or
 # getting takes one ("how do i cook", "how do i fix"), and those belong to the knowledge base.
 DOING_WITH_NO_OBJECT = frozenset("""prepare practise practice rehearse revise study train
 warm stretch""".split())
+# A doing with a pronoun after it names no thing of its own - "it" can only be the thing in the
+# answer above - so the verb does not have to be on any list: "how do i clean it" after "my oven is
+# filthy", "how do i unblock it" after "my sink is blocked", "how do i get rid of it", "how do i
+# descale it". The verb list only decides the case with no object at all ("how do i cook"), where
+# nothing on the line says what is in hand. (tan-needle, #routing 114695.)
+KNOWING_DOING = frozenset("""know tell check spot find see say guess recognise recognize""".split())
 # A bare plea for tips after the bot has already answered is the same ask as "what should i do":
 # "i cant sleep" / "any tips" was answered "Happy to help - tell me what you've got so far and I'll
 # add what I can", which asks the person to repeat what the bot had just told them. The subject is
 # in the answer above, so the reply is the step out of it, exactly as for "what next". The plea
 # comes in several words besides "tips": "any tricks" after the veg answer was still the stock
 # "Sure. What have you tried so far? That tells me where to start".
+#
+# "Ideas" is the same plea and was not in the list: after the answer about a child who will not eat
+# vegetables, "any ideas" was answered "That's most of what I know on it - say which part is still
+# unclear", which is the bot saying it has nothing while the first thing to do was in the answer a
+# line above ("Keep serving one small piece of veg next to something they already like").
+# "Suggestions" and "thoughts" are asked in the same breath. A plea that names its own thing ("any
+# ideas for dinner") keeps it, so it is still the knowledge base's question.
 TIPS_AGAIN = re.compile(
     r"^(?:and |so |ok |okay |well )?(?:(?:any|some|got any|got some|need some|need any|"
     r"want some|more|any more|another|a few|any other)\s+)?"
-    r"(?:tips?|advice|pointers?|tricks?|hints?)(?: (?:at all|then|please|too|now|really|anyway))*$"
+    r"(?:tips?|advice|pointers?|tricks?|hints?|ideas?|suggestions?|thoughts?)"
+    r"(?: (?:at all|then|please|too|now|really|anyway))*$"
 )
 # The same plea said as one move: "just one thing to start", "where do i start", "what is the
 # first thing to do". A person who has just been told the long version and asks for the one thing
@@ -1287,6 +1644,23 @@ TIPS_AGAIN = re.compile(
 ONE_THING_ADVERB = ("even", "actually", "really", "just", "possibly", "maybe", "instead",
                     "honestly", "normally")
 _ONE_THING_ADVERB = r"(?:(?:%s) )?" % "|".join(ONE_THING_ADVERB)
+# A follow-up that asks how to do the thing in hand, in the words people use for it: "whats the
+# safest way", "whats the best way to fix it", "which is the quickest method". Like a plea for
+# tips, it names no subject of its own - the subject is the answer above - so it is a step ask.
+# One that does name its own thing ("whats the best way to defrost chicken") is the knowledge
+# base's, and the "to <verb> it" tail is only accepted for a verb that takes a pronoun.
+# "Cheapest" is deliberately not here: "what is the cheapest way to do it" after an answer about
+# tyres wanted prices, and the base gave them ("a budget tyre fitted is about 55 to 80 a corner"),
+# while the step handed back was "read the size off the sidewall". A price ask is answered with
+# prices; the method asks above are the ones the base could not answer at all.
+A_HOW_ASK = re.compile(
+    r"^(?:and |so |ok |okay |well )?(?:what|whats|what is|which is|whichs) the "
+    r"(?:safest|best|quickest|fastest|easiest|simplest|surest|most reliable|right|"
+    r"proper|correct) (?:way|method|bet|option|approach|route)"
+    r"(?: (?:to (?:do|fix|sort|handle|treat|clean|stop|get rid of|deal with|go about) "
+    r"(?:it|that|this)|to (?:start|begin|try|go about)(?: (?:it|that|this))?"
+    r"|of doing (?:it|that|this)|of getting rid of (?:it|that|this)"
+    r"|for (?:it|that|this)|here|then|now|at all|please))?$")
 ONE_THING = re.compile(
     r"^(?:and |so |ok |okay |well |but )?(?:"
     r"just (?:one|the one|the first|1) (?:thing|step|move|bit)(?: to (?:start|begin|try|do)"
@@ -1385,6 +1759,9 @@ morning afternoon evening night day week month year hour minute second time time
 HANGING = frozenset((
     "with", "in", "of", "to", "on", "for", "at", "and", "or", "the", "a", "an", "my", "your",
     "its", "it's", "from", "by", "as", "than", "but", "if", "so", "into", "about",
+    "between", "among", "through", "under", "over", "without", "within", "against", "across",
+    "behind", "beyond", "towards", "toward", "upon", "except", "despite", "unless", "until",
+    "whether", "onto", "than",
 ))
 # A sentence the answer opens with a verb is the answer's first instruction.
 IMPERATIVES = frozenset((
@@ -1481,7 +1858,7 @@ LIST_STEP_LINES = (
 STEP_LINES = (
     "{Step} first.",
     "{Step} - that is the first move.",
-    "{Step}, before anything else I mentioned.",
+    "{Step}, before anything else.",
 )
 # The answer explained its own step after a colon ("Turn it off and keep it off: do not charge
 # it"), and that explanation is the part a friend would say, so it is quoted whole and the line
@@ -1781,7 +2158,7 @@ RULED_BY_THE_COMPOSER = (
     ORDINARY_NORMAL, CARE_NORMAL, CARE_NORMAL_UNKNOWABLE, CARE_NOW_NORMAL, DO_NORMAL,
     CONDITION_NORMAL, NOTHING_WARNED_NORMAL, NO_LINES, BOTH_LINES, DO_LINES, CONDITION_LINES,
     MET_LINES, MET_CONDITION_LINES, METHOD_OK_LINES, YES_LINES, BACKSTOP_LINES, SOON_LINES,
-    HELPED_LINES,
+    HELPED_LINES, MONEY_TROUBLE_LINES,
 )
 
 
@@ -2456,6 +2833,28 @@ def _considering(memory):
     return False
 
 
+def _the_last_line_was_mine(memory):
+    """True when the bot's last line is a line of this composer's, whichever module filed it.
+
+    The pools that answer a question a second time ("Same answer as a moment ago: nothing in what
+    I said was a warning sign") are only true when the bot itself said the answer the first time.
+    Reading the words alone is not enough, because these lines are templates: `{Step} first.` fits
+    any sentence that ends in that word, and a knowledge card that says "the last resort, not the
+    first" is not a verdict of mine.
+    """
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list) or not turns:
+        return False
+    for last in reversed(turns):
+        if not isinstance(last, dict):
+            return False
+        module = last.get("module")
+        if not module:
+            continue
+        return module == "chat" or module in COMPOSED
+    return False
+
+
 def _last_module(memory, past_the_nod=False):
     """The module that wrote the answer `_last_reply` reads, or "" if there is not one."""
     punt_module = ""
@@ -2510,6 +2909,153 @@ OWN_DOING = re.compile(
     r"^i\s+(?!am\b|m\b|'m\b|have\b|had\b|havent\b|got\b|ve\b|need\b|want\b"
     r"|found\b|noticed\b|spotted\b|saw\b|seen\b|might\b|may\b|could\b|probably\b)"
     r"[a-z']+\b", re.I)
+
+
+# A plan that can hurt is not a plan to weigh. The person states it, then checks it, and the
+# doubt path used to hand back a shrug or a yes: "stop taking my antidepressants" / "is that ok"
+# was answered "Nothing in that sounded like a warning sign - so yes, it is fine", which takes
+# back the answer before it ("Keep taking it until a pharmacist, nurse or GP tells you to stop").
+# Five families, each one a thing that injures somebody when it goes wrong, so an ordinary plan
+# is untouched: an engine or a fire in a space with no chimney, a medicine somebody else
+# prescribes, mains electricity, a blade with the guard off, and a job at height or one that
+# brings a structure down.
+CAN_HURT = (
+    # Carbon monoxide first, because it is the one that kills without any sign: an engine or a
+    # charcoal fire running in a garage, a shed, a tent or any room with the door shut.
+    ("carbon monoxide", re.compile(
+        r"\b(?:car|engine|van|generator|mower|bbq|barbecue|charcoal|stove)\b"
+        r"(?:\W+\w+){0,4}?\W+(?:running|left\s+on|on|lit|going|burning)\b", re.I),
+     re.compile(r"\b(?:garage|shed|indoors?|inside|tent|room)\b", re.I)),
+    # Stopping, doubling, halving or skipping a medicine: "stop my insulin", "double the dose",
+    # "stop taking my antidepressants", "cut my tablets in half". The medicine has to be what is
+    # being stopped - "the pill stopped working" is a report about the pill, not a plan of the
+    # person's, and the window after the verb is what keeps the two apart.
+    ("a medicine", re.compile(
+        r"\b(?:stop|stopping|quit|quitting|come\s+off|coming\s+off|double|doubling|halve|halving|"
+        r"skip|skipping|cut\s+(?:it\s+)?(?:in\s+half|down)|take\s+more|up\s+the\s+dose)\b"
+        r"(?!\s+(?:working|helping|hurting))"
+        r"(?:\W+\w+){0,4}?\W+(?:insulin|antidepress\w*|antibiotic\w*|medication|medications|"
+        r"meds|tablets?|pills?|statins?|steroids?|inhaler|epipen|epi\s*pen|"
+        r"blood\s+pressure\s+(?:tablets?|meds?)|dose|dosage|prescription)\b", re.I), None),
+    # Mains electricity and gas, done by hand: "wire the socket myself", "fit the fuse box",
+    # "can i fix the boiler myself".
+    ("the mains", re.compile(
+        r"\b(?:rewire|re-wire|wire\s+(?:it|up|the\s+socket|a\s+socket|the\s+lights?)|"
+        r"fit\s+(?:a\s+|the\s+)?(?:socket|fuse\s*box|consumer\s+unit)|"
+        r"move\s+(?:a\s+|the\s+)?(?:socket|fuse\s*box)|"
+        r"(?:socket|fuse\s*box|consumer\s+unit|wiring|boiler)\b(?:\W+\w+){0,4}?\W+"
+        r"(?:myself|ourselves|himself|herself))\b", re.I), None),
+    # A blade or a saw with the guard off, or in front of the eyes with nothing over them.
+    ("that blade", re.compile(
+        r"\b(?:angle\s+grinder|grinder|chainsaw|chain\s+saw|circular\s+saw|table\s+saw|"
+        r"chop\s+saw|bench\s+saw|saw)\b", re.I),
+     re.compile(r"\b(?:no\s+guard|without\s+(?:the\s+|a\s+|its\s+)?guard|guard\s+off|"
+                r"took\s+(?:the\s+|its\s+)?guard\s+off|no\s+goggles|without\s+goggles)\b",
+                re.I)),
+    # A job at height, or one that brings a structure down on the person doing it. The doing has
+    # to be theirs: "moss on the roof" and "my knee is not good on a ladder" are about the roof
+    # and the knee, not a plan, and they keep their card.
+    ("a job like that", re.compile(
+        r"\b(?:take|taking|knock|knocking|pull|pulling|remove|removing)\s+(?:the\s+|my\s+|our\s+)?"
+        r"(?:chimney|wall|ceiling|lintel)\b(?:\W+\w+){0,3}?\W+(?:out|down|off)\b"
+        r"|\b(?:on\s+the\s+roof|up\s+(?:a|the)\s+ladder|on\s+(?:a|the)\s+ladder)\b"
+        r"(?:\W+\w+){0,3}?\W+(?:myself|ourselves|alone|on\s+my\s+own|by\s+myself)\b"
+        r"|\b(?:myself|ourselves)\b(?:\W+\w+){0,4}?\W+"
+        r"(?:on\s+the\s+roof|up\s+(?:a|the)\s+ladder|off\s+the\s+ladder)\b", re.I), None),
+)
+# A line that already names the tradesperson is a plan to hire one, which is what this pool
+# says, so it stands aside rather than handing the advice back.
+NAMES_A_TRADE = re.compile(
+    r"\b(?:electrician|plumber|builder|roofer|chimney\s+sweep|gas\s+safe|engineer|"
+    r"handyman|scaffold\w*)\b", re.I)
+# A sentence in the answer that tells the person to keep doing the thing, stop it, or ask first.
+# It is what makes the warning the answer's own rather than a new one over the top of it.
+A_KEEP_OR_STOP = re.compile(
+    r"\b(?:keep|carry\s+on|stopping|stop|do\s+not|don\u2019t|dont|never|ask|check|review|"
+    r"until|rather\s+than)\b", re.I)
+# Each pool says the same thing in its own words: not on your own, here is what it does, and here
+# is the person to ask. None of them is an alarm - what the person did was check, and the check
+# is right - so they open on the check being right rather than on the danger.
+THE_PLAN_CAN_HURT_LINES = {
+    "carbon monoxide": (
+        "Good that you checked. Not with the engine running in there, though - that is carbon "
+        "monoxide, and it puts people to sleep before they notice it. Run it outside, and if the "
+        "door has to stay shut, have somebody with you.",
+        "Right to ask. That one gives off carbon monoxide, and a garage or a tent holds it: do it "
+        "out in the open, or with the doors wide open and somebody knowing you are in there.",
+        "Worth asking: an engine or a fire in a closed space is carbon monoxide, and that is the "
+        "kind that takes people quietly. Move it outside before you start it.",
+    ),
+    "a medicine": (
+        "Not without the person who prescribes it: stopping it, doubling it or cutting a tablet "
+        "in half is the one change they want to hear about first. Ring the surgery, a pharmacist "
+        "or 111 and ask what to do today.",
+        "That one goes through whoever prescribes it - a change of dose or a stop is not "
+        "something to work out alone. Ring the surgery or a pharmacist, and keep taking it as "
+        "written until they say otherwise.",
+        "Ask the prescriber before you change it, and carry on as written until then. A "
+        "pharmacist will answer this the same day, and 111 will at night.",
+    ),
+    "the mains": (
+        "Not by hand: that is mains, and it is not a thing to learn on. Get a registered "
+        "electrician in - a socket or a fuse box done wrong is the sort of fault that waits.",
+        "Not on your own. Mains wiring has to be done and signed off by somebody registered, and "
+        "the part that goes wrong is inside the wall where you cannot see it.",
+    ),
+    "that blade": (
+        "Not with the guard off. That guard is the part that comes between you and the blade, "
+        "and a saw does not give you a second go: put it back, or get somebody who has one.",
+        "Put the guard back on first, and goggles too - that is the half of the job that keeps "
+        "your hands the shape they are.",
+    ),
+    "a job like that": (
+        "Not from a ladder on your own, and not by taking it down yourself: that wants somebody "
+        "who has done it before, and a second pair of hands. Get a builder or a chimney sweep "
+        "round, and let them say what it is.",
+        "A job like that is one to hand over rather than climb to - a ladder on your own is how "
+        "people get hurt at home. Ring somebody who does it for a living.",
+    ),
+}
+
+
+def _the_plan_can_hurt(said):
+    """The family of harm the plan behind the check is in, or None.
+
+    An ordinary plan is untouched: this only answers a doubt when the line states one of the five
+    things that injure people, and each family needs both halves - the act and the thing that
+    makes it dangerous. "stop taking my antidepressants" is the medicine; "stop taking the bins
+    out on tuesday" is nothing.
+    """
+    if not said or NAMES_A_TRADE.search(said):
+        return None
+    for family, act, guard in CAN_HURT:
+        if act.search(said) is None:
+            continue
+        if guard is not None and guard.search(said) is None:
+            continue
+        return family
+    return None
+
+
+def _the_answer_already_warned(said):
+    """The warning the answer above already gave, when it gave one, else "".
+
+    "stop taking my antidepressants" / "is that ok" follows an answer that says "Keep taking it
+    until a pharmacist, nurse or GP tells you to stop". The best reply is that sentence, not a
+    new one, so a warning the answer already carries is handed back rather than rewritten.
+    """
+    if not said or not NAMES_A_CLINICIAN.search(said):
+        return ""
+    for sentence in re.split(r"(?<=[.!?])\s+", said):
+        sentence = sentence.strip()
+        if not 6 <= len(sentence.split()) <= 40:
+            continue
+        if NAMES_A_CLINICIAN.search(sentence) is None:
+            continue
+        if A_KEEP_OR_STOP.search(sentence) is None:
+            continue
+        return sentence.rstrip(" .") + "."
+    return ""
 
 
 def _a_plan_doubt(memory):
@@ -3542,6 +4088,26 @@ CONTINUES = re.compile(r"^\s*(?:or|but|so|yet|nor|otherwise)\b", re.IGNORECASE)
 ORDER_CONTINUES = re.compile(r"^\s*(?:then|after\s+that|next)\b", re.IGNORECASE)
 
 
+# "Between home and there" is one frame, not two instructions: cutting at its " and " left the
+# step "Ask nursery to use the same words, so the rule does not change between home", which ends
+# where the comparison does not. `and` inside `between ... and ...` (and inside `both ... and
+# ...`) hands the same instruction on rather than starting a new one, so the split walks past it.
+FRAME_AND = re.compile(r"\b(?:between|both)\b[^,;:.!?]*\band\b", re.I)
+
+
+def _cut_at_a_join(part):
+    """The part up to the first " and " or " then " that is not inside a between/both frame."""
+    keep_until = 0
+    for frame in FRAME_AND.finditer(part):
+        if frame.end() > keep_until:
+            keep_until = frame.end()
+    for at in re.finditer(r" and | then ", part):
+        if at.start() < keep_until:
+            continue
+        return part[:at.start()]
+    return part
+
+
 def _first_clause(part, and_break=True):
     """The part of an instruction up to where it stops being one instruction.
 
@@ -3563,7 +4129,7 @@ def _first_clause(part, and_break=True):
             return part[:at]
     if not and_break:
         return part
-    return re.split(r" and | then ", part)[0]
+    return _cut_at_a_join(part)
 
 
 # A sentence that is the bot asking something rather than telling anyone to do anything. It ends
@@ -4722,6 +5288,137 @@ def _care_pool(said):
     return CARE_NORMAL + CARE_NORMAL_UNKNOWABLE
 
 
+def _the_knowledge_has_this(clean, memory, above):
+    """The knowledge base's own new answer to this line, or None.
+
+    Read the way `safetyask` reads it: on a copy of the memory, so asking changes nothing about
+    this turn. A card that cannot be read is no card.
+
+    A card that only says the answer above again is not a new answer either, and asking the
+    knowledge base does not tell the two apart: for "will that help" after the back-pain card it
+    hands back that card, sometimes with the nod ("Same as before: ...") and sometimes without.
+    So the test is the words - the answer above's own opening, said again - and not the nod in
+    front of them. The person asking whether the method works has read that paragraph.
+    """
+    try:
+        from .safetyask import _the_answers_have_this
+    except Exception:  # noqa: BLE001 - a card that cannot be read is no card
+        return None
+    card = _the_answers_have_this(clean, memory)
+    if not card:
+        return None
+    said = _flat(card)
+    opening = _flat(above)[:60]
+    if opening and opening in said:
+        return None
+    return card
+
+
+def a_check_on_the_reply(reply):
+    """True when a reply is this composer's answer to a check on the answer above, else False.
+
+    Read by the arbiter: a check on the method just given is not answered by saying that method
+    again, so the recall band - which repeats the paragraph - gives way to this line. The pools
+    are the whole reading, because the same check is asked in many wordings.
+    """
+    if not reply:
+        return False
+    text = reply.strip()
+    return any(text in {line.strip() for line in pool}
+               for pool in (CHECK_WORKS_LINES, CHECK_ONCE_LINES, CHECK_WATCH_LINES,
+                            CHECK_JOB_LINES))
+
+
+def _an_amount_asked(flat):
+    """Whether the check is about how much of a thing, which is the one kind a card can answer."""
+    return bool(ENOUGH_ASK.match(flat) or re.search(r"\bhow (?:much|many)\b|\bamount\b|"
+                                                    r"\benough\b", flat or ""))
+
+
+def _the_last_thing_said_is_a_nod(memory):
+    """Whether the bot's last turn only said the person was heard."""
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list) or not turns:
+        return False
+    last = turns[-1]
+    return isinstance(last, dict) and _a_punt(last)
+
+
+def _a_check_on_the_method(flat, memory):
+    """"Will that work" / "will that help" / "is that enough" about the answer above, or None.
+
+    Only an answer that is a method is what the check is about: the person is asking whether the
+    thing the bot just told them to do does anything. A check on a choice the bot has no view on
+    ("we are thinking about a second baby" / "will that work") keeps the line it has today - the
+    answer above asked the person a question back, and no pool here can say the question works.
+    """
+    said = _last_reply(memory, past_the_nod=True)
+    if not said or not _a_how_to(said):
+        return None
+    # A choice the answer put back to the person ("we're thinking about getting a rescue dog" /
+    # "would that work") is not a method, whatever verbs the answer happens to use: the dog
+    # answer's "get one" is the end of a test, not a step. The bot has no view on the choice, so
+    # the check keeps the line it has today.
+    behind = _flat(_last_person_line(memory) or "")
+    if A_THINKING_ABOUT.search(behind) or A_DECISION_ASK.search(behind):
+        return None
+    # A plan of the person's own is not a method the bot gave, so a check on it is theirs to
+    # weigh: "im going to quit my job" / "will that work" is not a doubt about advice.
+    if A_PLAN.search(behind):
+        return None
+    # And the answer has to be the knowledge base's own method. "budget is about 30 quid" is
+    # answered by the store's echo of it, and "do you think that is enough" over that echo wants
+    # the sum done, not "that is the standard way": a check on an echo is a question this file
+    # cannot see the subject of, so it keeps the line it has.
+    if _last_module(memory) != "answers":
+        return None
+    if _the_last_thing_said_is_a_nod(memory):
+        # A nod in between ("Got it - you're paying 60 a month") means the answer above is not the
+        # last thing said, and the line the person is checking is whatever the bot is about to say
+        # about their own figure, which this file cannot see: "i owe about 4000 on my credit card"
+        # / "im paying 60 a month" / "is that enough" has the money line to come, and a check on
+        # the card above the nod took it away.
+        return None
+    # A check the knowledge base answers itself is not a check on the method above: "he will eat
+    # them raw though" / "is that enough" has the five-a-day card, and that card is a better
+    # answer than anything this file can say about the answer before it (qptf-02 on the deck).
+    # Read before the pools, and after the echo test, so a card that only repeats the answer
+    # above leaves the turn here.
+    if _an_amount_asked(flat) and _the_knowledge_has_this(flat, memory, said):
+        # Only an amount check can be answered by a card. "is that enough" has the five-a-day card
+        # behind it, and that card is the answer; "would that be worth it" over the descaling card
+        # has a kettle-buying card behind it, which is about something else, so the check keeps
+        # the turn.
+        return None
+    # A remedy pool only reads as an answer when there is a body in the question: "most people do
+    # well on it" and "if it is no better in a week or two" say nothing about a price, a form, a
+    # wait or a quote, and those three lines are what a check on a job used to get (snappy-net,
+    # #8488). The line the person typed counts as well as the answer, because the answer to "my
+    # back hurts" speaks about the habit and the line names the back.
+    if not _about_a_body(behind):
+        pool = CHECK_JOB_LINES
+    else:
+        warns = (REFER.search(said) is not None or NAMES_A_CLINICIAN.search(said) is not None
+                 or _first(said.split(), STOP_DOING) is not None)
+        if warns:
+            pool = CHECK_WATCH_LINES
+        elif A_LENGTH_IN_THE_ANSWER.search(_flat(said)):
+            pool = CHECK_WORKS_LINES
+        else:
+            pool = CHECK_ONCE_LINES
+    return pick(_round_robin(pool, flat + " " + said), memory, said)
+
+
+# The doubts that are about the thing itself rather than about what to do next. A ruling is only
+# said again for one of these: "my pan caught fire" / "what now" is the next thing to do, not a
+# doubt about the pan, and answering it with "the answer above still stands: it stays off" takes
+# the one reply that mattered - "Stay out and ring 999" - off a fire that is still burning.
+A_DOUBT_ABOUT_THE_THING = re.compile(
+    r"\b(?:safe|safely|unsafe|dangerous|danger|ok|okay|fine|risky|risk|bad|wrong|worried|"
+    r"worry|worrying|problem|normal|harm|harmful)\b"
+    r"|\b(?:can|could|may|should) i (?:still |even )?(?:use|keep using|leave|carry on using)\b")
+
+
 def reply_for(clean, memory):
     """The answer to a bare "is that bad / what should i do / should i see someone"."""
     flat = _flat(clean).strip(" .!?")
@@ -4732,6 +5429,22 @@ def reply_for(clean, memory):
     # back than the line being checked (`_the_plan_they_brought`), which is the ordinary shape of
     # a plan being talked through, and only a line that says nothing else is read here: a check
     # with a subject of its own ("is that fair on my mum") is a question about that.
+    # The answer above ruled the thing unsafe - it said to unplug it, switch it off at the wall,
+    # stop using it, or call 999. A bare doubt after that is about the ruling, and the verdict
+    # pools below cannot give it: "the plug on the kettle is scorched" is answered "Unplug it if
+    # you can do it without touching anything hot...", and "is it safe" came back "Ordinary on its
+    # own, yes. It stops being ordinary if there are flames or smoke in the room" - an all-clear
+    # for a scorched plug, in the same breath as the answer that said not to touch it. The
+    # ruling is read from the same place the safety reading reads it, so the two cannot disagree
+    # about whether the bot has already said stop.
+    from . import safetyask
+
+    if (safetyask.the_bot_already_ruled(memory) and A_DOUBT_ABOUT_THE_THING.search(flat)
+            and not any(word in flat for word in safetyask.A_RULING_ALREADY)):
+        # A line that names the stopping itself ("should i unplug it") asks about that step, and
+        # the card that names the thing answers it better than the ruling said again. The line
+        # here is the bare doubt about the thing - "is it safe", "is that dangerous".
+        return pick(safetyask.A_SAFETY_ALREADY_RULED, memory, flat)
     if A_CHECK_ON_A_PLAN.match(flat):
         plan = _the_plan_they_brought(memory)
         if plan:
@@ -4759,10 +5472,30 @@ def reply_for(clean, memory):
         if (not behind or not _a_how_to(behind)
                 or not (A_HOW_TO_ASK.search(line) or A_HOW_TO_ASK.search(written)
                         or A_HOW_TO_ASK.search(spoken))):
+            # The other way round: the answer above is a method the knowledge base gave, and the
+            # person is asking whether it does anything ("my back hurts" / "will that help").
+            # Returning None handed it to the acknowledgement floor, which closed the
+            # conversation with "Alright then - good luck with it."
+            return _a_check_on_the_method(flat, memory)
+        if _danger(behind) is not None:
             return None
-        if (REFER.search(behind) is not None or NAMES_A_CLINICIAN.search(behind) is not None
-                or _danger(behind) is not None):
-            return None
+        if REFER.search(behind) is not None or NAMES_A_CLINICIAN.search(behind) is not None:
+            # The answer above sends them to a clinician ("see a GP if they keep coming back"),
+            # and the doubt is about the warning rather than about the doing of it, so the method
+            # pool ("that is the method I would use") must not answer it - that is the bug the
+            # guard stands for. The check pool is a different reading, though: it exists to say
+            # what to watch for, and a how-to with "see a GP" in it is exactly the answer a check
+            # on a method was written for. So the check is read here, and only a check that reads
+            # nothing (not a how-to, not the answers module's own method) stands aside as before.
+            return _a_check_on_the_method(flat, memory)
+        # A check on the effect ("will that help") is not the question the method pool was
+        # written for ("is that ok"): "Done that way, it needs no one else: that is the method I
+        # would use" says the method is the right one and never says whether it does anything,
+        # which is what was asked. The check pool answers that, and picks its line by whether
+        # the answer above named anything to watch for.
+        checked = _a_check_on_the_method(flat, memory)
+        if checked:
+            return checked
         return pick(_round_robin(METHOD_OK_LINES, behind), memory, behind)
     # Whether a price is a lot, read before the bare doubts: the ask is about the figure in the
     # person's own line, and it is the one doubt that must not fall through to the body readings
@@ -4787,10 +5520,28 @@ def reply_for(clean, memory):
     # quantity sentence is what it is answered with.
     enough_ask = bool(ENOUGH_ASK.match(flat))
     if not BARE.match(flat) and not enough_ask:
+        # A check on the method just given ("will that work") said in words the pattern above does
+        # not hold ("do you think that is enough", "would that sort it") is still not a doubt
+        # about the thing, and every pool below answers what is wrong with the thing. Read here
+        # and go no further.
+        if A_CHECK_ASK.search(flat):
+            return _a_check_on_the_method(flat, memory)
         return None
     normal_ask = bool(ASKS_NORMAL.search(flat))
     ok_ask = not normal_ask and bool(ASKS_OK.search(flat))
     said = _last_reply(memory, past_the_nod=True)
+    # A check on a plan that can hurt is the one doubt this file does have something to say
+    # about: the plan is still theirs, but the answer cannot be "yes, it is fine". Read before
+    # any of the pools below, because several of them read a plan as a thing to be weighed and
+    # say so.
+    plan = _the_line_behind(memory)
+    family = _the_plan_can_hurt(_flat(plan))
+    if family:
+        warned = _the_answer_already_warned(_flat(said))
+        if warned:
+            return "Go with the answer above rather than around it: " + warned
+        return pick(_round_robin(THE_PLAN_CAN_HURT_LINES[family], _flat(plan)), memory,
+                    _flat(plan))
     # A death is not a subject this file can rule on, and the pools below would ask after it like
     # a symptom. Standing aside is not enough either: the chat pool fills the hole with "Alright
     # then - good luck with it", so the floor stays with the person instead.
@@ -4805,6 +5556,18 @@ def reply_for(clean, memory):
         # that never gave an amount keeps whatever it had.
         stated = _said_enough(said)
         if stated is None:
+            # Nothing in the answer to hand back as an amount, so this is a check on the method
+            # like the others: "my back hurts" / "is that enough" has the back-pain card and no
+            # amount in it, and standing aside here left the acknowledgement floor to close the
+            # conversation ("Alright then - good luck with it").
+            # Only when the answer above is the last thing said: "i owe about 4000 on my credit
+            # card" / "im paying 60 a month" / "is that enough" has the store's nod in between
+            # ("Got it - you're paying 60 a month"), and the line to read is the money one the
+            # greeting module is about to give, not the card above the nod.
+            if _last_module(memory) == "answers":
+                checked = _a_check_on_the_method(flat, memory)
+                if checked:
+                    return checked
             return None
         return pick(_round_robin(ENOUGH_STATED_LINES, said + " " + flat), memory,
                     said).replace("{yes}", stated)
@@ -4814,7 +5577,11 @@ def reply_for(clean, memory):
     # got, so there is nothing here to rule on and nothing below will claim it either -
     # returning nothing left the turn to the sign-off pool ("Alright then - good luck
     # with it"), which ends a conversation the person is still in.
-    if _considering(memory):
+    # A going named in the person's own line is the same shape: "we are going to skegness in
+    # june" / "is that ok". The store has no card for a town, so the line comes back as an echo
+    # and nothing above it is an answer to read the doubt against - the plan is still theirs and
+    # the ask is still about it.
+    if _considering(memory) or A_PLAN.search(_flat(_the_line_behind(memory))):
         return _a_plan_doubt(memory)
     # The worst thing said, read beside the answer above: a death or a diagnosis is not a fault,
     # so a doubt on top of one is about the person rather than about the answer, and it is read
@@ -4830,6 +5597,25 @@ def reply_for(clean, memory):
         # father's cancer, a husband's terminal cancer and a miscarriage all got one sentence.
         seed = worst + " " + flat + " " + str(len(memory.get("turns") or []))
         return _round_robin(HARD_NEWS_LINES, seed)[0]
+    # A doubt over money is answered about money, and read before the answer above is read for a
+    # symptom. "i cant afford to heat the house" / "is that bad" was told "That one is the ordinary
+    # kind, so no. Watch it rather than worry about it: if it's still the same in a week or two ..."
+    # - the sentence a cough gets, over a month that does not add up. The rent, a card, a fine and
+    # a bill were all told that their thing was "to watch", which is the one thing money is not.
+    # A safety answer, a death and a diagnosis all keep their own paths above this.
+    money = _a_doubt_about_money(memory)
+    if money and _last_module(memory, past_the_nod=True) in ("answers", "chat", "greeting",
+                                                             "trouble"):
+        # A figure the person gave, against the usual one the answer gave, is the comparison
+        # below rather than this pool: "i owe 300 on my gas bill" / "is that bad" wants its own
+        # number put beside the usual one, and the pool that names the date is for the trouble
+        # that has no figure in it at all. The figure has to be a number: "the rent is late and i
+        # am scared" names no amount either, and it was told "That is a figure to compare" too.
+        # A digit of any shape counts, because "i owe 300 on my gas bill" is a figure with no
+        # currency sign and no period beside it, which `A_FIGURE` does not catch.
+        if (not _about_a_death(memory) and not _the_worst_thing_they_said(memory)
+                and not (_A_NUMBER.search(money) and _is_a_comparison(said))):
+            return pick(_round_robin(MONEY_TROUBLE_LINES, said or money), memory, said or money)
     # A mood or a money worry is not a body and not a fault: "i feel low" then "is that bad"
     # was told its mood was "the ordinary kind, so no", because a warm chat line was read as if
     # it were a symptom answer. The doubt path reads the knowledge base only.
@@ -4957,11 +5743,16 @@ def reply_for(clean, memory):
             return pick(WHEN_CALL_LINES, memory, flat).replace("{when}", call)
         if WORRYING_ASK.match(flat):
             return None
-    # The line before was this composer's own verdict, filed under the module that answers, so
-    # the person asking again gets the same answer said plainly rather than a new verdict. It used
-    # to fall through to the "a fix with no warning" reading, which saw the advice-in-its-own-words
-    # in "watch for that" and answered it afresh.
-    if OWN_PATTERN.search(_flat(said)):
+    # The line before was this composer's own verdict, so the person asking again gets the same
+    # answer said plainly rather than a new verdict. It used to fall through to the "a fix with no
+    # warning" reading, which saw the advice-in-its-own-words in "watch for that" and answered it
+    # afresh.
+    # It has to be this composer's line before the words are worth reading: `{Step} first.` is one
+    # of the templates, and any answer that ends in that word fits it, so a card that says
+    # "chemical drain cleaner is the last resort, not the first" was taken for a verdict of mine
+    # and the reply to "is that serious" was "Still no." - a no the bot never said. The module is
+    # the fence, and the text only decides which of my lines it was.
+    if _the_last_line_was_mine(memory) and OWN_PATTERN.search(_flat(said)):
         return pick(AGAIN, memory, flat)
     if any(line.lower() in _flat(said) for line in
            NO_LINES + DO_LINES + YES_LINES + ORDINARY_NORMAL + CARE_NORMAL
@@ -5316,10 +6107,103 @@ def reply_for(clean, memory):
     # or gave a fix with a warning in it), and the acknowledgement floor took the turn with a
     # goodbye. Read here, at the end, so a pool that does have something to say keeps the turn.
     if _an_instruction_and_nothing_else(said, memory):
+        # The answer's own closing sentence is the referral more often than not, and then there is
+        # nothing to be vague about: the boiler answer ends "if it keeps dropping, stop topping it
+        # up and get a heating engineer out", and "is that dangerous" four turns into that chat was
+        # told "Nothing in that says how serious it is" over an answer that does say. Standing the
+        # reading aside is not enough - every answer in this pool is an instruction and nothing
+        # else, so the five doubt tests that need this pool went to the acknowledgement floor and
+        # got a goodbye - and handing back the referral alone loses the figure the person acts on.
+        # So the closing referral is the verdict, and the range the answer gave is kept with it.
+        referral = _the_referral_it_closed_on(said)
+        if referral:
+            kept = _the_range_it_gave(said)
+            said_back = referral + (f" {kept}" if kept else "")
+            return pick(_round_robin(HANDED_BACK_LINES, said + " " + flat),
+                        memory, said + " " + flat).replace("{referral}", said_back)
         # Seeded on the answer and the ask together: "is that bad" and "is that ok" over one answer
         # are two doubts and get two sentences, while the same ask twice gets the same answer.
         return pick(_round_robin(DIRECTED_LINES, said + " " + flat), memory, said + " " + flat)
     return None
+
+
+# The referral said back as the verdict, when the answer closed on one. The person asked whether
+# the thing matters, and the answer already says when to act and who to call, so the reply is that
+# and not a line about the reply.
+HANDED_BACK_LINES = (
+    "That is worth acting on rather than watching: {referral}",
+    "It needs sorting rather than waiting: {referral}",
+    "Not one to sit on: {referral}",
+)
+
+# The range an answer gives, which is the half a person acts on and the half a bare referral
+# drops: "keep it between 1 and 1.5 bar" out of the boiler answer. Read as a range of numbers with
+# a unit after them, so "between 1 and 1.5 bar", "30 to 35 psi" and "between 18 and 20 degrees"
+# all arrive, and a "between 2 and 3" with no unit after it does not.
+_A_RANGE_OF_ITS_OWN = re.compile(
+    r"\b(?:between|from) (\d+(?:\.\d+)?) (?:and|to) (\d+(?:\.\d+)?) ?([a-z]{2,10})\b", re.I)
+
+
+# "Get a heating engineer out" is the way a boiler answer names the trade, and REFER reads
+# see/ring/call/contact, so the act was invisible to it and the closing sentence of the boiler card
+# matched nothing. The trade comes with "out", "round" or "in" after it, which is what makes it an
+# act rather than a mention: "an engineer will check the pressure" is not this.
+_A_REFERRAL_OUT = re.compile(
+    r"\b(?:get|have|call|ring|book) (?:a |an |your |the )?"
+    r"(?:(?!and\b|or\b|to\b|it\b)[a-z-]+ ){0,3}"
+    r"(?:engineer|plumber|electrician|mechanic|technician|specialist|someone) ?(?:out|round|in)\b",
+    re.I)
+# And what to stop doing, which is the other half of a closing act: "stop topping it up".
+_A_STOP = re.compile(r"\b(?:stop|don't|dont|do not) (?:[a-z]+ing|it|using it|driving|eating)\b",
+                     re.I)
+
+
+def _the_referral_it_closed_on(said):
+    """The answer's closing sentence, when that sentence says who to get or what to stop.
+
+    Only the closing sentence: an answer that names a professional in passing ("if it is a gas
+    leak, a Gas Safe engineer needs to look at it") and then ends on a step is a how-to, and the
+    pools above have it. What is left is an answer whose last word is the act.
+    """
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?]) +", _flat(said)) if s.strip()]
+    if not sentences:
+        return ""
+    last = sentences[-1]
+    if len(last.split()) < 5:
+        return ""
+    if not (REFER.search(last) or _A_REFERRAL_OUT.search(last) or _A_STOP.search(last)
+            or _first(last, STOP_DOING) is not None):
+        return ""
+    # The fence in front of the referral is about when to act, and the doubt comes after the
+    # person has just said the situation is happening: "if it keeps dropping, stop topping it up"
+    # said back to somebody who has said it drops within a day is a condition already met, and
+    # handing it back verbatim asks them the question their own account answered.
+    unfenced = re.sub(r"^(?:but )?(?:if|once|when|whenever) [^,]{0,70}, ", "", last, flags=re.I)
+    # A stop only means something the first time it is said: by the doubt the person has already
+    # been told to stop, so the half of the act that answers them is the one that names who to
+    # get. Said back whole, the line is the last answer word for word, and the arbiter passes over
+    # a reply that repeats the last answer - the boiler doubt came back as the whole card with
+    # "Same answer, and it covers this" in front of it, a paragraph already on the screen.
+    act = re.sub(r"^(?:stop|don't|dont|do not) [^,]{0,40}?,? (?:and|but) ", "", unfenced, flags=re.I)
+    if len(act.split()) >= 4:
+        return act
+    return unfenced if len(unfenced.split()) >= 4 else last
+
+
+def _the_range_it_gave(said):
+    """The range the answer told the person to hold, said as a line to keep, or "".
+
+    A referral on its own tells somebody to ring someone; the figure is what they do while they
+    wait, and it is the half of the answer they act on. "between 1 and 1.5 bar" comes back as
+    "Keep it between 1 and 1.5 bar in the meantime."
+    """
+    found = _A_RANGE_OF_ITS_OWN.search(_flat(said))
+    if not found:
+        return ""
+    low, high, unit = found.group(1), found.group(2), found.group(3)
+    if unit.lower() in ("and", "the", "for", "with"):
+        return ""
+    return f"Keep it between {low} and {high} {unit} in the meantime."
 
 
 # The verbs an answer opens its first instruction on, for the reading below. `DOING` is the
@@ -5577,6 +6461,53 @@ def _the_answer_under_a_frame(memory):
     return again_reply.unframed(last.get("bot")) or ""
 
 
+
+# The words in front of a colon that name the thing rather than say something about it: the
+# article in front of a noun is dropped, and the two words after it are the subject. Anything
+# past that is the verb and what follows it ("A loo seat bangs because ...").
+FRONT_LEAD = frozenset(("a", "an", "the", "my", "your", "our", "their", "his", "her", "its",
+                        "one"))
+# A front built on one of these names no thing of its own: "That is a few pounds, not a new
+# instrument" and "It is nearly always a worn washer" are about the thing already in the chat, so
+# the person has read the diagnosis and the step starts at the move. A front that does name a
+# thing ("A loo seat bangs because ...") is judged by whether that thing is in the chat.
+FRONT_THIS = frozenset(("it", "that", "this", "they", "these", "those", "there"))
+# A front that carries the trigger is not a diagnosis but the condition the move hangs on:
+# "Defrost it when the ice is more than about 5mm thick: switch it off at the wall" loses the
+# number that says when to bother, and the move after the colon reads as something to do now.
+FRONT_WHEN = frozenset(("when", "if", "once", "unless", "whenever", "till", "until"))
+FRONT_SUBJECT_WORDS = 2
+
+
+def _the_front_names_what_is_in_hand(head, line, memory):
+    """Whether the subject of the clause in front of a colon is the thing this chat is about.
+
+    The words of the chat are the line itself and what the person and the bot have already said,
+    because a follow-up that names the job says "how do i fix it" and not the thing: the dripping
+    tap is in the first turn, not in the ask.
+    """
+    words = re.findall(r"[A-Za-z'’-]+", str(head or "").lower())
+    if any(word in FRONT_WHEN for word in words):
+        return False
+    if words and words[0] in FRONT_THIS:
+        return True
+    subject = [word for word in words if word not in FRONT_LEAD][:FRONT_SUBJECT_WORDS]
+    if not subject:
+        return False
+    in_hand = set(re.findall(r"[a-z'’-]+", str(line or "").lower()))
+    for part in (memory or {},) if isinstance(memory, dict) else ():
+        for topic in [part.get("topic")] + list(part.get("topics") or []):
+            if isinstance(topic, dict):
+                in_hand.update(str(word) for word in topic.get("words") or ())
+        for turn in part.get("turns") or []:
+            if isinstance(turn, dict):
+                in_hand.update(re.findall(r"[a-z'’-]+", str(turn.get("user") or "").lower()))
+    for word in subject:
+        if word in in_hand:
+            return True
+    return False
+
+
 def next_step(clean, memory):
     """A bare "what should i do" or "should i see someone", answered from the advice given."""
     flat = _flat(clean).strip(" .!?")
@@ -5601,9 +6532,16 @@ def next_step(clean, memory):
     # so it is a step ask and not a line for the base to fail on: the doing names no thing of its
     # own ("how do i cook rice" does, and is the knowledge base's).
     how_to = HOW_TO.match(flat)
-    if how_to and how_to.group("doing") in DOING_WITH_NO_OBJECT:
+    how_to_asked = bool(how_to) and (
+        how_to.group("doing") in DOING_WITH_NO_OBJECT
+        or (how_to.group("obj") and how_to.group("doing") not in KNOWING_DOING))
+    if how_to_asked:
         asks_step = True
     if plea and _last_module(memory) == "answers":
+        asks_step = True
+    # "whats the safest way", asked one line after the answer said how: the same ask as a plea for
+    # tips, and it was answered "That's beyond what I know well ... a search should sort you out".
+    if A_HOW_ASK.match(flat) and _last_module(memory) == "answers":
         asks_step = True
     if not (asks_step or asks_who):
         return None
@@ -5773,6 +6711,37 @@ def next_step(clean, memory):
             return _say(ONE_TURN_PLAIN_LINES, memory, flat, step=piece)
         pool = ONE_TURN_PLAIN_LINES if (": " in step or FIRST_ITSELF.search(step)) else ONE_TURN_LINES
         return _say(pool, memory, flat, step=step)
+    if how_to_asked:
+        # "how do i clean it", "how do i top it up": the line named the job, so the instruction is
+        # the whole sentence the step sits in and not its first clause. One instruction can be
+        # two moves in one sentence, and the clause stops in front of the second: the washer
+        # answer's step read "Run a hot 60C or 90C service wash with a washing-machine cleaner or
+        # a cup of bicarbonate of soda" and left out "and clean the filter and the detergent
+        # drawer while it runs", which is half the job; the boiler's read "Top the pressure up to
+        # between 1 and 1.5 bar using the filling loop" and left out "then bleed the radiators and
+        # check it again the next day". A person who asked how to do the thing is owed the move
+        # the answer wrote, not the part of it before the comma.
+        whole = _step_sentence(said, step)
+        if whole and len(whole.split()) > len(step.split()):
+            step = whole
+        # One answer opens on what the thing is and puts the move after a colon: "A dripping tap
+        # is nearly always a worn washer or cartridge: turn the water off at the isolating valve".
+        # Handing that back whole says turn one again - the person read the diagnosis in the
+        # answer above and asked how to do the job, so the step starts where the move starts. A
+        # front clause that is itself an instruction is kept ("Start with a plunger: then undo")
+        # because the second half only makes sense with it.
+        head, colon, tail = step.partition(": ")
+        if (colon and tail and _doing_word(re.findall(r"[A-Za-z'’-]+", head)) not in IMPERATIVES
+                and _the_front_names_what_is_in_hand(head, flat, memory)):
+            # The front has to be about the thing in this chat as well as not an instruction. One
+            # answer slides a list of devices into one sentence ("A loo seat bangs because the
+            # rubber bumpers under it have gone hard: tighten the two bolts ..."), and a line
+            # about pipes or a blind meets it on the word "bangs". Cutting the front there leaves
+            # an instruction about hinges with nothing saying what it is for, and the person
+            # never sees that the card picked the wrong thing. Where the front's own subject is
+            # in the chat - the dripping tap, the washing machine, the boilers - the front is the
+            # part they have already read and the step starts at the move.
+            step = tail.strip()
     # A step that already orders itself ("Start with a plunger over the plughole", "block that
     # first") cannot take a second "first", so it gets the lines written for one.
     if FIRST_ITSELF.search(step):
@@ -5784,5 +6753,12 @@ def next_step(clean, memory):
         return _say(STEP_DETAIL_LINES, memory, flat, step=step)
     if _action_count(said) > 1:
         pool = STEP_ALREADY_FIRST_LINES if FIRST_ITSELF.search(step) else STEP_LINES
+        if how_to_asked:
+            # "how do i clean it", "how do i unblock it": the ask names a doing and the thing it is
+            # done to, so the reply is the answer's own first step and nothing more. The lines that
+            # point at the rest of the answer ("Clip the top growth, before anything else I
+            # mentioned") are for an ask about where to begin, not for one that named the job, and
+            # a sentence that ends on "I mentioned" reads like a note to self.
+            pool = STEP_DETAIL_LINES
         return _say(pool, memory, flat, step=step)
     return _say(STEP_ONE_LINES, memory, flat, step=step)

@@ -261,7 +261,18 @@ PARTY_ASK = re.compile(
     # "how many did i book for" asks the same number in the words a booking is made in, and it
     # was answered "That is everything I have on that one" two turns after the person said it.
     r"|\bhow many (?:did|have) (?:i|we) (?:book|booked|reserve|reserved|ask for|asked for)\b"
-    r"|\bhow many is (?:the|that|this|my|our) (?:table|booking|reservation) for\b", re.I)
+    r"|\bhow many is (?:the|that|this|my|our) (?:table|booking|reservation) for\b"
+    # The count asked about the job instead of the people. "how many am i baking for",
+    # "how many are we cooking for", "how many am i making for again": the number they want back
+    # is the size of the table, but the ask names the activity, so the noun above never appears
+    # and the line fell to a search suggestion two turns after the person said "about 15 people".
+    # The verb list is the work done for a table, not a way of asking about the world, and the
+    # word after it has to be "for" - "how many am i cooking" on its own is a question about how
+    # to cook, which is not this one.
+    r"|\bhow many (?:am|are|was|were) (?:i|we) (?:cooking|baking|making|catering|feeding|"
+    r"preparing|planning|doing)\b[^.?!]{0,18}?\bfor\b"
+    r"|\bhow many (?:do|did|will) (?:i|we) (?:cook|bake|make|cater|feed|prepare|plan) for\b",
+    re.I)
 # A line that changes the number: "actually one more is coming so theres 10 of us now". It says the
 # size of the group, not of a table, but the change is what makes it the table's: a chat that set
 # the table at eight and has just been told there are ten of them must not answer "eight" two
@@ -309,6 +320,27 @@ POINTS_AT_A_NUMBER = re.compile(r"\b(?:again|was it|was that|is it for|did i say
 # What the party size is kept under: the people, not a thing they own, so that a count of anything
 # else ("how many brothers") is never answered with the number at the table.
 PARTY_THING = "person"
+
+# How far back a chat is read for the word that makes its people a table: a few turns, because
+# the meal is said at the start and the number of people can come a turn or two later.
+LOOK_BACK_FOR_A_MEAL = 6
+
+# The people for the table, said with no cue before the number and no word after it: "about 15
+# people", "15 people, mostly her sisters". The noun and the number are both there; the only thing
+# missing is the word that says what they are for, because the chat has already said it ("my mum
+# turns 80 next week and we are doing a tea for her"). Two turns later "how many am i baking for
+# again" had nothing to answer from, so the chat fell to a barbecue portion card. "i met 15 people
+# at work" is the same shape and is not a table, so this is read only in a chat that has named a
+# meal, a cake or a party (`_the_chat_feeds_people`).
+BARE_PEOPLE = re.compile(
+    r"\b(?:(?:about|around|roughly|maybe|probably|just|only|some|like)\s+)?(?P<n>" + BARE_NUMBER +
+    r")\s+(?:people|persons?|guests?|adults?|heads?|folk)\b", re.I)
+# What makes the people a table rather than a crowd: a meal the chat is cooking, a cake being
+# baked, a party being given. Only ever asked about a chat, never about the line that gives the
+# number, which is the point - the line that gives the number has no word for it.
+A_MEAL_IN_THE_CHAT = re.compile(
+    r"\b(?:" + TABLE_MEAL + r"|cake|cakes|bake|baking|cooking|cook|menu|scones?|birthday|"
+    r"buffet|canapes|finger food)\b", re.I)
 
 
 # Where the phrase that names the thing counted stops: "two flat tyres" is a count of tyres and
@@ -554,6 +586,57 @@ def _the_party(said):
     return 0
 
 
+# A booking sets the table without naming a meal: "we booked a table for 6 on friday" then "how
+# many did i book for" is the number at that table, and it was answered before the bare headcount
+# reader existed. Read where a count is handed back, never where a bare headcount is filed,
+# because "i bought a table" is furniture and the people around it are not people being fed.
+A_TABLE_BOOKED = re.compile(
+    r"\b(?:book(?:ed|ing|ings)?|reserv(?:ed|ing|ation|ations))\b[^.]{0,24}\btables?\b"
+    r"|\btables?\b[^.]{0,12}\bfor\s+(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|"
+    r"twelve)\b"
+    r"|\b(?:book(?:ed|ing)?|reserved)\b\s+(?:for\s+)?(?:\d+|two|three|four|five|six|seven|eight|"
+    r"nine|ten|eleven|twelve)\b", re.I)
+
+
+def _the_chat_lines(memory):
+    """The lines of this chat a count is read from: the plan it holds and its last turns."""
+    lines = [str(((memory or {}).get("user") or {}).get("plan") or "")]
+    lines += [str(turn.get("user") or "") for turn in ((memory or {}).get("turns") or [])
+              if isinstance(turn, dict)][-LOOK_BACK_FOR_A_MEAL:]
+    return lines
+
+
+def _the_chat_feeds_people(memory):
+    """Whether this chat has said what the people are for: a meal, a cake, a party being given."""
+    return any(A_MEAL_IN_THE_CHAT.search(line) for line in _the_chat_lines(memory))
+
+
+# The words that make a number of people a table on the line that gives it: they are coming or
+# coming over, they are for something, they were invited. "15 people at work" has none of them -
+# "at" says where, not what the people are for - and that is the line the fence is for.
+A_TABLE_CUE = re.compile(
+    r"\b(?:people|persons?|guests?|adults?|heads?|folk|friends|kids|children)\b"
+    r"[^.]{0,16}\b(?:coming|over|round)\b"
+    r"|\b(?:for|having|expecting|feeding|catering for|cooking for|invited|inviting)\s+"
+    r"(?:the\s+|just\s+|only\s+)?(?:" + GROUP_NUMBER + r")\b", re.I)
+
+
+def _the_chat_sets_a_table(memory):
+    """Whether this chat has a table for people at all: a meal said, a booking, or people coming."""
+    lines = _the_chat_lines(memory)
+    return any(A_MEAL_IN_THE_CHAT.search(line) or A_TABLE_BOOKED.search(line)
+               or A_TABLE_CUE.search(line) for line in lines)
+
+
+def _the_bare_people(said):
+    """How many people a line says with no word for what they are for, or 0."""
+    for match in BARE_PEOPLE.finditer(said):
+        number = _said_number(match.group("n"))
+        if number > 0:
+            return number
+    return 0
+
+
 def _the_number_put_right(said, memory):
     """The number a line puts right, when the chat already holds the number at the table.
 
@@ -596,6 +679,67 @@ SAID_AS_A_CHANGE = re.compile(
     r"\b(?:actually|instead|now|sorry|wait|hold on|make (?:it|that)|change|put it at|no|nope|"
     r"correction|then|after all|not|still|only)\b", re.I)
 POINTS_AT_THE_THING = re.compile(r"\bof (?:them|those|these|it)\b", re.I)
+# The word in front of a figure that makes it a name rather than a count: "the bus is number 9"
+# is the route, "its half 5" is the time, "room 12" and "platform 3" are where they are. Read as
+# a count of the thing in hand, every one of them moved the nights a chat was planning - the bus
+# number the person mentioned a turn after "we have 4 nights" answered "how many nights was it"
+# with "You've got nine nights."
+A_LABEL_IN_FRONT = frozenset("""number no nos num bus train flight room flat gate platform
+seat table lane door channel code pin model version series episode chapter page line half
+quarter past o'clock oclock platform route size step floor grade level class year""".split())
+# The words that stand between a figure and the thing it counts without changing what it counts:
+# "10 of us now", "5 of them", "4 nights please".
+COUNTS_THE_THING_AFTER = frozenset("""of now then instead too as well please thanks again
+still only just left to go more another""".split())
+# A sentence that opens on one of these has no subject of its own, so its figure is the time or the
+# weather until the line names what it counts.
+A_DUMMY_SUBJECT = frozenset("""its it's it thats that's theres there's""".split())
+# A figure that follows "<something> is" belongs to that something: "the bus is 44 now" is the
+# route and "the room is 3" is the room, not the nights of the trip the chat is planning. The rule
+# only looks at what stands in front of the copula, so a line with no subject of its own ("weve got
+# 3 now", "make it 8") is left to the thing in hand.
+A_COPULA = re.compile(r"\b(?P<subj>[a-z][a-z'-]*)\s+(?:is|are|was|were|be|being)\s*$", re.I)
+
+
+def _forms_of(thing):
+    """The words the person may say the thing with: its singular and its plural."""
+    thing = str(thing or "")
+    if not thing:
+        return frozenset()
+    forms = {thing, thing + "s", thing + "es"}
+    for plural, single in IRREGULAR.items():
+        if single == thing:
+            forms.add(plural)
+    return frozenset(forms)
+
+
+def _the_figure_counts_the_thing(said, match, after_word, thing):
+    """Whether the line says the figure is the count of `thing`, and not of something else.
+
+    A figure in a line is the count of the thing in hand only when the line puts the two
+    together. Everything else is a figure of its own: a name ("number 9"), a measurement ("20
+    degrees"), a time ("its 2 now", "half 5"), a price. One rule, read here, because every
+    shape of it was moving the count: the nights of a Rome trip became 9, then 5, then 2, and the
+    ask that follows ("how many nights was it") gave back the bus number.
+    """
+    before = said[:match.start("n")].strip(string.punctuation + " ")
+    front = before.split()[-1].lower().strip(string.punctuation) if before else ""
+    if front in A_LABEL_IN_FRONT:
+        return False
+    subject = A_COPULA.search(before)
+    if subject and subject.group("subj").lower() not in _forms_of(thing) \
+            and subject.group("subj").lower() not in ("it", "there", "that", "this"):
+        return False
+    if after_word not in _forms_of(thing):
+        # Nothing names the thing after the figure, so the line has to be about the thing already.
+        # A sentence that opens on a dummy "it" is not: "its 2 now", "its gone 9 now" and "its
+        # half 5 now" are the time, and "its 20 degrees now" the weather.
+        first = said.split()[0].lower().strip(string.punctuation) if said.split() else ""
+        if first in A_DUMMY_SUBJECT:
+            return False
+    if after_word in COUNTS_THE_THING_AFTER or not after_word:
+        return True
+    return after_word in _forms_of(thing)
 
 
 def _the_lines(memory):
@@ -663,7 +807,8 @@ def _a_figure_for_a_thing_the_chat_counts(said, memory, already=()):
         # "its 20 degrees now" and "its 5 minutes now" carry a number and a change word, and
         # filing either over the nights a chat is planning would answer "how many nights" with
         # the weather.
-        after = said[A_FIGURE.search(said).end("n"):].strip(string.punctuation + " ")
+        match = A_FIGURE.search(said)
+        after = said[match.end("n"):].strip(string.punctuation + " ")
         word = after.split()[0].lower() if after else ""
         word = word.strip(string.punctuation)
         if already:
@@ -671,6 +816,8 @@ def _a_figure_for_a_thing_the_chat_counts(said, memory, already=()):
         if word in NOT_A_THING or word in NOT_A_COUNT:
             return {}
         thing = _the_thing_in_hand(memory, held)
+        if not _the_figure_counts_the_thing(said, match, word, thing):
+            return {}
     else:
         return {}  # "8" on its own counts nothing until the chat says what of
     if not thing or held.get(thing) == number:
@@ -704,6 +851,8 @@ def observe(text, memory):
         counts[PARTY_THING] = party
     elif _the_number_put_right(said, memory):
         counts[PARTY_THING] = _the_number_put_right(said, memory)
+    elif _the_chat_feeds_people(memory) and _the_bare_people(said):
+        counts[PARTY_THING] = _the_bare_people(said)
     elif group and CHANGED.search(said) and not ABOUT_THE_HOUSE.search(said):
         # The group size is the table's when the line changes it: "one more is coming so theres 10
         # of us now" after "a roast for 8 people" makes ten people to cook for.
@@ -783,7 +932,13 @@ def answer(text, memory):
         # cooking for when they gave that: the same words ask for whichever number the chat has.
     if PARTY_ASK.search(low):
         number = held.get(PARTY_THING)
-        if isinstance(number, int) and number > 0:
+        if isinstance(number, int) and number > 0 and _the_chat_sets_a_table(memory):
+            # A number of people is the table only in a chat that has said what the people are
+            # for, which is the fence `observe` already keeps when it files a bare headcount.
+            # Without it on the reading side "i met 15 people at work today" then "how many am i
+            # feeding for" answered "You said 15 people." - a table the person never set, said
+            # back to them as their own fact. A chat that named a roast, a tea or a party still
+            # answers, because there the people were the table.
             return _the_party_said_back(number, low, memory)
         # The chat set the number as a group ("so theres 10 of us now") and never as a table: an
         # ask that points back at it is answered from the group, and a fresh ask is not, because

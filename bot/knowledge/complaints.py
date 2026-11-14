@@ -15,7 +15,7 @@ bot/knowledge/lookup.py, so "what can i do about my dandruff" reaches the dandru
 
 import re
 
-from .lookup import ASK_ABOUT, TOOTH_OUT, entry
+from .lookup import ASK_ABOUT, TOOTH_OR_GUM, TOOTH_OUT, entry
 
 # The red flags that make any of these a doctor's question rather than a chemist's. Kept in one
 # place because the same four symptoms turn several of these entries into "go now", and a line
@@ -86,6 +86,40 @@ def _warts_verrucas(memory, understood):
             "a soak and a gentle file, clears most of the rest. Don't cut, pick or freeze them at "
             "home, and cover a verruca at the pool. See a podiatrist or GP if it is painful, "
             "bleeds, or you have diabetes or poor circulation in your feet.")
+
+
+# "Socket" is the word the row below needs and the word a wall has too: "do i need an electrician
+# for a new socket" and "how do i replace a socket" were both a clot and a dentist, because a
+# socket plus "how do i" is the row's key and nothing asked whether the socket was in a mouth. The
+# row's own comment says a socket in a mouth question is the socket; this is that, enforced once,
+# so the fence below does not have to guess at every word a wall can be called (it was an
+# `avoid` list that missed "electrician" and "replace"). A line with no "socket" in it is none of
+# this row's business here - "tooth out", "extraction" and "was pulled" are unambiguous - and
+# "dry socket" names the dental one outright.
+# The words that say the socket is a mouth's: the tooth words and the aftercare the row itself
+# answers (a taste, a throb, a clot, a rinse). "My socket is throbbing and tastes bad" is a dry
+# socket with no tooth word in it, and standing the row down for that would lose a line it gets
+# right today.
+_A_MOUTH_ABOUT_IT = TOOTH_OR_GUM + (
+    "dry socket", "extraction", "extracted", "gum", "jaw", "mouth", "clot", "clots",
+    "bleed", "bleeds", "bled", "blood", "taste", "tastes", "smell", "smells", "throb",
+    "throbbing", "ache", "aches", "hurts", "sore", "heal", "heals", "healing", "numb",
+    "anaesthetic", "rinse", "rinsing", "salt water", "straw", "straws", "smoke", "smoking",
+    "wisdom", "filling", "gap")
+
+
+def _a_socket_in_a_mouth(understood):
+    """False when the socket in the line is the wall's, not the one a tooth leaves."""
+    text = " ".join(str((understood or {}).get("clean")
+                        or (understood or {}).get("text") or "").lower().split())
+    if not text:
+        text = " ".join(str(word) for word in ((understood or {}).get("words") or ())).lower()
+    if "socket" not in text:
+        return True
+    # the socket in a face is the eye's, and it is the one socket a pain word does not make a mouth
+    if re.search(r"\beyes?\b", text):
+        return False
+    return any(" " + word + " " in " " + text + " " for word in _A_MOUTH_ABOUT_IT)
 
 
 def _after_a_tooth_out(memory, understood):
@@ -181,6 +215,19 @@ def _after_a_tooth_out(memory, understood):
                 "gently several times a day all help; do not force it wide. If you cannot open "
                 "your mouth at all, the swelling is spreading under the jaw, or you have a fever, "
                 "ring the dentist or 111 the same day.")
+    # The length of the visit, not the healing: "how long does a wisdom tooth extraction take" is
+    # the procedure's own clock, and the healing card answered it with a fortnight of gum. Asked
+    # for the wait after the event ("how long does it take to heal") the healing card keeps it.
+    if (says("how long", "how soon", "how much time") and
+            says("take", "takes", "last", "lasts", "appointment", "procedure", "surgery",
+                 "in the chair") and
+            not says("heal", "healing", "healed", "ache", "aches", "pain", "sore", "swell",
+                     "swelling", "bruis", "numb")):
+        return ("A single tooth is out in a few minutes once the gum is numb, and the whole "
+                "appointment is about 20 to 30 minutes with the numbing and the aftercare talk in "
+                "it. A wisdom tooth that has to be cut out takes longer: usually 20 to 40 minutes, "
+                "and up to about an hour if it is sitting deep, so ask the dentist what yours will "
+                "be. " + _SOCKET)
     if says("heal", "how long", "normal", "days", "weeks", "week", "still"):
         return ("The gum closes over in about one to two weeks and the hollow fills in over the "
                 "weeks after that; a dull ache that eases day by day is normal, and paracetamol or "
@@ -287,6 +334,125 @@ def _the_visit_is_not_arranged(understood):
     if not _A_TIME_NAMED.search(said):
         return True
     return bool(_STILL_TO_GET_THERE.search(said))
+
+
+# --- an illness with a name is that illness's card --------------------------------------
+# Every one of these was a shrug or somebody else's answer on main: "what is measles",
+# "how long is mumps contagious" and "what is laryngitis" reached the search hedge, "what is
+# scarlet fever" and "what is glandular fever" were answered by the general what-is-a-fever
+# entry, because "fever" is in that row's key and the name of the illness is not, and "what is
+# hand foot and mouth" was the Raynaud's answer off the words "hand", "foot" and "cold".
+#
+# The shape of the answer is the same for all of them - what it is, how long it is catching,
+# and when to get help - so they are one entry with one row per illness, keyed by the name of
+# the illness rather than by the wording of the question, and the row's own words pick the
+# reply. A parent asking "is measles dangerous" and one asking "how long off school with
+# measles" want the same three facts in a different order, and both get them.
+CHILDHOOD_ILLNESSES = (
+    (("measles",),
+     "Measles is a viral illness: a high fever, cough and sore red eyes, then a blotchy rash "
+     "that starts behind the ears and spreads down the body. It is caught by coughing and is "
+     "infectious from about four days before the rash until four days after it appears, and it "
+     "can cause pneumonia, so ring the GP the same day rather than waiting it out. Keep a child "
+     "off school for those four days, and tell the GP if a pregnant woman or anyone with a weak "
+     "immune system has been in contact."),
+    (("mumps",),
+     "Mumps swells the salivary gland in front of the ear, so the jaw and cheek look puffy on one "
+     "side or both, with fever and a headache. It spreads by coughs and saliva and is infectious "
+     "from about two days before the swelling until five days after it starts; in teenagers and "
+     "adults it can also inflame the testicles or the ovaries. Keep a child off school for five "
+     "days from the swelling, and use cold drinks and soft food if chewing hurts."),
+    (("rubella", "german measles"),
+     "Rubella is a mild viral illness - a fine pink rash, tender glands behind the ears and a low "
+     "fever - and in a child it is often so slight it goes unnoticed. It is infectious from about "
+     "a week before the rash to six days after it, and it matters mainly because it is dangerous "
+     "to an unborn baby, so anyone pregnant who has been near it should ring their midwife or GP "
+     "straight away. A child stays off school for six days after the rash appears."),
+    (("slapped cheek", "fifth disease", "parvovirus"),
+     "Slapped cheek is a virus that gives bright red cheeks, as if the child has been slapped, "
+     "sometimes with a lacy pink rash on the body and a mild fever. It is most infectious in the "
+     "days before the rash shows, so by the time the cheeks are red the worst is usually over, "
+     "and once the child feels well they can go back to school. Tell anyone pregnant who has been "
+     "in contact, because it can affect an unborn baby."),
+    (("scarlet fever", "scarletina"),
+     "Scarlet fever is a bacterial infection from the same germ as strep throat: a sore throat "
+     "and fever, then a rough red rash like sandpaper and a strawberry-red tongue, and it needs "
+     "antibiotics. It stops being infectious 24 hours after the first dose, so ring the GP the "
+     "same day - untreated it can lead to rheumatic fever. A child can go back to school a day "
+     "after starting the medicine if they feel well in themselves."),
+    (("whooping cough", "pertussis"),
+     "Whooping cough starts like a cold, then turns into fits of coughing that end in a whoop or "
+     "in vomiting, and the cough can run for two to three months. It spreads by coughing and is "
+     "infectious from the first symptoms until about three weeks after the coughing fits begin, "
+     "or 48 hours after antibiotics; it is most dangerous to babies under six months, so ring the "
+     "GP as soon as you suspect it. A newborn who has been near a case needs telling their "
+     "doctor the same day."),
+    (("hand foot and mouth", "hand foot mouth", "hand foot and mouth disease", "hfmd"),
+     "Hand, foot and mouth is a common virus in small children: mouth ulcers, then small spots or "
+     "blisters on the palms, the soles and the nappy area, with a mild fever. It spreads by "
+     "coughs, saliva and nappy changes and is most infectious in the first week, but once the "
+     "child is well enough to eat and drink they can go back to nursery - there is no need to "
+     "wait for the spots to go. See the GP if they will not drink at all, or are drowsy."),
+    (("glandular fever", "kissing disease"),
+     "Glandular fever is a viral infection with a bad sore throat, swollen glands in the neck, a "
+     "fever and an exhaustion that can drag on for weeks. It spreads by saliva - bottles, cups, "
+     "cutlery - and the tiredness usually eases over a month or two, though it can come back for "
+     "a while. No sport or heavy lifting for about four weeks, because the spleen can swell; see "
+     "the GP if swallowing is very painful, they are badly unwell, or the tiredness is not "
+     "lifting."),
+    (("impetigo",),
+     "Impetigo is a bacterial skin infection: golden, crusty sores or blisters, usually round the "
+     "nose and mouth or on the hands, and it is very infectious until the sores have crusted or "
+     "48 hours of antibiotics have been taken. Keep it covered, wash your hands after touching "
+     "it, and do not share towels; a pharmacist or GP can give a cream or tablets. A child stays "
+     "off school until the sores are crusted or treated for two days."),
+    (("laryngitis",),
+     "Laryngitis is inflammation of the voice box, usually after a cold or a lot of shouting: a "
+     "hoarse or lost voice, a dry tickle and sometimes a sore throat, and it settles within one "
+     "to two weeks. Rest the voice - do not whisper, which strains it more than talking does - "
+     "drink plenty and treat it like the cold it is. See the GP if it lasts over three weeks, or "
+     "if breathing or swallowing becomes hard."),
+)
+
+# The ask is how a person writes the question: the name alone is the subject, and these are the
+# words that make it a question about that subject rather than a mention of it ("my brother had
+# measles in 1990" is a memory, not a request).
+_ILLNESS_ASK = ("what is", "what's", "whats", "what are", "what was", "mean", "means", "meaning",
+                "explain", "how long", "how many days", "contagious", "infectious", "catching",
+                "catch", "catch it", "spread", "spreads", "last", "lasts", "symptoms", "symptom",
+                "signs", "dangerous", "serious", "bad", "worst", "treatment", "treat", "cure",
+                "rash", "spots", "blisters", "fever", "temperature", "child", "children", "kid",
+                "kids", "baby", "son", "daughter", "school", "nursery", "adult", "adults",
+                "i have", "ive got", "i've got", "has", "have", "got", "caught", "came down with",
+                "came out in", "how do you get", "how is it", "is it", "how bad", "should i worry",
+                "worried", "worry", "how long off", "off school", "back to school",
+                # the yardstick in a how-long question is the illness's own timetable
+                "days", "weeks", "day", "week")
+
+# The MMR, a jab and a booster are the vaccine question and have their own answers; the animal
+# disease is not this one; and a hoarse voice is the voice entry's line, not the definition.
+_ILLNESS_AVOID = ("mmr", "vaccine", "vaccines", "vaccination", "vaccinated", "jab", "jabs",
+                  "immunisation", "immunization", "immunise", "immunize", "booster", "side effect",
+                  "side effects", "cow", "cows", "cattle", "farm", "farms", "livestock", "vet",
+                  "animal", "animals", "voice", "hoarse", "croaky", "lost my voice",
+                  "my voice", "singing", "singer", "shout", "shouting")
+
+
+def _first_named(table, said):
+    """The row whose name comes earliest in the line, or None."""
+    best = None
+    for names, reply in table:
+        for name in names:
+            at = said.find(name)
+            if at >= 0 and (best is None or at < best[0]):
+                best = (at, reply)
+    return best[1] if best else None
+
+
+def _childhood_illness(memory, understood):
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    return _first_named(CHILDHOOD_ILLNESSES, said)
+
 
 
 # The abscess answer, with the tablets read for a pregnancy.
@@ -567,8 +733,14 @@ ENTRIES = [
           "bite wants another look.",
           # a "how long" line that is about pain is the appointment row's ("how long will my
           # filling hurt"), and a cake filling is nobody's here
+          # "take" is the other half of the same words: "how long does a filling take" is the
+          # length of the appointment, not how long the filling lasts in the tooth, and this
+          # answer ("five to seven years") was given to it. The visit's length belongs to the
+          # dentist appointment answer, so the durability card stands down for the ask that
+          # says the doing rather than the thing.
           avoid=_FILLING_FOOD + ("hurt", "hurts", "pain", "painful", "sore", "sensitive", "numb",
-                                 "appointment", "dentist")),
+                                 "appointment", "dentist",
+                                 "take", "takes", "taking", "in the chair", "procedure")),
 
     entry("dental-filling-question",
           (("filling", "fillings"),
@@ -877,10 +1049,14 @@ ENTRIES = [
           (("garlic", "garlicky", "garlicy", "onion", "onions", "raw onion"),
            # The second group is the breath itself, not the asking: with "why" and "how long" in
            # it this row took "why does garlic burn" and "is green garlic safe to eat".
+           # Every word here names the breath itself. The speed and duration words that used to
+           # sit in this group ("last", "lasts", "how long", "fast", "quick", "stays") are not
+           # about a smell at all: "last time" and "why does garlic burn so fast" are the cooking
+           # question, and with a bias of two they carried this row over the burn row's answer.
+           # "how long does garlic breath last" still reaches it, because it says "breath".
            ("breath", "bad breath", "breathe", "breathing", "smell", "smells", "smelly",
-            "stinks", "stink", "get rid of", "rid of the smell", "how long", "last", "lasts",
-            "mask", "hide", "cover up", "quick", "fast", "gone", "goes away", "lingers",
-            "stays", "cure")),
+            "stinks", "stink", "get rid of", "rid of the smell", "rid of it", "mask", "hide",
+            "cover up", "gone", "goes away", "went away", "lingers", "lingering", "cure")),
           "You cannot brush garlic or onion breath away, because the smell is not on your tongue: the "
           "sulphur compounds are absorbed into the blood and come out on your breath from the "
           "lungs, so it fades over about a day whatever you do. What helps is at the meal - milk, "
@@ -891,6 +1067,11 @@ ENTRIES = [
           "dentist or GP question rather than this one.",
           # the food answers keep their own line: how to peel, crush, store or cook garlic, and
           # how long a bulb keeps
+          # A clove that burned is the burn row's question, and it needs no fence here: with the
+          # speed and duration words gone from the key above, "i burnt the garlic last time" and
+          # "why does garlic burn so fast" name no breath at all, so this row cannot take them.
+          # A fence on "burnt" would be wrong in the other direction - "does burnt garlic give you
+          # bad breath" is a breath question and the burn row stands down for it.
           avoid=URGENT + ("peel", "peeling", "peeled", "crush", "crushed", "crushing", "chop",
                           "mince", "grow", "growing", "plant", "planting", "keep", "keeps",
                           "keeping", "store", "storing", "stored", "freeze", "frozen", "bulb",
@@ -969,6 +1150,7 @@ ENTRIES = [
             "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")),
           _after_a_tooth_out,
           bias=1,
+          guard=_a_socket_in_a_mouth,
           # the cost and the complaint about a dentist are other answers, and a child's, a dog's
           # or a denture wearer's mouth is somebody else's line again
           avoid=("cost", "how much", "price", "expensive", "free", "nhs", "private", "quote",
@@ -1061,6 +1243,34 @@ ENTRIES = [
           avoid=URGENT + ("baby", "babies", "newborn", "toddler", "nappy", "diaper",
                           "sunburn", "sunburnt", "burnt", "heatstroke", "heat stroke",
                           "heat exhaustion", "dizzy", "fainted", "pregnant", "pregnancy")),
+
+    # One entry for the whole table above: the key is every name in it, so any way of naming the
+    # illness reaches this row, and the ask is what turns the name into a question.
+    entry("childhood-illness",
+          # The names, then the words the illness is asked or told about. A draft's second group
+          # also held "a", "the", "i", "my", "it", "we", "have", "has", "got", "can" and
+          # "should" - words nearly every row in the knowledge base uses. A word two rows share
+          # stops being specific, and those cost the sore-throat and throat-infection rows a rank
+          # point each, so "what is a throat infection" came out as globus. Only the question
+          # words a person actually uses about an illness are here.
+          (tuple(name for names, _ in CHILDHOOD_ILLNESSES for name in names),
+           ("what", "whats", "what's", "how", "is", "does", "mean", "long", "contagious",
+            "infectious", "catch", "catching", "spread", "last", "lasts", "symptoms", "signs",
+            "dangerous", "serious", "treatment", "treat", "rash", "spots", "child", "children",
+            "kid", "kids", "baby", "school", "nursery", "off", "vaccine", "vaccinated",
+            "antibiotics")),
+          _childhood_illness,
+          ask=_ILLNESS_ASK,
+          # a named illness outranks the general fever entry and the circulation ones that were
+          # taking the words "fever" and "hand"/"foot" from these lines
+          bias=2,
+          # A person telling you what they have names the illness and asks nothing ("i think i
+          # have measles", "ive got mumps"). Without the report counted as the second signal the
+          # row never came within reach: the line scored under MIN_SCORE and the chat nod or the
+          # greeting took the turn, so the card was only ever reached by "what is measles" or by a
+          # line that added a word ("i have measles and a rash", "ive got measles what do i do").
+          report=True,
+          avoid=_ILLNESS_AVOID),
 ]
 
 ANSWERS = ("health",)

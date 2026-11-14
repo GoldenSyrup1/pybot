@@ -17,6 +17,9 @@ The trade is looked up from the words of the answer that did not work, not from 
 import re
 
 from . import you
+# The store's own list of people, so "with my partner" is a person here without a second list of
+# what counts as one.
+from .facts import PEOPLE_AGED, RELATIONS as A_PERSON
 
 # The modules whose last turn counts as an answer to this problem. A shrug is not one, so a
 # "still blocked" after the fallback asks the person what they mean instead of escalating.
@@ -35,6 +38,25 @@ NOT_WORKED = re.compile(
     r"still (?:not (?:working|worked|fixed|shifted|moved|helped)|blocked|broken|stuck|"
     r"the same|doing it|coming back|leaking|clogged|dripping))\b"
 )
+# A short line that says the thing has not moved, in whatever words the person gave it: "still
+# cold", "still freezing", "it still clicks". The words after "still" are the thing the chat is
+# already on, not a new subject: "my shower is cold" then "still cold" was answered as the illness
+# and "my laptop keeps freezing" then "still freezing" as what keeps in a freezer, because every
+# reader matched the one word the line carries and no reader saw the subject.
+STILL_ONLY = re.compile(
+    r"^(?:it|its|it's|it is|they|theyre|they're|they are|that|thats|that's|that is|this|"
+    r"this is|there|theres|there's|he|hes|he's|he is|she|shes|she's|she is)?\s*"
+    r"still\s+(?P<tail>[a-z][a-z' -]*)$"
+)
+# Words that point at the thing rather than naming it, so the report is whole with no word of
+# the thing in it: "still there" about a headache is the headache still there.
+POINTS_AT_IT = frozenset(("there", "the same", "like that", "like this", "doing it", "at it",
+                          "the same thing", "no better", "not working"))
+# Words too common to say the line is about the thing the chat is on.
+TOO_COMMON = frozenset("""the and but for not still it its this that them they there here
+out off now just very really again same doing like been being was were are had has have
+one two three""".split())
+
 # The same report said as an attempt: "i tried that", "we already tried it", "tried everything".
 TRIED = re.compile(
     r"\b(?:i|we|ive|i've|weve|we've|they)\s+(?:already\s+|just\s+)?(?:tried|did|used|gave)\s+"
@@ -145,6 +167,26 @@ ASK_WHAT_TRIED = (
 
 # Said when no trade fits: the fix has been tried, so what matters now is what the thing is
 # doing instead. Honest - it claims nothing about what the next step is.
+# Said when the line is only the thing again with "still" on it: "still cold" after the shower
+# answer is the shower, not a common cold, and "still there" after a headache is the headache,
+# not the bot being asked whether it is there. Nothing here claims what the next step is, and
+# nothing repeats the answer: it asks the one thing that tells them apart.
+# Said when the thing the chat is on is a body or a feeling, and the line says it is still there
+# ("still there" after a headache, "still the same" after being tired). SAME_STILL asks what
+# happens when they try it again, which is the question for a boiler and reads as if the person
+# were operating themselves; what somebody with a bad head is asked is whether it has moved.
+STILL_GOING_ON = (
+    "Still there, then. Any better than it was, or much the same?",
+    "Still with you \u2014 has it eased at all since it started?",
+    "So it hasn't gone. Is it the same as when it started, or worse?",
+)
+SAME_STILL = (
+    "Right, so that hasn't shifted. What happens now when you try \u2014 nothing at all, or "
+    "something different from before?",
+    "So it's still going on, then. What have you noticed since \u2014 the same as before, or has "
+    "it changed?",
+    "Then it hasn't moved. Tell me what it does now and I'll take it from there.",
+)
 ASK_NEXT = (
     "Then the easy fixes have had their go. Tell me what it's doing now \u2014 still the same, "
     "different, or worse \u2014 and I'll see where that points.",
@@ -235,7 +277,9 @@ STEP_EMPTY = frozenset("""a an the and but or so oh well yeah yep ok okay right 
 # names the doing - so each has its own leads: "You've already restarted the router, then ..."
 # reads, and "You've tried restarted the router" does not.
 STEP_LEADS = (
-    "You've tried {thing}, then {step}.",
+    # Two sentences here too: what follows the comma was the step, not the trying, so
+    # "You've tried the plunger, then pull the gunk out" is the same splice as the report above.
+    "You've tried {thing}. Now {step}.",
     "Right, so {thing} is done. {Step}.",
     "Then {step}.",
 )
@@ -259,12 +303,21 @@ PAST_STEP_ED = re.compile(r"^[a-z]{3,}ed$")
 PAST_IRREGULAR = frozenset("""ran did made took gave put set cut kept left found got went saw
     wrote sold sent spent built burnt read shot told brought bought thought caught taught""".split())
 DONE_LEADS = (
-    "You {thing}, then {step}.",
-    "Right, so you {thing}. {Step}.",
+    # Two sentences, never a comma and a joint word: the {thing} handed in here is the person's
+    # own clause with its verb on it ("ran a hot wash"), so "You ran a hot wash, then clean the
+    # filter" joins a past-tense report to an imperative and reads as one broken sentence, and
+    # "You ran a hot wash, so clean the filter" is worse than broken - it claims the filter needs
+    # cleaning *because* of the hot wash, which is a reason nobody said. The lead that names the
+    # trying ("You've tried the plunger, then ...") can splice, because what follows its comma is
+    # what was tried, not a step to take.
+    "You {thing}. Now {step}.",
+    "Right, so you {thing}. Then {step}.",
     "Then {step}.",
 )
 PRESENT_LEADS = (
-    "You already {thing}, so {step}.",
+    # The same two sentences, for the same reason: a habit said back in the second person is a
+    # sentence of its own, and the step after it does not follow from it with "so".
+    "You already {thing}. Now {step}.",
     # "Since clean the filter is already part of your day" is what this said: the {thing}
     # handed in here is a bare verb phrase said as a habit ("clean the filter", "walk the
     # dog twice a day"), not a noun, so the frame needs a subject the line never carries.
@@ -274,7 +327,10 @@ PRESENT_LEADS = (
 )
 # The phrase opening on a doing word says the doing ("cleaned the filter") rather than naming
 # the thing ("the plunger"), which is what decides how the attempt is introduced.
-DOING_WORD = re.compile(r"(?:" + DOING + r"|[a-z]{4}ed)\b", re.I)
+# A doing word is any past tense, whatever its length: the pattern here was four letters and
+# an "-ed", so "degreased the drawer" was read as a thing ("Right, so degreased the drawer is
+# done") while "cleaned the filter" was read as the doing it is.
+DOING_WORD = re.compile(r"(?:" + DOING + r"|[a-z]{2,}ed)\b", re.I)
 # A piece of the answer that opens on one of these is the tail of the step before it.
 TAIL_WORD = re.compile(r"^(?:and|but|or|not|if|so|then|which|that|because|while|rather)\b", re.I)
 # "put it as central as the phone line allows" is the tail of the step before it: a step handed
@@ -1333,11 +1389,22 @@ def reads_as_a_step_done(text, memory):
         return False
     if not said:
         return False
-    # The same walk the hand-back uses decides it: the store stands back from the knowledge base
-    # only when it has a step of the answer to give. "i started selling things online last year"
-    # shares the words "online" and "year" with a tax answer, and it is a report on their life
-    # rather than on the answer, so the answer's own entry keeps the line.
-    return bool(_walk_answer(said, thing))
+    # The walk decides what is handed over; what it decides here is whether the turn is kept.
+    walk = _walk_answer(said, thing)
+    if walk:
+        return True
+    # Nothing after their step, so the answer has been used up. The turn is kept only when the
+    # whole answer was that one step ("turn the brightness down"): the knowledge base would give
+    # the advice they have just followed, a second time, and an answer with nothing else to say
+    # is fairly met with "good, see how it goes".
+    #
+    # An answer with more steps than that is a different thing: what follows the step they did is
+    # still to come, so the knowledge base keeps the line and hands over the rest of its own
+    # answer. Claimed, the report went to the store's own frame for it, which read the answer's
+    # second part out of a clause cut at a comma ("try another socket and cable; if the charger
+    # lights up but the laptop is still dead, then"), and the next thing said in the chat lost the
+    # thread the answer had ("its still dropping in the back room" was met with an echo).
+    return len(_the_steps_of(said)) <= 1
 
 
 def _as_a_lead(lead, thing, step):
@@ -1348,6 +1415,11 @@ def _as_a_lead(lead, thing, step):
     # is the same swap the echo and the reading use, so the two cannot drift apart.
     thing = you(thing)
     step = step.strip(" .,;:")
+    # A step that ends on the joiner it was cut at hands over a "then" with nothing after it:
+    # "You've already checked the charger. Try another socket and cable; if the charger lights up
+    # but the laptop is still dead, then." The word belongs to the part that comes next, so it
+    # goes with it rather than onto the end of this one.
+    step = re.sub(r",?\s*\bthen$", "", step).rstrip(" ,;:")
     first = step.split()[0] if step.split() else ""
     # The person's own "I", and a name in capitals ("GP", "NHS"), keep their shape.
     if not (first in ("I", "I'm", "I've", "I'd") or (first.isupper() and len(first) > 1)):
@@ -1475,6 +1547,148 @@ def next_step_ask_pool(text, memory):
     return [reply]
 
 
+# A person and an animal are not a thing that is being tried. "my mum is in hospital" then "still
+# there" is she is still there, and asking what happens "when you try" is wrong twice over: nobody
+# is trying anything, and on a person it reads as though the worst line in the chat had not been
+# heard. The same for "my dog is at the vet", "my dad had a stroke", "my wife is ill" and "the baby
+# is not feeding", the last of which is the worst of them because the answer it replaced - stop and
+# ask rather than push on - was the right one. So the point-at-it tail belongs to the speaker's own
+# thing only, and a chat whose subject is somebody keeps the reply it had.
+def _somebody_is_the_subject(memory):
+    """True when the chat is about a person or an animal rather than the person's own thing."""
+    from . import facts, named
+
+    topic = (memory or {}).get("topic")
+    if not isinstance(topic, dict):
+        return False
+    words = set(words_of(topic.get("text") or ""))
+    words |= {str(word).lower() for word in (topic.get("words") or ()) if word}
+    if not words:
+        return False
+    if words & set(facts.KIN) or words & set(named.PEOPLE_WORDS) or words & set(facts.PET_ANIMALS):
+        return True
+    # A person or an animal the chat has already named: "bella is at the vet" then "still there".
+    user = (memory or {}).get("user") or {}
+    names = set()
+    for entry in user.get("pets") or ():
+        if isinstance(entry, dict) and entry.get("name"):
+            names.add(str(entry["name"]).lower())
+    for entry in user.get("others") or ():
+        if isinstance(entry, dict) and entry.get("name"):
+            names.add(str(entry["name"]).lower())
+        elif isinstance(entry, str):
+            names.add(entry.lower())
+    return bool(words & names)
+
+
+def still_tail(text, memory):
+    """The thing said again with "still" on it, or "".
+
+    Two readings, both of them the chat's rather than the line's:
+
+    * a state the chat has already named, which `the_still_state` reads - "still cold" after "my
+      shower is cold", "it still clicks" after "the car cranks but will not start";
+    * the thing said whole, with a word that only points at it: "still there" after a headache is
+      the headache, and on its own it is the bot being asked whether it is there, which is why
+      `still_going_on` wants an answer behind it.
+
+    `the_still_state` drops a body and a feeling on purpose, and it drops the point-at-it words,
+    so both are read here. What comes back is only used to keep a card for one word of the line
+    from taking the turn away from the thing the chat is on.
+    """
+    state = the_still_state(text, memory)
+    if state:
+        return state
+    line = " ".join(words_of(text))
+    if not line or len(line.split()) > 6:
+        return ""
+    match = STILL_ONLY.match(line)
+    if not match:
+        return ""
+    tail = match.group("tail").strip()
+    if tail not in POINTS_AT_IT:
+        return ""
+    # The tail is the speaker's own thing: a chat about a person or an animal keeps its reply.
+    if _somebody_is_the_subject(memory):
+        return ""
+    return tail
+
+
+def a_card_is_not_the_answer(text, memory):
+    """True when the card one word of this line belongs to must not answer it.
+
+    `bot/modules/answers.py` asks this before it reads anything, because a card is opened by a
+    single word and a line that is only the thing again carries that one word: "still cold" after
+    "my shower is cold" found the common cold, "still freezing" after "my laptop keeps freezing"
+    found the freezer. The thing the chat is on keeps the turn instead.
+
+    A body and a feeling are the exception: "still tired" after the tiredness answer wants that
+    answer's own advice, and the card for it is not a different subject. So a card is stepped back
+    from only where the tail points at the thing, or where the chat is holding a thing at all.
+    """
+    tail = still_tail(text, memory)
+    if not tail:
+        return False
+    if tail in POINTS_AT_IT:
+        # "still there" is the thing only when there is an answer behind it: on its own it is
+        # "are you there?", and that is a card of nobody's.
+        return after_an_answer(memory)
+    return names_a_thing(memory) or after_an_answer(memory)
+
+
+def still_going_on(text, memory):
+    """The pool for a line that is only the thing again with "still" on it, or None.
+
+    `pool_for` already reads these lines, but only the modules that ask it do: a line of one
+    word opened whatever card that word belongs to first ("still cold" the common cold, "still
+    freezing" the freezer), and the reading never reached the person. The store answers it before
+    any card is looked at, so the thing the chat is on keeps the turn.
+    """
+    tail = still_tail(text, memory)
+    if not tail or buying(memory):
+        return None
+    if tail in POINTS_AT_IT:
+        # "still there" is only the thing on the line before: on its own it is "are you there".
+        if not after_an_answer(memory):
+            return None
+        # A body or a feeling is not a machine, so the question SAME_STILL asks - what happens
+        # when you try it again - is the wrong one for a headache. It is still going on, and
+        # that is the thing to ask about.
+        if not names_a_thing(memory):
+            return STILL_GOING_ON
+    # A body or a feeling is not a thing with a next step of its own: "still tired" after the
+    # tiredness answer wants that answer's own advice, and the store keeps out of it.
+    elif not names_a_thing(memory):
+        return None
+    # Whatever the last turn was, the thing is still doing it, so a card for its one word - the
+    # freezer, the common cold - is the reply that is certainly wrong. The store keeps out of
+    # every line the report readers can carry: a trade to hand over, a step that carries on, the
+    # end of the home fixes. Those lines are theirs, and they were answering them before this
+    # reading existed. What is left is a line with no fix in hand ("Which things have you
+    # tried?" is another shrug), and there the thing keeps the turn with the one question that
+    # tells the two apart.
+    pool = pool_for(text, memory)
+    if pool is not None and pool is not ASK_WHAT_TRIED and pool is not SAME_STILL:
+        return None
+    return SAME_STILL
+
+
+def reply_for(text, memory):
+    """The reply to a line that is only the thing again with "still" on it, or None.
+
+    Called from `bot.memory.not_this`, which is the reader the store already asks before any card
+    is looked at: the thing the chat is on keeps the turn, and no card for the one word the line
+    carries gets it. It lives here rather than in the store because the store is over the size the
+    tools take, so this reading adds nothing to it.
+    """
+    from ..compose import pick
+
+    pool = still_going_on(text, memory)
+    if not pool:
+        return None
+    return pick(pool, memory, str(text or ""))
+
+
 def pool_for(text, memory):
     """The pool the next step comes from, or None when the line is not a report on the answer.
 
@@ -1487,7 +1701,11 @@ def pool_for(text, memory):
         # readers below would read "still in hospital" as a state of a thing and ask what happens
         # when they try it again, so this is asked first.
         return care
-    if not (reads_as_not_worked(text) or still_the_state(text, memory)) or not after_an_answer(memory):
+    # `still_the_state` reads "still cold" after the shower; it deliberately drops a state that
+    # is a body or a feeling, and it drops "still there", which is the thing said whole. Those
+    # are read here so the report path stays shut and the store's own pool answers the line.
+    if not (reads_as_not_worked(text) or still_the_state(text, memory)
+            or still_tail(text, memory)) or not after_an_answer(memory):
         # The named step is read first: "ive tried the plunger" is not a report that the answer
         # failed, it is being partway through it, and the turn after it is the next step.
         step = next_step_pool(text, memory)
@@ -1533,6 +1751,13 @@ def pool_for(text, memory):
     if state and not (asks_for_a_fix(memory) and has_evidence(text, memory)):
         return [line.format(state=state) for line in STILL_ASK]
     if not asks_for_a_fix(memory) or not has_evidence(text, memory):
+        # A line that is only the thing again with "still" on it says the same problem is going
+        # on, so it is not nothing: the person gets asked what has changed instead of another
+        # card's reading of its one word ("still cold" is not a common cold). A body is not a
+        # thing with a next step, so "still tired" keeps the answer it had.
+        if still_tail(text, memory) and (still_tail(text, memory) in POINTS_AT_IT
+                                        or names_a_thing(memory)):
+            return SAME_STILL
         return None
     # "and now it is worse" has already said what the thing does, so asking "what is it doing
     # now" asks for the line back. Without a trade to hand over there is nothing to add here, and
@@ -1582,6 +1807,17 @@ IN_CARE_ASK = (
     "Still in, then. Has anyone there said what happens next?",
     "Still in. How are you doing with all of it?",
     "Still in, then. Did you get to see {obj} today?",
+)
+# The same answer when the place of care is named and nobody is: "im at the hospital with mum" and
+# "my partner is in hospital". There is no word for who they are, so the pool says "they" itself
+# rather than filling {subj} into "How is they doing today?".
+IN_CARE_ASK_UNNAMED = (
+    "Still in, then. How are they doing today?",
+    "No change yet, then. How have they been today?",
+    "Still there. The waiting is the worst of it, and no news is not bad news.",
+    "Still in, then. Has anyone there said what happens next?",
+    "Still in. How are you doing with all of it?",
+    "Still in, then. Did you get to see them today?",
 )
 IN_CARE_SELF = (
     "Still in, then. How are you doing today?",
@@ -1635,6 +1871,23 @@ def _in_care(memory):
             return None
         if not IN_CARE.search(said):
             continue
+        with_someone = re.search(r"\bwith\s+(?:my\s+|our\s+|the\s+)?([a-z']+)", said)
+        person_with = _the_person_word(with_someone.group(1)) if with_someone else ""
+        if not person_with and with_someone:
+            # "with my partner" and "with my friend" name a person with no pronoun to fix, so
+            # `_the_person_word` gives nothing and the line fell back to the patient reading - the
+            # fault this branch is here to fix, two lines further on. A `with` clause that names a
+            # person at all is not the user being the patient.
+            word_with = with_someone.group(1).rstrip("'s")
+            if word_with in A_PERSON or word_with.rstrip("s") in A_PERSON \
+                    or word_with in PEOPLE_AGED:
+                return ("", "they", "them")
+        if person_with:
+            # "im at the hospital with mum" is about the mum, not about the person sitting in the
+            # waiting room: the self reading answers it "How are you doing today?", which is the
+            # one thing they are not asking about.
+            return (person_with, "she" if person_with in SHE else "he" if person_with in HE else "they",
+                    "her" if person_with in SHE else "him" if person_with in HE else "them")
         if re.search(r"\bi(?:'?m| am)\b.*\bin\b", said) or re.match(r"^im\b", said):
             return ("", "you", "you")
         for word in said.split():
@@ -1661,5 +1914,9 @@ def in_care_pool(text, memory):
     if not word:
         if subj == "you":
             return IN_CARE_SELF
-        return IN_CARE_ASK
-    return tuple(line.format(subj=subj, obj=obj, word=word) for line in IN_CARE_ASK)
+        return IN_CARE_ASK_UNNAMED
+    filled = tuple(line.format(subj=subj, obj=obj, word=word) for line in IN_CARE_ASK)
+    # A line that still prints a brace is a line with a word in it this branch cannot fill. Nothing
+    # can reach it now - the unnamed branch has its own pool - and this is what keeps a pool that
+    # grows a fourth placeholder from reaching a person.
+    return tuple(line for line in filled if "{" not in line and "}" not in line) or IN_CARE_ASK_UNNAMED

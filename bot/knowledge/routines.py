@@ -16,6 +16,7 @@ technique is study.py's. This domain only holds behaviour change, which is what 
 import re
 
 from .body import _the_nail_is_a_persons
+from .wording import screens_are_somebody_elses
 from .lookup import a_food_is_being_kept, entry
 
 # The topics this domain answers (bot/understanding/topics.py). These are ids other domains
@@ -450,21 +451,44 @@ ENTRIES = [
                                 # a fault (broken, dying, pinging, blocked) is in the avoid
                                 # list below, which is what keeps this from being "stop"
                                 # as a topic in its own right.
-                                "stop", "stops", "stopping", "stayed off", "time on it")),
+                                "stop", "stops", "stopping", "stayed off", "time on it",
+                                # The habit said as a habit rather than as the pull: "how do i
+                                # cut down on my phone" (which reached the phone-contract answer
+                                # about the retention price), "im always on my phone how do i
+                                # stop" and "my girlfriend says im always on my phone" (both of
+                                # which reached the children's screen limit), and "my phone habit
+                                # is out of control" (which reached a stain card). These are
+                                # said as phrases, not as single common words: "less", "limit"
+                                # and "habit" alone are keys of other rows, and widening this row
+                                # with them made those rows rarer and the cards that own them
+                                # lose their own lines. The phone, the app or "screen time" is
+                                # still needed in the first part, and a child's screens are
+                                # fenced out by the guard below.
+                                "cut down", "cutting down", "cut back", "cut down on it",
+                                "addicted to my phone", "addicted to it", "phone addiction",
+                                "always on my phone", "always on it", "on it all the time",
+                                "on my phone all", "cant put it down", "can't put it down",
+                                "my phone habit", "phone habits", "out of control", "too attached",
+                                "glued to my phone", "glued to it")),
           "Take the choice out of the moment rather than counting on willpower: put the phone "
           "in another room while you get on with something, turn off everything except calls, "
           "and charge it outside the bedroom so the first and last hour of the day are "
           "phone-free. If you want a handbrake, set a screen-time limit and let someone else "
           "hold the passcode, since a limit you can dismiss is not a limit.",
           ask=("how", "what", "any", "tips", "help", "should", "can i", "keep", "stop", "cant",
-               "can't", "ways", "distracting me", "distracts me", "keeps", "too much", "less"),
+               "can't", "ways", "distracting me", "distracts me", "keeps", "too much", "less",
+               # a line that reports the habit instead of asking about it: "my girlfriend says
+               # im always on my phone", "my phone habit is out of control" - the person wants
+               # the habit broken, and the report is the ask
+               "says", "told me", "my phone habit"),
           # A payment is not a habit. With the app names in the key above, "how do i stop paying
           # for facebook" became "take the choice out of the moment" - willpower advice for a
           # question about a bill - and the free-app row that owns the line never saw it. The
           # words live here rather than in the `avoid` list because an avoid word counts towards
           # how rare a word is across the knowledge base, and moving the money words into this
           # domain made two money rows lose their own lines.
-          guard=_not_about_money,
+          guard=lambda reading: (_not_about_money(reading)
+                                 and not screens_are_somebody_elses(reading)),
           avoid=("battery", "charger", "charging", "dying", "dies", "cracked", "screen is", "wifi",
                  # a subscription billed through the phone is the cancellation card's line:
                  # "how do i stop a subscription on my phone bill" was answered with the screen
@@ -547,6 +571,12 @@ ENTRIES.append(entry(
            "wont get up", "won't get up", "cant wake", "can't wake", "oversleep", "sleep through",
            "insomnia", "wake up early", "waking up", "night shift", "shift work", "commute",
            "traffic", "train times", "bus times", "missed the bus", "alarm clock", "snooze",
+           # "how do i complain" is not a routine question. One deck conversation - the bus
+           # cancelled three mornings running, late twice, how do i complain - came here for the
+           # night-before plan and stayed for three turns, because "late" and "mornings" are in
+           # both halves of this key. The complaint rows answer it.
+           "complain", "complaining", "complaint", "complaints", "refund", "delay repay",
+           "cancelled", "canceled", "cancellation", "delayed", "replacement bus",
            "depressed", "depression", "exhausted", "burnout", "baby", "newborn", "toddler",
            "night feeds"),
     bias=1))

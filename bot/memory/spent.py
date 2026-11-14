@@ -43,7 +43,7 @@ COST = re.compile(r"\b(?:it|that|this|the\s+[a-z]+)\s+cost\s+(?:me\s+)?(?:about\
                   r"nearly\s+|just\s+|only\s+)?£?\s*" + _MONEY + _CURRENCY + r"\s*(.*)$", re.I)
 # "40 on a takeaway" on its own, right after a question about money: the verb is left off, and the
 # person is still reporting a spend.
-BARE_ON = re.compile(r"^\s*(?:and\s+|then\s+|also\s+)?(?:another\s+)?£?\s*" + _MONEY +
+BARE_ON = re.compile(r"^\s*(?:(?:and|then|also|so)\s+)*(?:another\s+)?£?\s*" + _MONEY +
                      _CURRENCY + r"\s+(?:on|for)\s+(.+)$", re.I)
 
 # What is left of the thing: the time it happened is the line's business, not the thing's, and a
@@ -133,6 +133,16 @@ _TWO_SPENDS = re.compile(r"(?=[,;]\s*(?:and\s+)?£?\d|\s+and\s+£?\d)", re.I)
 _SAID_AS_A_COST = re.compile(
     r"\b(?:my|our|the)\s+([a-z][a-z' -]{1,24}?)\s+(?:is|are|comes? to|works out at)\s*"
     r"£?(\d[\d,]*(?:\.\d{1,2})?)\s*(k|p|pounds?|quid|gbp)?\b", re.I)
+# A person is not a bill: "the kids are 6 and 9" is two ages, and the reader above took the six as
+# money that went on kids, so a tally a turn later read "You had 90 and 6 on kids has gone, so 84
+# is left." Nobody had spent anything. A figure with no money marker in it, on a thing that is one
+# of the people in their life, is an age, and so are two figures in a row ("6 and 9").
+_PEOPLE = frozenset("""
+kid kids child children baby babies toddler boy boys girl girls lad lass son sons daughter
+daughters twin twins nephew niece grandchild grandchildren grandson granddaughter mum mom
+dad stepson stepdaughter
+""".split())
+_TWO_FIGURES = re.compile(r"^\s*(?:,|and|&|or)\s*\d{1,3}\b")
 
 
 # The same bill said from the paying side: "i pay 95 a month for my phone", "we pay 1200 rent every
@@ -155,16 +165,27 @@ _PAY_THING = re.compile(
 
 def _a_bill(text):
     """The money a line says a thing of theirs costs, or None."""
-    for pattern, amount_group, thing_group in ((_SAID_AS_A_COST, 2, 1), (_PAY_FOR, 1, 3),
-                                               (_PAY_THING, 1, 3)):
+    for pattern, amount_group, thing_group, currency_group in (
+            (_SAID_AS_A_COST, 2, 1, 3), (_PAY_FOR, 1, 3, 2), (_PAY_THING, 1, 3, 2)):
         match = pattern.search(text)
         if not match:
             continue
         thing = (match.group(thing_group) or "").strip(" .,")
         if not _family(thing):
             continue
+        if not match.group(currency_group) and _an_age_not_a_bill(match, thing, pattern):
+            continue
         return {"amount": _amount(match.group(amount_group)), "thing": thing}
     return None
+
+
+def _an_age_not_a_bill(match, thing, pattern):
+    """Whether a cost said as a fact is really somebody's age."""
+    if pattern is not _SAID_AS_A_COST:
+        return False
+    if set(thing.lower().split()) & _PEOPLE:
+        return True
+    return bool(_TWO_FIGURES.match(match.string[match.end():] or ""))
 
 
 def _one(text):
@@ -422,6 +443,64 @@ ON_A_BUDGET = re.compile(
     r"\b(?:i|we)(?:'m|'re|'ve)?\s+(?:on|working\s+to|sticking\s+to|sticking\s+with)\s+a\s+"
     r"budget\s+of\s+(?:only\s+|just\s+|about\s+|around\s+|maybe\s+)?£?\s*" + _MONEY +
     r"(\s*(?:k\b|p\b|pounds?|quid|gbp))?", re.I)
+# "theres about 90 left" leaves the holder out, and every reader above asks who has the money:
+# "i have", "my budget", "my savings", "on a budget". The person says it the way a friend does
+# when the sum is the whole of what they know about their money, and the ask that follows ("how
+# much have i got left") then found nothing and told them they had never said a budget. What
+# makes it money and not a count is the scope at the end - "left", "remaining", "to last" - which
+# is the same scope `HELD` reads after the figure, and the reason "there's 2 kids at home" is not
+# a fund. The scope is a lookahead here rather than a group, because the sum ends at those words.
+THERE_LEFT = re.compile(
+    r"\bthere(?:'s|s|\s+is|\s+are|\s+was)\s+(?:only\s+|just\s+|about\s+|around\s+|"
+    r"maybe\s+|like\s+|still\s+|nearly\s+)*(?:a\s+)?£?\s*" + _MONEY +
+    r"(\s*(?:k\b|p\b|pounds?|quid|gbp))?(?=\s*(?:left|remaining|to\s+last)\b)", re.I)
+# A figure with a scope after it is money only when nothing else in the line owns the count.
+# People count things with exactly this shape - "i made 12 buns and theres 5 left", "theres 2
+# left in the shop", "weve got 3 left of the paint" - and a "how much have i got left" ask is
+# about money, so those lines must not file a fund. What gives a count away is the thing being
+# counted: a figure with its own noun ("12 buns"), the scope written as "left of the paint" or
+# "left in the shop", or a plural noun in the clause before the figure. Nothing here touches a
+# figure the person holds of nothing in particular, which is the line this reader is for.
+# The thing counted, when the figure says it: "12 buns", "2 kids". A currency word after the
+# figure is the money itself and not a thing counted - "theres 10 pounds left" is a tenner - so
+# those are read out of the count.
+_A_COUNTED_NOUN = re.compile(r"\b\d+\s+([a-z]{3,}(?:s|es))\b", re.I)
+_A_CURRENCY_PLURAL = ("pounds", "quid", "euros", "dollars", "bucks", "pence", "pennies",
+                      "cents", "sterling")
+# "left of the paint", "left in the shop", "left over from the shop": the scope names the thing
+# counted. A period after the scope is the time the money has to last and not a count of
+# anything - "theres 30 left for the week" is a budget - so periods are read out of it.
+_A_TIME_SCOPE = (r"(?![ \t]*(?:" + "|".join((r"week", r"weekend", r"month", r"day",
+                                            r"days", r"year", r"fortnight", r"holiday",
+                                            r"holidays", r"term", r"morning", r"evening",
+                                            r"night", r"month\s+end")) + r")\b)")
+_A_SCOPE_OF_A_THING = re.compile(
+    r"\b(?:left|remaining)\s+(?:over\s+)?(?:of|in|on|from|at|for)\s+"
+    r"(?:the|a|an|my|our|his|her|their|this|that)" + _A_TIME_SCOPE, re.I)
+# Plural words that are the money itself, or the time it has to last, rather than things counted:
+# "things are tight this month and theres about 90 left" is still money.
+_A_MONEY_PLURAL = ("things", "days", "weeks", "months", "years", "minutes", "hours",
+                   "pounds", "quid", "euros", "dollars", "pence", "savings", "notes",
+                   "coins", "bills", "pennies", "payments", "leftovers")
+_A_PLURAL = re.compile(r"\b([a-z]{4,}(?:s|es))\b", re.I)
+
+
+def _a_count_of_a_thing(text):
+    """True when the figure in the line counts something, so it is not money of theirs."""
+    for noun in _A_COUNTED_NOUN.findall(text):
+        if noun.lower() not in _A_CURRENCY_PLURAL:
+            return True
+    if _A_SCOPE_OF_A_THING.search(text):
+        return True
+    before = text.split("there", 1)[0] if "there" in text else ""
+    for word in _A_PLURAL.findall(before):
+        word = word.lower()
+        if word in _A_MONEY_PLURAL or word.endswith("ss"):
+            continue
+        return True
+    return False
+
+
 # The scope the money has to last, which is what makes a plain figure money: "till friday", "for
 # the week", "left", "this month". A gift is not a budget - "i got 20 for my birthday" is money
 # that came in, and it is not what a "what's left" ask is about.
@@ -441,12 +520,19 @@ LEFT = re.compile(
     r"(?:got\s+|have\s+)?(?:left|remaining)\b"
     r"|\bwhat(?:'s| is|s)\s+(?:left|remaining)\b"
     r"|\bwhat\s+(?:have|do)\s+(?:i|we)\s+(?:got\s+)?(?:left|remaining)\b"
-    r"|\bhow\s+much\s+(?:of\s+)?(?:it|that|the\s+[a-z]+)\b[^?]{0,20}\b(?:left|remaining)\b", re.I)
+    r"|\bhow\s+much\s+(?:of\s+)?(?:it|that|the\s+[a-z]+)\b[^?]{0,20}\b(?:left|remaining)\b"
+    # The same ask written as a recall of what they said: "and how much did i tell you i had
+    # left", "what did i say i had left". The store's recall frames read the line as a question
+    # about the chat, and the sum is in the chat, so the ask has to be in this reader too or the
+    # person who checks the bot remembers nothing about money they gave it a turn before.
+    r"|\b(?:how\s+much|what)\s+did\s+(?:i|we)\s+(?:tell\s+you|say)\b[^?]{0,30}"
+    r"\b(?:left|remaining)\b", re.I)
 AFFORD = re.compile(
     r"\bcan\s+(?:i|we)\s+afford\s+(.*)$"
     r"|\bis\s+there\s+enough\s+(?:left\s+)?(?:for|to)\s+(.*)$"
     r"|\b(?:do|have)\s+(?:i|we)\s+(?:have|got)\s+enough\s+(?:left\s+)?(?:for|to)\s+(.*)$"
-    r"|\benough\s+left\s+for\s+(.*)$", re.I)
+    r"|\benough\s+left\s+for\s+(.*)$"
+    r"|\b(?:is|was|will|would)\s+(?:that|this|it)\s+(?:be\s+)?enough\s+(?:for|to)\s+(.*)$", re.I)
 
 
 def _figure(value):
@@ -481,10 +567,15 @@ def _held_in(line):
     match = BUDGET_HELD.search(text) or ON_A_BUDGET.search(text) or SAVINGS_HELD.search(text)
     if match:
         return _with_scale(match.group(1), match.group(2))
+    match = THERE_LEFT.search(text)
+    if match and not _a_count_of_a_thing(text):
+        return _with_scale(match.group(1), match.group(2))
     match = HELD.search(text)
     if match:
         currency, tail = (match.group(2) or "").strip(), match.group(3) or ""
         if not currency and "£" not in match.group(0) and not _HELD_SCOPE.match(tail):
+            return None
+        if not currency and "£" not in match.group(0) and _a_count_of_a_thing(text):
             return None
         return _with_scale(match.group(1), match.group(2))
     return None

@@ -20,6 +20,8 @@ how it would tell them if it lost the thread. Then it hands the floor back.
 import hashlib
 import re
 
+from ..understanding.kinds import a_stop_ask
+
 # A count is not a length: "how many messages can i send you" asked how many, and the answer to
 # "how long" ("as long as you like") reads as a dodge. Read on the line, in the one place that
 # needs it, so the reading keeps one kind for both and nothing else learns a vocabulary of counts.
@@ -79,6 +81,43 @@ def _pick(lines, text):
     return lines[_seed(text) % len(lines)]
 
 
+# A bare "should i stop" is about the thing in hand, not about this conversation. "im trying to
+# lose a stone", "i started running last week", "my knee hurts now", "should i stop" - the last
+# line asks whether to stop the running, and it was answered "You're not boring me. Take as long as
+# it needs.", which answers a question about the chat. The bot is asked whether the person is a
+# nuisance only when nothing else is in hand: "am i boring you" and "do you want me to stop" name
+# the talk, so they are that whatever the chat is on (the reading in `bot/understanding/kinds.py`
+# keeps them, and they never reach the gate below). The bare stop-ask names nothing of its own, so
+# the thing the chat is on decides it: when that is a thing the knowledge base answers, the ask is
+# a follow-up about the thing and is read with the rest of them.
+# The stop the person asks about their own doing: "should i stop", "shall i quit", "should i give
+# up". "do you want me to stop" is the other side of it - a question about the bot's wishes, not
+# about the running - so it keeps its warm answer whatever the chat is on, and so does "am i
+# boring you".
+THEIR_OWN_STOP = re.compile(
+    r"(?:should|shall|can|could|may)\s+(?:i|we)\s+"
+    r"(?:stop|quit|give\s+up|pack\s+it\s+in|leave\s+it|jack\s+it\s+in)"
+    r"(?:\s+(?:now|then|it|this|that|doing\s+(?:it|this|that)))?\s*[.!?]*")
+
+
+def _a_bare_stop_about_a_thing(text, memory):
+    """True when a bare "should i stop" is about the thing the chat is on, not about the chat."""
+    said = " ".join(str(text or "").lower().split())
+    if not THEIR_OWN_STOP.fullmatch(said):
+        return False
+    # The same reading the rest of the bot uses, on the same normalised line the test above reads:
+    # "Should I stop?" with a capital and a question mark is the line the test writes, and reading
+    # the raw one as well was two readings of one thing.
+    if not a_stop_ask(said):
+        return False
+    topic = (memory or {}).get("topic") or {}
+    # Anything of the person's in hand is a thing the stop could be about, and the knowledge base
+    # having a row for it was the wrong test: "i smoke about 20 a day", "im 40", "should i quit" is
+    # the smoking, and no entry answers "i smoke about 20 a day", so the line kept "Not at all -
+    # carry on, I'm following." The topic is the reading; the entry is one way to have a topic.
+    return bool(str(topic.get("text") or "").strip())
+
+
 def _the_kind(understood):
     if not isinstance(understood, dict):
         return None
@@ -113,6 +152,8 @@ def respond(text, memory):
     understood = memory.get("understood") if isinstance(memory, dict) else None
     kind = _the_kind(understood)
     if kind is None:
+        return None
+    if kind == "keeping" and _a_bare_stop_about_a_thing(text, memory):
         return None
     said = _already_said(memory)
     if kind == "while" and _A_COUNT.search(str(text or "")):

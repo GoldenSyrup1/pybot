@@ -100,11 +100,11 @@ LIBRARY_LOST_LINES = (
     "card number, and they will cancel it or mark the book lost and say what is owed.",
 )
 DELIVERY_LINES = (
-    "I can't see the tracking from here. The confirmation email or the shop's app has it, and if "
-    "it has not moved for a day or two it is the shop to chase - they open the case with the "
-    "courier, not you.",
-    "No window on a parcel from this end, sorry. The tracking link in the order email shows where "
-    "it is and the day it is due, and if that day has gone the shop can chase the courier for you.",
+    "The tracking link in the confirmation email or the shop's app has the last scan, and if it "
+    "has not moved for a day or two it is the shop to chase - they open the case with the courier, "
+    "not you. I can't see the tracking from here.",
+    "The tracking link in the order email shows where a parcel is and the day it is due, and if "
+    "that day has gone the shop chases the courier for you; no window on it from this end.",
 )
 # A parcel that is late or stuck is a trouble as well as a record: lead with the sympathy a
 # friend gives, then the tracking and the shop, rather than a cold "I can't see it" first.

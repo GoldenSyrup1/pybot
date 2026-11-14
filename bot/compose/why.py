@@ -607,18 +607,70 @@ def _last_turn(memory):
     turns = memory.get("turns")
     if not isinstance(turns, list) or not turns:
         return {}
+    skipped_a_nod = False
     for last in reversed(turns[-3:]):
         if not isinstance(last, dict):
             return {}
         said = last.get("bot")
+        if isinstance(said, str) and _answered_nothing(said):
+            skipped_a_nod = True  # the bot's own nod: the answer being asked about is above it
+            continue
         if last.get("module") in ANSWERED:
             if not isinstance(said, str) or len(said.split()) < SUBSTANCE:
                 return {}
+            if skipped_a_nod:
+                reason = _reason_in(last)
+                if not reason or THE_REASON_POINTS_AT_THE_ADVICE.match(reason):
+                    # The nod is stepped over only where the answer under it can be explained from
+                    # its own words. "how long does rice take" / "thanks" / "why" reads a timing
+                    # answer, and the reason for it is the knowledge base's own why row ("Rice
+                    # burns when there is no water left under it"): handing that turn to this
+                    # module's shrug took five such chats from a real cause to "I don't know why".
+                    #
+                    # And a reason that opens on "that"/"this" is the answer's own advice saying
+                    # why the advice works - "Cut saturated fat first, because that moves the
+                    # number more than anything else". In the answer the antecedent is on the
+                    # page; behind this module's "That's because ..." it is not, and the reply
+                    # reads as nonsense that names nothing ("That's because that moves the number
+                    # more than anything else"). So that answer is left to the module that wrote
+                    # it, which hands its own sentence back with the antecedent still in it.
+                    # Found by lavender-thimble and upbeat-badger reading this change.
+                    return {}
             return last
         if last.get("module") == "greeting" and isinstance(said, str) and HEDGED.search(said):
             continue  # the bot's own shrug: the answer being asked about is above it
         return {}
     return {}
+
+
+# The bot's own nod between the answer and the ask: "Alright then - good luck with it." after the
+# boiler card, "Got it." after a fact. It answered nothing, so it is not the thing being asked
+# about - yet it was read as the turn above, `_last_turn` found no claim in it and came back
+# empty, and the `why` fell to the repeat frame: "my boiler is losing pressure" / "ok" / "why" got
+# the whole card back as "Same as before: ..." where the same chat without the "ok" got "Because
+# water is escaping somewhere." A nod is short, opens on a word of agreement or good wishes, and
+# carries neither a step nor a cause; an answer with either in it is left alone.
+A_NOD_OPENS = re.compile(
+    r"^(?:alright|all\s+right|ok|okay|sure|got\s+it|noted|right|of\s+course|no\s+problem|"
+    r"lovely|great|good|glad|happy|sorry|thanks|thank\s+you|fair\s+enough|makes\s+sense|"
+    r"understood|will\s+do|cool|nice)\b", re.I)
+A_NOD_IS_SHORT = 12
+# A reason that points back at the answer's own advice instead of naming the thing: "Cut
+# saturated fat first, because that moves the number more than anything else." The antecedent of
+# "that" is the sentence in front of it, so the clause cannot stand on its own as the reply.
+THE_REASON_POINTS_AT_THE_ADVICE = re.compile(r"^(?:because\s+|since\s+)?(?:that|this)\b", re.I)
+
+
+def _answered_nothing(said):
+    """True when a bot line is a nod rather than an answer: it gives no step and names no cause."""
+    said = (said or "").strip()
+    if not said or len(said.split()) > A_NOD_IS_SHORT:
+        return False
+    if IMPERATIVE.match(said) or INSTRUCTION.search(said) or CAUSE.search(said):
+        return False
+    if EXPLAINS.search(said) or NAMED_CAUSE.search(said):
+        return False
+    return bool(A_NOD_OPENS.match(said))
 
 
 FIRST_SENTENCES = 2
@@ -832,7 +884,16 @@ def _a_reason_in(said, strict=False):
                 if (trigger and not THE_FIX.search(trigger)
                         and not (number and INSTRUCTION.search(part))):
                     return trigger
-    return _named_by_definition(said)
+    named_class = _named_by_definition(said)
+    if named_class:
+        return named_class
+    # The class the answer put the thing in ("Most back pain is muscular") is its cause as plainly
+    # as a `because` clause is, and it is the one shape with no cause word in it at all. Read last,
+    # so a colon that names the cause in a list ("most constant tiredness is dull rather than
+    # medical: too little sleep, a late screen") still hands that list back rather than the class,
+    # and only an answer whose colon holds instructions ("...what helps most: keep walking") is
+    # left for the class.
+    return _the_class_it_belongs_to(said)
 
 
 # The cause said as what the thing needs, in front of the consequence: "X and Y are what mould
@@ -989,6 +1050,75 @@ def _cause_clause(part, number, instruction_ok):
     if not clause.lower().startswith(("because ", "since ")) and IMPERATIVE.match(clause):
         return ""
     return clause
+
+
+# A generalization about the thing is a cause, and it is how the health and home entries write the
+# reason most often: "Most back pain is muscular and settles in two to six weeks", "Most shoulder
+# pain is a strained or trapped tendon", "Most bad breath is bacteria on the tongue and between the
+# teeth, not the stomach", "Most rashes are contact or heat". No cause word marks any of them, so the
+# clause sets were read and the answer was told it named no cause at all - "my back aches in the
+# mornings" / "why is that" got "I don't know the reason, and I'd rather say so than invent one"
+# directly under the bot's own "Most back pain is muscular". A bot that disowns the line above it is
+# worse than one that repeats it, so the class the answer named is handed back as the reason.
+#
+# The claim is only the reason when it says what the thing IS. "Most back pain is muscular" is the
+# why; "Most cars want an oil and filter change every 12 months" is a schedule, "Most sharks live 20
+# to 30 years" is a lifespan, and both answer "how often" rather than "why". So the complement is
+# cut at the first clause boundary and kept only when what is left is a noun or adjective class:
+# no figure in it, and none of the verbs the entries use to say what a thing does.
+A_GENERAL_CLAIM = re.compile(
+    r"\A(?:most|almost\s+all|nearly\s+all|in\s+most\s+cases|the\s+majority\s+of|mostly)\s+"
+    r"(?P<subject>[^.;:,]{2,60}?)\s+(?:is|are|was|were)\s+(?P<what>[^.;:]{2,140})",
+    re.IGNORECASE)
+# Where the class ends: the claim in front of these is the thing itself, and behind them is what to
+# do about it or how long it lasts ("muscular and settles in two to six weeks", "contact or heat: a
+# new soap or washing powder").
+ENDS_THE_CLASS = re.compile(r"(?::|,| - | and | so | which | but | worse )", re.IGNORECASE)
+# The complement says what the thing does, so a "why" answered by it is the answer again: "Most
+# fevers from a virus settle within two or three days", "Most couples take" the complement away
+# from the cause. These are the doing verbs the entries actually use in a `Most ... is ...` line.
+SAYS_WHAT_IT_DOES = re.compile(
+    r"\b(?:want|wants|need|needs|live|lives|take|takes|last|lasts|go|goes|come|comes|get|gets|"
+    r"settle|settles|heal|heals|die|dies|cost|costs|help|helps|work|works|hold|holds|keep|keeps|"
+    r"put|puts|eat|eats|do|does|say|says|give|gives|pay|pays|rise|rises|fall|falls|start|starts|"
+    r"finish|finishes|run|runs|turn|turns|sit|sits|charge|charges|cover|covers|include|includes|"
+    r"pass|passes|count|counts|matter|matters|mean|means|stay|stays|carry|carries)\b",
+    re.IGNORECASE)
+# A complement that is only a place-holder says nothing about why: "Most of it is air", "Most are
+# harmless". The class has to name a thing the person can act on.
+A_PLACEHOLDER = frozenset(("it", "this", "that", "them", "they", "one", "so", "true", "fine",
+                           "ok", "okay", "normal", "harmless", "nothing", "none", "air", "you",
+                           "me", "us"))
+
+
+def _the_class_it_belongs_to(said):
+    """The class the answer said the thing belongs to, as the reason for it, or "".
+
+    Read from the answer's own opening sentence, because that is where an entry puts what the thing
+    is: "Most back pain is muscular and settles in two to six weeks, and staying active is what
+    helps most". What comes back is the claim as it stands, not a rewrite of it, so the reply is the
+    bot's own words: quoting them invents nothing.
+    """
+    first = re.split(r"(?<=[.!?])\s+", str(said or "").strip())[0].strip()
+    if IMPERATIVE.match(first) or CONDITIONAL_SENTENCE.match(first):
+        return ""
+    found = A_GENERAL_CLAIM.match(first)
+    if not found:
+        return ""
+    claim = ENDS_THE_CLASS.split(found.group("what"), 1)[0].strip().rstrip(".,;:")
+    # The class is what the thing is, so it is a short noun or adjective phrase: a doing verb, a
+    # figure or a place-holder means the answer was saying how often or how long, not why.
+    if len(claim.split()) < 1 or len(claim.split()) > 14:
+        return ""
+    if SAYS_WHAT_IT_DOES.search(claim) or re.search(r"\d", claim):
+        return ""
+    if claim.lower() in A_PLACEHOLDER or THE_FIX.search(claim):
+        return ""
+    if INSTRUCTION.search(claim) or DOSE.search(claim):
+        return ""
+    subject = found.group("subject").strip()
+    lead = first[:found.start("what")].strip()
+    return "{} {}".format(lead or "Most " + subject, claim)
 
 
 def _named_by_definition(said):

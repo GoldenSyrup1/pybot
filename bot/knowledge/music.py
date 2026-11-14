@@ -134,13 +134,21 @@ _STAFF_MEANS_PEOPLE = (
 )
 
 
+# The tails a line puts on "staff" when it means the people: staffed, staffing, staffs.
+_STAFF_TAILS = frozenset(("", "ed", "ing", "s", "er", "ers"))
+
+
 def _staff_is_the_five_lines(understood):
     """Whether "staff" in this line is the music, rather than the people who work somewhere."""
     if not isinstance(understood, dict):
         return True
     clean = str(understood.get("clean") or understood.get("text") or "").lower()
     words = set(clean.replace("'", "").split())
-    if "staff" not in words:
+    # The word arrives as "staffed" and "staffing" far more often than as "staff": "my team is
+    # short staffed and i keep covering, how do i bring it up" slipped past this check on the
+    # bare word alone, reached the clef row on its "how do i", and was told the five lines are
+    # E, G, B, D, F. The inflections have to reach the people phrases below to be read as people.
+    if not any(word.startswith("staff") and word[5:] in _STAFF_TAILS for word in words):
         return True
     if any(phrase in clean for phrase in _MUSIC_PHRASES):
         return True
@@ -178,7 +186,12 @@ ENTRIES = [
           avoid=("car", "drawstring", "shoe", "shoes", "shoelace", "shoelaces", "bag", "hoodie",
                  "curtain", "curtains", "purse", "scissors", "theatre", "gift", "present",
                  "bank", "insurance", "energy", "supplier", "fish", "fishing", "sea", "lake",
-                 "river", "pond", "speaker", "speakers", "subwoofer"),
+                 "river", "pond", "speaker", "speakers", "subwoofer",
+                 # "how often should i practise the guitar" is the practice rate, not the
+                 # strings: the row holds "how often" for "how often should i change my strings",
+                 # and it answered the practice question with the restring instead.
+                 "practice", "practise", "practising", "practicing", "rehearse", "rehearsing",
+                 "practice pad"),
           bias=1),
     # --- keeping it clean -------------------------------------------------------
     entry("instrument-clean", (KIT, CLEANING),
