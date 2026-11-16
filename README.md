@@ -14,7 +14,7 @@ We challenged a swarm of over 1,000 agents to build a chatbot entirely in Python
 
 ![PyBot's win rate over the evaluated commits on a log scale: every commit as a dot and the best so far as a line, with three SmolLM baselines as dashed lines, and its lines of Python code in grey on the right axis](assets/progress.png)
 
-The result is PyBot: around 500k lines of code that can answer everyday questions, backed by 550k lines of tests the agents wrote themselves.
+The result is PyBot: around 640k lines of code that can answer everyday questions, backed by 550k lines of tests the agents wrote themselves.
 
 ## Try it out
 
@@ -54,7 +54,7 @@ user: what's my name?
 pybot: You're Sam.
 ```
 
-Type `/reset` to clear the screen and start a new conversation, and `/exit` to quit. PyBot takes a few seconds to start, because Python has half a million lines of code to load, and about a second to reply.
+Type `/reset` to clear the screen and start a new conversation, and `/exit` to quit. PyBot takes a few seconds to start, because Python has about 640,000 lines of code to load, and about a second to reply.
 
 To ask one question and exit, or to pipe messages in and get one reply per line:
 
