@@ -20,6 +20,8 @@ click all day, and an ear that clicks is a hearing question, not a joint.
 
 from .lookup import entry
 
+import re
+
 ANSWERS = ("health",)
 
 # The noise words. "crack" and "click" are the two people use, and both are also things that
@@ -230,9 +232,42 @@ def _not_a_road(understood):
                                    "physiotherapy"))
 
 
+# "is it worth replacing a bath with a shower" is a builder's question that read as wound care:
+# "replacing" is enough for REPLACED_JOINT and "bath" and "shower" are both WASH words, so two words
+# about a bathroom made a washing-after-an-operation line. The thing being replaced has to be a
+# joint; a line that replaces something else is not one of these cards.
+# The determiner is optional: people type the article-less way too ("replacing bath with shower
+# worth it", "replacing boiler cost"), and with the determiner required the guard read neither and
+# both fell back to the wound card. The guard only has to answer "is the thing after 'replacing' a
+# joint", and without the article the next word is that thing just the same.
+A_REPLACING_A_THING = re.compile(
+    r"\breplac(?:e|ing|ed)\s+(?:(?:a|an|the|my|our|your|his|her|their)\s+)?(?P<thing>[a-z]+)")
+# A dressing, a bandage, a cast and a plaster are things a person replaces on a body rather than
+# on a house, so "i replaced the dressing on my knee" keeps the card about a knee that was replaced.
+THE_JOINT_WORDS = ("hip", "knee", "shoulder", "joint", "joints", "resurfacing", "implant",
+                   "implanted", "replacement", "dressing", "dressings", "bandage", "bandages",
+                   "cast", "plaster")
+
+
+def _not_something_else_replaced(understood):
+    """True unless the line replaces a thing that is not a joint - a bath, a boiler, a road."""
+    said = str((understood or {}).get("clean") or "") if isinstance(understood, dict) else ""
+    things = A_REPLACING_A_THING.findall(said.lower())
+    if not things:
+        return True
+    return any(word in THE_JOINT_WORDS for word in things)
+
+
 def _a_replacement(*args, **kwargs):
     """One of the cards about a joint that was replaced, which a road line must not reach."""
-    kwargs["guard"] = _not_a_road
+    asked = kwargs.pop("guard", None)
+    if asked is None:
+        kwargs["guard"] = lambda understood: (_not_a_road(understood)
+                                              and _not_something_else_replaced(understood))
+    else:
+        kwargs["guard"] = lambda understood: (_not_a_road(understood)
+                                              and _not_something_else_replaced(understood)
+                                              and asked(understood))
     return entry(*args, **kwargs)
 
 

@@ -9,7 +9,7 @@ import re
 
 from . import pets
 from .lookup import (ASK_ABOUT, FOOD_SUBJECT, TOOTH_OR_GUM, TOOTH_OUT, entry,
-                     not_the_flat_you_live_in, said)
+                     not_keeping_an_eye_on_it, not_the_flat_you_live_in, said)
 from .body import _the_nail_is_a_persons, _the_part_is_a_persons
 from .shopping import not_a_present
 
@@ -49,6 +49,22 @@ def not_a_machine_that_broke(understood):
     words = said.get("words") or ()
     text = " ".join(bits + [str(word) for word in words])
     return not (_A_MACHINE.search(text) and _A_FAULT.search(text))
+
+
+# "whether" is not "when": a line asking when or how often wants the interval, and the eye-test
+# row above answers that. "when should i get my eyes tested" was losing the interval to the
+# need-glasses row's "book a sight test", which answers a question nobody asked.
+_A_WHEN_ASK = re.compile(
+    r"\b(?:when|how often|how regularly)\b|\bhow long (?:until|before|between)\b", re.I)
+
+
+def not_a_when_ask(understood):
+    """True unless the line asks when or how often, for a row that answers whether."""
+    said = understood if isinstance(understood, dict) else {}
+    bits = [str(said.get(key) or "") for key in ("clean", "text", "raw", "words")]
+    words = said.get("words") or ()
+    text = " ".join(bits + ([" ".join(str(w) for w in words)] if words else []))
+    return not _A_WHEN_ASK.search(text)
 
 
 def not_a_season_or_a_machine(understood):
@@ -308,6 +324,22 @@ def _the_eye_is_said(understood):
     said = " ".join(str((understood or {}).get(key) or "")
                     for key in ("clean", "text", "norm_text")).lower()
     return any(word in said for word in ("eye", "eyes", "eyelid", "eyelids", "lash", "lashes"))
+
+
+def _the_pregnancy_verdict(understood):
+    """The sentence the row owes an "is it safe" about a drug that is not the one it leads with.
+
+    The card is written for "what can I take" and opens on paracetamol, so "is ibuprofen safe in
+    pregnancy" was answered with the drug it does not name before the one it does. The card's
+    second sentence is the verdict, and this returns it - its own words, not a rewording - only
+    for the lines that name something to avoid. Anything else gets no sentence, so the card is
+    left exactly as it is.
+    """
+    words = set((understood or {}).get("words") or ())
+    if not words & {"ibuprofen", "aspirin", "nurofen", "voltarol", "naproxen",
+                    "anti-inflammatory", "anti-inflammatories"}:
+        return ""
+    return ("Avoid ibuprofen and aspirin unless a doctor or midwife has told you otherwise")
 
 
 def _medicine_when_pregnant_or_feeding(memory, reading):
@@ -631,13 +663,36 @@ EYE_WHAT = (
     "piece of glass", "bit of glass", "shard of glass", "shards of glass", "glass in",
     "broken glass", "splinter of glass",
 )
+# Water in the eye, and the rinse: the phrases name the water going in or coming out, so the
+# litres table in home.py and the speck row beside this one leave them alone.
+WATER_IN_EYE = (
+    "water in my eye", "water in my eyes", "water in the eye", "water in the eyes",
+    "water getting in my eye", "water gets in my eye", "water keeps getting in",
+    "water keep getting in", "water got in my eye", "water went in my eye",
+    "get water in my eye", "got water in my eye", "getting water in my eye",
+    "soap in my eye", "soap in my eyes", "got soap in my eye", "shampoo in my eye",
+    "shampoo in my eyes", "got shampoo in my eye", "shower in my eye",
+    "rinse my eye", "rinse my eyes", "rinse the eye", "rinse out my eye",
+    "rinse it out of my eye", "how do i rinse my eye", "flush my eye", "flush the eye",
+    "flush my eyes", "wash my eye out", "wash out my eye", "wash my eyes out",
+    "get the water out of my eye", "get the water out of my eyes", "water out of my eye",
+    "water out of my eyes", "get water out of my eye", "get water out of my eyes",
+    "get it out of my eye", "something in my eye is water",
+)
+EYE_RINSE_ASK = (
+    "how", "what", "why", "should", "do", "can", "help", "keep", "keeps", "kept", "getting",
+    "gets", "got", "rinse", "flush", "wash", "out", "shower", "sting", "stings", "stinging",
+    "sore", "hurts", "hurt", "safe", "harm", "harmful", "bad", "ok", "okay", "normal",
+    "worry", "worried", "shouldnt", "shouldn't", "again", "still",
+)
+
 # Whose eye it is decides as much as the eye itself, and the first person was the only voice
 # written down: "my child scratched his eye" was answered "Thanks for telling me" while "i
 # scratched my eye" got the card, which is the same question asked for a child by a parent.
 EYE_WHERE = (
     "in my eye", "in the eye", "in my eyes", "in the eyes", "in both eyes", "in one eye",
     "on my eyeball", "on the eyeball", "in my eyeball", "my eye", "my eyes", "the eye",
-    "eyeball", "eyelid", "lid",
+    "eyeball", "eyelid", "lid", "eyelashes",
     "his eye", "his eyes", "her eye", "her eyes", "their eye", "their eyes", "your eye",
     "your eyes", "in his eye", "in her eye", "in their eye", "in his eyes", "in her eyes",
     "in their eyes", "in your eye", "in your eyes", "his eyeball", "her eyeball",
@@ -875,17 +930,132 @@ FEVER_ADVICE = (
 FEVER_FROM = 38.0
 
 
+LOW_FROM = 36.0        # under this a reading is low, and worth saying so
+COLD_BELOW = 35.0      # under this it is hypothermia, not a low reading
+RAISED_FROM = 37.5     # 37.5 to 38 is a raised reading rather than a fever
+
+
+def _in_celsius(number):
+    """The reading in Celsius, or None when the number is not a temperature at all."""
+    value = number.get("value") if isinstance(number, dict) else None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    unit = str(number.get("unit") or "").lower()
+    # A body temperature above 45 can only have been given in Fahrenheit (113F), and 98.6
+    # comes in with no unit at all, so the size of the number says which scale it is on. This
+    # is why "i have a temp of 98.6" no longer gets the fever card.
+    if unit in ("fahrenheit", "f", "degrees f", "deg f") or value >= 45:
+        return (value - 32.0) * 5.0 / 9.0
+    return value
+
+
+def _a_reading(value):
+    """The reading as it is written back: 39C, 38.5C, 37.3C - not 37.2778C.
+
+    99.1F is 37.2777...C, and printing the whole conversion put an unreadable number in the first
+    words of the reply. One decimal is as fine as a thermometer reads.
+    """
+    rounded = round(value, 1)
+    if rounded == int(rounded):
+        return "%dC" % int(rounded)
+    return "%.1fC" % rounded
+
+
+def _the_number_says(value):
+    """A person's own reading, answered with what that number means, the number first."""
+    said = _a_reading(value)
+    if value >= FEVER_FROM:
+        # The fever answer never used to say what the person's own number meant, which is the one
+        # thing asked: "is 39.5 too high" got the advice and not the verdict. The number and the
+        # verdict open it now, as they do in the three readings below.
+        if abs(value - FEVER_FROM) < 0.05:
+            return ("%s is a fever: 100.4F is the point where one starts. %s"
+                    % (said, FEVER_ADVICE))
+        return ("%s is a fever: 38C (100.4F) is where one starts. %s" % (said, FEVER_ADVICE))
+    if value < COLD_BELOW:
+        return ("%s is below 35C (95F), which is hypothermia territory rather than a fever: get "
+                "them out of the cold and out of wet clothes, wrap them in blankets and warm them "
+                "slowly with a warm drink if they can swallow. Shivering that stops, slurred "
+                "speech, confusion or drowsiness at that reading is a 999 call." % said)
+    if value < LOW_FROM:
+        return ("%s is a low reading rather than a fever: normal is 36.1 to 37.2C, and a cold "
+                "room or a thermometer that slipped reads low more often than an illness does. "
+                "Take it again after ten minutes somewhere warm with the arm tucked in, and if it "
+                "stays under 36C with shivering, confusion or drowsiness, ask a doctor the same "
+                "day." % said)
+    if value >= RAISED_FROM:
+        return ("%s is a raised reading rather than a fever: normal is 36.1 to 37.2C and 38C "
+                "(100.4F) is where a fever starts. A drink, an ordinary room and another reading "
+                "in an hour, and a stiff neck, a rash that does not fade under a glass or "
+                "trouble breathing is a same-day call." % said)
+    return ("%s is within the normal range of 36.1 to 37.2C, which runs half a degree higher in "
+            "the evening, and a fever starts at 38C (100.4F), so there is nothing to treat. A "
+            "stiff neck, a rash that does not fade under a glass, or trouble breathing with a "
+            "fever is a same-day call." % said)
+
+
+# "is 37.2 normal" and "is 38 too high" name no subject at all: the number is the whole subject,
+# and the key wanted the word "temperature" to see it. A number on its own is a body temperature
+# only in the body's own range, which is what keeps "is 7 normal" (a mark, an age, a price) out.
+TEMPERATURE_NOUN = re.compile(r"\b(temperature|temp|degrees|fever|fahrenheit|celsius|centigrade)\b")
+NOT_A_BODY = ("battery", "phone", "cpu", "gpu", "pressure", "tyre", "tire", "psi", "mph",
+              "speed", "price", "cost", "salary", "score", "percent", "litre", "liter", "ml",
+              "kg", "gram", "ounces", "mpg", "download", "wifi", "signal", "humidity", "rent",
+              "income", "interest", "tax", "storage", "memory", "temperature of the",
+              # Water that is heated for its own sake, not a person's reading: "is 38 too high
+              # for a bath" was answered with the fever card. A thermometer in a bath measures
+              # the bath.
+              "bath", "bathwater", "hot tub", "jacuzzi", "pool", "swimming", "sauna", "shower",
+              "steam room")
+BODY_RANGE = (34.0, 42.5)
+
+
+def _a_body_temperature_number(understood):
+    """The line names a reading, or names a number that can only be one.
+
+    The key holds the words a person uses for the reading itself ("temperature", "temp",
+    "degrees", "a fever"), and a line like "is 37.2 normal" holds none of them: the number is the
+    whole subject. So a bare number is read as a body temperature only when it is inside the
+    body's range - 34 to 42.5C, which is 93 to 108.5F - and nothing in the line says another
+    thing was measured. "is 7 normal" and "is 37.2 a good download speed" stay out of the card.
+    """
+    reading = understood or {}
+    said = str(reading.get("clean") or reading.get("text") or "").lower()
+    if TEMPERATURE_NOUN.search(said):
+        return True
+    if any(word in said for word in NOT_A_BODY):
+        return False
+    for number in reading.get("numbers") or []:
+        value = _in_celsius(number)
+        if value is not None and BODY_RANGE[0] <= value <= BODY_RANGE[1]:
+            return True
+    return False
+
+
+_LOW_QUESTION = re.compile(r"\b(too low|a low|low temperature|temperature too low|"
+                            r"hypothermia|chilly|very cold|under ?36|below ?36)\b")
+LOW_READING = (
+    "Normal is 36.1 to 37.2C, so a reading under 36C is low, and a cold room or a thermometer "
+    "that slipped is the usual reason: take it again after ten minutes somewhere warm with the "
+    "arm tucked in. Below 35C (95F) with shivering that stops, slurred speech, confusion or "
+    "drowsiness is hypothermia, and that is a 999 call.")
+
+
 def temperature_card(memory, reading):
-    """What to do about a fever reading, or what is normal, from the number the line gives."""
+    """What to do about the reading the line gives, or what is normal when it gives none."""
     try:
         given = reading.get("numbers") or []
     except Exception:  # noqa: BLE001 - a reading with no numbers is a normal-range line
         return NORMAL_TEMPERATURE
     for number in given:
-        value = number.get("value") if isinstance(number, dict) else None
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            if value >= FEVER_FROM:
-                return FEVER_ADVICE
+        value = _in_celsius(number)
+        if value is not None:
+            return _the_number_says(value)
+    # "what temperature is too low" and "is 36 too low" ask about the bottom of the range, and
+    # the normal-range card answers the top of it.
+    said = str((reading or {}).get("clean") or (reading or {}).get("text") or "").lower()
+    if _LOW_QUESTION.search(said):
+        return LOW_READING
     return NORMAL_TEMPERATURE
 
 # Which cold-sore question a line is asking. The subject is the same every time, so the answer
@@ -1264,7 +1434,12 @@ def _a_wound_not_a_cramp(understood):
         if word in _RUNNING_WORDS:
             return False
     said = set(words)
-    if said & {"stitches", "sutures", "suture", "glued", "glue"}:
+    # A staple holds a cut together exactly as a stitch does, and the row's key names staples, so
+    # the guard has to let them through or the row is written and never read: "when do staples
+    # come out" was a search hedge with `staple` in the key all along. The stationery sense is
+    # fenced by the row's own avoid words rather than here, because a guard that also had to
+    # tell paper from skin would read the line twice.
+    if said & {"stitches", "sutures", "suture", "glued", "glue", "staple", "staples"}:
         return True
     return bool(said & {"cut", "cuts", "wound", "wounds", "gash", "slashed", "bleeding"}) \
         and "stitch" in said
@@ -1282,8 +1457,16 @@ _SOMEONE_ELSE = re.compile(
     r"pensioners|students)\b")
 
 
+# "signs of depression in a teenager" names a group, not a person, and it is the reader asking
+# what to look for - the card is exactly that answer. A question about the signs keeps the card
+# whoever it names; what stands down is a line about a named person's depression.
+_SIGNS_ASK = re.compile(r"\b(?:signs?|symptoms?)\s+(?:of|for)\b")
+
+
 def _is_the_readers_own_line(understood):
     said = str((understood or {}).get("clean") or "")
+    if _SIGNS_ASK.search(said):
+        return True
     return not _SOMEONE_ELSE.search(said)
 
 
@@ -1509,6 +1692,28 @@ def _a_refusal_is_not_a_mood(understood):
     """True when the line says `down` of a refusal and says nothing about how it left them."""
     said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
     return bool(_TURNED_DOWN.search(said)) and not _HOW_IT_LEFT_THEM.search(said)
+
+
+# A home with something wrong with it is not a mood, and "flat" is the word that keeps saying so.
+# "why is my flat so cold even with the heating on" was answered with the low-mood plan - daylight
+# and a GP - because "flat" is in this row's key and "why" is all its ask side needs. The two lists
+# are read together: a home word and a cold or damp word in the same line is a house question, and a
+# mood line ("i feel flat", "my flat is a mess and i am fed up") has no cold word to match.
+_A_HOME_WORD = re.compile(
+    r"\b(?:house|home|flat|flats|room|rooms|bedroom|bedrooms|kitchen|living room|sitting room|"
+    r"lounge|garage|shed|cellar|basement|loft|attic|conservatory|hall|hallway|porch|workshop|"
+    r"caravan|bungalow|cottage|office|bedsit|storage heater)\b", re.I)
+_A_COLD_OR_DAMP_WORD = re.compile(
+    r"\b(?:cold|colder|coldest|freezing|chilly|chilled|perishing|freeze|freezes|frozen|"
+    r"warm|warmer|warmest|warmth|heating|heated|radiator|radiators|boiler|thermostat|"
+    r"draught|draughts|draughty|draft|drafts|drafty|damp|damps|dampness|damp patch|"
+    r"mould|mouldy|mold|moldy|condensation|insulation|insulate|double glazing)\b", re.I)
+
+
+def not_a_cold_or_damp_house(understood):
+    """True unless the line is a home with a temperature or damp problem, not a low mood."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
+    return not (_A_HOME_WORD.search(said) and _A_COLD_OR_DAMP_WORD.search(said))
 
 
 # The mood words are also said of things, and the mood rows were reading them as how somebody
@@ -1821,7 +2026,9 @@ def _not_a_night_of_going(understood):
 # appetite" and neither of these is either. The row below is the reader's own appetite, in the
 # phrases people use for it, and it stands down for somebody else's: a parent's or a husband's
 # going off their food is the family table's card, which can say what to do about them.
-_SOMEONE_ELSE = re.compile(
+# Its own name: a module-level name that is bound twice in this file is rebound for the whole
+# module, and this list is not the third-person list the depression card reads.
+_SOMEBODY_NAMED = re.compile(
     r"\b(?:mum|mums|mam|mom|mother|dad|dads|father|husband|wife|partner|boyfriend|girlfriend|"
     r"son|sons|daughter|child|children|kid|kids|nan|nana|gran|granny|grandma|grandad|grandpa|"
     r"sister|brother|aunt|uncle|cousin|friend|neighbour|neighbor|patient|client|elderly|"
@@ -1831,7 +2038,7 @@ _SOMEONE_ELSE = re.compile(
 def _my_own_appetite(understood):
     """True unless the line names somebody else as well or instead."""
     said = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
-    return not _SOMEONE_ELSE.search(said)
+    return not _SOMEBODY_NAMED.search(said)
 
 
 # "im not diabetic" and "i dont have hypertension" state the opposite of a row's subject, and a
@@ -1875,6 +2082,24 @@ _SAID_HOT = re.compile(
     r"(?:(?:a\s+bit|a\s+little|a\s+tad|a\s+lot|a\s+touch|really|so|very|too|that|quite|"
     r"proper|bloody|dead|still|always|absolutely)\s+)*"
     r"(?:hot|boiling|roasting|sweltering|sweaty|sweating|shivery|shivering|feverish)\b")
+
+
+# "piles" is the condition and also the verb: the emails pile up, the washing piles up, the bills
+# pile up. The row below already avoids the stack's own nouns, but the verb needs no noun at all -
+# "how do i stop my emails piling up" and "how do i stop the paperwork piling up" were both the
+# haemorrhoid answer - and an avoid word is read loosely, so a noun in the list cannot tell "piles
+# of" from "piles are". The guard reads where the word stands: "piling", "piles up", "pile up",
+# "piled up" is the heap, while "i have piles", "my piles hurt", "piles are painful" is the
+# condition, and no medical line says the word with "up" after it.
+_THE_WORD_IS_A_HEAP = re.compile(
+    r"\b(?:piles?|piling|piled)\s+up\b|\bpiling\b|\bpiles?\s+of\b", re.IGNORECASE)
+
+
+def _a_heap_not_the_condition(understood):
+    """False for "the emails keep piling up", true for "my piles are itchy"."""
+    clean = " ".join(str((understood or {}).get(key) or "")
+                     for key in ("clean", "norm_text", "text")).lower()
+    return not _THE_WORD_IS_A_HEAP.search(clean)
 
 
 ENTRIES = [
@@ -2255,6 +2480,7 @@ ENTRIES = [
                                      "breast feeding", "nursing", "while i'm expecting")),
           _medicine_when_pregnant_or_feeding,
           ask=("pregnant", "pregnancy", "expecting", "breastfeeding", "breast feeding", "nursing"),
+          lead=("yesno", _the_pregnancy_verdict),
           bias=1),
 
     entry("nosebleed", (("nosebleed", "nose bleed", "nose bleeds", "nose is bleeding",
@@ -2857,7 +3083,16 @@ ENTRIES = [
     entry("cold-have", (("i have a cold", "ive got a cold", "i ve got a cold",
                          "i think i have a cold", "i think ive got a cold", "i caught a cold",
                          "caught a cold", "my cold", "got a cold", "this cold", "a bad cold",
-                         "i have had this cold", "i have got a cold"),
+                         "i have had this cold", "i have got a cold",
+                         # "full of cold" is how a heavy cold is said, and it is the person
+                         # having one: without it the line fell to the reason the Earth has
+                         # winters, and the question "why is it so cold" is a different row.
+                         "full of cold", "full of the cold", "full of a cold",
+                         # "feel rough with a cold" and "feel ill and cold" are the same report
+                         # with the feeling said before the cold, and the tilt of the Earth was
+                         # answering every one of them.
+                         "rough with a cold", "ill with a cold", "ill and cold",
+                         "poorly with a cold", "poorly and cold"),
                         ("what should", "worse", "better", "started", "caught", "help", "do",
                          "rest", "last", "how long", "still", "have", "has", "got", "think",
                          "today", "now", "coming on", "feel", "feeling", "nose", "sneez",
@@ -2908,6 +3143,38 @@ ENTRIES = [
                         "cough sweets", "cough medicine", "cough syrup", "cough drop",
                         "cough drops", "honey", "lemon", "recorder", "smoker", "smoking",
                         "vape", "vaping")),
+    # "Can i take the baby out in the cold" was the cold remedy card, because "cold" is the
+    # illness to the rows that own it and the weather to everyone else. A baby in the cold is a
+    # dressing question, and it has the same answer in every town: one more layer than you.
+    entry("a-baby-in-the-cold",
+          (("baby", "babies", "newborn", "new born", "infant", "toddler", "pram", "buggy",
+            "pushchair", "car seat", "little one"),
+           # "temperature" is left out on purpose: to a parent it is a fever first ("can i give my
+           # baby anything for a temperature" was this card), and the weather words are enough
+           ("cold", "cold out", "in the cold", "outside", "out", "walk", "walking", "fresh air",
+            "winter", "freezing", "snow", "too cold", "wrap up", "layers",
+            "coat", "how many layers", "how warm", "dress")),
+          "Yes: a baby can go out in the cold, and the rule is one more layer than you are wearing, "
+          "plus a hat, and a blanket over the pram rather than a thick coat in the car seat. Feel "
+          "the chest or the back of the neck to check: warm and dry is right, hot and clammy or "
+          "cold hands mean a layer is wrong. Below about -5C, or in wind and rain, keep the walk "
+          "short, and bring a baby under six months in out of the cold quickly.",
+          avoid=("i have a cold", "she has a cold", "he has a cold", "has a cold",
+                 "had a cold", "caught a cold", "has a temperature", "poorly", "unwell", "ill",
+                 "temperature", "fever", "paracetamol", "ibuprofen", "calpol", "dose", "doctor",
+                 "runny nose", "cough",
+                 "temperature of", "fever", "snot", "sniffles", "chesty", "chest", "croup",
+                 "rash", "nappy", "feeding", "milk", "sleep", "sids", "cot death",
+                 # a keeping or a cooking line that happens to name a baby
+                 "keep", "keeps", "freeze", "defrost", "bath", "door", "window", "garden",
+                 # the room the baby sleeps in is the child-too-cold row's question, and it
+                 # answers it with the thermostat and the cot
+                 "room", "rooms", "cot", "bedroom", "nursery", "heating", "radiator",
+                 "thermostat", "indoors", "sleep", "sleeping", "blanket", "blankets"),
+          # the illness cards key the same "cold", so this one has to be sure it is the day's
+          # weather and not a virus: the baby words in the key are what the bias is for, and the
+          # child-too-cold row keys the same walk
+          bias=4),
     entry("baby-fever", (("weeks old", "week old", "newborn", "new born", "just born",
                           "months old", "month old", "6 weeks", "8 weeks", "10 weeks",
                           "3 months", "2 months", "baby", "babies"),
@@ -2947,9 +3214,16 @@ ENTRIES = [
     entry("body-temperature",
           (("normal temperature", "normal temp", "body temperature", "temperature in celsius",
             "temperature in c", "temperature in degrees", "temperature should a body be",
-            "temperature", "temp", "degrees", "a fever"),
+            "temperature", "temp", "degrees", "a fever",
+            # "is 37.2 normal" / "is 38 too high" hold no word for the reading at all, and the
+            # verdict word is the whole of the ask: the guard below decides whether the number
+            # is a body's.
+            "normal", "too high", "too low", "ok", "okay"),
            ("normal", "celsius", "degrees", "body", "37", "36", "38", "39", "what", "should",
-            "is", "fever", "high", "my")),
+            "is", "fever", "high", "my",
+            # "can a temperature be too low" is the other end of the same range, and the key
+            # held only the words for the top of it
+            "too low", "low", "hypothermia")),
           temperature_card,
           # The key can hold the bare word "temperature", because this card is only an answer
           # when the line is about a person: every other temperature is the thing's own. Without
@@ -2958,7 +3232,13 @@ ENTRIES = [
           # want", which are three different cards and none of them a body.
           ask=("body", "normal", "fever", "temp", "temperature is", "my temperature", "my temp",
                "i have a temp", "is 3", "37.5", "37", "36", "38", "39", "40", "someone",
-               "person", "adult", "celsius", "fahrenheit", "degrees c", "degrees f"),
+               "person", "adult", "celsius", "fahrenheit", "degrees c", "degrees f",
+               # "can a temperature be too low" names no number and no "is X", so the gate
+               # turned it away and the line went to the kitchen follow-up's shrug
+               "too low", "low temperature", "hypothermia", "too high", "high temperature"),
+          # A number on its own is read only inside the body's range, so "is 37.2 normal" is a
+          # reading and "is 7 normal" is not. With a noun in the line the words decide, as before.
+          guard=_a_body_temperature_number,
           avoid=("room", "house", "weather", "outside", "heating", "thermostat", "oven",
                  "in the oven", "fridge", "freezer", "water", "sea", "car", "engine", "cpu",
                  "laptop", "boiler", "radiator", "washing", "wash", "laundry", "clothes",
@@ -3021,6 +3301,61 @@ ENTRIES = [
                  # answers it; a fever counted in weeks or months is a chronic one anyway
                  "weeks old", "week old", "newborn", "new born", "just born", "days old",
                  "weeks", "week", "months", "month", "baby", "babies")),
+    # "What should I watch for?" is the warning-signs question, and about a child it had no card
+    # at all: the only rows in reach were the eye one (which read "keep an eye out for" as an eye)
+    # and, once that was fixed, nothing at all - a search hedge in answer to the question every
+    # parent asks on the second bad night. The four things worth watching are the same four
+    # whatever the illness is, so the row is keyed on the asking rather than on a symptom, and a
+    # named symptom keeps its own row through the avoid list below.
+    entry("watch-for-a-child",
+          # The asking comes in several clothes and they all want the same answer: what to watch
+          # for, what the signs are, what the red flags are, and how to tell if it is getting
+          # worse. Each of these words is only in reach with an asking phrase in the ask list
+          # below, so a named symptom or a film keeps its own row.
+          (("watch for", "watch out for", "watching out for", "look out for", "looking out for",
+            "keep an eye out for", "keep an eye on", "keeping an eye on", "what to look for",
+            "what should i look for", "what do i look for", "warning signs", "signs of",
+            "signs that", "what signs", "signs to watch", "be alert for",
+            "red flag", "red flags", "getting worse", "get worse",
+            "how do i know", "call 111", "needs a doctor", "need a doctor"),
+           ("child", "children", "kid", "kids", "baby", "babies", "toddler", "son", "daughter",
+            "boy", "girl", "little one", "year old", "years old", "months old",
+            "school age", "my lad", "my lass")),
+          "Watch four things: whether they will drink, whether they are still weeing, whether "
+          "they perk up between bouts, and how they are breathing. A child who is poorly but "
+          "plays between bouts is usually fine. Limp or drowsy, breathing fast or grunting, a rash "
+          "that will not fade under a glass, no wee for eight hours, or nothing kept down all day "
+          "means 111 today, and 999 if they are hard to wake or struggling to breathe.",
+          # a named illness or symptom is its own row's question, and those rows say more about it
+          avoid=("fever", "temperature", "temp", "rash", "cough", "croup", "breathing",
+                 "chickenpox", "chicken pox", "measles", "mumps", "seizure", "fit", "convulsion",
+                 "sick", "sickness", "vomiting", "vomited", "diarrhoea", "diarrhea", "unwell",
+                 "poorly", "ill", "not well", "ear", "earache", "throat", "tonsils", "stye",
+                 "conjunctivitis", "sticky eye", "head injury", "fell", "bumped",
+                 "allergic", "anaphylaxis", "asthma", "inhaler", "diabetes", "eczema",
+                 # a person's own worry is not a triage question and it has its own row
+                 "anxious", "anxiety", "panic", "panicking", "depressed", "depression",
+                 "mental health", "self harm", "suicidal",
+                 "nappy", "nappies", "teething", "colic", "reflux", "jabs", "vaccination",
+                 "vet", "dog", "cat", "puppy", "kitten",
+                 # something to watch is not something to watch: a film question is not this
+                 "film", "films", "movie", "movies", "tv", "telly", "show", "series",
+                 "episode", "netflix", "cinema", "documentary",
+                 # a newborn is a different answer and it already has one: the health visitor
+                 # and the 111 line, where "they perk up between bouts" is not the test
+                 "newborn", "new born", "just born", "days old", "weeks old"),
+          # The asking is what makes it this row. A bare "watch for" is not enough: "anything
+          # good to watch for the kids tonight" says it too, and that is a viewing request.
+          ask=("what should i watch", "what do i watch", "what to watch for", "watch for signs",
+               "what signs", "which signs", "what symptoms", "what are the signs",
+               "warning signs", "signs of", "signs that", "what should i look",
+               "what do i look", "look out for", "watch out for", "keep an eye out",
+               "keep an eye on", "what to look for", "what should i be looking",
+               "red flag", "how do i know if", "how do i know when", "how do i know whether",
+               "when to call 111", "getting worse"),
+          # the asking is worth more than a card that merely names the child: one of these lines
+          # was answered by a travel-documents card and one by a scam red-flag card
+          bias=2),
     entry("see-doctor-cold", (("doctor", "gp", "pharmacist"), ("cold", "cold's", "cough", "throat",
                                                               "flu", "sniffles", "better",
                                                               "monday", "worse")),
@@ -3161,6 +3496,16 @@ ENTRIES = [
                          "bad belly", "dicky tummy", "dicky stomach", "dodgy tummy",
                          "dodgy stomach", "running to the loo", "running to the toilet",
                          "runs to the loo", "loose stools", "runny tummy",
+                         # People say it the other way round as often as not, and the phrase
+                         # only matched in one order: "my stools are loose" reached nothing at
+                         # all while "i have loose stools" was answered, because "are" is not
+                         # one of the question words in the second half.
+                         # the plural only: "my stool is loose" is a chair leg, and the chair
+                         # repair keeps it (see `tests.test_loose_stools_are_the_stomach`)
+                         "stools are loose", "stools are runny",
+                         "stools are watery", "stools went loose",
+                         "watery stools", "runny stools", "loose poo", "loose poos",
+                         "poo is loose", "poos are loose", "runny poo",
                          # "i cant stay off the loo" is unambiguous; "up and down to the loo"
                          # is not, because it is just as often the night weeing (the night row
                          # has it, and its advice is the right one for that), so it is left out
@@ -3176,6 +3521,10 @@ ENTRIES = [
                         # only manage about five minutes" while talking about a running plan).
                         ("how long", "help", "stop", "what", "rehydrate", "have", "got", "had",
                          "feel", "feeling", "been", "since", "keep", "keeps", "keeping",
+                         # "my stools are loose" is "i have loose stools" with the verb swapped,
+                         # and "are" was not a word this half knew, so the phrase scored 3 on its
+                         # own and fell under MIN_SCORE 4, and the line went unanswered.
+                         "are", "is", "were",
                          "cant", "cannot", "with", "and",
                          # the going is said with the -ing verb the exercise rows also use:
                          # "im running to the loo" is the runs, and "running" beside "loo" is
@@ -3715,11 +4064,70 @@ ENTRIES = [
           # have their own answers
           ask=("muscle", "muscles", "strain", "strained", "pulled", "pull", "tweaked", "tweak",
                "tore", "torn", "tear"),
+          # "what is a pulled muscle" is the same question as "what do i do about one", so the
+          # card takes the bare definition too
+          explain=True,
           avoid=("back", "lower back", "spine", "sciatica", "groin", "hernia", "calf", "calves",
                  "clot", "swollen", "chest", "heart", "arm numb", "numb", "tingling",
                  "car", "engine", "wire", "cable", "rope", "chain", "sieve", "colander",
                  "tea", "coffee", "wine", "filter", "strained vegetables", "strained potatoes"),
           bias=1),
+    # An injury with no part named had no card at all: "how do i look after a football injury",
+    # "what should i do about an injury", "i got injured playing football, what should i do",
+    # "what do i do about a strain", "what is first aid for a sprain" and "how do i look after a
+    # sporting injury" were every one of them a search hedge on main, while the line that named
+    # the part ("i hurt my knee playing football") was answered well. So this is the first-aid
+    # answer for the lines that do not name a part, and every part with a card of its own stands
+    # it down - a knee, a back, an ankle and a shoulder each know more than this does.
+    entry("first-aid-injury",
+          (("injury", "injuries", "injured", "hurt myself", "hurt me", "done myself",
+            "done myself in", "done my in", "did my in", "strain", "strained", "sprain",
+            "sprained", "twisted", "knock", "banged myself", "got hurt"),
+           ("what should", "what do", "what can", "how do", "how to", "look after", "first aid",
+            "treat", "treatment", "care", "help", "advice", "deal with", "do about", "sort",
+            "now", "today", "yesterday", "this morning", "recover", "recovery",
+            "playing", "at the gym", "in the gym", "running", "football", "rugby", "netball",
+            "hockey", "cricket", "match", "training", "sport", "sports")),
+          "For a fresh knock, sprain or strain, the first two days do most of the work: rest it "
+          "from the movement that hurt, ice it for 15 to 20 minutes every few hours with a cloth "
+          "between the pack and the skin, wrap it firmly and keep it up when you sit. After 48 "
+          "hours gentle movement beats total rest, and paracetamol or ibuprofen eases the pain. "
+          "Go to A&E the same day if you cannot put weight on it, a joint looks crooked, or the "
+          "skin past the injury goes numb, white or cold; see a GP or a physio if it is no better "
+          "after a week, if it gives way, or if the swelling keeps coming back.",
+          # the part named is the part's own card: the knee, the back, the ankle and the shoulder
+          # each answer their own line better than one paragraph about injuries in general
+          avoid=("ankle", "ankles", "knee", "knees", "shoulder", "shoulders", "back", "backs",
+                 "wrist", "wrists", "elbow", "elbows", "hip", "hips", "hamstring", "hamstrings",
+                 "calf", "calves", "thigh", "thighs", "shin", "shins", "groin", "achilles",
+                 "neck", "head", "eye", "eyes", "tooth", "teeth", "finger", "fingers", "thumb",
+                 "toe", "toes", "foot", "feet", "hand", "hands", "arm", "arms", "leg", "legs",
+                 "chest", "tummy",
+                 # the same words in a kitchen or a workshop
+                 "car", "engine", "wire", "cable", "rope", "chain", "sieve", "colander",
+                 "tea", "coffee", "wine", "filter", "strained vegetables", "strained potatoes",
+                 "saucepan", "netting", "fence",
+                 # somebody else's injury is the hurt-limb answer for a person, and a pet's is
+                 # the vet's
+                 "my son", "my daughter", "my child", "my kid", "my baby", "my husband",
+                 "my wife", "my partner", "my mum", "my mom", "my dad", "my dog", "my cat",
+                 "my puppy", "the dog", "the cat", "horse",
+                 # an injury at work is a claim, a sick note or a boss question
+                 "compensation", "claim", "insurance", "sick note", "sick pay", "workplace",
+                 "accident at work", "boss", "hr",
+                 # and the prevention and the comeback have their own answers
+                 "prevent", "prevention", "avoid", "stop it happening", "warm up",
+                 "start running again", "back to running", "back to the gym", "how often",
+                 # getting back to it is the comeback answer's line, whatever brought it on:
+                 # "how do i start running after an injury" is a plan for next week, not the
+                 # first two days of a fresh knock
+                 "start running", "start jogging", "start exercising", "running after",
+                 "running again", "get back into", "getting back into", "return to running",
+                 "return to exercise", "comeback", "back into training",
+                 "how do i not", "how not to", "not get injured", "not get hurt",
+                 "stop getting injured", "stop getting hurt", "stop injuring",
+                 "keep getting injured", "keep getting hurt", "how do i stop getting",
+                 "without getting hurt", "without getting injured", "dont want to get injured")),
     entry("mouth-ulcers-rinse", (("ulcer", "ulcers"), ("mouth", "mouths", "tongue", "gum", "gums",
                                                  "lip", "inside", "recurring")),
           "Most mouth ulcers heal in a week to ten days: rinse with warm salty water, avoid spicy "
@@ -3758,7 +4166,12 @@ ENTRIES = [
           "or pharmacist look, because they can point at iron or thyroid, and a dark streak that "
           "does not grow out is seen within two weeks.",
           avoid=("paint", "varnish", "polish", "gel", "acrylic", "fake", "dog", "cat", "hammer",
-                 "snapped", "broke", "filing")),
+                 "snapped", "broke", "filing"),
+          # the other nail: "what nail for plasterboard" and "which nails for a stud wall" are a
+          # fixing question, and this row answered them with the ridges on a fingernail. The
+          # workshop words in the line say which nail it is, the same test the cutting and fungus
+          # rows use.
+          guard=_the_nail_is_a_persons),
     entry("throat-lump",
           (("throat",),
            ("something stuck", "something is stuck", "feels like something", "feels stuck",
@@ -3891,6 +4304,12 @@ ENTRIES = [
                  "sting", "stings", "stung", "bee", "bees", "wasp", "wasps", "hornet",
                  "insect", "insects", "nettle", "nettles", "ant", "ants", "mosquito",
                  "mosquitos", "mosquitoes", "horsefly", "tick", "midge", "gnat",
+                 # A shine is a state of the skin, not a lump in it: "how do i get rid of the
+                 # shine on my hands" was answered "a smooth lump on the back of the wrist that
+                 # comes and goes is usually a ganglion cyst", because `hand` is a key here and
+                 # the getting words are its ask words. A state has no lump to look at, so the
+                 # states stand this row down wherever they appear.
+                 "shine", "shines", "shiny", "sheen", "gleam", "glow", "glowing", "greasy",
                  # a shoulder is a road as well as a joint: "the hard shoulder had glass on it"
                  # was answered "a smooth lump on the back of the wrist ... is usually a ganglion
                  # cyst", because `shoulder` is a key here and `hard` is one of its ask words
@@ -3958,6 +4377,12 @@ ENTRIES = [
                  "my kid", "seizure", "fit", "convulsion", "epilep",
                  "phone", "car", "steering", "washing machine", "machine", "train", "bus",
                  "lift", "camera", "picture", "video", "cake", "jelly", "tin", "handlebars",
+                 # a chair that wobbles is a repair in wood, and a fan that wobbles is the
+                 # machine's question: both were answered "most shaking like this is caffeine"
+                 # because the wobble word is the one this row shares with them.
+                 "chair", "chairs", "table", "tables", "desk", "stool", "stools", "bench",
+                 "sofa", "settee", "wardrobe", "shelf", "shelves", "the fan", "tower fan",
+                 "ceiling fan", "desk fan", "pedestal fan", "floor fan", "appliance",
                  # a shaky feeling with sickness, or weak hands with no shake in them, are
                  # their own lines and the sickness and numbness answers handle them better
                  "sick", "sickness", "nauseous", "vomit", "vomiting", "throw up",
@@ -4345,7 +4770,12 @@ ENTRIES = [
                  # the morning-after pill's own row names its sickness and its three-hour rule,
                  # which is the answer to "what are the side effects of the morning after pill":
                  # the leaflet paragraph is about a tablet taken every day
-                 "morning after", "emergency contraception", "plan b", "levonelle", "ellaone"),
+                 "morning after", "emergency contraception", "plan b", "levonelle", "ellaone",
+                 # which jab and when is the vaccine rows' question, not this leaflet answer:
+                 # "is the shingles jab worth it" was told to read the leaflet in the box
+                 "booster", "boosters", "mmr", "measles", "mumps", "rubella", "shingles",
+                 "pneumococcal", "pneumonia", "tetanus", "whooping cough", "am i due",
+                 "when should i", "do i need", "due for"),
           bias=1,
           # "are these side effects normal" is answered by the leaflet in the third clause; the
           # verdict is the row's own reading of the same facts, so the line that asks for one
@@ -4383,6 +4813,50 @@ ENTRIES = [
           "Every two years is the usual rhythm, and every year if you are over 70, diabetic or have "
           "a close relative with glaucoma. It is free on the NHS for under 16s, over 60s and people "
           "with diabetes, and it checks the health of the eye as well as the prescription."),
+    # "do i need glasses" is the question behind a blurry evening and a sore pair of eyes, and
+    # nothing answered it: "does that mean i need glasses", asked after a turn about eyes aching
+    # over a book, got the cannot-weigh-that health hedge and a phone call to 111, which is not a
+    # verdict on anything. Only a sight test says for certain, so the answer is yes, go and have
+    # one, with what it costs and what the blur usually is - the row is the verdict and the step.
+    # A "when" or a "how often" is the interval's question, and the eye-test row above answers
+    # it ("every two years, every year from 70"). This row is for the person asking whether they
+    # need one at all, so it stands down on a when-ask: "when should i get my eyes tested" lost
+    # the interval and got "book a sight test" instead, which answers a question nobody asked.
+    entry("need-glasses",
+          (("need glasses", "need new glasses", "need spectacles", "need specs",
+            "get glasses", "sight", "eyesight", "my vision", "my eyes", "blurry",
+            "blurred", "cant see", "can't see", "struggle to see", "squint at"),
+           ("need", "do i need", "do i have to get", "should i get", "will i need",
+            "might i need", "worth getting", "have my eyes tested", "get my eyes tested",
+            "need an eye test", "need a sight test", "do with")),
+          "Book a sight test: about twenty minutes, and the only thing that says whether you "
+          "need glasses and what prescription - nothing you do at home settles it. The blur "
+          "usually has a name: eyes that ache after a chapter in bed are the focusing muscles "
+          "tired from close work and dim light, and a distance that has gone soft is short "
+          "sight, which a pair from the test sorts. It is free on the NHS if you are under 16, "
+          "over 60, diabetic or a close "
+          "relative has glaucoma, and \u00a325-\u00a345 on the high street otherwise. Sudden "
+          "blur in one eye, floaters, flashes or a curtain across the sight is an A&E or "
+          "optician-today job.",
+          ask=("need", "do i need", "should i get", "will i need", "have to", "worth",
+               "have my eyes tested", "get my eyes tested", "might i"),
+          guard=not_a_when_ask,
+          # a pair of glasses that is dirty, broken or fogged up is the cleaning and repair rows'
+          # question, and the money and the interval have their own answers
+          avoid=("clean", "cleaning", "dirty", "smudge", "smudges", "smudged", "fog", "foggy",
+                 # a glass is a measure as well as a thing on your nose: "do i need 8 glasses of
+                 # water" is the water row's question and this row took it
+                 "water", "drink", "drinks", "drinking", "litre", "litres", "liter", "liters",
+                 "pint", "pints", "fluid", "fluids", "wine", "wine glass", "wine glasses",
+                 "glass of", "glasses of", "a day", "each day", "per day",
+                 "fogged", "scratch", "scratched", "scratches", "repair", "repairs", "fix",
+                 "fixed", "broken", "broke", "arm", "arms", "frame", "frames", "lens", "lenses",
+                 "sunglasses", "prescription", "how much", "cost", "price", "afford", "free",
+                 "how often", "every two years", "driving", "for driving", "contacts",
+                 "contact lens", "contact lenses", "laser", "cataract", "floaters",
+                 "child", "children", "kid", "kids", "school", "my son", "my daughter",
+                 "toddler", "baby"),
+          bias=2),
     # A hypo is the diabetic emergency people send most, and the crisis answer in the safety module
     # is the right answer to "im having a hypo". It deliberately stands aside for the question
     # shapes - "how do i know im having a hypo", "what are the signs of a hypo", "how do i avoid a
@@ -4806,6 +5280,25 @@ ENTRIES = [
           # See `_the_eye_is_said`.
           guard=_the_eye_is_said),
 
+    # Water in the eye is not the litres a shower uses, and it is not a speck either: clean water
+    # does no harm, so a line that says the water keeps getting in, or asks how to rinse the eye,
+    # is asking what to do about it. The shower was the worst of these - "i keep getting water in
+    # my eye in the shower" came back as "a shower runs at about 10 litres a minute" - because the
+    # water-use table in home.py owns the word "shower". The table now stands down for an eye, and
+    # the answer here is the rinse, the sting and the tap.
+    entry("water-in-the-eye", (WATER_IN_EYE, EYE_RINSE_ASK),
+          "Water alone does no harm to an eye, so if it stings there is soap or shampoo in it: hold "
+          "the lids open and rinse with cool clean water for about five minutes, blink, and check "
+          "your sight is clear. Turn the shower down or aim it at your shoulder while you wash "
+          "your hair, and get the eye looked at the same day if it is still sore, red, or your "
+          "sight is blurred after the rinsing.",
+          # a chemical splash is the rinse-and-ring answer in the safety module, and a scale or a
+          # plant is not about a person's eye at all
+          avoid=("bleach", "chemical", "chemicals", "acid", "alkali", "paint", "white spirit",
+                 "limescale", "hard water", "descale", "shower screen", "shower head",
+                 "shower tray", "grout", "plant", "plants", "contact lens", "lens solution"),
+          bias=1),
+
     # An eye with something in it is not a dry eye, and "eyes sting" was enough to send it to the
     # tear-film answer. The subject is what got in, so the row keys on that and the second part
     # holds the way people ask about it.
@@ -5015,11 +5508,37 @@ ENTRIES = [
             "feel very blue", "im feeling a bit blue", "feeling really blue",
             "im feeling flat", "feel a bit flat", "feeling a bit flat",
             "am blue", "am so blue", "am i blue", "am i so blue", "know why im blue",
+            # An adverb between the feeling word and `flat` breaks the phrase, and the person is
+            # still saying how they feel. `i feel quite flat this week`, `feel pretty flat`,
+            # `i feel very flat` and `i felt flat yesterday` got the short "Sorry to hear
+            # that. A walk and someone to talk to" line, and `i feel a little flat` got the
+            # storage card ("a shelf over the door, hooks on the back of a cupboard door").
+            # Each phrase is carried by the feeling verb or by `im`, never by the adverb alone:
+            # `really flat` and `a bit flat` are said of a mattress, a tyre, a road and a
+            # battery all day, and those keep their own cards.
+            "feel quite flat", "feeling quite flat", "im quite flat", "im feeling quite flat",
+            "feel pretty flat", "feeling pretty flat", "im pretty flat",
+            "feel really flat", "feeling really flat", "im really flat",
+            "feel very flat", "feeling very flat", "im very flat",
+            "feel so flat", "feeling so flat", "im so flat", "im feeling so flat",
+            "why do i feel so flat", "why i feel so flat",
+            "feel a little flat", "feeling a little flat", "im a little flat",
+            "feel a bit flat today", "feeling a bit flat today", "felt flat",
+            "feel flat today", "feeling flat today", "feel flat this week",
+            "feeling flat this week", "feel flat all week", "feel flat again",
+            "feel flat again", "feeling flat again", "feel quite flat today",
             "why i feel blue", "why im so blue", "why i am so blue",
             "feel down in the", "feeling down in the",
             "cheer up", "feel happier", "happier", "feel better", "feeling better",
             "in a rut", "stuck in a rut", "no joy in anything", "nothing interests me"),
            ("how do i", "how can i", "what can i do", "what should i do", "stop", "lift",
+            # "im quite flat today" and "i felt flat yesterday" are the same self-report with
+            # nothing else in the line, and the mood phrase alone was not enough to make the
+            # pair. `felt` is a feeling verb and `today`/`yesterday` are when they felt it.
+            # The pair still needs one of the mood phrases above, so none of these adds an
+            # answer of its own. `im` and `i am` are deliberately not here: they would take
+            # the plain "im sad" and "im weepy" off the chat module's warm short line.
+            "felt", "today", "yesterday", "this week",
             "cheer", "feel", "feeling", "happier", "better", "keeps", "keep", "always",
             "all the time", "every day", "most days", "advice", "tips", "help", "why",
             "i dont know why", "don't know why", "nothing", "anymore", "any more")),
@@ -5036,7 +5555,8 @@ ENTRIES = [
           # a blue sky, a flat tyre and a flat beer are things, not somebody's mood (and a
           # refusal said of "down" is not one either, which is main's guard below)
           guard=lambda understood: (_the_mood_is_the_persons(understood)
-                                    and not _a_refusal_is_not_a_mood(understood)),
+                                    and not _a_refusal_is_not_a_mood(understood)
+                                    and not_a_cold_or_damp_house(understood)),
           # somebody else's line, every one of them: a crisis (the safety module's own card), a
           # grief, a loneliness question, the named condition, the winter version, an unhappy job,
           # a relationship, and a bad day that is a complaint rather than a question
@@ -5333,7 +5853,12 @@ ENTRIES = [
                  "bud", "buds", "q-tip", "qtip", "olive oil", "drops", "syringe",
                  "syringing", "unblock", "unblocking", "water in my ear", "water in the ear",
                  # hearing that fades is the wax answer's question, pain or not
-                 "cant hear", "can't hear", "hearing", "hear", "deaf", "deafness"),
+                 "cant hear", "can't hear", "hearing", "hear", "deaf", "deafness",
+                 # A pop is not an ache on its own, but an ear that hurts after it is still an
+                 # ache: "my ear popped and now it hurts" is the pain answer's question. So the
+                 # ache row stands down on the pressure words, not on the pop, and the pop row
+                 # stands down on the pain words instead (see `ears-pop` in science.py).
+                 "pressure", "eustachian"),
           # "my ear hurts when i swallow" otherwise reaches the bird-migration answer, because
           # swallows are a subject too; the ear is the subject of a line that says it hurts
           bias=1),
@@ -5626,26 +6151,100 @@ ENTRIES = [
     # anyone can look for, and one of them - a red streak running up the limb - is a same-day job.
     # The cut itself is the first-aid answer in bot/modules/safety.py; this row only takes the
     # lines that name an infection.
+    # The other half of the stitch question, which had nothing: "how long do stitches stay in"
+    # and "when do the stitches come out" were a search hedge, and `_a_wound_not_a_cramp` above
+    # says why in as many words - taking them out is another question from closing the cut. The
+    # answer is the body's own timetable, so it is one row and the line only has to say when.
+    entry("stitches-out",
+          (("stitches", "stitch", "sutures", "suture", "stitches out", "staple", "staples"),
+           # The words that carry the question are the phrases, not the bare joiners. With
+           # `when`, `out`, `long`, `in`, `days` and `weeks` in the key, any line holding
+           # "stitches" and one of them scored: "my stitches came out and it opened again" (a
+           # wound that has reopened, which wants a person, not a timetable) and "stitches in my
+           # hand, can i drive" both took the timetable. Every wording below keeps a phrase.
+           ("how long", "how many days", "come out", "comes out", "coming out",
+            "take out", "taken out", "taking out", "remove", "removed", "removing",
+            "stay in", "stays in", "left in", "leave in", "leave them in", "left them in",
+            "leave stitches in", "leaving stitches in", "leaving them in",
+            "dissolve", "dissolvable", "dissolving",
+            # "when" alone is a joiner, so the possessive is what makes it the timetable's
+            # question: "when do my stitches come out" is, "when do i need stitches" is the cut.
+            "when do they", "when do my", "when do the", "when do these", "when will they",
+            "when will my", "when will the", "when can they", "when can my", "when are they",
+            "when are my", "when should i take", "when should they", "when out", "when is it out",
+            "how long until", "how long before", "how long till")),
+          "They come out on the body's own timetable: five days on the face or neck, seven to "
+          "ten on the scalp, chest or belly, ten to fourteen on an arm or a leg, and around two "
+          "weeks over a joint. A nurse at the surgery or the walk-in takes them out, usually "
+          "with no appointment, and leaving them in too long is what leaves a ladder of marks. "
+          "Keep them dry for the first day or two and do not pick at the scab. Dissolvable "
+          "stitches and skin glue need no appointment: the glue peels off by itself in about a "
+          "week to ten days, and the stitches under the skin go in two to three weeks.",
+          guard=_a_wound_not_a_cramp,
+          # what the cut needs and whether it is infected are the two rows beside this one, and
+          # a graze that has gone red is not a timetable question
+          avoid=("infected", "infection", "pus", "red streak", "smelly", "hot to touch",
+                 "should i get", "do i need", "needs stitches", "need stitches",
+                 "is it infected",
+                 # "he had me in stitches" and "i was in stitches" are a laugh, and the phrase
+                 # is the whole of the signal: "how long do stitches stay in" never says it.
+                 "in stitches", "had me in", "having me in", "left me in", "hysterics",
+                 "laughing", "a good laugh",
+                 # a staple is a staple of paper as often as of skin, and the guard above now
+                 # lets the word through: the desk senses are fenced here instead
+                 "stapler", "staplers", "paper", "papers", "sheet", "sheets", "paperwork",
+                 "documents", "magazine", "magazines", "booklet", "office", "gun",
+                 # a wound that has come apart, and the everyday things people ask about doing
+                 # with the threads in, are not a timetable: the first needs a person today and
+                 # the rest were a punt before this row and go back to it
+                 "opened again", "opened up", "reopened", "re-opened", "came apart", "come apart",
+                 "split open", "burst open", "fell open", "come undone", "came undone", "undone",
+                 "drive", "driving", "shower", "showering", "bath", "bathing", "swim", "swimming",
+                 "gym", "exercise", "work out", "workout", "football", "run", "running"),
+          bias=1),
+
     entry("cut-needs-stitches",
           (("stitches", "stitch", "suture", "sutures", "glued", "glue"),
            ("need", "needs", "needed", "get", "getting", "should", "could", "might", "wound",
             "cut", "cuts", "gash", "cutting", "gaping", "deep", "close", "closed", "nurse",
-            "hospital", "a&e", "walk-in", "walk in", "how do i know")),
+            "hospital", "a&e", "walk-in", "walk in", "how do i know",
+            # a wound that has come apart again is the closing question, not the timetable: the
+            # edges that fall apart are the first thing the reply names, and it is the one line
+            # in this family where the person needs to be seen rather than told a number of days
+            "opened again", "opened up", "reopened", "re-opened", "split open", "came apart",
+            "come apart", "fallen apart", "fell apart", "come undone", "came undone", "undone",
+            "opened", "split", "burst")),
           "A cut needs closing properly if the edges fall apart when you let go, if it is longer "
           "than about 2cm, if it is on the face, a hand or over a joint, or if it is a bite or has "
           "grit in it: go to a walk-in or A&E, ideally within six to eight hours and sooner for a "
           "face wound. A clean, straight cut shorter than that holds with a plaster or "
           "steri-strips. Press a clean cloth on it hard for ten minutes first so the bleeding "
           "stops, and check your tetanus is up to date.",
+          # the timetable is the row above's, so a line asking when they come out is not this one.
+          # Only the words that say "out": "when do" and "when can" sat here too, and they said
+          # nothing about taking them out - "when do i need stitches" says "when do" before it
+          # says "need", so the cut card stood down for a question nobody else answers and the
+          # person got a search hedge.
+          avoid=("how long", "come out", "comes out", "coming out", "take out", "taken out",
+                 "remove", "removed", "stay in", "stays in", "left in", "leave in",
+                 "dissolve", "dissolvable", "dissolving"),
           guard=_a_wound_not_a_cramp),
 
 
     entry("cut-infected",
           (("infected", "infection", "infections", "septic", "pus", "pusy", "pus-filled",
             "puss", "oozing", "weeping", "red streak", "red streaks", "yellow", "green",
-            "crusty", "crusting", "smelly", "smell", "hot to touch", "gone hot"),
+            "crusty", "crusting", "smelly", "smell", "hot to touch", "gone hot",
+            # redness and swelling are two of the four signs the reply names, and a line that says
+            # them was reaching other cards entirely: "my stitches are red and swollen" was a back
+            # pain card. The `ask` gate below is what keeps "my knee is swollen" out.
+            "red", "redder", "redness", "swollen", "swelling", "warm", "warmer"),
            ("cut", "cuts", "wound", "wounds", "graze", "grazes", "scab", "scabs", "gash",
             "scratch", "scratches", "scrape", "tattoo", "tattoos", "piercing", "piercings",
+            # a closed wound is a wound, and the row that answers "my cut has a red streak" was
+            # silent on the same thing said about the threads holding it shut: "my stitches are
+            # infected" had no answer at all and got the chat filler instead.
+            "stitch", "stitches", "suture", "sutures", "staple", "staples",
             "finger", "hand", "thumb", "knee", "shin", "arm", "leg", "foot", "toe")),
           "A wound that is infected shows up two or three days after the injury: the redness "
           "spreads outwards (more than about a centimetre a day), the skin round it is hot and "
@@ -5664,7 +6263,10 @@ ENTRIES = [
                 "scratch", "scratches", "scrape", "tattoo", "tattoos", "piercing", "piercings",
                 "infection", "infected", "infections", "septic", "pus", "pusy", "puss",
                 "pus-filled", "oozing", "weeping", "streak", "streaks", "crust", "crusty",
-                "crusting", "smell", "smelly", "hot to touch", "gone hot"),),
+                "crusting", "smell", "smelly", "hot to touch", "gone hot",
+                # a wound that has been closed is still the wound: "my stitches are red and
+                # swollen" names no cut word at all
+                "stitch", "stitches", "suture", "sutures", "staple", "staples"),),
           # an infection somewhere else is another entry's question, and the words are the
           # giveaway: a chest, throat, ear, urine or dental infection names no wound.
           avoid=("chest", "throat", "ear", "ears", "urine", "urinary", "uti", "kidney",
@@ -5680,7 +6282,12 @@ ENTRIES = [
                  "ammonia", "paint", "thinners", "drains", "drain", "sewage", "burning",
                  "oil", "kerosene", "paraffin",
                  "diabetes", "diabetic", "ulcer", "ulcers", "operation", "surgery",
-                 "caesarean", "c-section", "stitches out")),
+                 "caesarean", "c-section", "stitches out"),
+          # the hot-and-swollen card in body.py answers any line that says red beside a part, and
+          # it was taking the wound's own lines: "my cut is red and swollen" was told about chest
+          # pain and a hot calf. A line that names a wound, a stitch or a tattoo is this row's,
+          # so it wins the tie rather than the general card.
+          bias=2),
 
     # An infected finger is neither a wound nor an overused tendon. "my finger is red and
     # throbbing" was answered with the typing-and-tendon card, "my finger hurts and is hot"
@@ -5869,6 +6476,8 @@ ENTRIES = [
                             "lid is swollen", "puffy eyelid", "eyelid has a", "lump on my eyelid",
                             "bump on my eyelid", "spot on my eyelid", "eyelid hurts")),
           _eye_reply,
+          # "keep an eye out for a rash" is watching, not an eye that hurts (see the guard)
+          guard=not_keeping_an_eye_on_it,
           avoid=("screen", "screens", "monitor", "phone", "laptop", "tv", "test", "tested",
                  "glasses", "contact lens solution", "makeup", "shadow")),
     # A glass eye is not a screen: "my glass eye is sore" was answered with the 20-20-20 rule,
@@ -6090,6 +6699,15 @@ ENTRIES = [
                  "flat", "house", "home", "room", "bedroom", "living room", "the heating",
                  "thermostat", "insulation", "damp", "windows", "window",
                  "weather", "outside", "for the house", "beer", "fridge", "freezer",
+                 # the thing that is cold decides the answer: a house, a flat, a room and a bedroom
+                 # each have their own heating or sleep row, and "why is my house so cold" was
+                 # answered with a thyroid test because a bare "cold" and "so cold" are all this
+                 # row needs. Only the body keeps this row, so every other cold thing stands it down.
+                 "house", "houses", "flat", "flats", "home", "my house", "the house", "home is",
+                 "house is", "flat is", "bedroom", "bedrooms", "room", "rooms", "kitchen",
+                 "bathroom", "garage", "conservatory", "living room", "shed", "sheds",
+                 "outbuilding", "outbuildings", "loft", "attic", "cellar", "basement",
+                 "hallway", "porch", "workshop", "caravan",
                  "sore", "flu", "virus", "shiver", "shivering", "a cold", "cold sore",
                  # a cold you keep catching is science's repeated-colds question, not a chill
                  # not "colds": that reads as a form of "cold" and would zero the entry
@@ -6172,7 +6790,14 @@ ENTRIES = [
                  # nor is how long a baby sleeps a question about conceiving: the same bare
                  # word and "how long" answered it with a year of trying and folic acid
                  "baby sleep", "babies sleep", "newborn sleep", "sleep through", "sleeps through",
-                 "nap", "naps", "wake for a feed", "waking for feeds"),
+                 "nap", "naps", "wake for a feed", "waking for feeds",
+                 # A baby the person already has is not a baby they are trying for: "who can help
+                 # me with the baby", "i need help with the baby" and "nobody helps me with the
+                 # baby" were all told a year of trying and folic acid, because "baby" is in the
+                 # key and "help" is one of its ask words.
+                 "the baby", "my baby", "our baby", "this baby", "new baby", "newborn",
+                 "with a newborn", "look after the baby", "look after my baby", "nobody helps",
+                 "no help with", "no one to help", "whos going to help"),
           guard=not_a_childs_age, bias=1),
     entry("testicle-pain", (("testicle", "testicles", "scrotum", "ball", "balls"),
                             ("pain", "hurts", "hurting", "ache", "aching", "swollen", "lump",
@@ -6364,7 +6989,12 @@ ENTRIES = [
             "nail polish", "nail varnish", "gel nails", "acrylic nails"),
            ("paint", "painting", "polish", "varnish", "manicure", "base coat", "top coat",
             "dry", "drying", "smudge", "smudged", "chip", "chips", "chipping", "last longer",
-            "make them last")),
+            "make them last",
+            # how a coat went on: "my nails came out lumpy" and "my nail polish came out streaky"
+            # are about the painting, and "lumpy" alone was the gravy card's word. The food
+            # stand-down below already keeps a sauce and a gravy with their own rows.
+            "lumpy", "lumps", "streaky", "streaks", "bubbles", "bubbly", "uneven", "patchy",
+            "came out", "goes on thick", "too thick", "dragging", "tacky", "tacky to")),
           ("Two thin coats beat one thick one, and a base coat stops the colour staining the "
            "nail: wipe each nail with remover first so there is no oil on it, paint from the "
            "middle of the cuticle outwards in three strokes, and give each coat 10 minutes so it "
@@ -6428,20 +7058,31 @@ ENTRIES = [
           (("glandular fever", "glandular", "mono", "mononucleosis", "kissing disease",
             "epstein barr", "epstein-barr", "ebv"),
            ("how long", "last", "lasts", "lingering", "tired", "tiredness", "exhausted",
-            "fatigue", "rest", "recover", "recovery", "sport", "football", "rugby", "gym",
-            "exercise", "running", "spleen", "alcohol", "work", "school", "university",
-            "blood test", "fever", "sore throat")),
+            "fatigue", "rest", "recover", "recovery", "sport", "sports", "football", "rugby",
+            "gym", "exercise", "running", "spleen", "alcohol", "work", "school", "university",
+            "blood test", "fever", "sore throat",
+            # the question a parent actually asks is about one sport, by name, after the illness
+            # has been named: "my daughter wants to play netball but she has glandular fever" was
+            # a plan for a term of cheap lessons on base
+            "netball", "hockey", "basketball", "lacrosse", "contact sport", "play sport",
+            "back to sport", "training", "team", "match", "matches", "pe kit")),
           # "it lasts" is how a person gives a timeline, and the keeping reader in the answers
           # module is what answers a "how long does X last" line: a card that gives the length
           # without that shape was passed over for the general fever timeline.
-          "For most people it lasts about four to six weeks, and the tiredness often lingers for "
-          "two or three months after the sore throat and fever have gone. Rest is the "
+          "Glandular fever is the Epstein-Barr virus, and for most people it lasts about four to "
+          "six weeks, with the tiredness often lingering for two or three months after the sore "
+          "throat and fever have gone. Rest is the "
           "treatment: sleep when you need to, drink, take paracetamol or ibuprofen for the sore "
           "throat, and no alcohol while you are unwell because the liver is involved. The one "
           "rule people miss is no contact sport, heavy lifting or anything with a risk of a knock "
           "for at least four weeks - the spleen is enlarged and can rupture - and your GP may say "
           "longer. Sudden severe pain in the upper left of the tummy means A&E. A blood test "
           "confirms it, and tiredness that is not lifting after three months is worth a review.",
+          # The child's-fever card keys on "fever" and a child word, which is most of these
+          # lines, so the card that names the illness has to outrank it by a point to be asked at
+          # all: a parent asking about glandular fever wants the weeks and the sport rule, not
+          # how to bring a temperature down.
+          bias=1,
           avoid=("gland", "glands", "lump", "lumps", "neck", "throat lump")),
     entry("shin-splints", (("shin", "shins", "shin splint", "shin splints", "splints", "calf"),
                            ("pain", "hurts", "hurting", "ache", "sore", "running", "run",
@@ -7174,6 +7815,10 @@ ENTRIES = [
     # also names the pale it belongs to, because the composer cuts a repeated answer down to a
     # later sentence: a cut-down reply used to be the bare "111 today" line, which is an alarm
     # where the person asked about a face.
+    # "can i hang washing out today" and "can i put washing out when its raining" reached this row
+    # on "wash" and "out": a line about a washday is not a line about a pale child. The laundry
+    # words are here rather than in a guard because the row is keyed on two groups and the phrase
+    # that matched is the one to stand aside for.
     entry("pale-look",
           (("pale", "paleness", "pallid", "washed out", "no colour", "grey", "gray",
             "white as a sheet", "losing colour", "lost colour", "colour has gone",
@@ -7189,7 +7834,13 @@ ENTRIES = [
           "or someone you cannot wake is 999, and so is pale and clammy with chest pain. Pale with a "
           "rash that does not fade when you press a glass on it is 999 too.",
           # a pale pastry, a pale sauce, a pale ale and a pale lawn are other cards' questions
-          avoid=("bread", "pastry", "cake", "sauce", "sourdough", "dough", "roast", "gravy",
+          avoid=("washing", "washing out", "wash out", "wash", "laundry", "washing line",
+                 "line", "peg", "pegs", "dry", "drying", "tumble dryer", "load of washing",
+                 "clothes", "whites", "bedsheets", "sheets",
+                 # a sock or a shoe asked for beside a colour is a clothing question: "what colour
+                 # socks with grey trousers" was read as a person gone grey and told about iron
+                 "sock", "socks", "shoe", "shoes", "trousers", "shirt", "jumper", "dress",
+                 "bread", "pastry", "cake", "sauce", "sourdough", "dough", "roast", "gravy",
                  "mince", "stew", "casserole", "bake", "baked", "baking", "oven", "recipe",
                  "ale", "lager", "beer", "stout", "wine", "coffee", "milk", "tea", "butter",
                  "bolognese", "curry", "onion", "garlic", "rice", "pasta", "potato", "potatoes",
@@ -7203,10 +7854,26 @@ ENTRIES = [
                  "flu", "run down", "rundown",
                  "breathless", "breathing", "breath", "blue", "grey lips", "rash", "floppy",
                  "limp", "unresponsive", "not drinking", "wont drink", "won't drink",
+                 # a colour that is changing in someone's hair is not a pale look: "im going
+                 # grey", "im going grey at 30" and "my beard is going grey" are the melanin
+                 # question, and with "im" in the second group this row was the one that answered
+                 # them - with a list of children's red flags. "went grey" stays out of this list,
+                 # because "his face went grey" is exactly the shut-down this row is for.
+                 "going grey", "going gray", "turning grey", "turning gray",
+                 "turn grey", "turn gray", "grey hair", "gray hair", "beard", "beards",
+                 "moustache", "mustache", "eyebrows", "eyebrow",
                  # not people: eyes, the sky, a car in a photo and a pet are other questions, and
                  # a heavy period has its own card, which is the more specific answer
                  "eyes", "eye", "sky", "cloud", "clouds", "car", "cars", "photo", "picture",
                  "paint", "period", "periods", "cat", "cats", "dog", "dogs", "kitten", "puppy",
+                 # a colour that has gone out of a garment is a wash question: "my old jeans have
+                 # gone grey" and "my towels have gone grey" were the laundry card on main and
+                 # reached this row's list of children's red flags once the melanin row learned to
+                 # decline them. Not "wash" on its own - this row's own key holds "washed out".
+                 "jeans", "trousers", "denim", "jumper", "jumpers", "cardigan", "hoodie",
+                 "shirt", "shirts", "dress", "dresses", "skirt", "coat", "jacket", "socks",
+                 "fabric", "wool", "curtains", "laundry", "washing", "faded", "fading",
+                 "clothes", "clothing",
                  # pale and dizzy is not "otherwise well": the faint card already answers it,
                  # and this row's own first sentence would contradict the person
                  "dizzy", "dizziness", "dizzy spells", "light headed", "light-headed",
@@ -7508,11 +8175,16 @@ ENTRIES = [
           "Piles are swollen veins in the back passage: they itch, ache or sting, and often bleed a little when you go. Most settle in a few days. Eat fibre and drink water so you are not straining, don't sit on the loo scrolling, and a pharmacy cream or suppository takes the sting out. See a GP if bleeding keeps up for weeks, if a lump will not go back in, or if it is very painful; dark blood, or blood mixed with the stool, is worth checking sooner.",
           ask=("piles", "haemorrhoids", "hemorrhoids", "haemorrhoid", "hemorrhoid",
                "back passage"),
+          guard=_a_heap_not_the_condition,
           # a pile is also a stack: the leaves, the washing and the paperwork keep their answers
           avoid=("leaves", "leaf", "washing", "laundry", "paper", "papers", "rubbish", "bin",
                  "bags", "boxes", "books", "clothes", "coal", "wood", "logs", "garden", "lawn",
                  "drive", "shed", "garage", "clutter", "chores", "ironing", "dishes", "snow",
-                 "gravel", "soil", "compost", "contract", "tenancy", "landlord")),
+                 "gravel", "soil", "compost", "contract", "tenancy", "landlord",
+                 # the compounds an avoid word does not reach: "paper" is in the list above and
+                 # "paperwork" is not the same word to a loose match
+                 "paperwork", "email", "emails", "inbox", "admin", "messages", "letters",
+                 "bills", "unread", "backlog")),
     # "i think i have shingles" was "I'm listening" and "how long does shingles last" a search
     # punt. The reason to answer it well is time: the antiviral only works if it starts early.
     entry("shingles",
@@ -7610,6 +8282,11 @@ ENTRIES = [
                  "dog", "cat", "puppy", "kitten", "pet", "horse", "child", "baby", "toddler",
                  "pregnant")),
 ]
+
+from .costs import time_entries
+# An appointment is asked how long it takes: the check-up, the eye test and the ten-minute
+# GP slot are durations, not prices.
+ENTRIES += time_entries("dentist", "eye-test", "gp-appointment", "physio")
 
 
 def _a_rate_reading(memory, reading):
@@ -7921,6 +8598,38 @@ ENTRIES.extend([
 # was a hedge and "my blood pressure is 95 over 60 is that ok" was told the 140/90 answer, which
 # is the wrong way round: how the person feels is what makes a low reading worth a doctor.
 
+# A pressure in a pipe is not a blood pressure. "my shower has low pressure" was answered "Under
+# 90/60 is a low reading ..." because this card holds the phrase "low pressure" and the word the line
+# named - the shower - means nothing to a blood-pressure card. The same door was open to the boiler,
+# the taps, the radiators, the tyres and the garden hose, and the water-pressure cards in home.py
+# answer all of them.
+#
+# It is a guard and not a word in the avoid list because an avoid phrase is read loosely and would
+# also stand the card down for "i feel dizzy in the shower", which is a blood-pressure question. The
+# guard only steps aside when the line names a fitting and never says blood.
+_A_PRESSURE_IN_A_PIPE = (
+    "shower", "showers", "tap", "taps", "boiler", "boilers", "radiator", "radiators", "pipe",
+    "pipes", "plumbing", "hose", "hosepipe", "sprinkler", "irrigation", "pump", "pumps",
+    "pressure washer", "jet wash", "washer", "washing machine", "dishwasher", "tyre", "tyres",
+    "tire", "tires", "gas", "cylinder", "combi", "central heating", "stopcock", "stop cock",
+    "water butt", "water tank", "header tank", "mains",
+)
+_BLOOD_WORDS = ("blood", "bp", "hypotension", "dizzy", "dizziness", "faint", "fainting",
+                "lightheaded", "light headed", "black out", "blackout", "reading")
+
+
+def _not_a_pressure_in_a_pipe(understood):
+    """Whether the pressure the line is about is a person's, not a pipe's."""
+    said = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not said:
+        said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if not said:
+        return True
+    if any(word in said for word in _BLOOD_WORDS):
+        return True
+    return not any(word in said for word in _A_PRESSURE_IN_A_PIPE)
+
+
 ENTRIES.append(entry(
     "low-blood-pressure",
     (("blood pressure", "bp", "low pressure", "hypotension"),
@@ -7937,6 +8646,8 @@ ENTRIES.append(entry(
      "causes, so ask a pharmacist to go through your medicines. Fainting with an injury, "
      "confusion, chest pain or black stools is 999 or A&E."),
     # the high reading card, the dizzy-on-standing entry and a spoken number are other answers
+    guard=_not_a_pressure_in_a_pipe,
+    # a pressure in a pipe is not a blood pressure: see _not_a_pressure_in_a_pipe
     avoid=("high", "higher", "140", "150", "160", "170", "180", "stroke", "lower it",
            "bring it down", "get it down", "reduce it", "too high",
            # "what is a normal blood pressure" is the normal-range answer's line
@@ -8620,6 +9331,65 @@ STATIN_FIRST_WEEKS = (
     "yourself: most people take one for years without trouble, and most of the ones who do get "
     "aches are fine on a different statin.")
 
+# What to say when the line is about taking it with the other things in the cupboard. It is the one
+# statin question whose honest answer starts "ask a pharmacist", because it depends on the list.
+STATIN_WITH_OTHER_TABLETS = (
+    "Ask a pharmacist with your list in front of you, because it depends on what you take: the "
+    "ones that matter are some antibiotics (clarithromycin and erythromycin), some antifungal "
+    "tablets, and gemfibrozil, and those raise the level of a statin in the blood and with it the "
+    "risk of aching muscles. Most everyday medicines are fine alongside one - paracetamol, "
+    "ibuprofen, most blood-pressure tablets - so the pharmacist only needs a minute and the names.")
+
+# "Can I take it with the rest of what I take?" is one question, and it is made of a medicine
+# word and a word that puts two of them together - whatever words a person uses for either. A list
+# of whole phrasings ("other tablets", "with my medication") answers the phrasings on the list and
+# misses "will my statin clash with my blood pressure pills" or "any interactions with atorvastatin",
+# which are the same question.
+_MEDICINE_WORDS = ("tablet", "tablets", "pill", "pills", "medicine", "medicines", "medication",
+                   "medications", "drug", "drugs", "antibiotic", "antibiotics", "antibody",
+                   "painkiller", "painkillers", "supplement", "supplements", "prescription",
+                   "prescriptions", "capsules", "inhaler", "inhalers", "injection", "patch",
+                   "patches", "spray", "sprays", "drops", "syrup", "steroid", "steroids",
+                   "ibuprofen", "paracetamol", "aspirin", "codeine", "naproxen", "blood thinner",
+                   "blood thinners", "warfarin", "antidepressant", "antidepressants",
+                   "water tablet", "water tablets", "beta blocker", "beta blockers",
+                   "blood pressure tablets", "blood pressure pills", "the pill")
+_MORE_THAN_ONE = ("other", "another", "rest of", "both", "together", "alongside", "at the same",
+                  "same time", "as well as", "plus", "and my", "on top of", "more than one",
+                  "with my", "with the", "with any", "with some", "with one of my")
+_INTERACTION_WORD = re.compile(
+    r"\b(?:interact\w*|interaction\w*|clash\w*|contraindicat\w*|mix(?:es|ed|ing)?|"
+    r"conflict\w*|safe (?:with|alongside|to take)|be taken with|taken together|"
+    r"go(?:es)? with|compatible)\b")
+
+
+def _another_medicine_is_named(line):
+    """True when the line puts a statin beside a second medicine, in whatever words.
+
+    Three shapes, and only the first two need a medicine word in the line: an interaction word on
+    its own ("any interactions with atorvastatin"), a medicine word with a word that makes it a
+    second one ("with my blood pressure pills", "as well as my inhaler"), or two medicine words.
+    A line about food or drink ("can i take my statin with food") names no second medicine, so it
+    is not this question.
+    """
+    if _INTERACTION_WORD.search(line):
+        return True
+    medicines = [word for word in _MEDICINE_WORDS if word in line]
+    if len(medicines) >= 2:
+        return True
+    if medicines and any(word in line for word in _MORE_THAN_ONE):
+        return True
+    return False
+
+# "should i take statins" asks whether to have one at all, and the risk-and-benefit card (the LDL
+# fall, the side effects, the small number needed to treat) is the answer to that. This row used to
+# take it on the words "should i" and answer about a blood test in three months.
+_STATIN_WHETHER = re.compile(
+    r"\b(?:should i (?:take|be on|start|go on)|do i (?:need|have to)|is it worth|"
+    r"are statins worth|do i really need|is it necessary)\b")
+_STATIN_STARTED = ("start", "started", "starting", "put me on", "prescribed", "just been",
+                   "new to", "began", "begin", "first month", "few weeks")
+
 _STATIN_NAMES = ("statin", "statins", "simvastatin", "atorvastatin", "rosuvastatin",
                  "pravastatin", "fluvastatin", "lipitor", "crestor", "zocor",
                  "cholesterol tablet", "cholesterol tablets", "cholesterol pill",
@@ -8627,11 +9397,21 @@ _STATIN_NAMES = ("statin", "statins", "simvastatin", "atorvastatin", "rosuvastat
 
 
 def _a_statin_and_the_day(memory, understood):
-    """When in the day, or what to expect: the time words decide which half is asked."""
+    """When in the day, what to expect, or what it can be taken with.
+
+    Three questions, and the words in the line pick one. The order matters: a line that names
+    another medicine is the pharmacist's question even when it also says "take"; a line with a time
+    of day in it is the timetable; a line asking *whether* to have a statin at all passes, so the
+    risk-and-benefit card answers it instead of this one talking about a blood test.
+    """
     line = _the_line(understood)
+    if _another_medicine_is_named(line):
+        return STATIN_WITH_OTHER_TABLETS
     if any(word in line for word in ("night", "evening", "morning", "what time", "when",
                                      "same time", "best time", "time of day", "together")):
         return STATIN_TIMING
+    if _STATIN_WHETHER.search(line) and not any(word in line for word in _STATIN_STARTED):
+        return None
     return STATIN_FIRST_WEEKS
 
 
@@ -8659,7 +9439,18 @@ ENTRIES.append(entry(
       "mornings", "when", "time", "best time", "same time", "start", "started", "starting",
       "new", "just", "put", "prescribed", "first", "month", "months", "how long", "forever",
       "life", "stop", "stopping", "come off", "side effect", "side effects", "muscle",
-      "aches", "achy", "should i", "do i")),
+      "aches", "achy", "should i", "do i",
+      # the question about taking it beside the rest of the medicine cupboard: "do statins
+      # interact with anything" and "can i take statins with antibiotics" were the search punt
+      # and the blood-test card, because none of these words was in the key at all. These are the
+      # words such a line is made of rather than whole phrasings, so "will my statin clash with my
+      # blood pressure pills" and "can i take statins with my inhaler" reach the row too; the
+      # dispatcher then decides whether it is the pharmacist question or the timetable.
+      # a key word has to be the spelling people type: "interact" does not reach "interactions"
+      # (the plural is its own word), so the noun and the verb are both here
+      "interact", "interaction", "clash", "mix", "safe", "tablet", "tablets", "pill", "pills",
+      "medication", "medicine", "medicines", "antibiotic", "antibiotics", "alongside",
+      "together", "other tablets", "other medication", "other medicines", "other pills")),
     _a_statin_and_the_day,
     # a food question about a statin is the food-and-drug row's, and a dose or a child is not this
     # row at all
@@ -8705,7 +9496,14 @@ ENTRIES.append(entry(
 # The multiword forms are not here on purpose: a phrase in a key is matched word by word, so
 # "blood test" also matched "blood pressure" and "blood sugar" and answered a reading question
 # with the result card.
+# The vet is the one who runs the test for an animal, and a vet's all clear is the same news as
+# a clear blood test: "i did take her to the vet, they said no infection" was answered "Sorry to
+# hear it. Give it a day before deciding anything", a condolence for an animal that had just been
+# given the all clear ("said no" read as a refusal, and no row claiming the line). The reply has
+# to be the pet's, not the person's, so `_a_result_reply` says it in the animal's terms when the
+# line names a vet.
 _TEST = ("bloods", "results", "result", "test", "tests", "scan", "scans", "x-ray", "xray",
+         "vet", "vets", "vet's", "the vets",
          "x ray", "mri", "ct scan", "ct", "ultrasound", "biopsy", "smear", "ecg", "swab")
 # The readings are another card's: "what is a normal blood pressure" is a number, not a result.
 _READING = ("blood pressure", "bp", "heart rate", "pulse", "cholesterol", "blood sugar",
@@ -8786,10 +9584,77 @@ CLEAR_RESULT_TEXT = (
     "found. Keep the letter or save the message, and if the symptom that started it off is still "
     "there in a few weeks, tell the GP even with a clear result behind you.")
 
+# The same news when the vet ran the test. The person's version ends "tell the GP", which is the
+# wrong person and the wrong animal: a vet's all clear is about the animal, and the thing to watch
+# is the animal coming back with the same symptom.
+CLEAR_RESULT_FOR_A_PET_TEXT = (
+    "That is the result you wanted: nothing found means there was nothing to treat, so the visit "
+    "did its job. Keep the note the vet gave you, and if the same thing comes back, ring them "
+    "rather than waiting to see whether it settles on its own.")
+ABNORMAL_RESULT_FOR_A_PET_TEXT = (
+    "Ask the vet to say what the result was and what the next step is, in those words. Most "
+    "results a little outside the range are repeated in a few weeks rather than treated now, and "
+    "it is worth knowing which one this is before you read the worst into it.")
+
 NEGATIVE_RESULT_TEXT = (
     "A negative result means the thing they were looking for was not found, which is usually the "
     "news you want: nothing to act on. If you were expecting it to show something, ring and ask "
     "what it means for you rather than reading it either way.")
+
+# The turn after a clear result is usually not about the result at all: "so i can go back to the
+# gym then", "does that mean i can stop the tablets". Nothing answered those - the person had
+# just been told nothing was found, asked the obvious next question, and got "Got it. Is there
+# anything you'd like a hand with?". The permission belongs to the result, so the row reads the
+# conversation rather than the line: the reply is given only when the answer before it was the
+# clear one, and every other "can i go back to work" falls through to whatever owns it.
+# The permission belongs to the result, and what it lets the person do decides the reply. One
+# line for all of them argued with itself: "does that mean i can stop the tablets" was told
+# "Yes - nothing was found ... Build back up over a week or two if you have been off it, and keep
+# taking anything you were prescribed" - a gym answer that says yes and then says no, and the
+# first sentence is the one people act on. So there is one line per kind of thing being asked
+# about (medicine, driving, sport, work) and a generic one that claims nothing for the rest.
+AFTER_A_CLEAR_RESULT_EXERCISE = (
+    "Yes - nothing was found, so nothing is waiting on it. Build back up over a week or two "
+    "rather than straight back to where you were, and ease off again if the symptom comes back.")
+AFTER_A_CLEAR_RESULT_MEDICINE = (
+    "Don't stop them on the strength of a clear result: ring whoever prescribed them and ask, "
+    "because a test clearing one thing does not mean the medicine has done its job. A clear "
+    "result answers the test, it does not end a prescription.")
+AFTER_A_CLEAR_RESULT_WORK = (
+    "Nothing in the result keeps you off - but if you were signed off, whoever signed you off is "
+    "the one who says it can end early, so ask them before you go back.")
+AFTER_A_CLEAR_RESULT_DRIVING = (
+    "Nothing in a clear result stops you driving. If the test was for a licence or an insurance "
+    "medical, whoever asked for it decides, not the result on its own.")
+AFTER_A_CLEAR_RESULT_TEXT = (
+    "Yes - nothing was found, so nothing in that result is holding you up. If it is a medicine "
+    "or a note from work, ask whoever prescribed or signed it before you change anything: a "
+    "clear result answers the test.")
+# Which of those the line is asking about. Medicine first, because "can i stop the tablets" is
+# also "can i stop", and a sport word in the same line must not turn it into a gym answer.
+_A_STOPPING_A_MEDICINE = re.compile(
+    r"\b(?:tablets?|pills?|medicines?|medication|meds|inhaler|antibiotics?|dose|dosage|statins?|"
+    r"stop taking|stop the|stop my|come off|prescribed)\b", re.I)
+_A_DRIVING_AGAIN = re.compile(r"\b(?:driv\w+|licence|license|dvla)\b", re.I)
+_A_SPORT_AGAIN = re.compile(
+    r"\b(?:gym|run|running|jog\w*|swim\w*|cycl\w*|football|sport\w*|train|training|weights|"
+    r"lifting|work out|workout|exercise|exercising|walk\w*|hike|hiking|tennis|badminton|dance|"
+    r"dancing|ride|riding)\b", re.I)
+_A_JOB_AGAIN = re.compile(
+    r"\b(?:work|job|office|shift|shifts|signed off|sick note|back to work)\b", re.I)
+
+
+def _the_permission_for(text):
+    """The permission line for the thing the person wants to get back to."""
+    if _A_STOPPING_A_MEDICINE.search(text):
+        return AFTER_A_CLEAR_RESULT_MEDICINE
+    if _A_DRIVING_AGAIN.search(text):
+        return AFTER_A_CLEAR_RESULT_DRIVING
+    if _A_SPORT_AGAIN.search(text):
+        return AFTER_A_CLEAR_RESULT_EXERCISE
+    if _A_JOB_AGAIN.search(text):
+        return AFTER_A_CLEAR_RESULT_WORK
+    return AFTER_A_CLEAR_RESULT_TEXT
 
 # A bare "is that bad" names no result, so the result it is about is the one in the conversation.
 # Saying what an abnormal result means to somebody whose test came back clear is answering a
@@ -8799,13 +9664,82 @@ _RESULT_SAYS_ABNORMAL = re.compile(
 _RESULT_SAYS_CLEAR = re.compile(r"\b(?:clear|nothing was found|good news)\b")
 
 
+# The other way a result is told: not "clear" but a no in front of the thing they were dreading -
+# "the bloods showed no infection", "the x ray showed no fracture", "the scan found nothing". That
+# is the answer they wanted, and without this it fell past the clear reading and came out as the
+# abnormal-result card, which is the opposite of what the line says. The words after the no are
+# what a test rules out, so the list is what people are tested for, not a guess.
+_RULES_IT_OUT = re.compile(
+    r"\b(?:no|nothing|not)\s+(?:signs?\s+of\s+)?(?:infection|fracture|break|damage|growth|"
+    r"lump|clot|blockage|problems?|disease|cancer|abnormalit\w*|arthritis|ulcer|stones?)\b"
+    r"|\b(?:showed|found|seen|shows|finds)\s+nothing\b"
+    # "the doctor said the scan showed no signs of anything" is the same clear result said with a
+    # placeholder instead of the thing that was looked for, and without this it was answered with
+    # the blood test card - a scan is not a blood test.
+    r"|\bno signs? of (?:anything|it|that|a problem|trouble|concern)\b"
+    r"|\bnothing\s+(?:there|found|showed|showing)\b", re.I)
+
 # A line that does not name a test at all is a follow-up ("is that bad"), and it is about the
 # result in the conversation rather than one of its own.
 _A_TEST_NAME = re.compile(
     # "x ray" with a space is how most people type it, and without it the line fell past the
     # clear-or-abnormal reading and came out as the abnormal card: "my x ray came back clear".
     r"\b(?:test|tests|result|results|bloods|scan|scans|x[ -]?ray|xray|mri|ct|ultrasound|"
-    r"biopsy|smear|ecg|swab)\b")
+    r"biopsy|smear|ecg|swab|vet|vets)\b")
+
+
+# A line that asks permission, and a thing to be let back into. Both are needed, because "can i
+# ask something" and "can i go back to work" are one word apart in shape and miles apart in what
+# they want.
+_A_PERMISSION_ASK = re.compile(
+    r"\b(?:can i|can we|could i|am i ok|am i alright|is it ok|is it alright|should i|"
+    r"do i need to|does that mean i can|so i can|so can i|when can i|time to|back to)\b", re.I)
+_SOMETHING_TO_GO_BACK_TO = re.compile(
+    r"\b(?:go back|get back|back to|return to|start again|drive|driving|exercise|gym|running|run|swim|"
+    r"swimming|cycling|cycle|football|training|train|weights|lifting|work out|workout|"
+    r"work|stop taking|stop the|come off|drink|eat)\b", re.I)
+
+
+def _after_a_clear_result(memory, understood):
+    """Whether the clear result just given is what lets the person do the thing they ask about."""
+    text = ((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
+    if not _A_PERMISSION_ASK.search(text) or not _SOMETHING_TO_GO_BACK_TO.search(text):
+        return None
+    last = ""
+    for turn in (memory.get("turns") or [])[-2:]:
+        if isinstance(turn, dict) and turn.get("bot"):
+            last = turn["bot"].lower()
+    if not _RESULT_SAYS_CLEAR.search(last):
+        return None
+    return _the_permission_for(text)
+
+
+# The other turn after a clear result is the person checking it: "so thats good then", "is that
+# good", "so its fine". The result is already on the table, so the answer is a yes - and it is
+# also the line that kept the blood test card away, because "so thats good then" named no ask of
+# its own and the carried "blood test" was enough for "what does a blood test show": a person who
+# had just been told nothing was found was told what a needle in the arm is.
+_A_CHECKING_THE_RESULT = re.compile(
+    r"^(?:so|and|oh|well|ok|okay|right|thats|that's)?\s*(?:thats|that's|that is|its|it's|it is)?"
+    r"\s*(?:good|great|fine|ok|okay|alright|all right|normal|reassuring|brilliant|nice)\b",
+    re.I)
+
+
+def _a_check_on_a_clear_result(memory, understood):
+    """The yes to a person checking the clear result already on the table."""
+    text = ((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
+    text = text.strip()
+    if not text or len(text.split()) > 6 or not _A_CHECKING_THE_RESULT.match(text):
+        return None
+    last = ""
+    for turn in (memory.get("turns") or [])[-2:]:
+        if isinstance(turn, dict) and turn.get("bot"):
+            last = turn["bot"].lower()
+    if not _RESULT_SAYS_CLEAR.search(last):
+        return None
+    return ("It is - nothing was found, so there is nothing to do about it. If the symptom that "
+            "started all this is still there in a few weeks, say so to the GP even with that "
+            "result behind you.")
 
 
 def _a_result_reply(memory, understood):
@@ -8814,14 +9748,20 @@ def _a_result_reply(memory, understood):
     # subject back into a bare "is that bad" ("is the blood test came back bad"), and read that
     # way the person seems to have said the result was bad when they said nothing of the sort.
     text = ((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
+    # A vet is who ran the test for an animal, and the clear result is the same news: "i did take
+    # her to the vet, they said no infection" was a condolence for an animal given the all clear.
+    # The reply is the pet's version, because "tell the GP" is the wrong person and the wrong body.
+    pet = bool(re.search(r"\b(?:vet|vets)\b", text))
+    if _RULES_IT_OUT.search(text):
+        return CLEAR_RESULT_FOR_A_PET_TEXT if pet else CLEAR_RESULT_TEXT
     if _A_TEST_NAME.search(text):
         # Only a word that states what the result WAS counts here: "abnormal", "clear", "normal".
         # "bad", "worried" and "serious" are the words of the worry about a result, and they are
         # the same words whether the result was clear or not, so they are read below, from the
         # result the conversation has actually got to.
         if re.search(r"\b(?:clear|all clear|normal|fine|nothing there|nothing found|no problems|"
-                     r"nothing showed up)\b", text):
-            return CLEAR_RESULT_TEXT
+                     r"nothing showed up|(?:she|he)'?s fine|(?:she|he) is fine)\b", text):
+            return CLEAR_RESULT_FOR_A_PET_TEXT if pet else CLEAR_RESULT_TEXT
         # "my results came back negative" is the same news in the word a lab uses. Read as an
         # abnormal result it got the "a number a little outside the range" card, which is the
         # opposite of what a negative says.
@@ -8829,7 +9769,7 @@ def _a_result_reply(memory, understood):
             return NEGATIVE_RESULT_TEXT
         if re.search(r"\b(?:abnormal|borderline|flagged|outside the range|out of range|high|low|"
                      r"showed something|shows something|showed up)\b", text):
-            return ABNORMAL_RESULT_TEXT
+            return ABNORMAL_RESULT_FOR_A_PET_TEXT if pet else ABNORMAL_RESULT_TEXT
     last = ""
     for turn in (memory.get("turns") or [])[-2:]:
         if isinstance(turn, dict) and turn.get("bot"):
@@ -8861,6 +9801,46 @@ def _a_result_reply(memory, understood):
     return ("A blood test is a small sting and a vial or two, and there is nothing about having "
             "one to worry about - it is the number it comes back with that matters. If that comes "
             "back outside the range they will tell you, and it is usually repeated in a few weeks.")
+
+
+# A line that asks how long to go without food before a blood test is asking for the hours, and
+# the rest of the test's card (the needle, the counts) answers a different question about the same
+# test. The row says the fasting first when that is what the line wants.
+_A_FASTING_LENGTH = re.compile(
+    r"\bhow long\b[^.?]*(?:fast|fasting|fasted|without food|no food|nothing to eat|empty stomach)"
+    r"|(?:fast|fasting|fasted)\b[^.?]*\bhow long\b"
+    r"|\bhow many hours\b[^.?]*(?:fast|fasting|fasted|without food|no food|nothing to eat)",
+    re.IGNORECASE)
+
+# "how long does a fasting blood test take" names the fast but asks about the visit, and the
+# card has that length in it (five minutes in the chair), so the fasting hours are not the answer.
+_A_TEST_THAT_TAKES = re.compile(
+    r"\b(?:test|tests|appointment|appointments)\s+(?:take|takes|took|last|lasts)\b", re.IGNORECASE)
+
+_A_BLOOD_TEST_TEXT = (
+    "A blood test is a small needle in the arm and a vial or two, about five minutes in the "
+    "chair, and it checks red and white cells and platelets, kidney and liver figures, "
+    "thyroid, cholesterol, vitamin D and blood sugar. It shows how the organs are working "
+    "and whether something is short or high, which is what the GP reads against your "
+    "symptoms, so ask what your number was and what the normal range is. You do not need to "
+    "fast unless the surgery says so.")
+
+_A_FASTING_BEFORE_A_TEST_TEXT = (
+    "Eight to twelve hours without food is the usual ask, and water is fine: book the first "
+    "appointment of the morning, and tea or coffee with no milk still counts as fasting. Only "
+    "some tests need it - a fasting cholesterol or a glucose, not a full blood count or a "
+    "thyroid check - so read the letter, because eating by mistake usually means going back "
+    "another day. Take your medicine as normal unless the letter says to skip it, and if you "
+    "are diabetic ask the surgery how they want that morning to work.")
+
+
+def _a_blood_test(memory, understood):
+    """The test itself, or the fasting hours when the line asks how long to fast for it."""
+    read = understood if isinstance(understood, dict) else {}
+    said = " ".join(str(read.get("clean") or read.get("text") or "").split())
+    if _A_FASTING_LENGTH.search(said) and not _A_TEST_THAT_TAKES.search(said):
+        return _A_FASTING_BEFORE_A_TEST_TEXT
+    return _A_BLOOD_TEST_TEXT
 
 
 ENTRIES.extend([
@@ -8968,6 +9948,17 @@ ENTRIES.extend([
             # this it was the school results-day card: the word "results" and nothing else tied
             # it there, and a medical result is not a resit.
             "came back", "came through",
+            # The other way a clear result is told: "the bloods showed no infection", "the scan
+            # showed no damage", "my scan found nothing". The test word in the first part is what
+            # keeps these apart from a line about being tested rather than about a result, and
+            # `_RULES_IT_OUT` is what reads them as the news they are. The words are the thing
+            # ruled out and the "nothing" itself, never "showed" or "shows": those two are what
+            # makes the abnormal row's key rare, and a second row using them quietly demoted it
+            # by a point - "what does it mean if my scan shows something" stopped being the
+            # abnormal card and became what a scan is.
+            "no infection", "no fracture", "no damage", "no growth", "no lump", "no clot",
+            "no blockage", "no problem", "no problems", "no disease", "no cancer",
+            "no arthritis", "no ulcer", "no stones", "no sign", "no signs", "nothing",
             # "my results say i need a follow up" is a result with another appointment on it,
             # and a bare "follow up" on its own is the job chase - the test word in the first
             # part is what keeps them apart
@@ -8981,6 +9972,38 @@ ENTRIES.extend([
                                        "nervous", "scared", "anxious", "afraid", "dreading",
                                        "dread", "worried about", "needle", "needles",
                                        "claustrophobic")),
+    # "so i can go back to the gym then" and "does that mean i can stop the tablets" are the
+    # question a clear result leaves behind, and the row above answers the result itself. The
+    # reply is worked out from the conversation, so a permission question with no clear result
+    # behind it declines here and goes on to whatever has its own answer.
+    # The ask is a whole phrase, not a bare "should i" or "can i" with a thing after it: "should i
+    # take a water bottle to the gym" and "I passed out at the gym last week, should I see a doctor"
+    # both name a gym and neither is a permission that a result gave, and a routing row that takes
+    # them is a health row claiming a line another row answers.
+    entry("after-a-clear-result",
+          (("so i can", "so can i", "does that mean i can", "can i go back", "can i get back",
+            "can i return", "can i start", "can i exercise", "can i swim", "can i run",
+            "can i train", "can i work out", "can i stop", "can i come off", "can we go back",
+            "am i ok to", "am i alright to", "is it ok to", "is it alright to", "when can i",
+            "time to go back", "do i need to stop", "can i drive", "am i ok to drive",
+            "can i get back to driving", "can i start driving"),
+           ("go back", "get back", "back to", "return to", "start again", "exercise", "gym",
+            "running", "swim", "cycling", "football", "training", "weights", "work",
+            "stop taking", "stop the", "come off", "drink", "eat", "drive", "driving")),
+          _after_a_clear_result,
+          avoid=_NOT_A_MEDICAL_TEST),
+    # A person checking a result they have already been given, rather than asking what a test is.
+    entry("thats-good-then",
+          (("so thats good", "so that's good", "thats good then", "that's good then",
+            "is that good", "so its good", "so it's good", "so its fine", "so it's fine",
+            "thats fine then", "that's fine then", "so thats fine", "so that's fine",
+            "so thats ok", "so that's ok", "so thats okay", "so its ok", "so it's ok",
+            "so thats normal", "so its normal", "so its all fine", "is that alright",
+            "so thats good news", "thats good news then", "so thats reassuring"),
+           ("good", "fine", "ok", "okay", "alright", "normal", "great", "reassuring",
+            "news", "then", "clear", "result", "results")),
+          _a_check_on_a_clear_result,
+          avoid=_NOT_A_MEDICAL_TEST),
     # The smear result is its own worry: "abnormal" on a smear sounds like cancer and almost never
     # is, so the card says what the words mean and what happens next.
     entry("smear-came-back-abnormal",
@@ -9015,7 +10038,9 @@ ENTRIES.extend([
                                        "hear back", "how many weeks", "when will i know")),
     # "what does a blood test show" was a **TV recommendation** ("Happy Valley for tense British
     # crime"), and "what is a blood test for" and "how long does a blood test take" were search
-    # punts. The wait for a result is the row above; this is the test itself.
+    # punts. The wait for a result is the row above; this is the test itself. "how long do i need
+    # to fast before a blood test" is the same test asked about the fasting, and it was answered
+    # with the needle: the hours are the only thing that line wants, so they lead when it is asked.
     entry("a-blood-test",
           # "bloods" is not here: it folds to "blood", so it took "what does blood in my pee
           # mean" from the uti card
@@ -9024,16 +10049,15 @@ ENTRIES.extend([
            ("what is", "whats", "what does", "show", "shows", "for", "detect", "check", "checks",
             "take", "takes", "how long", "how much blood", "needle", "hurt", "hurts", "fast",
             "fasting", "eat", "anaemic", "anemia", "anaemia", "test for")),
-          "A blood test is a small needle in the arm and a vial or two, about five minutes in the "
-          "chair, and it checks red and white cells and platelets, kidney and liver figures, "
-          "thyroid, cholesterol, vitamin D and blood sugar. It shows how the organs are working "
-          "and whether something is short or high, which is what the GP reads against your "
-          "symptoms, so ask what your number was and what the normal range is. You do not need to "
-          "fast unless the surgery says so.",
+          _a_blood_test,
           bias=2,
           # the wait for the result, the amount drawn and a diagnosis already made are other rows
           # anaemia has its own card, and "my blood test says im anaemic" is that card's line
           avoid=("results", "result", "came back", "come back", "back", "wait", "waiting",
+                 # "the blood test showed no problems" is a result that came back clear, not a
+                 # question about having blood taken: the results row says there is nothing to
+                 # act on.
+                 "showed no", "shows no", "showed nothing", "found nothing", "nothing there",
                  "abnormal", "diagnosed", "diagnosis", "cancer", "leukaemia", "anaemic",
                  "anaemia", "anemia", "iron", "scared", "afraid", "frightened", "hate", "phobia",
                  # a named reading is that reading's question: "what is a normal blood sugar"
@@ -9111,6 +10135,20 @@ HOW_LONG_LASTS = (
      "lasts, ask for a hearing test if it has been there three months or more, and see a GP "
      "sooner if the child's speech is behind, if it keeps coming back, or if either ear is sore "
      "or running."),
+    # "how long does an inhaler last" went to the side-effects card, because an inhaler is listed
+    # there as a medicine. The question is how many doses are left in the canister, which is a
+    # length of time, so it belongs in this table with the illnesses.
+    (("inhaler", "inhalers", "blue inhaler", "brown inhaler", "ventolin", "salbutamol",
+      "preventer inhaler", "reliever inhaler", "puffer", "puffs left"),
+     "A blue reliever inhaler holds 100 doses in the small canister and 200 in the bigger one, so "
+     "at two puffs four times a day a 200-dose one lasts about three weeks, and one puff a day "
+     "would stretch it to months. Most have a dose counter on the side now, and that number is "
+     "what to go by rather than the date on the box. A brown preventer at two puffs twice a day "
+     "runs out in about a month in the same way. Order the repeat before it empties rather than "
+     "after, because the last puffs are weaker.",
+     # a side effect, the asthma itself, an out-of-date canister and an attack are other rows
+     ("side", "effect", "effects", "attack", "asthma", "wheeze", "wheezing",
+      "expired", "expire", "breathless", "breathe")),
 )
 
 for _names, _reply, *_rest in HOW_LONG_LASTS:
@@ -9251,6 +10289,39 @@ ENTRIES.append(entry(
      "nerves at the bottom of the spine and needs seeing at once."),
     ask=("sciatica", "sciatic", "trapped nerve", "slipped disc", "prolapsed disc")))
 
+# The operation's own clock when that is the question: "how long does a cataract operation take"
+# opened on what a cataract is and buried "about 20 minutes" in its second sentence. The waiting
+# list is a different clock, so a line that says wait keeps the card it had.
+_CATARACT_WHAT = (
+    "A cataract is the lens inside the eye going cloudy, so sight fades slowly and lights glare "
+    "and smear at night - it is not a film on the surface, and no drops or glasses fix it. It is "
+    "mostly age, and the operation is one of the commonest and safest there is: the cloudy lens is "
+    "swapped for a clear plastic one under local anaesthetic, about 20 minutes, and most people "
+    "see better within days. Ask the optician at your next test if the glare is affecting driving, "
+    "and tell them if sight drops suddenly, which is not a cataract.")
+_CATARACT_LENGTH = (
+    "About 20 minutes for the operation itself, under local anaesthetic, and most people are in "
+    "and out of the hospital the same morning or afternoon: the cloudy lens is swapped for a clear "
+    "plastic one, and sight is usually better within days, though the eye can feel gritty and "
+    "watery for a week or two. Ask the optician at your next test if the glare is affecting "
+    "driving, and tell them if sight drops suddenly, which is not a cataract.")
+
+
+def _the_cataract_answer(memory, understood):
+    """The length of the operation, or what a cataract is - whichever the line asked for."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    asks_a_length = ("how long" in said or "how many minutes" in said or "how soon" in said)
+    is_the_operation = any(word in said for word in
+                           ("operation", "surgery", "operate", "procedure", "the op"))
+    is_the_wait = "wait" in said
+    is_the_recovery = any(word in said for word in
+                          ("recover", "recovery", "heal", "healing", "back to work",
+                           "back to normal", "off work", "drive again", "after the op"))
+    if asks_a_length and is_the_operation and not (is_the_wait or is_the_recovery):
+        return _CATARACT_LENGTH
+    return _CATARACT_WHAT
+
+
 ENTRIES.append(entry(
     "cataract",
     (("cataract", "cataracts", "cloudy lens", "cloudy eye lens"),
@@ -9259,12 +10330,7 @@ ENTRIES.append(entry(
       "glare", "blurred", "blurry", "vision", "sight", "see", "seeing", "eyes", "eye",
       "have", "got", "ive", "is it", "serious", "wait", "nhs", "private", "cost", "recover",
       "recovery", "drops", "glasses")),
-    ("A cataract is the lens inside the eye going cloudy, so sight fades slowly and lights "
-     "glare and smear at night - it is not a film on the surface, and no drops or glasses fix "
-     "it. It is mostly age, and the operation is one of the commonest and safest there is: the "
-     "cloudy lens is swapped for a clear plastic one under local anaesthetic, about 20 minutes, "
-     "and most people see better within days. Ask the optician at your next test if the glare "
-     "is affecting driving, and tell them if sight drops suddenly, which is not a cataract."),
+    _the_cataract_answer,
     ask=("cataract", "cataracts", "cloudy lens")))
 # Reading in the dark was answered with the headlight bulb ("Change bulbs in pairs, because the
 # other one is usually the same age and about to go"), and the fear behind the question is the old
@@ -9306,7 +10372,15 @@ ENTRIES.append(entry(
            # eyes") is still this card and does not stand down for the word "hurt".
            "eyes tired", "eyes are tired", "tired eyes", "eyes hurt", "eyes hurting",
            "eyes are sore", "sore eyes", "eyes ache", "eyes are aching", "aching eyes",
-           "eye strain", "strained eyes"),
+           "eye strain", "strained eyes",
+           # and a pair of glasses is not the light they are read by: "glasses" is in this key,
+           # so "my reading glasses are smudged" and "how do i clean my reading glasses" were
+           # the lamp card. What the lenses are like is the lenses' question, whatever the line
+           # is doing with them.
+           "smudged", "smudgy", "smudge", "smudges", "smeary", "smeared", "smear", "smears",
+           "streaky", "streaked", "scratched", "scratches", "dirty", "dusty", "greasy",
+           "fingerprint", "fingerprints", "fogging", "fogged", "foggy", "steamed up",
+           "clean my", "cleaning my", "wipe my", "wiping my"),
     # "what light is best for reading" is this row, and science.py's "what is light" card keys
     # the bare word with the same question frame, so the reading lines have to outweigh it
     bias=3,
@@ -10023,6 +11097,23 @@ ENTRIES.append(entry(
     bias=1,
     ask=("smear", "smear test", "cervical screening", "cervical smear", "pap test", "hpv")))
 
+# "Gasping" is the British word for very thirsty, and the sleep-apnoea row keyed on it, so `im
+# gasping for a brew` was answered with a description of the airway closing at night. The rule is
+# the same one safety keeps for the emergency line: what is gasped for decides. The air itself,
+# and the people who bring it, keep the row - a thirst for anything else is not a sleep complaint.
+_A_GASP_FOR_A_THING = re.compile(
+    r"\bgasp\w*\s+(?:for|at|after)\s+(?:a|an|the|some|any|my|me|that|one)\s+"
+    r"(?!(?:[\w'-]+\s+){0,1}(?:air|breath|breathe|breathing|oxygen|help|doctor|nurse|"
+    r"ambulance|paramedic|paramedics|inhaler|nebuliser|nebulizer|ventilator|respirator|"
+    r"999|911|111|rescue|defibrillator|aed)\b)[\w'-]+")
+
+
+def _a_gasp_for_a_thing_is_a_thirst(understood):
+    """False when the gasp in the line is for something to drink or eat, not for breath."""
+    line = str(understood.get("clean") or "").lower()
+    return not _A_GASP_FOR_A_THING.search(line)
+
+
 ENTRIES.append(entry(
     "sleep-apnoea",
     # The card is keyed on the name and on the things a person says instead of the name: the
@@ -10030,9 +11121,18 @@ ENTRIES.append(entry(
     # sent for. Those lines were the breathlessness card at 111 ("my partner says i stop
     # breathing in my sleep"), the sleep-hygiene list on "cpap machine" and the desk-sleepiness
     # card on "sleep study" - none of which is about the thing being described.
+    # "gasping" and "gasp" on their own are not the apnoea: "i was gasping at the price of it"
+    # got this card, "i gasped when i saw the bill" got it, and so did "im gasping going up the
+    # stairs" - one is a bill, one is exertion, and neither is a night-time airway. The bare
+    # word was standing in for the sleep around it, so the sleep is what the row asks for now
+    # and the phrase shapes below carry the lines where the gasp itself is the whole report.
     (("sleep apnoea", "sleep apnea", "apnoea", "apnea", "obstructive sleep apnoea",
       "obstructive sleep apnea", "stop breathing", "stops breathing", "stopped breathing",
-      "gasping", "gasp", "sleep study", "sleep test", "sleep clinic", "cpap",
+      "gasping for air", "gasping for breath", "gasp for air", "gasp for breath",
+      "wake up gasping", "wakes up gasping", "woke up gasping", "waking up gasping",
+      "wake up choking", "woke up choking", "gasping in my sleep", "gasp in my sleep",
+      "gasping at night", "gasp at night", "snoring and gasping", "snore and gasp",
+      "sleep study", "sleep test", "sleep clinic", "cpap",
       "cpap machine", "mouth splint"),
      ("what is", "whats", "what's", "snoring", "snore", "stop breathing", "stops breathing",
       "gasping", "choking", "wake up", "waking", "tired", "knackered", "exhausted", "sleepy",
@@ -10059,7 +11159,7 @@ ENTRIES.append(entry(
     ask=("sleep apnoea", "sleep apnea", "apnoea", "apnea", "stop breathing",
          "stops breathing", "gasping", "sleep study", "sleep test", "sleep clinic", "cpap",
          "splint"),
-    report=True, bias=1))
+    report=True, bias=1, guard=_a_gasp_for_a_thing_is_a_thirst))
 
 # Somebody who says they have it, or asks about the mask or the test, is past "what is it" and
 # wants the practical half: the definition above is the answer to the name and this is the answer
@@ -10097,7 +11197,7 @@ ENTRIES.append(entry(
            "signs", "symptoms"),
     ask=("sleep apnoea", "sleep apnea", "apnoea", "apnea", "cpap", "sleep study", "sleep test",
          "sleep clinic", "splint"),
-    report=True, bias=2))
+    report=True, bias=2, guard=_a_gasp_for_a_thing_is_a_thirst))
 
 ENTRIES.append(entry(
     "long-sighted",
@@ -10142,6 +11242,71 @@ ENTRIES.append(entry(
     bias=2))
 
 
+# --- a grown person's cough, said out loud ------------------------------------------------
+# "my 30 year old brother has a cough" was answered "Noted: your 30 year old brother has a
+# cough." The child card stands down on a grown age (rightly), and there was nothing underneath
+# it: every cough row in here keys the person as "i", so a relation word - which is how people
+# name the person they are asking about - reached no row at all. The cough is the question; the
+# relation says whose it is.
+_GROWN_RELATION = ("brother", "sister", "husband", "wife", "partner", "mum", "mother", "dad",
+                   "father", "gran", "grandma", "grandad", "grandpa", "nanna", "nan", "friend",
+                   "neighbour", "neighbor", "colleague", "flatmate", "housemate", "uncle",
+                   "aunt", "auntie", "boyfriend", "girlfriend", "stepdad", "stepmum")
+
+_CHILD_WORD = ("baby", "babies", "toddler", "toddlers", "newborn", "child", "children", "kid",
+               "kids", "infant", "nursery", "school age", "little one", "teenager", "teen",
+               "my son", "my daughter", "grandchild", "grandchildren")
+
+_AN_AGE = re.compile(r"\b(\d{1,2})\s*(?:month|months|yr|yrs|year|years)?\s*old\b")
+
+ADULT_COUGH_REPLY = (
+    "Most coughs after a cold last two to three weeks and settle on their own: honey in warm "
+    "drinks, plenty of fluids and a propped-up pillow at night ease it, and cough medicines do "
+    "little. See a GP if it lasts more than three weeks, they are coughing blood or breathless, "
+    "they have lost weight, or it came with a fever that will not go - and the same day if they "
+    "are breathing fast, suck in under the ribs, or their lips look blue.")
+
+
+def _grown_cough(memory, understood):
+    """The adult cough card, for a grown person named by a relation or an age of eighteen plus.
+
+    "my 30 year old brother has a cough" is a grown man's cough and "my 2 year old has a cough"
+    is a child's, so a child word or an age under eighteen stands this row down and the child
+    card keeps it. A relation word is the whole signal otherwise, because a grown brother, a mum
+    or a friend is never the child card's.
+    """
+    text = understood.get("clean") or ""
+    words = understood.get("words") or []
+    joined = (text + " " + " ".join(str(word) for word in words)).lower()
+    if not any(word in joined for word in ("cough", "coughing", "coughed")):
+        return None
+    if any(word in joined for word in _CHILD_WORD):
+        return None
+    for age in _AN_AGE.findall(joined):
+        if int(age) < 18:
+            return None
+    if any(word in joined for word in _GROWN_RELATION):
+        return ADULT_COUGH_REPLY
+    return None
+
+
+ENTRIES.append(entry(
+    "a-grown-persons-cough",
+    (("cough", "coughing", "coughed"), _GROWN_RELATION),
+    _grown_cough,
+    bias=4,
+    avoid=("my cough", "i have a cough", "ive had this cough", "smoker", "smoking", "vape",
+           "x ray", "chest xray",
+           # A cough with a red flag is the red flag's line, not the cough's: the breathless, the
+           # fever and the coughing-blood cards answer those and say what to do today, while this
+           # card is the ordinary two-to-three-week cough. "my mum has a cough and is breathless"
+           # got this card when it was added, and the breathless answer was better.
+           "breathless", "short of breath", "struggling to breathe", "can't breathe",
+           "cant breathe", "cannot breathe", "blue lips", "fever", "temperature",
+           "blood", "chest pain", "chest infection", "wheeze", "wheezing"),
+))
+
+
 # Pet allergy had no answer at all: "im allergic to cats" was only remembered back, "how bad is
 # cat allergy" was a search hedge, and "do antihistamines work for cat allergy" went to the vet
 # card, because the word "cat" with no symptom on it is a pet line everywhere else in here. The
@@ -10184,7 +11349,12 @@ _PET_AS_SUBJECT = re.compile(
     r"(?:cat|cats|kitten|kittens|dog|dogs|puppy|puppies|pup|rabbit|rabbits|hamster|hamsters|"
     r"guinea|budgie|budgies|parrot|horse)\b")
 _PET_SYMPTOM = re.compile(r"sneez|cough|wheez|runny nose|runny eye|sniff|conjunctiv")
-_SOMEONE_ELSE = re.compile(r"\b(?:me|i|i'm|im|my nose|my eyes|my throat|us|we|making|makes|"
+# A person is the one reacting, not the pet: "my cat keeps sneezing" against "i keep sneezing".
+# The name matters. This was `_SOMEONE_ELSE` as well, and a module-level name bound a second time
+# rebinds it for the whole module, so the third-person list above - which the depression card's
+# guard reads - was replaced by this one at import, and every first-person depression line looked
+# like somebody else's.
+_THE_PERSON_IS_REACTING = re.compile(r"\b(?:me|i|i'm|im|my nose|my eyes|my throat|us|we|making|makes|"
                            r"make|gives|giving|gave|set off|sets off)\b")
 
 
@@ -10198,7 +11368,7 @@ def _the_pet_has_the_symptom(understood):
     symptom = _PET_SYMPTOM.search(rest)
     if not symptom:
         return False
-    return not _SOMEONE_ELSE.search(rest[:symptom.start()])
+    return not _THE_PERSON_IS_REACTING.search(rest[:symptom.start()])
 
 
 ENTRIES.append(entry(
@@ -10344,13 +11514,48 @@ CONDITIONS = (
      "to the lung. Sudden breathlessness, a sharp pain when you breathe in, or coughing blood "
      "means a clot may already be there, so ring 999. The GP sorts the scan and the blood thinner; "
      "do not rub the leg or wait to see if it settles."),
-    ("glandular-fever",
-     ("glandular fever", "glandular fever symptoms", "glandular fever virus", "kissing disease"),
-     "Glandular fever is the Epstein-Barr virus: a sore throat that will not settle, swollen "
-     "glands in the neck, a fever and a tiredness that can last weeks, and it spreads in saliva, "
-     "which is why it runs through schools. Nothing treats it beyond rest, fluids and paracetamol "
-     "- antibiotics bring out a rash - and no contact sport for about four weeks, because the "
-     "spleen can enlarge. See a GP if the tiredness is still there after a month."),
+    # Glandular fever is not here: the fuller card further down the file answers it, with the
+    # four to six weeks, the sport rule and the blood test, and two rows for one disease meant the
+    # weaker of the two won whichever line its key happened to match ("how long does glandular
+    # fever last" was the short definition once this table outranked the timeline).
+    # The rest of the illnesses whose name ends in "fever". A name is not a temperature, and the
+    # row for a child's fever was taking every one of these lines and answering them with how to
+    # bring a temperature down - advice that is wrong for scarlet fever, which needs antibiotics,
+    # and dangerous for dengue, where ibuprofen and aspirin are the two things not to give.
+    ("scarlet-fever",
+     ("scarlet fever", "scarletina", "strawberry tongue", "sandpaper rash"),
+     "Scarlet fever is a strep infection: a sore throat with a rough, sandpapery rash that feels "
+     "like goosebumps, flushed cheeks and a red strawberry tongue, and it needs antibiotics from "
+     "a GP the same day - children are usually much better within 24 to 48 hours of starting "
+     "them. Keep them off school until 24 hours of antibiotics have been taken, give plenty to "
+     "drink and paracetamol for the sore throat, and get advice if the fever lasts past five "
+     "days, the rash spreads, or there is earache or swelling in the neck."),
+    ("dengue",
+     ("dengue", "dengue fever", "breakbone fever"),
+     "Dengue is a virus spread by daytime-biting mosquitoes in the tropics, and it is not passed "
+     "from person to person: sudden high fever, a severe headache behind the eyes, deep muscle and "
+     "joint pain and often a rash, with the fever usually breaking after three to seven days. Take "
+     "paracetamol only - ibuprofen and aspirin raise the risk of bleeding - drink plenty, and get "
+     "seen the same day for sickness that will not stop, tummy pain, bleeding gums or nose, or "
+     "drowsiness, because those are the warning signs of the severe form. It is worth telling any "
+     "doctor you see where you travelled."),
+    ("yellow-fever",
+     ("yellow fever", "yellow fever vaccine", "yellow fever jab"),
+     "Yellow fever is a mosquito-borne virus in parts of Africa and South America, and most people "
+     "have a fever, headache, muscle ache and sickness for about a week and then recover. A small "
+     "share go on to jaundice, bleeding and organ failure, which is a 999 emergency, so get seen "
+     "quickly for yellow skin or eyes, bleeding or vomiting. The vaccine is the protection: a "
+     "travel clinic gives it, some countries require a certificate to enter, and it needs booking "
+     "at least six to eight weeks before you fly."),
+    ("rheumatic-fever",
+     ("rheumatic fever", "rheumatic", "strep throat", "strep a"),
+     "Rheumatic fever is the body reacting to an untreated strep throat or scarlet fever two to "
+     "four weeks later: a fever with painful, swollen joints that move around, sometimes a rash "
+     "and a racing heart, and it needs a GP the same day because it can scar the heart valves. "
+     "The protection is treating a sore throat with the antibiotics the GP prescribes and finishing "
+     "the course, so a sore throat with a fever and swollen neck glands in a child is worth having "
+     "swabbed rather than waited out. It is now rare in the UK but still seen in children aged 5 "
+     "to 15."),
 )
 
 # One word of a condition's name is not a line about it. A definition is asked by naming the
@@ -10388,6 +11593,13 @@ for _condition_id, _condition_names, _condition_said in CONDITIONS:
         _condition_said,
         explain=True,
         report=True,
+        # A condition named on the line is the subject of it, and half these names are also a
+        # symptom word another card keys on: "my daughter has glandular fever" tied at 5 with the
+        # child-fever card (4 plus its own bias) and lost on the tie, so the mother of a
+        # school-age child with Epstein-Barr was told how to bring a temperature down. A row that
+        # names the condition wins a tie with a row that names a symptom; a card that scores
+        # higher still wins, so "my daughter has a fever" (no condition named) is unchanged.
+        bias=3,
         # a pet's lump and a child's fever are other cards' questions, and the flu card keeps
         # the when-to-have-it and how-much questions
         avoid=PETS + _WHEN_TO_GET_IT))
@@ -10469,6 +11681,48 @@ ENTRIES.append(entry(
     avoid=("tired of", "my partner", "my husband",
            "my wife", "baby", "newborn", "months old", "cot", "crib", "wont sleep", "not sleeping",
            "sleep training", "burnout", "burnt out", "at work", "puppy", "dog", "cat"),
+    bias=1))
+
+# --- the words on a maternity leaflet -----------------------------------------------
+# Two words a person meets in pregnancy and birth and nods along to: a cut they may be offered
+# and a person they may hire. Both were search hedges on main, and both are definitions, so each
+# answer says what the thing is first and then what to do about it.
+ENTRIES.append(entry(
+    "episiotomy",
+    (("episiotomy", "episiotomies", "episiotomy cut", "cut during birth", "cut during labour",
+      "cut in labour", "cut when giving birth", "stitches after birth", "tear or a cut"),
+     ("what is", "whats", "what are", "mean", "means", "why", "do i need", "will i need",
+      "heal", "healing", "recover", "recovery", "hurt", "pain", "sore", "stitches", "cut",
+      "birth", "labour", "giving birth", "better", "weeks")),
+    "An episiotomy is a cut a midwife or doctor makes at the opening of the vagina during birth, "
+    "under local anaesthetic, to make room for the baby when it is needed quickly or the tissue is "
+    "about to tear badly. It is not routine - most births do not need one - and a natural tear is "
+    "usually preferred where there is time. The cut is stitched, the stitches dissolve, and it is "
+    "sore for a week or two: keep it clean and dry, change pads often, and take the painkillers "
+    "you would take for a headache. Ring the maternity unit if the pain gets worse rather than "
+    "better, if it smells, or if you cannot pass urine.",
+    # the tear, the caesarean and the induction each have their own card, and a general
+    # "what stitches do i need" line is not this one
+    avoid=("caesarean", "c-section", "c section", "induction", "induced", "forceps", "ventouse",
+           "epidural", "gas and air", "home birth", "water birth", "second degree", "third degree",
+           "fourth degree", "perineal tear", "tore", "tearing"),
+    bias=1))
+
+ENTRIES.append(entry(
+    "doula",
+    (("doula", "doulas", "birth doula", "postnatal doula", "birth partner for hire",
+      "birth companion"),
+     ("what is", "whats", "what does", "do i need", "worth", "cost", "how much", "hire",
+      "hiring", "difference", "vs", "instead of", "help", "role", "find", "book")),
+    "A doula is a trained companion who supports you through pregnancy, birth or the first weeks "
+    "at home: she stays with you, helps you understand what is happening and what your choices "
+    "are, and looks after the practical side. She is not a midwife and does no medical care - no "
+    "examinations, no monitoring, no advice on the baby's health - so she is there alongside the "
+    "midwife, not instead of her. Most charge a few hundred to about a thousand pounds for a "
+    "birth, and finding one early matters, because good ones book up.",
+    # a midwife, a health visitor and a nanny are different people with their own cards
+    avoid=("midwife", "midwives", "health visitor", "nanny", "childminder", "babysitter",
+           "au pair", "nursery", "antenatal class", "hypnobirthing"),
     bias=1))
 
 # --- bleeding, and where it is coming from -------------------------------------
@@ -10565,3 +11819,142 @@ ENTRIES.append(entry(
     avoid=("hot flushes", "hot flush", "night sweats", "hrt", "mood", "sleep", "hair",
            "dog", "cat", "nappy", "nose", "gums", "urine", "poo", "my mum", "my wife"),
     bias=2))
+# A child's headache is deliberately kept off the adult headache row (see the avoid list there)
+# and family.py answers the ordinary one. What it does not survive is a frequency: a child named
+# as a son, a daughter or a year old with a daily headache goes to the adult cards, because
+# science.py's headache-days row reads "every day" as a pattern worth a GP and its fences name
+# only "child" and "kids". Parents ask this one constantly.
+CHILD = ("my son", "my sons", "my daughter", "my daughters", "my child", "my children",
+         "my kid", "my kids", "my lad", "my lass", "my boy", "my girl", "my little one",
+         "my eldest", "my youngest", "my stepson", "my stepdaughter", "my teenager",
+         "my teen", "my toddler", "toddler", "child", "children", "kid", "kids", "school",
+         "schools", "nursery", "year old", "year old son", "year old daughter",
+         "years old", "teenager", "teen")
+
+# The ask has to name the head: "my kid wont wear his coat and we are late every day" matched a
+# looser list on "every day" alone and got the headache card, and so did a cold and a coat fight.
+CHILD_HEADACHE_ASK = ("headache", "headaches", "head ache", "head aches", "head hurts",
+                      "head is sore", "head pain", "head is banging", "banging head",
+                      "bad head", "sore head", "migraine", "migraines")
+
+# The card below only takes the child headache that KEEPS COMING BACK. `bot/knowledge/family.py`
+# already keeps an ordinary child headache off the adult row and answers it well, so a second
+# card for the same line would only be a worse copy of it (two reviewers said exactly that about
+# the first cut of this one). What family.py does not survive is a frequency: "my kid has a
+# headache every day", "my 8 year old has a headache most days" and "my daughter has a headache
+# every single day after school" are all taken by the adult cards - the migraine one, then the
+# three-days-one - because those rows carry the time words. This is that gap and nothing else.
+#
+# The answer keeps both sentences of family.py's that a repeated headache must not lose: never
+# aspirin under sixteen, and 999 for a stiff neck, a rash that does not fade under a glass, or
+# drowsiness. On top of them it adds what a parent with a child who has these weekly needs: the
+# five ordinary causes, and the time-of-day diary a GP asks for first.
+CHILD_HEADACHE_RECUR = ("every day", "every single day", "most days", "daily", "all the time",
+                        "each day",
+                        "every week", "a few times a week", "twice a week", "three times a week",
+                        "keeps coming back", "keep coming back", "wont go away", "won't go away",
+                        # a run of days is the other way a parent says "this keeps happening",
+                        # and science.py's headache-days row fences the word "kid", so a child's
+                        # three-day headache was falling to the adult migraine card
+                        "for 3 days", "for three days", "for 4 days", "for four days",
+                        "for 2 days", "for two days", "for 5 days", "for five days",
+                        "a few days", "several days", "a week now", "for a week",
+                        "3 days now", "three days now")
+
+ENTRIES.append(entry(
+    "child-headache-that-keeps-coming-back",
+    (CHILD_HEADACHE_ASK, CHILD),
+    "A child who gets them most days is usually one of five things: not enough to drink, a missed "
+    "meal, too little sleep, a long stretch on a screen, or eyes that need testing. Write down "
+    "the time of day each one comes on and what they had eaten and drunk - that diary is what a "
+    "GP asks for first. Never aspirin under sixteen. See a GP about a run like this, and ring 999 "
+    "for a stiff neck, a rash that does not fade under a glass, or drowsiness.",
+    ask=CHILD_HEADACHE_RECUR,
+    # an adult's headache, a pregnant woman's and a hangover keep their own cards; a child who is
+    # being sick with it keeps the child-sickness card, which is the better answer there, and a
+    # bang on the head keeps the bumped-head card
+    avoid=("my wife", "my husband", "my mum", "my mother", "my dad", "my father", "im pregnant",
+           "i'm pregnant", "pregnant", "my period", "hormone", "hangover", "drunk", "office",
+           "desk", "my boss", "shift work", "covid", "flu", "temperature and a stiff neck",
+           "meningitis", "rash", "diarrhoea", "vomiting bug", "sickness bug", "chickenpox",
+           "measles", "earache", "ear ache", "toothache", "tooth ache", "sore throat",
+           "being sick", "is sick", "was sick", "throwing up", "vomiting", "stiff neck",
+           "banged his head", "banged her head", "bang on the head", "fell and hit"),
+    # science.py's headache-days row (bias 4) reads "every day" as a pattern worth a GP, and it
+    # is right to - but its fences name "child" and "kids" and not "my daughter", so a child's
+    # daily headache went to the adult row. A child named with the frequency is this card.
+    bias=5))
+
+
+
+# --- a named condition that has no card of its own ---------------------------------------------
+# "what is the menopause" and "what is a hernia" are still a search hedge: the word is one people
+# are given by a doctor, or hear from a friend who has it, and the neighbouring cards here answer
+# a symptom rather than the name. Each row says what the thing is, what makes it worth a GP, and
+# what is actually done about it. `explain=True` lets a bare "what is X" reach the row and
+# `report=True` so "i have a hernia" is the same question; both stand down on a pet, a child, a
+# dose, a pregnancy, and on the neighbouring cards that own their own lines.
+_NAMED_CONDITION_AVOID = (
+    # a pet, a baby and somebody else's illness are other cards' lines
+    "dog", "dogs", "puppy", "cat", "cats", "kitten", "rabbit", "hamster", "guinea pig", "horse",
+    "pet", "pets", "vet", "baby", "babies", "newborn", "toddler", "my son", "my son's",
+    "my daughter", "my child", "my kid", "my mum", "my dad", "my wife", "my husband",
+    "my partner", "my friend", "my nan", "my gran",
+    # a dose, a tablet and a prescription are the medicine cards' questions
+    "dose", "dosage", "how many", "mg", "overdose", "side effect", "side effects",
+    "withdrawal", "addicted", "addiction")
+
+def _hernia(memory, understood):
+    """The hernia card, opened on the kind of hernia the line names.
+
+    A hiatus hernia is not a lump in the groin and the first sentence has to say what it is, or
+    "what is a hiatus hernia" is answered with the groin.
+    """
+    line = " " + str((understood or {}).get("clean") or "").lower() + " "
+    if "hiatus" in line:
+        return (
+            "A hiatus hernia is the top of the stomach sliding up through the hole in the diaphragm "
+            "that the food pipe comes through, so part of it sits above the muscle that keeps acid "
+            "down. It is very common and it is not dangerous in itself: what it causes is heartburn "
+            "and reflux, worse lying flat, bending or after a big meal. Smaller meals, nothing to "
+            "eat for three hours before bed, the head of the bed up on a couple of books, and losing "
+            "weight round the middle all help, and a GP can add a tablet that turns the acid down "
+            "if those are not enough. An operation is only for the few people whose reflux still "
+            "damages the food pipe on treatment. Trouble swallowing, food sticking, vomiting or "
+            "weight loss without trying are the reasons to be seen quickly rather than treated at "
+            "home.")
+    return _A_HERNIA
+
+
+_A_HERNIA = (
+    "A hernia is a piece of bowel or fat pushing out through a weak spot in the wall of muscle "
+    "that is meant to hold it in - commonest in the groin, where the wall is thin already, and "
+    "then at the belly button or along an old operation scar. It shows as a soft lump that is "
+    "there when you stand and cough and gone when you lie down, and it is usually a dull ache "
+    "rather than a pain. It will not mend itself, and it does not need a repair unless it is "
+    "bothering you, but it does need to be looked at by a GP so the diagnosis is on your record. "
+    "A hiatus hernia is different: the top of the stomach slides up through the diaphragm into "
+    "the chest, which causes heartburn and is treated with the reflux advice and a tablet rather "
+    "than an operation. Go to A&E the same day if a lump that used to go back in becomes hard and "
+    "very tender, or comes with vomiting, a swollen belly or no wind - that is a hernia that has "
+    "been trapped, and it needs a surgeon rather than a wait.")
+
+
+ENTRIES.append(entry(
+    "hernia",
+    (("hernia", "hernias", "inguinal hernia", "hiatus hernia", "femoral hernia",
+      "umbilical hernia", "incisional hernia", "strangulated hernia", "rupture"),
+     ("what", "whats", "what's", "is", "mean", "means", "explain", "tell", "about", "cause",
+      "causes", "why", "treatment", "operation", "surgery", "repair", "fix", "help", "symptoms",
+      "signs", "serious", "dangerous", "can it", "does it", "do i need", "do i have",
+      "have i got", "how do i know", "lump in my groin", "lump in my stomach")),
+    _hernia,
+    explain=True,
+    report=True,
+    bias=2,
+    avoid=_NAMED_CONDITION_AVOID + (
+        # a pulled groin, a bad back and a lump that is not a hernia are the body's own cards,
+        # and heartburn has its own rows
+        "pulled", "pulled muscle", "strain", "strained", "back pain", "slipped disc",
+        "heartburn", "reflux", "indigestion", "acid", "lump in my breast", "lump in my neck",
+        "lump in my armpit", "testicle", "testicles", "testicular", "spot", "cyst")))

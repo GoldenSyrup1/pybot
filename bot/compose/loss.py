@@ -18,6 +18,10 @@ words need a person or a pet behind them, and never an object right before them.
 The pools vary and never repeat, like the fallback's (`_choose` in bot/compose/fallback.py).
 """
 import re
+try:  # the reading of a dream, so a death in a dream is not a death
+    from ..memory import dream as _dream
+except Exception:  # noqa: BLE001 - a reading that cannot be imported just adds no rule
+    _dream = None
 
 from ..understanding import normalise
 from ..understanding.topics import is_a_machine_word
@@ -337,12 +341,28 @@ LOST = re.compile(r"\b(lost|we lost|i lost|he lost|she lost|they lost)\s+"
 # "we lost nan" names the person without a possessive: the subject of "lost" is the person.
 LOST_BARE = re.compile(r"\b(?:i|we|he|she|they)\s+lost\s+"
                        r"(?!(?:my|our|his|her|their|the|it|a|an|that|this|him|them)\b)([a-z]+)\b")
+# The verb was only read in the past tense and only with a possessive, so the same bereavement in
+# the present or said of somebody else was read as an occasion: "what do i say when someone loses
+# a baby" got the congratulations card ("Congratulations - she is beautiful"), "when a family
+# loses a child" got the memory-loss card and "when my friend loses her husband" got a birthday
+# card. The object decides, exactly as it does for "lost": a word that can die is a bereavement,
+# and "lose weight", "lose my temper", "losing my keys" and "lose the plot" name things that
+# cannot, so they are not one. The object may come with a determiner ("loses a baby", "lose the
+# baby") or with none ("loses mum").
+LOSE_A_PERSON = re.compile(
+    r"\b(?:lose|loses)\s+(?:(?:my|our|his|her|their|the|a|an|this|that)\s+)?([a-z]+)")
+# The three readings that ask "was that the person or a thing of theirs" read the verb in the
+# same forms, so the tense cannot change the answer.
+LOST_FORMS = ((LOST, 2), (LOST_BARE, 1), (LOSE_A_PERSON, 1))
 # "the loss of my mum has hit me hard" and "losing my wife has hit me hard" say the bereavement
 # that "i lost my mum" says, in the noun and in the -ing form, and neither was read as a loss at
 # all: the sympathy never came and the follow-up got small talk. Both take an owner and a person
 # or a pet, exactly like LOST, so "the loss of my job" and "losing my temper" stay out.
 LOSS_OF = re.compile(r"\b(?:the\s+|a\s+|any\s+)?loss\s+of\s+(?:my|our|his|her|their)\s+([a-z]+)")
-LOSING = re.compile(r"\blosing\s+(?:my|our|his|her|their)\s+([a-z]+)")
+# The -ing form takes a determiner as well as a possessive: "someone is losing a baby" and
+# "losing the baby" are the loss that "losing my baby" is. The relation still has to be a close
+# one or the line still needs a grief cue, so "im losing a friend" stays a cooling friendship.
+LOSING = re.compile(r"\blosing\s+(?:my|our|his|her|their|a|an|the)\s+([a-z]+)")
 # A close relation is mourned the moment the -ing form names them: "losing my mum has been hard",
 # "losing my wife hit me for months". The cue above is what a friend needs, because "im losing my
 # friend" is as often a friendship cooling; a mum, a husband or a child is not. So the close
@@ -538,6 +558,17 @@ PASSED_ALONE_NOUN = frozenset((
     "words", "message", "messages", "memo", "review", "stone", "stones", "ball", "balloon",
     "duty", "laws", "law", "bill", "act", "exam", "exams", "test", "tests",
 ))
+# The things a person passes that are good news. "my mum got her results and she passed" was met
+# with "I'm so sorry to hear that" - the same word as "my dad passed in jan", and what tells them
+# apart is earlier in the line: a test, an exam, a result is what was passed. Read before the
+# end-of-line reading, because there nothing follows the word to go on.
+PASSED_A_RESULT = frozenset((
+    "results", "result", "exam", "exams", "test", "tests", "interview", "course", "grade",
+    "grades", "marks", "finals", "mocks", "driving", "theory", "gcse", "gcses", "alevels",
+    "a-levels", "degree", "dissertation", "viva", "audition", "assessment", "inspection",
+    "mot", "physical", "boards", "revision", "resit",
+))
+
 # "my dad passed in jan" is a death; "she passed in maths" is a mark.
 PASSED_DATE = frozenset((
     "jan", "january", "feb", "february", "mar", "march", "apr", "april", "may", "jun", "june",
@@ -729,7 +760,8 @@ GRIEF_ASK_FORM = re.compile(
 # The answer modules have the facts, so the composer stands aside rather than offering comfort
 # about the wrong thing - "if you can make it, go" is not an answer to what a funeral costs.
 PRACTICAL = re.compile(
-    r"\b(cost|costs|price|prices|pricing|cheap|cheapest|expensive|afford|affordable|pay|paid|"
+    r"\b(cost|costs|price|prices|pricing|cheap|cheapest|expensive|afford\w*|"
+    r"pay|pays|paid|paying|payment|payments|cover|covers|covered|"
     r"how much (?:is|are|was|were|does|do|will|did)|"
     r"probate|paperwork|document\w*|register|registered|registering|certificate|death certificate|"
     r"wills|estate|insurance|solicitor|lawyer|undertaker|funeral director|coffin|crematorium|"
@@ -816,6 +848,28 @@ FIRST_DAYS_PET = (
     "often find the first one is the hardest.",
 )
 
+# A life that is ending is often said without the word: "my dad is at the end", "my nan is on her
+# last legs", "she is fading fast", "the doctors say there is nothing more they can do". Every one
+# of those was read as something else - an ordinary chat, a breakup, a waiting-room question - so
+# the reader only knew the plain words. The fence is the same rule as the pet one below: ask what
+# follows the phrase, because "my dog is at the end of the garden" and "my cat is fading into the
+# background" are the same words and not the same week. "at the end" has to stop the sentence or
+# say whose life; "fading" has to be away, fast or now.
+AT_THE_END = re.compile(
+    r"\bat\s+the\s+end\b"
+    r"(?=\s*(?:[,.!?;]|$)|\s+of\s+(?:his|her|its|their)\s+(?:life|days|time))"
+    r"|\bon\s+(?:his|her|its|their)\s+last\s+legs\b"
+    r"|\bfading\s+(?:away|fast|now)\b"
+    r"|\b(?:is|are|seems?|looks?)\s+fading\b(?=\s*(?:[,.!?;]|$))"
+    r"|\bnothing\s+more\s+(?:they|we|the\s+vet|the\s+doctors?|anyone)\s+can\s+do\s+"
+    r"for\s+(?:me|us|him|her|them|my|our|his|their)\b"
+    # "the vet says there is nothing more", "the doctors have said theres nothing more": the give-up
+    # that stops the sentence, which is the shape a frightened owner types ("my dog keeps having
+    # seizures and the vet says there is nothing more") and the one the give-up reader misses when
+    # there is no "can do" after it. A care word is what says it is somebody's life and not a job.
+    r"|\b(?:vets?|doctors?|consultants?|specialists?|oncologists?|surgeons?|hospital|hospice|"
+    r"nurses?)\b[^.?!]{0,30}\bnothing\s+more\b(?=\s*(?:[,.!?;]|$))")
+
 # A person who is dying is still here, and the line that says so is not asking for a condolence
 # card: "that's a real loss" and "take today slowly" are answers about the week after the
 # funeral, and they land on someone whose father is in the next room. The reader already counts
@@ -858,7 +912,8 @@ def is_dying_now(text):
     said = _spoken(said)
     clean = _tight(said)
     words = words_of(said)
-    if not (DYING_NOW.search(clean) or _the_end_is_near(clean, words)):
+    if not (DYING_NOW.search(clean) or _the_end_is_near(clean, words)
+            or AT_THE_END.search(clean)):
         return False
     if DYING_ALREADY.search(clean):
         return False
@@ -1372,6 +1427,11 @@ FUNERAL_COST = re.compile(
 # The other half of a funeral bill: not what it costs, but who helps pay it. The DWP payment is
 # the one that exists, and the council has its own fund, so a line asking about help is answered
 # with both rather than with where the money goes.
+# The money the person left pays for their own funeral before anything is shared out, and that is
+# a different answer from the benefits one: "does the estate pay for the funeral" got "apply for
+# the funeral expenses payment from the DWP", which is help for somebody with no money, not where
+# the bill goes when there is some. The estate rows answer it, so this pool stands aside.
+_THE_ESTATE = re.compile(r"\b(?:estate|probate|inheritance|the will)\b")
 FUNERAL_HELP = re.compile(
     r"\b" + _FUNERAL_NOUN + r"\b[^.?!]{0,30}?\b(?:help|afford|claim|payment|pay for|council|"
     r"benefits?|dwp|social fund|charity|charities)\b"
@@ -1492,7 +1552,7 @@ def arrangement_cost_pool(line, tight=None, memory=None):
     if not (asks_anything(line, tight) or QUIETER_ASK.search(tight)
             or FUNERAL_COST_COMPARE.search(tight) or HELP_ASK.search(tight)):
         return None
-    if FUNERAL_HELP.search(tight):
+    if FUNERAL_HELP.search(tight) and not _THE_ESTATE.search(tight):
         # "does the council pay for funerals", "how do i claim the funeral expenses payment",
         # "i cant afford a funeral": the money is the question, and where it goes is not the
         # answer to it.
@@ -1844,6 +1904,91 @@ PRACTICAL_ASK = re.compile(
     r"|\bhow\s+(?:much|expensive)\b")
 
 
+# A death leaves paperwork and money behind, and a line about a death often asks about them in the
+# same breath: "my mum died, is the cremation expensive", "my dad died last week how long does
+# probate take", "my husband passed away last month and i dont know where to start with probate".
+# Those words are the administration, not a feeling, so the entry that knows what to do about them
+# answers the line better than a condolence does, and the person is left holding the question.
+ADMINISTRATION = re.compile(
+    r"\b(?:funerals?|cremation|crematorium|burial|coffin|headstone|probate|wills?|estate|"
+    r"solicitors?|coroner|register(?:ing)? the death|death certificate|medical certificate|"
+    r"bank accounts?|insurance|pension|bereavement|inheritance|funeral directors?|grave|"
+    r"chapel of rest|quotes?|cheapest)\b", re.I)
+
+
+def asks_the_administration(line):
+    """True when the line asks about the paperwork or the money a death leaves behind.
+
+    Read on the words of the administration themselves, not on the shape of the ask: "is the
+    cremation expensive" and "my dad died last week how long does probate take" are the funeral
+    and the probate entries' lines, while "is it normal to still cry" is about the person and
+    belongs to the condolence.
+    """
+    text = " ".join(str(line or "").lower().replace("\u2019", "'").split())
+    return bool(ADMINISTRATION.search(text))
+
+
+# The same words as one key each, so a line and a reply can be asked whether they are about the
+# same piece of paperwork: "his bank accounts" and "the account holder has died" are both the
+# accounts, and "probate" is probate whatever else the sentence says. A bare word is not enough
+# on its own - "pension" belongs to the card about paying into one, and "will" to the card that
+# defines one - so the key only decides the topic; the two questions below decide the rest.
+ADMINISTRATION_KEYS = (
+    ("accounts", r"\b(?:bank\s+)?accounts?\b|\bbereavement team\b"),
+    ("registration", r"\bregist(?:er|ering|ration)(?:\s+(?:the|a|his|her|their))?\s+death\b"
+                     r"|\bregister office\b"),
+    ("death certificate", r"\bdeath certificate\b|\bmedical certificate\b"),
+    ("probate", r"\bprobate\b|\bletters of administration\b"),
+    ("inheritance", r"\binheritance(?: tax)?\b|\biht\d*\b"),
+    ("estate", r"\bestate\b|\bexecutor\b"),
+    ("will", r"\bwills?\b"),
+    ("funeral", r"\bfunerals?\b|\bfuneral directors?\b|\bchapel of rest\b"),
+    ("cremation", r"\bcremat(?:ion|orium|e|ed)\b"),
+    ("burial", r"\bburials?\b|\bbury\b|\bburied\b|\bgrave(?:side)?\b"),
+    ("coffin", r"\bcoffins?\b|\bheadstones?\b"),
+    ("solicitor", r"\bsolicitors?\b"),
+    ("coroner", r"\bcoroners?\b"),
+    ("insurance", r"\binsurance\b|\blife cover\b"),
+    ("pension", r"\bpensions?\b"),
+)
+
+
+def administration_keys(text):
+    """The pieces of paperwork a line or a reply names, as plain keys."""
+    lowered = " ".join(str(text or "").lower().replace("\u2019", "'").split())
+    return frozenset(key for key, pattern in ADMINISTRATION_KEYS
+                     if re.search(pattern, lowered))
+
+
+# A reply that only defines the word the person asked about answers a different question: "what
+# do i do about her will" was answered with "A will says who gets what when you die", which gives
+# the kind of answer the line asked for (it reads as instructions) and none of what to do.
+DEFINES = re.compile(r"^\s*(?:a|an|the)\s+[\w'-]+\s+(?:says|means|is)\b", re.I)
+
+# A death leaves paperwork behind, and a reply about it says whose it is: a card about paying
+# into a pension is about a living person, however well its instructions fit the ask.
+THE_DEATH = re.compile(
+    r"\b(?:died|dies|dying|death|dead|deceased|passed away|bereave\w*|widow\w*|widower\w*|"
+    r"estate|executor|next of kin|funeral|cremation|burial)\b", re.I)
+
+
+def is_about_the_paperwork(reply, line):
+    """Whether the reply answers the paperwork the line named, not merely the right shape.
+
+    Three things have to hold, and each of them was a real turn: the reply has to name the same
+    piece of paperwork the line named ("what do i bring to the funeral" was answered with the
+    wake food list, which names none), it has to say whose paperwork it is ("i have to sort out
+    her pension" was answered with a card about paying into your own), and it must not be a
+    definition of the word ("what do i do about her will" got what a will is).
+    """
+    if not (administration_keys(line) & administration_keys(reply)):
+        return False
+    text = str(reply or "")
+    if DEFINES.match(text) or not THE_DEATH.search(text):
+        return False
+    return True
+
+
 # The open ask, with no thing of its own: "what do i do now", "what next", "where do i start",
 # "so what do i do". Inside a loss it is not a shrug - it is the same question the loss asks,
 # and the answer is the stage the chat is at. A line with a thing in it ("what do i do with her
@@ -2067,6 +2212,76 @@ PET_ARRANGEMENT = re.compile(
     r"pick\w*\s+(?:\w+\s+){0,2}up|collect\s+\w+\s+from\s+the\s+vet)\b")
 PET = re.compile(r"\b(cat|dog|puppy|kitten|rabbit|hamster|guinea\s?pig|horse|pony|budgie|parrot|"
                  r"pet|pets|ferret|gerbil|rat|mouse|tortoise|snake|lizard|fish|goldfish)\b")
+# The animal is the one who has had enough: "my dog wants to die", "my cat has no quality of life",
+# "he doesnt want to live anymore". Nothing has died and no vet has given a timeline, so every pool
+# below reads the line as somebody else's death sentence or as nothing at all - the answer is the
+# days before it, and this is the wish that says so. A person getting these words is left alone
+# (`_a_pet_of_ours`), and so is a speaker who says the same of themselves in the same line: that
+# line is a crisis, and bot/modules/safety.py keeps the card for it.
+# "my dog has had enough" is a goodbye; "my dog has had enough of the rain", "... of the car",
+# "... of the vet", "... of the food" is an ordinary annoyance. The two shared one pattern to
+# begin with, so a fence listing the harmless nouns would always be one noun short (reviewers
+# measured rain, the car, the vet, the hoover, the food and his dinner within an hour). Ask what
+# the line does after "had enough" instead: it has to stop there, or name the animal's state.
+PET_HAS_HAD_ENOUGH_AFTER = (
+    r"has\s+had\s+enough"
+    r"(?=\s*(?:[,.!?;]|$)"
+    r"|\s*,?\s*(?:of\s+)?(?:it|this|life|everything|it\s+all|all\s+of\s+it)\b"
+    r"|\s*,?\s*(?:of\s+)?(?:the|his|her|their)\s+"
+    r"(?:pain|suffering|treatment|chemo|medication|operations|surgery|seizures|incontinence)\b"
+    r"|\s*,?\s+(?:he|she|it|they)?\s*(?:is|are|s)?\s*(?:not\s+eating|stopped\s+eating|"
+    r"cant\s+eat|cant\s+get\s+up|cant\s+walk|cant\s+stand|in\s+pain|suffering|giving\s+up)\b"
+    r"|\s+(?:now|today|already)\b)")
+PET_HAS_HAD_ENOUGH = re.compile(
+    r"\b(?:wants?\s+to\s+die|wants?\s+to\s+be\s+put\s+to\s+sleep|no\s+will\s+to\s+live|"
+    r"doesn'?t\s+want\s+to\s+live|does\s+not\s+want\s+to\s+live|no\s+quality\s+of\s+life|"
+    + PET_HAS_HAD_ENOUGH_AFTER + r")\b")
+SPEAKER_HAS_HAD_ENOUGH = re.compile(
+    r"\b(?:i|me|myself)\b[^.?!]{0,24}\b(?:die|dying|kill\s+myself|end\s+it|go\s+on)\b|"
+    r"\b(?:so\s+(?:do|will|would|can|am|are|have|has)\s+i|me\s+too)\b")
+# The ending said twice in one line: "my dog is at the end and so am i", "my nan is fading fast and
+# so am i", "my dad is at the end and i am too". The first half is somebody else's week, so the arms
+# above answer for them - the animal's days before, or a carer's pool - and `SPEAKER_HAS_HAD_ENOUGH`
+# stands the pet arm down and then nothing answered at all: the line came back as "Thanks for
+# telling me", as a punt, or as the echo "Noted: your nan is fading fast and so am you." The
+# speaker has put themselves in the same place as the one they are losing, so the answer is for
+# both of them, and it offers a person to talk to instead of arranging the vet.
+SPEAKER_TOO = re.compile(
+    r"\b(?:and\s+)?so\s+(?:am|do|have|has|will|would|can|are|is)\s+i\b"
+    r"|\b(?:and\s+)?i(?:'m|\s+am|\s+do|\s+have|\s+will|\s+would|\s+can)\s+(?:too|as\s+well)\b"
+    r"|\b(?:me\s+too|same\s+here|i\s+feel\s+the\s+same|i\s+feel\s+it\s+too|"
+    r"neither\s+(?:do|am|have)\s+i)\b")
+# A wish in the line is the safety lane's card and its card is the right one: "my dog wants to die
+# and so do i", "my cat is at the end and i want to die" keep the suicide card, not this pool.
+WISH_FRAME = re.compile(
+    r"\b(?:want|wants|wanted|wanna|wish|wishes|wished|plan|plans|planning|tempted|urge|"
+    r"thinking\s+(?:of|about)|thought\s+about)\b|\b(?:going|gonna)\s+to\b")
+# Two people at the end at once is too much for one of them to hold quietly, so the reply names
+# both, offers a person, and gives the crisis line without assuming the speaker means suicide.
+SPEAKER_TOO_REPLIES = (
+    "You are carrying their ending and your own in the same breath, and that is more than one "
+    "person should hold. Tell someone today - a GP, a friend, or a crisis line on 116 123 in the "
+    "UK or 988 in the US - and let them take a share of it.",
+    "That is two of you at the end at once, and you should not be managing it on your own. Ring a "
+    "crisis line today (116 123 in the UK, 988 in the US), or tell someone close so they can be "
+    "with you while you say the rest.",
+    "I'm sorry. Both at once is more than one person can carry quietly: say it out loud to someone "
+    "today - a friend, your GP, or a crisis line on 116 123 in the UK or 988 in the US - and let "
+    "them help with the next bit.",
+    "You matter in this too, not only the one you are losing. Please tell someone today - a crisis "
+    "line is 116 123 in the UK and 988 in the US - and let them sit with you while you say it.",
+)
+# The owner's own words for the coming goodbye, which are not words for a death anywhere else:
+# "my dog is done", "my cat is ready to go", "i think my dog is telling me its time", "he is 15 and
+# i think its time". Each is only these words about an animal - "my dad is done" is a hard week and
+# "my nan is ready to go home" is a discharge - so this fence is read only when the animal is ours
+# and the speaker's own wish is not in the line. "is done" and "ready to go" stop the sentence, so
+# "my dog is done with his dinner" and "ready to go for a walk" stay ordinary.
+PET_AT_THE_END = re.compile(
+    r"\b(?:is|are|seems?|looks?)\s+done\b(?=\s*(?:[,.!?;]|$))"
+    r"|\bready\s+to\s+go\b(?=\s*(?:[,.!?;]|$))"
+    r"|\btelling\s+me\s+(?:its|it'?s|his|her)\s+time\b"
+    r"|\bi\s+think\s+(?:its|it'?s)\s+time\b")
 
 FILLERS = frozenset(("actually", "really", "even", "just", "exactly", "honestly",
                      "literally", "basically", "anyway", "still", "perhaps", "maybe"))
@@ -2508,17 +2723,36 @@ ABSENCE = re.compile(
 # the place at the table are a strange thing to say to that. Bare "i keep thinking about my mum"
 # is left out on purpose - the mum may be alive and simply far away.
 STILL_LAYING = re.compile(
-    r"\bset\s+(?:the\s+|a\s+)?table\s+for\s+(?:two|three|four)\b|"
+    r"\b(?:set|setting|lay|laying|laid)\s+(?:out\s+)?(?:the\s+|a\s+)?table\s+for\s+"
+    r"(?:two|three|four)\b|"
     r"\b(?:lay|laying|laid|set|setting|put|putting)\s+(?:out\s+)?(?:\w+\s+){0,3}"
     r"(?:place|places|bowl|bowls|plate|plates|cup|cups)\b(?:\s+\w+){0,4}\s+for\s+(?:two|three)\b|"
     r"\b(?:keep|keeps|still)\s+(?:\w+\s+){0,2}(?:set|setting|put|putting|lay|laying|buy|buying)\b"
-    r"[^.]{0,24}\b(?:bowls?|places?|plates?|cups?|mugs?|glasses|food|biscuits?|treats?)\b", re.I)
+    r"[^.]{0,24}\b(?:bowls?|places?|plates?|cups?|mugs?|glasses|food|biscuits?|treats?)\b|"
+    # The second one still gets made, poured, cooked: "i still make two cups of tea", "i still
+    # buy two of everything", "i still dish up two plates". The verb is what makes it a routine
+    # and the count is what makes it theirs, so both are in the shape, and the count has to come
+    # within a few words of the verb rather than anywhere in the line.
+    r"\b(?:keep|keeps|kept|still)\s+(?:\w+\s+){0,3}"
+    r"(?:make|making|made|pour|pouring|poured|buy|buying|bought|cook|cooking|cooked|dish|"
+    r"dishing|fill|filling|cut|cutting|butter|buttering|boil|boiling)\b"
+    r"[^.]{0,24}\b(?:two|three|both)\b|"
+    r"\b(?:two|three|both)\s+(?:cups?|mugs?|teas?|coffees?|plates?|bowls?|portions?|"
+    r"helpings?|sandwiches?|glasses)\b[^.]{0,24}\b(?:for (?:us|two|both of us)|still)\b", re.I)
 STILL_WITHOUT = re.compile(
     r"\b(?:empty|quiet|silent)\s+without\s+(?:my|our|him|her|them)\b", re.I)
 STILL_CRYING = re.compile(
     r"\b(?:cry|cries|cried|crying)\s+(?:over|about|for)\s+(?:my|our|him|her|them)\b|"
     r"\b(?:cant|cannot|can'?t)\s+stop\s+(?:cry\w*|think\w*)\s+(?:about|over|for)\s+"
     r"(?:my|our|him|her|them)\b", re.I)
+# The habit where the person is not named, because the thing that carried them is: "i keep looking
+# up when the door goes", "i still reach for the phone", "i keep setting two places". Only ever
+# asked inside a thread or a line that already has the death, since the door and the phone are in
+# everybody's day.
+STILL_AT_THE_DOOR = re.compile(
+    r"\b(?:keep|keeps|kept|still)\s+(?:\w+\s+){0,2}"
+    r"(?:looking|look|listening|listen|waiting|wait|reaching|reach|expecting|expect|setting|set)\b"
+    r"[^.]{0,30}\b(?:door|doorbell|phone|key|keys|ring(?:ing)?|places?|table|seat)\b", re.I)
 STILL_SEEING = re.compile(
     r"\b(?:keep|keeps|kept|still)\s+(?:\w+\s+){0,3}"
     r"(?:expect\w*|looking|look|waiting|wait|listening|listen|hearing|hear|seeing|see|"
@@ -2529,6 +2763,16 @@ THE_ROUTINE_REPLIES = (
     "Laying it out for them is the routine still running. Put it away when you want to, not "
     "because anyone says it is time.",
     "Half of it is the small jobs your hands still do. There is nothing wrong with any of them.",
+)
+# The jobs that were theirs, still being done. The routine pool names the table, so it is wrong for
+# a phone or a coffee, and these are the three that hold whichever job the line names.
+THE_JOBS_FOR_THEM_REPLIES = (
+    "The jobs you did for them do not stop on the day. The hands keep going for a while, and that "
+    "is not a sign you are stuck.",
+    "Some part of the day is still theirs. Doing the job anyway is how a lot of people get "
+    "through the first year, and there is nothing wrong with it.",
+    "A habit that was for them takes a while to notice as a habit. Do it, or stop, whichever "
+    "comes first - neither is a betrayal of them.",
 )
 THE_HOUSE_REPLIES = (
     "An empty house is the hardest part of the day to fill. It does get less loud, and the quiet "
@@ -2569,6 +2813,29 @@ def _an_ask_in_the_line(line):
                           r"why|how|what|when|where|who)\s+(?:i|we|you|he|she|they|it)\b", line))
 
 
+# The routine done for them and for nobody else: "i still make his coffee", "i still call her
+# phone", "i still put his bowl down", "i still say goodnight to him", "i still buy his beer".
+# The verb is what makes it a job the hands still do and the person named after it is who it is
+# still done for, so both are in the shape and the person has to come within a few words of the
+# verb. The feeling verbs stay out on purpose - "i still love her" and "i still miss him" are the
+# loss itself, and "i still owe him 200" is a debt, not a habit - and so does a bare "he"/"she",
+# because "i still say he was a good man" is a verdict, not a routine.
+STILL_DOING_FOR_THEM = re.compile(
+    r"\b(?:keep|keeps|kept|still)\s+(?:\w+\s+){0,3}"
+    r"(?:make|making|pour|pouring|buy|buying|cook|cooking|dish|dishing|lay|laying|set|setting|"
+    r"put|putting|save|saving|leave|leaving|wash|washing|iron|ironing|fold|folding|"
+    r"call|calling|text|texting|ring|ringing|phone|phoning|greet|greeting|kiss|kissing|"
+    r"say|saying|check|checking|fill|filling|clean|cleaning|top|topping|pay|paying|paid|"
+    r"do|doing)\b"
+    r"[^.]{0,30}\b(?:his|her|their|him|them|hers|theirs)\b", re.I)
+
+
+HABIT_PATTERNS = ((STILL_LAYING, THE_ROUTINE_REPLIES),
+                  (STILL_DOING_FOR_THEM, THE_JOBS_FOR_THEM_REPLIES),
+                  (STILL_WITHOUT, THE_HOUSE_REPLIES),
+                  (STILL_CRYING, THE_CANNOT_STOP_REPLIES),
+                  (STILL_SEEING, THE_HABIT_REPLIES),
+                  (STILL_AT_THE_DOOR, THE_HABIT_REPLIES))
 def _still_here(line, words):
     """The pool for the habit a line reports, or None.
 
@@ -2590,13 +2857,15 @@ def _still_here(line, words):
         return None
     if _only_the_proceedings(" ".join(words), words):
         return None
-    for pattern, pool in ((STILL_LAYING, THE_ROUTINE_REPLIES),
-                          (STILL_WITHOUT, THE_HOUSE_REPLIES),
-                          (STILL_CRYING, THE_CANNOT_STOP_REPLIES),
-                          (STILL_SEEING, THE_HABIT_REPLIES)):
+    for pattern, pool in HABIT_PATTERNS:
         if pattern.search(line):
             return pool
     return None
+
+
+def _a_habit_in(line):
+    """True when the line reports one of the habits the pools above answer, whatever the pool."""
+    return any(pattern.search(line) for pattern, _pool in HABIT_PATTERNS)
 
 
 AFTER_REPLIES = (
@@ -3431,7 +3700,7 @@ def lost_in_a_place(text):
     the guard that keeps the sympathy away from a panic.
     """
     clean = " ".join(words_of(text))
-    for pattern, group in ((LOST, 2), (LOST_BARE, 1)):
+    for pattern, group in LOST_FORMS:
         found = pattern.search(clean)
         if not found or found.group(group) not in DEATHABLE:
             continue
@@ -3442,12 +3711,38 @@ def lost_in_a_place(text):
 
 # "losing my baby weight" is not a baby being mourned: the relation word is a description of the
 # pounds, not a person. Only the things people shed after a birth are here.
-SHED = re.compile(r"\s+(?:weight|fat|pounds|stone|belly|blubber)\b")
+SHED = re.compile(r"\s+(?:weight|fat|pounds|stone|belly|blubber|tummy|tummies|inches|waist|"
+                       r"middle|kilos?|kilograms?)\b")
 
 
 def _shed_after(clean, start):
     """True when what follows the relation is the weight rather than the person."""
     return bool(SHED.match(clean, start))
+
+
+# A loss that is feared, hoped against or only imagined is not one that has happened. "i hope i
+# never lose my dad" and "if i lose my mum i dont know what ill do" are the fear, and the
+# bereavement pool answered them "i'm sorry, that's a real loss" - a claim about the world that
+# was never made. The frame is in front of the verb, so it is read there, before the verb is.
+# Only the forms that look forward take it: "i never got to say goodbye, i lost my dad" keeps its
+# loss, because "lost" is not a form the frame can precede.
+FEARED_NOT_YET = re.compile(
+    r"\b(?:dont|don't|do not|doesnt|doesn't|never|hope|hoping|hoped|scared|afraid|worried|"
+    r"worry|worrying|dread|dreading|if|unless|before|hate|bear)\b"
+    r"[^.!?]{0,24}?\b(?:lose|loses|losing)\b", re.I)
+
+
+def _feared_not_done(clean, start):
+    """True when the verb a match begins at sits behind a frame that keeps it in the future.
+
+    The frame ends on the verb itself, so a match that starts before the frame's end is the verb
+    the frame is about: "i dont want to lose my mum" matches at "lose", four letters before the
+    frame ends.
+    """
+    for frame in FEARED_NOT_YET.finditer(clean):
+        if frame.start() <= start and 4 <= frame.end() - start <= 6:
+            return True
+    return False
 
 
 def _lost_in_a_place_after(clean, start):
@@ -3483,7 +3778,7 @@ def lost_a_thing(text):
     deathable = _can_die(clean)
     if re.search(r"\blost\s+it\b", clean):
         return True  # "i lost it with the kids": a bad moment, not a death
-    for pattern, group in ((LOST, 2), (LOST_BARE, 1)):
+    for pattern, group in LOST_FORMS:
         found = pattern.search(clean)
         if not found:
             continue
@@ -3653,12 +3948,18 @@ def reads_as_loss(text, words=None, a_pet=False):
         # "we lost the baby at twelve weeks" is a bereavement; "we lost the baby in the
         # supermarket" is a minute of panic, and "we lost the dog" could be either.
         return True
-    for pattern, group in ((LOST, 2), (LOST_BARE, 1)):
+    for pattern, group in LOST_FORMS:
         found = pattern.search(clean)
         if found and found.group(group) in deathable:
             # "lost her job" is a job; "lost my dad" is a dad; "we lost nan" is nan.
             if _their_thing_after(clean, found.end()):
                 continue  # "i lost my carer badge": the badge went missing, not the carer
+            # "losing my son at the park" is ten bad minutes and "how do i lose the baby
+            # weight" is the pounds, in the present tense as well as the past.
+            if (_lost_in_a_place_after(clean, found.end())
+                    or _shed_after(clean, found.end())
+                    or _feared_not_done(clean, found.start())):
+                continue
             return True
     for pattern in (LOSS_OF, NEWS_OF):
         found = pattern.search(clean)
@@ -3672,6 +3973,7 @@ def reads_as_loss(text, words=None, a_pet=False):
     if (losing and losing.group(1) in deathable
             and (losing.group(1) in CLOSE or LOSS_GRIEF_CUE.search(clean))
             and not _shed_after(clean, losing.end())
+            and not _feared_not_done(clean, losing.start())
             and not _lost_in_a_place_after(clean, losing.end())):
         # "losing my wife has hit me hard" is a bereavement; "losing my son at the park" is ten
         # bad minutes and "im losing my friend" has no grief cue at all.
@@ -3795,6 +4097,10 @@ def _passed_alone(clean, person):
         if word != PASSED_ALONE:
             continue
         if not person and not set(words[max(0, i - 4):i]) & PASSED_ON_SUBJECT:
+            continue
+        if set(words[:i]) & PASSED_A_RESULT:
+            # "my mum got her results and she passed": something to pass was named, so the word
+            # is the achievement and not the death.
             continue
         rest = words[i + 1:]
         if not rest:
@@ -4384,6 +4690,15 @@ def _grief_replies(line, memory):
     return tuple(reply.format(animal=animal, article=article) for reply in PET_GRIEF_REPLIES)
 
 
+def _a_colour_is_worn(line):
+    """True when the line asks about a colour of clothes (the knowledge base's own reading)."""
+    try:
+        from ..knowledge import lookup
+        return lookup.a_colour_is_worn(line)
+    except Exception:  # noqa: BLE001 - a reading that fails leaves the loss where it was
+        return False
+
+
 def reply_for(text, memory, clean=None, topics=None, mood=None):
     """The pool the line asks for, or None when it is not about a death.
 
@@ -4394,10 +4709,71 @@ def reply_for(text, memory, clean=None, topics=None, mood=None):
     words = words_of(text)
     line = clean if isinstance(clean, str) and clean else " ".join(words)
     tight = _tight(line)
+    if _a_colour_is_worn(line) and not A_DEATH_HAPPENED.search(tight):
+        # Clothes are not the loss. "is white ok at a funeral" is the question "what do I wear to
+        # the funeral" with the colour where the verb would go, and the condolence that follows is
+        # "Go if you can, even just for the service" - advice for somebody who has not decided to
+        # go at all. The reading is the knowledge base's own (`lookup.a_colour_is_worn`), so this
+        # file keeps no second list of colours, and a colour a person only reports ("i bought a
+        # black dress for my mums funeral") is still the loss it was. A line that says a death
+        # happened keeps the loss even with a colour in it: "my mum died last week, is black ok at
+        # the funeral" is somebody's week first, and the clothes answer to it was a shrug.
+        return None
+    if _dream is not None and _dream.SETTLED_IT.search(line) \
+            and _dream.told_in_the_turn_before(memory):
+        # The line that settles a dream the bot was just told ("hes fine its just a dream") names
+        # no frame of its own, and it was read as a bereavement: the condolence answered a death
+        # the same person had just said did not happen. The dream thread keeps it.
+        return None
+    if _dream is not None and _dream.a_dream_is_not_happening(line) \
+            and not _dream.a_death_came_first(line):
+        # A death in a dream is not a death: "i dreamt my dad died", "i had a dream my mother
+        # died" and "i dreamt my cat died" were each answered with the condolence for a death
+        # that had not happened. The dream module has the whole line. A death in the waking life
+        # with a dream beside it ("my dad died and i dreamt about him") is still this module's.
+        return None
     if _only_a_new_subject(line):
         return None  # the thing the line corrects, not a loss it reports
     if DYING_OTHER.search(tight):
         return None  # "my mum is dying for a coffee", "my mums dying her hair"
+    if SPEAKER_TOO.search(tight) and not WISH_FRAME.search(tight):
+        # Read the other half as it would be read alone: the same clause said of the speaker is
+        # taken off first, so "my dog is at the end and so am i" is read as "my dog is at the end"
+        # and "the paint is fading and so am i" is read as "the paint is fading" - which is not
+        # somebody's week, and stays ordinary.
+        rest = SPEAKER_TOO.sub(" ", tight).strip()
+        animal = bool(PET.search(rest)) and _a_pet_of_ours(rest, words)
+        if (is_dying_now(rest) or _the_end_is_near(rest, words)
+                or (animal and (AT_THE_END.search(rest) or PET_AT_THE_END.search(rest)
+                                or PET_HAS_HAD_ENOUGH.search(rest)))):
+            # "my dog is at the end and so am i", "my nan is fading fast and so am i": the ending
+            # is said of the other one and then of the speaker, and the speaker is the one nobody
+            # was answering - the pet pool would be about the animal, and the echo is no answer.
+            return SPEAKER_TOO_REPLIES
+    if (PET_HAS_HAD_ENOUGH.search(tight) and PET.search(tight)
+            and _a_pet_of_ours(line, words) and not SPEAKER_HAS_HAD_ENOUGH.search(tight)):
+        # "my dog wants to die", "my cat has no quality of life": the animal has had enough and
+        # the person is facing the days before it, which is the one pool written for that day.
+        return THE_DAYS_BEFORE
+    if (PET_AT_THE_END.search(tight) and PET.search(tight)
+            and _a_pet_of_ours(line, words) and not SPEAKER_HAS_HAD_ENOUGH.search(tight)):
+        # "my dog is at the end", "my cat is ready to go", "i think my dog is telling me its time":
+        # the same week as "my dog is dying", said the way people say it. Nothing here has died, so
+        # every condolence pool is about the wrong day.
+        return THE_DAYS_BEFORE
+    if AT_THE_END.search(tight) and not SPEAKER_HAS_HAD_ENOUGH.search(tight):
+        # The ending said another way, for whichever of ours it is: "my dad is at the end", "my nan
+        # is on her last legs", "the doctors say there is nothing more they can do". Before this
+        # they came back as a memory echo ("Noted: your nan is on her last legs"), a punt, or - for
+        # "my friend is at the end" - the card for a breakup. `is_dying_now` carries the reading, so
+        # the follow-up after one of these lines ("what do i say to him") knows the week too.
+        if is_dying_now(tight):
+            if PET.search(tight) and _a_pet_of_ours(line, words):
+                return THE_DAYS_BEFORE
+            if "?" in line or ASK_WORDS.search(tight) or line.startswith(
+                    ("what", "how", "should", "can", "do", "does", "is", "why", "when")):
+                return DYING_SAY_REPLIES
+            return DYING_REPLIES
     if _the_visit_ask(tight) and dying_in_the_chat(memory):
         # "how do i say goodbye to her" two turns after "my carer is dying" is about the visit,
         # not the announcement: the person is still here, and the other pool tells somebody the
@@ -4642,6 +5018,18 @@ def reply_for(text, memory, clean=None, topics=None, mood=None):
         # chat is already about the loss. It comes before the plain ritual answer, because a
         # question about the day is more than company.
         return REMEMBER_REPLIES
+    if (not asking and _a_habit_in(tight + " " + line)
+            and (continues(memory)
+                 or _thread_pool(memory) in (MISS_REPLIES, AFTER_REPLIES, THE_HABIT_REPLIES))):
+        habit = _still_here(line, tight.split())
+        if habit:
+            # "i keep expecting him to ring", "i still expect her at the door", a turn after "i
+            # missed my dad": the habit is the one specific thing in the line, and the general
+            # condolence said back to it ("I'm glad you said that out loud") tells a person their
+            # line was not heard. `_still_here` already answers a habit said beside a death in
+            # the same line; this asks it the same question one turn later, where the death is in
+            # the thread and the habit is all the line has.
+            return habit
     if (_thread_pool(memory) is MISS_REPLIES and not asking
             and STILL_ABOUT_THEM.search(tight)
             and not _a_question_about_the_feeling(line, set(tight.split()))
@@ -4832,7 +5220,15 @@ def is_practical_ask(line, tight=None):
     """
     line = str(line or "")
     tight = _tight(line) if tight is None else tight
-    asking = asks_anything(line, tight)
+    # A line opening with an interrogative word is a question even when it carries no question
+    # mark and no ASK_FORM: "who pays for a funeral", "where is the funeral", "which funeral
+    # director". The tuple of openers this reads elsewhere in the file has what, how, should,
+    # can, do, does, is, why, when - but not who, where or which, so "who pays for a funeral"
+    # read as a statement and got the condolence for somebody else's loss instead of the money
+    # answer. Read here, where a practical question after a death is what stands the composer
+    # down, rather than across the whole file.
+    asking = (asks_anything(line, tight)
+              or bool(re.match(r"\s*(?:who|who's|whos|whose|where|which)\b", tight)))
     # A question that arrives as the second half of a line - "my cat died, should we bury her",
     # "the cremation, is it expensive" - is only read as an ask by the pet card, which is what
     # the shape was added for. For everything else it made a person's death read as a practical
@@ -4870,10 +5266,18 @@ def is_practical_ask(line, tight=None):
 
 # MISS_REPLIES is in the list so a line said after it ("she died two years ago", "i keep expecting
 # him at the door") is still the same conversation rather than a fresh chat.
+# GETTING_THROUGH_REPLIES is here for the same reason, and it was the one pool missing: it is the
+# answer to the plea ("any thoughts"), so it is said *inside* the bereavement and the line after it
+# is still that bereavement. Without it the module's own answer closed the thread it had just
+# opened - "my dad died last week", "any thoughts" got the keeping-going line and then "any ideas"
+# and "any tips" went back to the search hedge and the tips pool, which are the two lines the plea
+# reading exists to delete. Every pool this file *says* is a pool the thread reads past.
 POOLS = (LOSS_REPLIES, SAY_REPLIES, CARD_REPLIES, GRIEF_REPLIES, FUNERAL_REPLIES,
          FUNERAL_COST_COMPARE_REPLIES, FUNERAL_HELP_REPLIES,
          REMEMBER_REPLIES, FUNERAL_WHEN_REPLIES, AFTER_REPLIES, HELLO_AFTER,
-         MISS_REPLIES) + tuple(FEELING_REPLIES.values())
+         MISS_REPLIES, THE_ROUTINE_REPLIES, THE_HOUSE_REPLIES, THE_CANNOT_STOP_REPLIES,
+         THE_HABIT_REPLIES, THE_JOBS_FOR_THEM_REPLIES,
+         GETTING_THROUGH_REPLIES) + tuple(FEELING_REPLIES.values())
 
 
 # An emergency inside a bereavement is answered by the safety band ("my mum died and i cant

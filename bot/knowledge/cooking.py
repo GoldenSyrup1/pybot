@@ -19,13 +19,15 @@ import re
 from ..understanding import line_as_read
 from .dishes import KEEP_QUALITY_WORDS, PLAN_NAMES
 from .keeping_cooked import COOKED_KEEP_ASK, COOKED_KEEP_AVOID, COOKED_KEEPS
-from .lookup import entry, find, TOOTH_OR_GUM
+from .lookup import (entry, find, kinds_entries, says_it_has_gone_off as _says_it_has_gone_off,
+                     TOOTH_OR_GUM)
 from .meals import NOT_MINE_ENTRY as _NOT_MINE, says_a_diet as _says_a_diet
 # The bake-fault dispatcher and its tables live in their own file: this one is on the
 # uploader's size ceiling, and the entry below still reaches the same code.
 from .bake_faults import (_BAKE_FAULT, _BAKE_FAULT_FAMILIES, _BAKE_THING,  # noqa: F401
                           _bake_always, _bake_fault)  # noqa: F401
-from .units import BIRD_GRAMS
+from .prices import a_price_is_judged
+from .units import BIRD_GRAMS, people_in_groups
 from .cooking_tables import (NOT_WANTED, MEAL_IDEAS, SIDES, SEASONINGS, DIET_VARIANTS, FREEZE_FACTS, FOOD_CALORIES, FOOD_NUTRIENTS, FOOD_CALORIE_MEALS, BAKES, KEEPS, PANTRY, DISHES, RECIPES)  # noqa: F401  (the tables, so the rows below can read them)
 
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
@@ -264,8 +266,8 @@ BASICS = (
      "off with the back of a finger and don't go past the line inside the bowl. Let it finish on "
      "its own, leave it on warm for 10 minutes, then fork it through."),
     (("rice", "basmati", "long grain rice", "white rice", "jasmine rice", "rice cooker"),
-     "One mug of rice to one and a half mugs of water, lid on, ten to twelve minutes on the "
-     "lowest heat, then ten minutes off the heat with the lid still on before you fork it "
+     "One mug of rice to one and a half mugs of water, lid on, 10 to 12 minutes on the "
+     "lowest heat, then 10 minutes off the heat with the lid still on before you fork it "
      "through. Rinse it until the water runs clear first. Don't stir it and don't drain it - "
      "that is what makes it gluey."),
     (("porridge", "oats", "oatmeal", "porridge oats"),
@@ -485,7 +487,11 @@ NOT_A_METHOD = ("make with", "made with", "make using", "use up", "using up", "u
                 # and keeping.py's own row for the food answers it.
                 "yesterday", "yesterdays", "last night", "the day before", "day before",
                 "the day after", "day after", "day later", "a day later", "days ago",
-                "a couple of days ago", "2 days ago", "two days ago")
+                "a couple of days ago", "2 days ago", "two days ago",
+                # a game shares its name with a food, and a shot at it is not a pan question:
+                # "how do i improve my backhand at squash" was told to halve a butternut squash
+                "backhand", "forehand", "racket", "racquet", "tennis court", "squash court",
+                "badminton", "volleyball", "netball", "the ball", "cricket")
 
 # The words that make a line a question about whether a crop is ready to pick, rather than about
 # cooking it. "how do i know when my onions are ready" is onions in the ground; the harvest row in
@@ -696,6 +702,31 @@ def _done_words():
     return DONE_NOT
 
 
+# A portion question and a timing question both start with "how much" or "how many": "how much
+# rice do i need for four people" is the portion table's, and "how many minutes per side for pork
+# chops" is this row's own. The avoid list used to hold the two bare words, so the timing question
+# was stood down as well and got a shrug while the same line with "how long do i cook" in it was
+# answered. A how-much ask that names a time or a heat is a method question, so the row keeps it.
+_A_HEAT_OR_TIME = re.compile(
+    r"\b(minutes?|mins?|minutes'|hours?|hrs?|seconds?|degrees?|celsius|fahrenheit|gas mark|"
+    r"temp|temperature|oven)\b|\bhow long\b")
+_A_HOW_MUCH = re.compile(r"\bhow (much|many)\b")
+# "a side" is a face of the meat once the line names a time ("3 minutes a side"), and the rest of
+# the plate when it does not ("what side with steak", "any sides for a roast").
+_A_SIDE_SAID = re.compile(r"\bsides?\b")
+
+
+def _not_a_portion_ask(understood):
+    """False when a "how much" line asks an amount, or a "side" line means the plate."""
+    text = str(understood.get("clean") or understood.get("norm_text")
+               or " ".join(understood.get("words") or [])).lower()
+    if _A_HOW_MUCH.search(text) and not _A_HEAT_OR_TIME.search(text):
+        return False
+    if _A_SIDE_SAID.search(text) and not _A_HEAT_OR_TIME.search(text):
+        return False
+    return True
+
+
 def _staple(memory, understood):
     """How to cook the everyday staple the line names, or nothing when it names none."""
     said = [_fold(str(word).lower()) for word in (understood.get("words") or [])]
@@ -735,12 +766,55 @@ def _staple(memory, understood):
                 guards = NOT_WANTED.get(names[0], ())
                 if name != names[0]:
                     guards = guards + NOT_WANTED.get(name, ())
-                if any(word in rest for word in guards):
+                # The row's own words are a case it already answers, so a guard that the answer
+                # itself says is not a reason to stand it down: the lamb shank row gives the
+                # slow cooker time for a shank, and "can i do it in a slow cooker" after "how do
+                # i cook a lamb shank" wants that row, not its own "slow cooker" guard.
+                own = _fold(reply.lower()) if isinstance(reply, str) else ""
+                if _a_guard_said(rest, joined, guards, own):
                     continue
                 # A staple whose method depends on the equipment the line names answers as a
                 # function of the line; the plain rows are strings and are returned as they are.
                 return reply(understood) if callable(reply) else reply
     return None
+
+
+# An appliance named beside a cut is answered by the two tables together: the dinner ideas stand
+# down for it (they hand the cut to the table), so a cut row stood down for the appliance would
+# leave the line with no answer at all. "how do i cook a leg of lamb in a slow cooker" was the
+# lamb's oven time before these guards fired, and a shrug after.
+_AN_APPLIANCE = ("slow cooker", "slow cookers", "crockpot", "crock pot", "air fryer",
+                 "pressure cooker", "instant pot", "oven")
+
+
+def _an_appliance_has_the_line(text):
+    """True when an appliance and a cut are both named, so the cut row has to answer."""
+    try:
+        from . import dishes
+    except Exception:  # noqa: BLE001 - the guard is a courtesy, not the row
+        return False
+    return dishes._names_an_appliance_and_a_cut(text)
+
+
+def _a_guard_said(rest, joined, guards, own=""):
+    """Whether the line carries one of a row's guard words, or one of its guard phrases.
+
+    A single word is read either side of the staple's name ("onions smell in the fridge", "the
+    smell of onions"), because it belongs to the staple. A phrase is read across the whole line,
+    because its words can sit on both sides of the name: "how many lamb chops per person" has
+    "how many" before the name and nothing of it in `rest`. Every phrase in these tables was
+    checked one word at a time, so none of them ever fired, and the rows they were written for
+    answered lines they were meant to stand down for.
+    """
+    for guard in guards:
+        if " " in guard:
+            phrase = _fold(guard)
+            if phrase in joined and phrase not in own:
+                if guard not in _AN_APPLIANCE or not _an_appliance_has_the_line(joined):
+                    return True
+        elif guard in rest:
+            return True
+    return False
 
 
 def _pancakes(memory, understood):
@@ -1017,7 +1091,15 @@ def _in_words(minutes):
 
 
 def _chicken_time(memory, understood):
-    """A whole chicken: 20 minutes per 500g plus 20, at 190C, for the weight they gave."""
+    """A whole chicken: 20 minutes per 500g plus 20, at 190C, for the weight they gave.
+
+    "Is 4 pounds a lot for a chicken" carries a figure in pounds and asks whether it is dear, so
+    the four pounds is money and not the bird: the minutes in the oven answer a question nobody
+    asked, and the price row answers this one.
+    """
+    said_line = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
+    if a_price_is_judged(said_line):
+        return None
     check = ("Check the thigh reads 74C on a thermometer and the juices run clear, then rest it "
              "for 15 minutes before carving.")
     kilos, said = _bird_weight(understood) or (2.0, "2kg")
@@ -1186,6 +1268,12 @@ def _crowd(text):
     # The same count typed as a number: "theres 14 of us for dinner", "12 people coming".
     for count in re.findall(r"\b(\d{1,3})\s+(?:people|of us|adults|guests|coming)\b", text):
         numbers.append(int(count))
+    # Every group of people the line names adds up: "with 4 adults and 3 kids" is seven at the
+    # table, and counting only the adults put the shopping 600 g short. The reader is the
+    # portion maths' own, so a count answers the same whoever asks about it.
+    grouped = people_in_groups(text)
+    if grouped:
+        numbers.append(grouped)
     if numbers:
         return max(numbers)
     if any(phrase in text for phrase in _CROWD_PHRASES):
@@ -1240,10 +1328,22 @@ def _table_text(text):
     # of the two ways the module already knows ("people coming", "dinner party"): the count was
     # read as four and then stood down to the ten-minute list, which is the wrong card for four
     # people somebody is cooking for.
-    if count >= 3 and any(phrase in text for phrase in _CROWD_PHRASES):
+    # "of us" is a table counted by the people at it: "whats a good lunch for 4 of us" and
+    # "lunch for 3 of us" are not one person's lunchbox, and with the lunchbox row standing down
+    # for them there was nothing else to take the line. It is read here, where the count is
+    # known, and not in _CROWD_PHRASES: that list is also the default six for a line with no
+    # number, and a table of four counted as six was handed the six-player games.
+    if count >= 3 and any(phrase in text for phrase in _CROWD_PHRASES + ("of us",)):
         return True
-    return (any(phrase in text for phrase in _TABLE_PHRASES)
-            and any(word in text for word in ("cook", "cooking", "make", "feed", "serve")))
+    if any(phrase in text for phrase in _TABLE_PHRASES) and any(
+            word in text for word in ("cook", "cooking", "make", "feed", "serve")):
+        return True
+    # The ask can be a lunch as readily as a dinner: "whats a good lunch for 4 of us" names no
+    # word of cooking at all, and with the lunchbox row standing down for the count of us it
+    # reached nothing until the meal itself counted as the ask. Three or more, because "lunch
+    # for 2 of us" is a sandwich apiece and not a dish to cook for a table.
+    return (count >= 3 and any(phrase in text for phrase in _TABLE_PHRASES)
+            and any(word in text for word in ("lunch", "lunches", "meal", "meals", "eat")))
 
 
 # The verbs that make a table line a cooking question.
@@ -1353,11 +1453,23 @@ def _crowd_or_any(text, banned):
     return _any_meal(banned)
 
 
+# "How many minutes a side for steak" is a timing question that happens to say "a side", and the
+# pair row's key holds the phrase "side for": steak, pork chops and chicken were all answered with
+# what to serve beside them when they asked how long to cook. A line that asks a time or a heat is
+# the timings' question, so the pair row stands down for it.
+A_TIME_OR_HEAT_ASK = re.compile(
+    r"\b(how many minutes?|how many mins?|how long|how much time|minutes a side|mins a side|"
+    r"minutes per side|what temperature|what temp|what heat|gas mark|how do i time)\b")
+
+
 def _sides(memory, understood):
     """What to put beside the dish a line names, or None when it names none I know."""
     text = str(understood.get("clean") or " ".join(understood.get("words") or [])).lower()
     # "a pain in my side" and "side effects" are not about the plate.
     if re.search(r"\bpain\b|\bstitch\b|\bside effects?\b|\bleft side\b|\bright side\b", text):
+        return None
+    # "how many minutes a side for steak" is a time, not the rest of the plate.
+    if A_TIME_OR_HEAT_ASK.search(text):
         return None
     # "what spice goes with lamb" is the herbs, not the new potatoes: the same entry, told which
     # of the two questions it is answering.
@@ -1373,7 +1485,17 @@ def _sides(memory, understood):
     # has no side, falls through to the table.
     if plan:
         return plan[1]
-    return table[1] if table else None
+    if table:
+        return table[1]
+    # A pairing ask about a food with no dish of its own and no side in the table is not a punt:
+    # "what goes with cheese", "what goes with penne", "what cheese goes with apple" and "what
+    # sauce goes with lentils" were four "I'd rather not guess" lines, and the rule underneath
+    # the tables is the answer - fat wants acid, plain starch wants something wet on top, and
+    # anything else wants one of each.
+    from . import dishes
+    if dishes.asks_for_a_side_of_a_food(text):
+        return dishes.general_sides(text)
+    return None
 
 
 def plan_side(memory, text):
@@ -5756,6 +5878,23 @@ def _meal_ideas(memory, understood):
     return _any_meal(banned)
 
 
+def pantry_idea(name):
+    """The pantry's own idea for one food, by name, or None.
+
+    Asked by the use-up table in bot/knowledge/meals.py, which has to know whether the idea it is
+    about to be beaten by is a dish (a use for the food) or a way of cooking it from raw.
+    """
+    folded = _fold(str(name or "").lower())
+    if not folded:
+        return None
+    for aliases, idea in PANTRY.values():
+        for alias in aliases:
+            key = _fold(str(alias).lower())
+            if key == folded or key == folded.rstrip("s") or key.rstrip("s") == folded:
+                return idea
+    return None
+
+
 def _pantry_idea(words, banned, clean=""):
     """The pantry's idea for the first food the line names, when no meal idea covers it.
 
@@ -5999,32 +6138,134 @@ def _honey_age(memory, understood):
     return HONEY_BABY
 
 
-def _freeze_food(memory, understood):
-    """The food the line names gets its own answer; anything else gets the general rule."""
-    words = understood.get("words")
-    if not isinstance(words, list):
-        words = " ".join(understood.get("words") or []).split()
-    words = [str(word).lower() for word in words]
-    # a name can be more than one word ("ice cream", "raw potatoes", "green beans"), and the
-    # words come one at a time, so the pairs and triples have to be looked at too: without this,
-    # "can i freeze ice cream" matched the bare "cream" row, which says cream must not be frozen.
+_FREEZE_WORD_FORMS = ("freeze", "freezes", "freezing", "frozen", "freezer", "freezers",
+                      "freezed", "freezed")
+_FREEZE_POINTS_AT = ("it", "this", "that", "these", "those", "them", "the rest", "the other half",
+                     "the remainder", "whats left", "what is left", "the spare", "some",
+                     "any left", "any spare", "a portion", "the leftovers", "left over",
+                     "the whole lot", "the remainder of it")
+
+
+def _points_at_something(words):
+    """True when the line says "freeze it" rather than talking about freezing in general.
+
+    "i can read it fine but freeze when someone talks to me" is a person freezing up, and a
+    pointing word in it ("it") would otherwise reach the food answers. A pointer only counts when
+    it sits against the freezing word itself - "freeze it", "freezing this", "this freeze", "the
+    freezer for it" - and a pointer of two or three words ("the rest", "what is left", "the other
+    half") counts as a whole, because those are the words people point with.
+    """
+    clean = [word.strip(".,!?").replace("'", "").lower() for word in words]
+    for at in range(len(clean)):
+        for size in (3, 2, 1):
+            if " ".join(clean[at:at + size]) not in _FREEZE_POINTS_AT:
+                continue
+            for step in (-1, -2, size, size + 1):
+                i = at + step
+                if 0 <= i < len(clean) and clean[i] in _FREEZE_WORD_FORMS:
+                    return True
+    return False
+
+
+def _freeze_units(words):
+    """Every run of the line's words worth comparing with a food name, up to three words long."""
     units = list(words)
     for size in (2, 3):
         units += [" ".join(words[i:i + size]) for i in range(len(words) - size + 1)]
-    # the most specific name wins, and the head noun after it: "cream cheese" is a cheese
-    # question, not the row that says cream must never be frozen.
+    return units
+
+
+def _a_freeze_fact(words):
+    """The most specific food freeze fact the words carry, or None."""
     best = None
     for names, fact in FREEZE_FACTS:
         for name in names:
-            for at, word in enumerate(units):
+            for at, word in enumerate(_freeze_units(words)):
                 if _same(word, name):
                     # a name that is the whole unit beats one that only sits inside it:
                     # "cream cheese" is not the cream row, however the words line up.
                     score = (word == name, len(name.split()), at)
                     if best is None or score > best[0]:
                         best = (score, fact)
-    if best is not None:
-        return best[1]
+    return best[1] if best else None
+
+
+# A thing frozen by an app, not by a freezer: "i lost my bank card, should i freeze it first"
+# is the bank's answer, and a food row that reads "freeze it" as a freezer took that turn away
+# from the money card that had been giving it. The words are what can be frozen that is not
+# food, and any of them in the line is enough for this row to say nothing.
+_NOT_A_FREEZER = frozenset("""
+    card cards account accounts subscription subscriptions membership phone credit file
+    report reports score payment payments direct debit standing order
+""".split())
+
+
+def _names_one_food(words):
+    """The one food name a line carries, or None when it carries two or more.
+
+    "what can i cook with mince and a tin of tomatoes" names two things and is about neither of
+    them: the answer for tomatoes (freeze them whole, the skins slip off) is a bad answer to
+    "can i freeze the rest" about a ragù, and the plain three-month answer is a true one. Two
+    names is a list, so the chat does not name a dish.
+    """
+    seen = set()
+    for names, fact in FREEZE_FACTS:
+        for name in names:
+            for at, unit in enumerate(_freeze_units(words)):
+                if _same(unit, name):
+                    seen.add(fact)
+                    break
+    return next(iter(seen)) if len(seen) == 1 else None
+
+
+def _the_dish_the_chat_names(memory):
+    """The food the person's own last few lines are about, or None: the thing "it" points at.
+
+    "do i need to freeze them" after a line about green beans is a question about beans, and
+    "can i freeze it" after bread is bread's question. The line itself names nothing, so the
+    dish has to come out of the chat, nearest line first.
+
+    Only the person's lines count. The bot's own reply is where the wrong dish came from: after
+    "i have half a bag of potatoes going soft" the reply offered cheese on the mash, and the
+    next turn's "could i freeze them" was answered with how to freeze grated cheese. A reply
+    also mentions the carcass making stock and the stock answer arrived for a roast chicken.
+    """
+    try:
+        from ..memory import recent
+        turns = recent(memory, 4) or ()
+    except Exception:
+        return None
+    for turn in reversed(list(turns)):
+        if not isinstance(turn, dict):
+            continue
+        said = turn.get("user")
+        if not isinstance(said, str) or not said.strip():
+            continue
+        fact = _names_one_food(said.lower().split())
+        if fact is not None:
+            return fact
+    return None
+
+
+def _freeze_food(memory, understood):
+    """The food the line names gets its own answer; a thing named earlier gets that one too."""
+    words = understood.get("words")
+    if not isinstance(words, list):
+        words = " ".join(understood.get("words") or []).split()
+    words = [str(word).lower() for word in words]
+    if _NOT_A_FREEZER & {word.strip(".,!?\"'") for word in words}:
+        # a card, an account, a subscription: someone else's answer
+        return None
+    fact = _a_freeze_fact(words)
+    if fact is not None:
+        return fact
+    if not _points_at_something(words):
+        # no dish in the line and nothing pointed at: this is not a freezing question about a
+        # thing, so the row says nothing and a lower one gets the turn
+        return None
+    earlier = _the_dish_the_chat_names(memory)
+    if earlier is not None:
+        return earlier
     return FREEZE_ANY
 
 
@@ -7776,9 +8017,26 @@ TEA_TWICE_TEXT = (
     "hour at most, and not once it has been sitting in milk.")
 
 
+# "Tea" is the evening meal as well as the drink, and the request shapes in the row - "can i
+# have", "i'll have" - are what a meal question is asked with too: "what can i have for tea" was
+# answered with how to brew a cup, while "whats for tea" and "what shall i have for tea" got
+# dinner (royal-zipper, #8152 was the drink half of the same row). A line that asks what to have
+# for a meal is asking about the plate, whatever the request shape around it.
+_ASKS_WHAT_TO_HAVE = re.compile(
+    r"\b(?:what|anything|something|whats|what's)\b[^.?!]*\b(?:have|eat|cook|make|do)\b")
+_FOR_A_MEAL = re.compile(
+    r"\bfor\s+(?:my\s+|our\s+|the\s+|his\s+|her\s+)?"
+    r"(?:tea|dinner|lunch|supper|breakfast|brekkie|supper|teatime|tea time)\b")
+
+
 def _tea_reply(memory, understood):
     """The brewing answer the line asked for: a method, a pot, iced, a cloudy cup, or a fault."""
-    words = set(re.findall(r"[a-z']+", (understood or {}).get("clean") or ""))
+    said = " ".join(str((understood or {}).get(key) or "")
+                    for key in ("clean", "norm_text", "norm")).lower()
+    if _FOR_A_MEAL.search(said) and _ASKS_WHAT_TO_HAVE.search(said):
+        # "what can i have for tea" is the evening meal: the meal table answers it.
+        return None
+    words = set(re.findall(r"[a-z']+", said))
     if words & {"iced", "ice"}:
         return TEA_ICED_TEXT
     if words & {"pot", "teapot", "teapots"}:
@@ -8601,6 +8859,19 @@ def _fat_has_landed_on_a_person(text):
     return bool(_BODY_PART.search(text)) and any(word in text for word in _ONTO_A_PERSON)
 
 
+# What a line has to say for the fat to be the fault: it is smoking, burning, foaming, spitting
+# or too hot. The row's key can be reached on its subject alone, and the default answer is about a
+# fire, so the fire (or the heat on the way to it) has to be named.
+_SOMETHING_IS_WRONG_WITH_THE_PAN = (
+    "smoke", "smokes", "smoking", "smoked", "smoky", "smoke point", "smoking point",
+    "burnt", "burn", "burns", "burning", "burned", "too hot", "overheat", "overheating",
+    "on fire", "caught fire", "in flames", "flaming", "flamed", "black", "spoiled",
+    "ruined", "wasted", "not right", "gone wrong", "tastes", "taste", "smell", "smells",
+    "stinks", "bubbling", "bubbles", "foam", "foams", "foaming", "foamy",
+    "spat", "spits", "spitting", "spattered", "splashed", "jumped out", "popped",
+)
+
+
 def _oil_smoking(memory, understood):
     """Why the fat is smoking, and what to do with the pan and the bottle."""
     understood = understood if isinstance(understood, dict) else {}
@@ -8620,12 +8891,25 @@ def _oil_smoking(memory, understood):
             "it is ready.")
     # Pan first or oil first is the same subject as the heat of the fat, and "when do i put the
     # oil in the pan" was the car's dipstick: a wick of engine oil in an engine that is off.
+    # The fat going into water is not the pan at all. "Should i put oil in pasta water" reached
+    # the pan-order arm's own words and was told the fat was past its smoke point, because the
+    # question is about the pot and the water rather than a hot pan; the pot of water is another
+    # row's question, so this one stands down.
+    if _says(text, ("in the water", "pasta water", "rice water", "boiling water", "the water for",
+                    "water for the pasta", "water for the rice", "in the pot of water",
+                    "into the water", "salt water", "salted water", "the pasta water")):
+        return ""
     if _says(text, ("put the oil in", "put in the oil", "add the oil", "adding the oil",
+                    # people leave the article out: "should i preheat the pan before adding oil"
+                    # was a "can't call that one" while the order was sitting in this arm
+                    "put oil in", "add oil to", "adding oil", "add oil",
                     "oil go in", "oil goes in", "oil first or the pan", "pan first",
-                    "oil in the pan", "oil in a pan", "hot pan first",
+                    "oil in the pan", "oil in a pan", "oil in pan",
+                    "hot pan first",
                     # "should the pan be hot before the oil" was a punt: the order is the
                     # question and the words that ask it are the pan and the heat, not "put"
                     "pan be hot", "pan hot before", "before the oil", "before adding the oil",
+                    "before adding oil", "hot pan",
                     "pan hot before", "when do i add the oil")):
         return ("Pan first, then the oil: a dry pan heats faster and you can watch the oil for the "
                 "heat - it thins and shimmers at about 180C, and a cube of bread turns golden in 30 "
@@ -8710,6 +8994,14 @@ def _oil_smoking(memory, understood):
                 "its temperature, and keep the lid or the basket dry. If oil you have already used "
                 "a few times foams as soon as anything goes in, it is spent - let it cool, bin it "
                 "in a bottle, and start with fresh.")
+    # A row that answers a fault falls back on the fault, so the default answer is only for a
+    # line that says something is wrong. The key takes two signals and one of them can be a plain
+    # subject word: "should i put oil in pasta water" reached the pan-order arm's subject and no
+    # arm applied, so it was told the fat was past its smoke point - a lecture about a fire
+    # nobody has. Naming the trouble is what earns the fault card; a line that only says where
+    # the oil goes is another row's question, or nobody's.
+    if not _says(text, _SOMETHING_IS_WRONG_WITH_THE_PAN):
+        return ""
     return ("The fat is past its smoke point, so turn the heat down and take the pan off the ring "
             "for a minute rather than carrying on. Open a window or put the extractor on, and once "
             "it has cooled wipe the pan out and start again with fresh fat - the smoked oil has "
@@ -8896,6 +9188,87 @@ from .cooking_entries import NO_SUGAR as _NO_SUGAR
 ENTRIES = list(_LISTED_ENTRIES)
 
 
+# ---------------------------------------------------------- what kinds a thing comes in
+# The shape is read once, in bot/knowledge/lookup.py (`KINDS_WORDS`, `asks_the_kinds`); a subject
+# is data here. What was wrong on main: "what kinds of tea are there" was answered with a dinner
+# pick, and pasta, oil, honey, milk, beans, lettuce, wine, coffee and yoghurt were answered with a
+# search hedge, because the rows that knew the subject knew one of its kinds (brewing a cup,
+# frying an egg) and no row knew the question. The ask is for the families a thing comes in.
+#
+# Only the subjects nothing else answers are here. A subject whose card already names the families
+# (potato, apple, rice, cheese, mushroom, onion, tomato, flour, chocolate) keeps that card: it
+# answers the shape, and a second answer for the same ask would only be longer.
+#
+# (the line's subject words, the subject for the row's id, the answer)
+_KINDS = (
+    (("tea", "teas"), "tea",
+     "Black, green, white and oolong are the same leaf, picked and processed differently: black "
+     "is fully oxidised and malty, green is steamed or pan-fired and grassy, white is the young "
+     "leaf dried, and oolong sits between green and black. Everything else - peppermint, "
+     "chamomile, rooibos, fruit - is a herbal infusion rather than tea, so it brews and keeps "
+     "differently."),
+    (("pasta", "pastas"), "pasta",
+     "Long pasta - spaghetti, linguine, tagliatelle - is for thin sauces that coat it. Short "
+     "shapes - penne, fusilli, rigatoni - hold chunkier sauces, and the ridges and tubes are there "
+     "to catch them. Filled pasta - ravioli, tortellini - is a meal with its sauce inside. Dried "
+     "is durum wheat and water; fresh is egg and soft wheat, cooks in two or three minutes, and "
+     "is richer. Wholewheat is the same shapes with the bran left in, and takes a minute longer."),
+    (("oil", "oils"), "oil",
+     "Olive oil splits in two: extra virgin is the cold-pressed first press, peppery and best "
+     "raw or for low heat, and ordinary olive oil is refined, plainer and fine for frying. "
+     "Rapeseed is the mild all-rounder and the cheapest British one. Sunflower and vegetable oil "
+     "are neutral and take high heat, which is what chips and stir-fries want. Sesame is for "
+     "flavour, a teaspoon at the end, and coconut oil tastes of coconut. Groundnut oil is the "
+     "one restaurants fry in, because it is neutral and stable when hot."),
+    (("honey", "honeys"), "honey",
+     "It is named for the flower the bees worked: clover and acacia are light and mild, heather "
+     "and chestnut are dark and strong, and orange blossom is perfumed. Runny or set is the same "
+     "honey - set has simply crystallised, which a warm jug of water undoes. Raw or unfiltered "
+     "means it has not been heated, so it is cloudier and tastes more of the flowers. Never give "
+     "any honey to a baby under one, because of the botulism risk."),
+    (("milk", "milks"), "milk",
+     "Cow's milk comes by fat: whole at about 3.5%, semi-skimmed at 1.7% and skimmed at almost "
+     "nothing, and the fat is what carries the taste in coffee and sauces. Fresh and UHT are the "
+     "same milk, one pasteurised hotter so it keeps for months unopened. Goat's and sheep's are "
+     "the other animals, sharper and richer. Plant milks - oat, soya, almond, coconut - are a "
+     "different drink, and the barista ones are the ones that do not split in hot coffee."),
+    (("bean", "beans"), "bean",
+     "Dried or tinned is the first split: dried needs soaking overnight and a hard ten-minute "
+     "boil, tinned is cooked and ready. After that it is the bean: kidney is the chilli one, "
+     "cannellini and haricot are creamy and white (baked beans are haricot in tomato), black "
+     "beans are earthy for Mexican food, and butter beans are the big soft ones. Chickpeas, "
+     "lentils and split peas are the same family - pulses - and they cook without soaking."),
+    (("lettuce", "lettuces"), "lettuce",
+     "Crisphead - iceberg - is the crunchy one that keeps for a week and is mostly water. Cos, "
+     "or romaine, is the upright one with a spine, and it is the one for Caesar. Butterhead - "
+     "round and little gem - is soft and sweet, and wilts first. Loose-leaf - oakleaf, lollo "
+     "rosso, frisée - is the curly one to tear into a bowl. Rocket and spinach are leaves sold "
+     "beside it, not lettuce, and they are peppery or earthy rather than crisp."),
+    (("wine", "wines"), "wine",
+     "Red, white and rosé are about the skin, not the grape: red is fermented on it, white off "
+     "it, and rosé briefly on it. Sparkling is a second fermentation for the bubbles, and "
+     "fortified - sherry, port, madeira - has spirit added, which is why it keeps for weeks after "
+     "opening. The other axis is the grape and where it grew, which is what makes a Chablis lean "
+     "and a Chardonnay from a hot place buttery, and a wine dry or sweet."),
+    (("coffee", "coffees"), "coffee",
+     "Two beans: arabica is the fruity, slightly acidic one in most good coffee, and robusta is "
+     "stronger, more bitter and has about twice the caffeine, which is why instant and cheap "
+     "espresso blends use it. Roast runs from light, which keeps the fruit and the acidity, to "
+     "dark, which tastes of the roast itself. Then it is ground to the brew: fine for espresso, "
+     "medium for a filter machine, coarse for a cafetière. Instant is brewed and dried, a "
+     "different drink, not a weaker one."),
+    (("yoghurt", "yogurt", "yoghurts", "yogurts"), "yoghurt",
+     "Natural is milk and cultures and nothing else, and it is what to cook with. Greek is the "
+     "same yoghurt strained of its whey, so it is thicker and higher in protein; Greek-style is "
+     "thickened with milk powder and is cheaper and sweeter. Set is cultured in the pot and stays "
+     "firm, stirred is smooth. Skyr is strained further still, so it is very thick and very high "
+     "in protein. Live yoghurt has the cultures still alive, which is the kind that helps an "
+     "unsettled stomach."),
+)
+
+ENTRIES.extend(kinds_entries(_KINDS))
+
+
 # The "can I use X instead of Y" verdicts, one entry per pair (see _SWAP_VERDICTS above).
 
 # The pair is matched on both words wherever they sit, so the reverse question ("can i use plain
@@ -8968,7 +9341,13 @@ KEEP_WORDS = ("keep", "keeps", "keeping", "shelf life", "shelf-life", "store", "
               # Without them the line reached the dish-plan entry, which had nothing to say
               # about a punnet of mushrooms in the fridge.
               "still ok", "still good", "still fine", "still safe", "still edible",
-              "are they ok", "are these ok", "ok to eat", "safe to eat")
+              "are they ok", "are these ok", "ok to eat", "safe to eat",
+              # a food that has turned is a keeping question said by its smell or its taste:
+              # "the flour tastes old" and "my flour smells musty" reached a house-damp card and
+              # the raw-flour sauce card, and neither row can tell a turned food from a fresh one
+              "smell", "smells", "smelling", "smelly", "tastes old", "taste old", "tastes off",
+              "tastes funny", "tastes strange", "tasted old", "gone stale", "tastes stale",
+              "tastes sour", "smells off", "smells funny", "smells sour", "smells musty")
 
 # A food, the words that name it, and how to keep it. Written as one table because the second
 # half of the question - how long, where, why has it gone soft - is the same in every case.
@@ -9020,6 +9399,17 @@ ENTRIES.append(entry("gone-off-pot",
                             "eczema cream", "cold cream", "moisturiser", "moisturizer",
                             "sun cream", "suncream", "sunscreen", "sunblock", "lip balm",
                             "lip salve", "aftershave", "toner",
+                            # a pot of compost is not a pot on the hob: "why is there mould in
+                            # my plant pot" was binned as a stew, and the soil-mould row is the
+                            # answer to it
+                            "plant", "plants", "houseplant", "house plant", "compost",
+                            # NOT "potting": its forms are {pot, potte, potting, pott}, so it
+                            # turns this row down for every line with "pot" in it, and "my pot
+                            # of curry went mouldy" stopped being binned. The same stem trap as
+                            # "ironing" in nutrient-a-day. `potting soil` and `potting compost`
+                            # say the same thing without the bare stem.
+                            "potting soil", "potting compost", "soil", "seedling", "seedlings",
+                            "garden", "terracotta", "saucer",
                             "chicken", "chickens", "meat", "beef", "pork", "lamb", "fish",
                             # a dog or a cat that has gone off its food is a refusal to eat, and
                             # "my dogs gone off his food" was binned as a stew. The pet rows say
@@ -9047,7 +9437,11 @@ ENTRIES.append(entry("gone-off-pot",
                             # nobody wants answered "Bin it." A pot has no owner.
                             "off her food", "off his food", "off their food",
                             "off our food", "off my food", "off your food",
-                            "gone off food", "gone off eating")))
+                            "gone off food", "gone off eating",
+                            # "the dog has gone off his food today" is a dog refusing his bowl,
+                            # not a pot on the turn: a pet named in the line is the pet's answer.
+                            "dog", "dogs", "puppy", "pup", "puppies", "cat", "cats",
+                            "kitten", "kittens", "pet", "pets", "vet")))
 
 # The commonest egg keeping question is about the raw ones in the box, and the keeping table's
 # single egg answer opened with boiled eggs, so "how long do eggs keep" and "should i keep my eggs
@@ -9148,7 +9542,13 @@ _SPOILT_WORDS = ("smell", "smells", "smelly", "smelt", "off", "gone off", "going
 # A curry paste, powder or spice mix is a jar in the cupboard, not a pot on the stove, and its
 # keeping question is a different one (months, not days). "curry" is in the pot row's names, so
 # the cupboard words hold the row off those lines.
-KEEP_STAND_DOWN = {"cheese": STORING + MOULD_WORDS + (
+KEEP_STAND_DOWN = {# "how long does garlic breath last" was answered with how long whole bulbs
+                   # keep, because "how long" and "last" are the keeping words and "breath" was
+                   # not a reason to stand down. A burned clove is the burn row's question too.
+                   "garlic": ("breath", "bad breath", "garlic breath", "breathe", "breathing",
+                              "smell", "smells", "smelt", "smelled", "stinks", "burn", "burnt",
+                              "burned", "burning", "bitter", "black", "went black"),
+                   "cheese": STORING + MOULD_WORDS + (
                        # "is my cheese off" is the mould question, and the row that cuts an
                        # inch around it answers better than the number of days does.
                        "off", "is bad", "are bad", "gone bad"),
@@ -9388,9 +9788,18 @@ KEEPS_COOKED = (
 )
 # "can i reheat gravy" is a keeping question with none of the keeping words in it, so the rows
 # whose food is a sauce or a set pudding take the reheat shapes as well as the shelf-life ones.
+# "can i do the gravy ahead" and "can i do the stuffing the night before" are keeping questions in
+# the doing-it form, and the list held only the making-it form ("make ahead", "make it ahead")
+# and "the day before". So the plain "do the X ahead" shape reached nothing and the person got the
+# hedge, while "can i do the cake ahead" worked only because cake has a card of its own. "ahead"
+# is here as a word and not only in the two phrases for that reason: what follows the food is
+# "ahead", "ahead of time" or "the night before", and the food name is already the other half of
+# the key. This is the making-ahead frame for every cooked food, not one line's wording.
 KEEPS_COOKED_WORDS = KEEP_WORDS + ("reheat", "reheating", "reheated", "heat up", "heated up",
                                   "warm up", "warmed up", "make ahead", "make it ahead",
-                                  "in advance", "the day before", "keep it warm")
+                                  "do it ahead", "do that ahead", "ahead", "ahead of time",
+                                  "in advance", "the day before", "day before", "the night before",
+                                  "night before", "keep it warm")
 for _names, _reply in KEEPS_COOKED:
     ENTRIES.append(entry("keep-" + _names[0].replace(" ", "-"), (_names, KEEPS_COOKED_WORDS),
                          _reply,
@@ -9491,6 +9900,44 @@ def _foods_said():
         _FOODS_SAID = ({_fold(str(word).lower()) for word in _NAMED_FOODS}
                        | {_fold(str(word).lower()) for word in _STAPLE_NAMES})
     return _FOODS_SAID
+# The answer for "i have leftovers, what can i make", when the line names no food this kitchen
+# has an idea for. A line that does name one gets that food's answer instead: see
+# _leftover_meal_reply.
+LEFTOVER_SOUP = ("Soup is the easiest use of leftovers: soften an onion, add whatever veg you "
+                 "have in order of toughness, cover with stock, simmer 20 minutes and blend or "
+                 "leave it chunky - season at the end. Any cooked meat goes in for the last five "
+                 "minutes only, and a spoon of something sharp (lemon, mustard, a splash of "
+                 "vinegar) is what stops it tasting like a fridge. Whatever you reheat must be "
+                 "piping hot all the way through once, and rice that has sat out is the one "
+                 "thing to bin.")
+
+
+def _leftover_meal_reply(memory, understood):
+    """Soup for the leftovers nobody named, and the named food's own use when one is named.
+
+    "What can i do with leftover chard" was answered with the soup paragraph above, which is the
+    answer to a fridge with odds and ends in it and not to a chard. The food named is asked for
+    its own use first; where the pantry's idea for it is a dish, that idea wins in the meal table
+    and this row never sees the line.
+    """
+    from . import meals
+    words = understood.get("words") or ()
+    if isinstance(words, str):
+        words = words.split()
+    words = tuple(words) or tuple(str(understood.get("clean") or "").lower().split())
+    named = meals.named_food(words, understood)
+    if named in LEFTOVER_IDEAS:
+        # Mince, chicken, rice and the rest have an idea of their own, and it is a use.
+        return LEFTOVER_IDEAS[named]
+    if named:
+        idea = PANTRY.get(named, (None, ""))[1] if isinstance(PANTRY.get(named), tuple) else ""
+        if not meals.idea_is_a_dish(idea):
+            said = meals.use_it_up(named)
+            if said:
+                return said
+    return LEFTOVER_SOUP
+
+
 ENTRIES.append(entry(
     "leftover-meal",
     (("leftovers", "leftover", "left over", "odds and ends", "bits and pieces",
@@ -9498,12 +9945,7 @@ ENTRIES.append(entry(
      ("make", "made", "cook", "meal", "dinner", "tea", "supper", "soup", "ideas",
       "recipe", "recipes", "what can i", "do with", "use up", "using up", "turn into",
       "throw", "waste")),
-    ("Soup is the easiest use of leftovers: soften an onion, add whatever veg you have in "
-     "order of toughness, cover with stock, simmer 20 minutes and blend or leave it chunky - "
-     "season at the end. Any cooked meat goes in for the last five minutes only, and a "
-     "spoon of something sharp (lemon, mustard, a splash of vinegar) is what stops it "
-     "tasting like a fridge. Whatever you reheat must be piping hot all the way through "
-     "once, and rice that has sat out is the one thing to bin."),
+    _leftover_meal_reply,
     ask=("how", "what", "can", "could", "any", "ideas", "should", "do i", "i have",
          "need", "got", "have"),
     # A line that names the food keeps the entry that names it: "what can I make with leftover
@@ -9538,6 +9980,13 @@ NOT_THIS_FOOD = {
     # "rice pudding" is deliberately NOT here: the pudding has its own recipe row, and fencing the
     # head word out under it made a statement about one ("rice pudding in the slow cooker") fall
     # through to the wrong dish. A dish row's own name outranks the plain rice row anyway.
+    # An animal's food is what goes in its bowl, not a dish: "he says theyre rabbit food" is a
+    # verdict on the vegetables and got a braise on main, because the table read the animal and
+    # stopped. The phrase steps the pantry name aside, so the line is answered by whatever it is
+    # really about.
+    "rabbit": ("rabbit food", "rabbit pellets"),
+    "duck": ("duck food",),
+    "chicken": ("chicken food", "chicken pellets"),
     "rice": ("rice cake", "rice cakes", "rice crispy",
              "rice crispies", "rice krispie", "rice krispies", "rice cracker", "rice crackers",
              "rice paper", "rice vinegar", "rice wine", "rice flour", "rice drink"),
@@ -10697,6 +11146,27 @@ SHORTAGE_WORDS = ("ran out", "run out", "out of", "none left", "nothing left", "
 LUNCH_AND_BREAKFAST = frozenset("lunch lunches breakfast brunch lunchbox lunchboxes".split())
 
 
+# A person changing one thing in a dish they mean to keep is asking what stands in for it, which
+# the substitute entries answer. A dish that has none of the thing in it is no answer at all:
+# "no buttermilk, what else can i use" came back as a potato hash, which is a dinner for a line
+# about baking. Only "what can i use" needs care, because "what can i use it for" is asking for a
+# dish and its "it" is the food in hand.
+_STAND_IN_ASK = ("instead", "instead of", "substitute", "substitutes", "sub for", "sub for it",
+                 "swap", "swaps", "replace", "replacement", "in place of", "stand in for",
+                 "what else can i use", "what else could i use", "what do i use instead")
+_STAND_IN_USE = re.compile(
+    r"what (?:can|could|do|should) i use(?!\s+(?:it|them|that|this|those|these|leftovers?"
+    r"|the rest)\b)")
+
+
+def asks_for_a_stand_in(understood):
+    """True when the line is asking what stands in for a food, not what to cook with it."""
+    said = _clean(understood) if not isinstance(understood, dict) else _clean(understood)
+    if any(phrase in said for phrase in _STAND_IN_ASK):
+        return True
+    return bool(_STAND_IN_USE.search(said))
+
+
 def a_dinner_without(understood, memory=None):
     """A dish for a line that rules a food out and asks what to cook, or None.
 
@@ -10708,6 +11178,9 @@ def a_dinner_without(understood, memory=None):
     cooked yet, so there is no dish to leave it out of.
     """
     said = _clean(understood)
+    if asks_for_a_stand_in(understood):
+        # the thing is being changed, not the dinner: see _STAND_IN_ASK above
+        return None
     if not _refused_foods(said):
         return None
     if not isinstance(memory, dict):
@@ -10922,6 +11395,48 @@ def _reads_as_news(understood, clean=""):
 
     return meals.reads_as_news(understood, clean)
 
+# Two foods on either side of an "or" are a choice, not a pair to cook together: "butter or oil"
+# and "chicken or lamb" name two things and ask for one of them. The choice words are what says
+# so - a line that merely mentions both ("potatoes and carrots", "chicken, then the butter") is
+# still one dinner, and the two ideas below are right for it.
+_CHOICE_WORDS = ("should i", "shall i", "do i use", "can i use", "could i use", "which",
+                 "better", "instead", "rather", "or is", "or would", "or should", "or do i",
+                 "what about", "worth using", "go for", "stick to")
+
+# The other half of a choice is not always a food: "butter or oil" and "rice or pasta" pick
+# between two things, and oil, water, stock or wine are what a pan is cooked in rather than an
+# ingredient of its own, so the pantry has no row for them.
+_COOKING_MEDIUM = ("oil|olive oil|water|stock|wine|milk|cream|margarine|ghee|lard|dripping|"
+                   "suet|vinegar|lemon|honey|syrup|sugar|salt|pepper|flour|cornflour|"
+                   "butter|yoghurt|juice|sauce|gravy|rub|marinade|foil|paper|trays?|tins?")
+
+_ANY_FOOD_TEXT = None
+
+
+def _any_food_text():
+    """Every name the pantry answers to, longest first, as one alternation for the "or" test."""
+    global _ANY_FOOD_TEXT
+    if _ANY_FOOD_TEXT is None:
+        names = sorted({_fold(str(alias)) for aliases, _idea in PANTRY.values()
+                        for alias in aliases}, key=len, reverse=True)
+        _ANY_FOOD_TEXT = "|".join(re.escape(name) for name in names if name)
+    return _ANY_FOOD_TEXT
+
+
+def _a_choice_of_foods(clean):
+    """True when the line puts two foods on either side of an "or" and asks which to use."""
+    low = _fold(str(clean or ""))
+    if " or " not in low:
+        return False
+    if not any(word in low for word in _CHOICE_WORDS):
+        return False
+    foods = _any_food_text()
+    if not foods:
+        return False
+    other = foods + "|" + _COOKING_MEDIUM
+    return bool(re.search(r"\b(?:%s)\s+or\s+(?:%s)\b" % (foods, other), low))
+
+
 def meal(understood, dishes_only=False, text=None, banned=None, diet=None, memory=None,
          avoid=(), pointed_back=False):
     """A meal idea for the ingredients a line names, or None when it names none it knows.
@@ -10949,6 +11464,11 @@ def meal(understood, dishes_only=False, text=None, banned=None, diet=None, memor
     if _names_a_bake(understood):
         return None
     if not isinstance(understood, dict):
+        return None
+    if _says_it_has_gone_off(understood.get("clean")):
+        # A food that smells or has gone off is a sniff test, not an ingredient: "my salmon
+        # smells is it still alright" and "my leftovers have gone slimy" were both answered with
+        # a recipe here, because naming a food is all this table needs to pick a dish.
         return None
     # The line names a dish this kitchen has a recipe for: the dish is the subject and the table
     # below answers foods. "spaghetti bolognese recipe" is the bolognese method, not any pasta
@@ -11241,6 +11761,30 @@ def meal(understood, dishes_only=False, text=None, banned=None, diet=None, memor
         return swap + best["text"]
     if dishes_only:
         return None
+    # A leftover is not always answered by the pantry's idea for the food. "Roast beetroot whole
+    # and unpeeled at 200C for an hour" is how to cook a beetroot from raw, and the one in the
+    # fridge is already cooked and needs a use, not an hour in the oven; the same for "Quinoa:
+    # rinse it, simmer 15 minutes". Where the idea names a dish it is a use and stays the answer
+    # ("Leek and potato soup", "A 15-minute tomato sauce"), which is what the dish words decide.
+    from . import meals
+    if (any(word in LEFTOVER_WORDS for word in folded)
+            or any(phrase in clean for phrase in LEFTOVER_PHRASES)):
+        for name in found:
+            row = PANTRY.get(name)
+            idea = row[1] if row else ""
+            if not idea or _mentions(idea, missing) or idea in avoid:
+                continue
+            if meals.idea_is_a_dish(idea):
+                continue
+            # Their own word for it, so a plural stays plural in "Leftover parsnips: ...".
+            said_name = name
+            for word in re.findall(r"[a-z]+", clean):
+                if _fold(word) == _fold(name) or _fold(word) == name:
+                    said_name = word
+                    break
+            use = meals.use_it_up(said_name)
+            if use:
+                return use
     if not swap and (any(word in LEFTOVER_WORDS for word in folded)
                      or any(phrase in clean for phrase in LEFTOVER_PHRASES)):
         for name in found:
@@ -11251,6 +11795,12 @@ def meal(understood, dishes_only=False, text=None, banned=None, diet=None, memor
                 return LEFTOVER_IDEAS[name]
     # An idea that asks for something the line has not got is no answer ("butter and eggs but no
     # flour" must not get shortbread), so it is dropped rather than sent.
+    # A line that names two foods and asks to choose between them ("butter or oil", "chicken or
+    # lamb") is a pick, and one idea for each is two answers to a question with one: "should i
+    # cook onions in butter or oil" got shortbread and onion soup. The pick is answered by the
+    # row that knows the pair, and this table passes.
+    if _a_choice_of_foods(clean):
+        return None
     ideas = [PANTRY[name][1] for name in found[:2]
              if not _mentions(PANTRY[name][1], missing) and PANTRY[name][1] not in avoid]
     if not ideas:
@@ -11457,7 +12007,20 @@ def timing_followup(understood, memory):
     if not (asks & {"how_long"} or "how long" in clean or "how many minutes" in clean):
         return None
     if not words & _BACK_REFERENCE:
-        return None
+        # A time question with no food of its own in it leans on the answer just given, whether
+        # it says so or not: after the chicken traybake, "how long in the oven" was answered by
+        # the whole-bird rule ("20 minutes per 500g plus 20 ... 1 hour 40 for a 2kg bird"), and
+        # the dish on the screen said 35 to 40 minutes. A word that names a food still sends the
+        # line to its own entry, so "how long do i boil an egg" keeps its answer.
+        if {_fold(word) for word in words} & set(_INGREDIENT_WORDS):
+            return None
+        if {_fold(word) for word in words} & _KEEP_WORDS:
+            # The lean is for a cooking time, and "how long" also asks how long a thing keeps.
+            # "how long does soup keep" after a chicken traybake was answered with raw chicken's
+            # one to two days, because soup names no ingredient and the line pointed at nothing.
+            # A keeping question that names its own subject is the store's, so the lean stands
+            # down; "how long does that keep" points back and never reaches here.
+            return None
     turns = memory.get("turns")
     if not isinstance(turns, list) or not turns or not isinstance(turns[-1], dict):
         return None
@@ -11523,6 +12086,11 @@ _RECIPE_ASK = ("make", "making", "made", "cook", "cooking", "recipe", "recipes",
                # taste module owns that line now (bot/knowledge/taste.py). Saying what you want
                # to eat is an ask; saying what you like is a fact about you.
                "fancy", "craving", "crave", "mood", "want", "wanting",
+               # "i feel like a curry" wants the dish as plainly as "i fancy a curry" does, and
+               # the feeling word was the one way of saying it the table did not hold: the line
+               # was read as a feeling and answered "Thanks for telling me". A dish still has to
+               # be named, so "i feel like a walk" reaches no row.
+               "feel like", "feels like", "feeling like", "felt like",
                # the everyday way of asking for one: "whats a good dry rub for chicken" was the
                # "serve it with something wet" fault answer, because no ask word in it was this
                # table's. A dish name is still needed, so "whats a good film" reaches nothing here.
@@ -11582,13 +12150,15 @@ def _names_nothing_but_the_dish(text, names):
 # A dish can be asked for by wanting it rather than by asking about it, and the reading calls
 # that a statement of news ("i fancy a curry" is not a question). The want is the ask.
 _WANT_PHRASES = re.compile(r"\b(?:fancy|fancied|craving|crave|in the mood for|really want|"
-                           r"i want|would love|i'd love|i would love)\b")
+                           r"i want|would love|i'd love|i would love|feel like|feels like|"
+                           r"feeling like)\b")
 
 # The want has to be for a thing and not for something to happen. "i want to cancel my gym
 # membership" carries the want too, and once a dish has been named it reached that dish's method:
 # the swap reading puts the last dish in the line, and the curry came back in answer to a
 # question about a gym. A want followed by "to" or a pronoun is about an action, not a dish.
-_WANT_ACTION = re.compile(r"\b(?:want|wants|wanting|fancy|fancied|craving|crave|love|loves)\s+"
+_WANT_ACTION = re.compile(r"\b(?:want|wants|wanting|fancy|fancied|craving|crave|love|loves|"
+                          r"feel|feels|feeling)\s+(?:like\s+)?"
                           r"(?:to|it|that|this|you|me|him|her|them|us|if|when|how|why|what)\b")
 
 
@@ -11619,9 +12189,17 @@ def _wants_the_dish(text):
 
 # The lines that name a dish but ask for something else: the swap for a food they have not got
 # ("shortbread without butter"), a diet the method breaks ("dairy free brownies"), another way of
-# cooking it ("in the air fryer"), another day ("reheat chilli", "how do i store scones"), or a
-# batch for a number of people ("how much custard for 8 people"). One guard for the whole table
-# beats 33 `avoid` lists, and each of those lines has its own answer on main.
+# cooking it ("in the air fryer"), or another day ("reheat chilli", "how do i store scones").
+# One guard for the whole table beats 33 `avoid` lists, and each of those lines has its own
+# answer on main.
+#
+# A table is not one of them. "for 8 people" was here, and the guard reads the whole said-so-far
+# line, not just this line, so the table sat in the text for the rest of the chat: "can i make
+# chilli con carne for 14 people" then "how long does it take" stood the chilli method down and
+# the reply was the growing time for chillies, 16 to 20 weeks from seed, to someone cooking
+# dinner tonight. The number a table needs is read by the rows that answer amounts ("150 g of
+# mince and 75 g of dry rice each, 2.1 kg and 1 kg in all" for that line), and they read it off
+# the line itself, so nothing here has to stand down for it.
 _RECIPE_NOT_THIS = re.compile(
     # "without" is a swap when an ingredient follows it - "scones without eggs", "pastry without
     # butter" - and it is the same method when what follows is a piece of kit: "how do i make
@@ -11648,10 +12226,7 @@ _RECIPE_NOT_THIS = re.compile(
     # a dish that has gone wrong wants the fix, and every one of those lines has its own
     # answer: "how do i thicken curry sauce" is soup-thick, not the curry method.
     r"thicken|thickening|thickens|runny|watery|lumpy|curdled|curdles|split|splits|"
-    r"too salty|too spicy|too sweet|bland|burnt|burning)\b"
-    # a batch size: "for 8 people", "for four of us", "for a crowd"
-    r"|\bfor\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|twelve|a few|a crowd|"
-    r"the family)\s+(?:people|persons?|of us|guests|adults|kids|children|teenagers)\b")
+    r"too salty|too spicy|too sweet|bland|burnt|burning)\b")
 
 
 # A table of methods answers a line that asks for one ("how do i make scones", "give me a chilli
@@ -11663,7 +12238,7 @@ _RECIPE_ANSWERS = ("question", "request", "statement")
 
 
 def _recipe_only_when_asked_for_this(reply, names=(), no_yeast_ok=False):
-    """This method, unless the line is not asking for it, wants a swap, another way, or a batch.
+    """This method, unless the line is not asking for it, wants a swap, or another way.
 
     no_yeast_ok is for the soda loaf: every other loaf row is a yeast method, and a line that
     says it has no yeast in it cannot use one. names are the row's own dish names, read here to
@@ -11756,6 +12331,28 @@ ANNOUNCED_DISH = (
     "i am making", "i am doing", "i am cooking", "i am gonna make", "i am going to make",
     "i am gonna do", "i am going to do")
 
+# A dish already made is the pot in the fridge, not the method. "stew made yesterday can i have
+# it" was answered with "About 2 to 3 hours start to finish. Brown 1kg of chuck steak..." and the
+# person had said when they cooked it: the day a dish was made, and the words for what is left of
+# it, are the keeping row's question, which answers them with a verdict on that day count. A
+# recipe ask never carries one of these - "how do i make a stew", "beef stew recipe" - so the
+# recipe rows stand down for a line that points at the pot rather than at the dish.
+_A_POT_ALREADY_MADE = re.compile(
+    r"\b(?:made|cooked|done|ate|had)\b[^.?!]{0,24}\b(?:yesterday|last night|this morning|"
+    r"the night before|the day before|days? ago|\d+ days?)\b"
+    r"|\b(?:left ?overs?|left over)\b"
+    r"|\b(?:in|been in) the (?:fridge|freezer|pot|tub)\b"
+    r"|\bmade (?:on|for) (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
+
+
+def _a_made_pot_is_not_its_recipe(understood):
+    """True when the recipe row may answer: the line asks for the method of a dish, not the pot."""
+    if not isinstance(understood, dict):
+        return True
+    text = understood.get("norm_text") or understood.get("clean") or ""
+    return not _A_POT_ALREADY_MADE.search(str(text))
+
+
 _RECIPE_FAULT_WORDS = (
     "thicker", "thicken", "thickens", "thickening",
     "thinner", "too thick", "too thin", "watery", "runny", "stodgy", "lumpy",
@@ -11790,7 +12387,9 @@ for _names, _key, _reply, _avoid in RECIPES:
                          # the swap and cut-down rows answer. The same words stand the rows
                          # written in cooking_entries.py down.
                          avoid=tuple(_avoid) + _RECIPE_FAULT_WORDS + _RECIPE_GROWING_WORDS
-                         + _NO_SUGAR + ANNOUNCED_DISH))
+                         + _NO_SUGAR + ANNOUNCED_DISH,
+                         # a dish already made is the keeping row's question, not the method
+                         guard=_a_made_pot_is_not_its_recipe))
 # A dish named in a line is the dish, not the foods it is made of. "spaghetti bolognese recipe"
 # was answered with aglio e olio and "should i do a spag bol tonight" with mac and cheese, while
 # "how do i make spag bol" got a shrug: the ingredient table reads "spaghetti" as a food to cook
@@ -12078,10 +12677,18 @@ ENTRIES.append(entry(
 
 ENTRIES.append(entry(
     "food-waste",
+    # The complaint is the same when there is a "so much" in it: "i waste so much food every
+    # week" said the amount and the frequency and neither phrase, so the row could not see it and
+    # the kitchen bin answered instead ("Most of it is air and packaging: flatten cartons...").
+    # The object is food in every phrase below, so the second half can carry the plain verbs.
     (("stop wasting food", "wasting food", "waste food", "food waste", "throw away food",
-      "throwing food away", "food going off", "use up food", "reduce waste"),
+      "throwing food away", "food going off", "use up food", "reduce waste",
+      "waste so much food", "wasting so much food", "waste food every week",
+      "so much food goes off", "food goes off before", "throw so much food away",
+      "throwing so much food away", "food in the bin", "ends up in the bin"),
      ("how", "what", "should", "can", "stop", "reduce", "avoid", "tips", "tip", "help",
-      "way", "ways", "best", "less", "not")),
+      "way", "ways", "best", "less", "not", "waste", "wasting", "wasted", "throw", "throwing",
+      "away", "week", "month", "much")),
     ("Look in the fridge before you go to the shop: see what is left, then plan the next two "
      "dinners around it. Keep the oldest veg at the front of the drawer, freeze bread, milk and "
      "any meat you will not use in two days on the day you buy it, and treat the freezer as a "

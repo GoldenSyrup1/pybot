@@ -759,6 +759,15 @@ def _cool_before_fridge(memory, understood):
     # shared, so the fault in the food stands this row down and the fix card answers.
     if _A_FAULT_IN_THE_FOOD.search(str(understood.get("clean") or "").lower()):
         return None
+    # A question about the clock is the roast's timetable, not a pot on the worktop: after
+    # "how long do i need for the chicken", "what time should i put it in" came here and got
+    # "spread it out in a shallow tub". The cooling question always names the cold end - a
+    # fridge, a freezer, cool, cold, ice - so a line that asks the time and names none of them
+    # is a timing question, and "when should i put it in the fridge" still gets its answer.
+    if re.search(r"\bwhat time\b|\bwhen should i\b|\bwhen do i\b|\bwhat time do i\b", said) \
+            and not re.search(r"\b(?:fridge|freez\w*|refrigerat\w*|cool\w*|cold|ice|chill\w*|"
+                              r"worktop|defrost\w*)\b", said):
+        return None
     # "i put it in rice" after "my cat knocked my phone into the bath" is the wet-phone
     # question, and this row took it and then answered "An hour" to the turn after. A line, or
     # the few lines before it, about a gadget is a gadget question, whatever grain it names.
@@ -801,6 +810,138 @@ def _cool_before_fridge(memory, understood):
             "are steaming hot all through. Past two hours out of the fridge, bin it.")
 
 
+# --- food that has gone a bit past its best ---------------------------------------------
+# The produce a person is holding when they ask, and the two states they describe. Kept apart
+# from the leaving-out tables above because the question is the food in front of them, not the
+# clock: nothing here needs the hours or the fridge.
+PAST_IT_PRODUCE = ("banana", "bananas", "apple", "apples", "pear", "pears", "grape", "grapes",
+                   "berries", "strawberries", "raspberries", "blueberries", "peach", "peaches",
+                   "plum", "plums", "mango", "avocado", "avocados", "tomato", "tomatoes",
+                   "spinach", "lettuce", "salad", "salad leaves", "rocket", "watercress",
+                   "kale", "cabbage", "leafy", "greens", "carrot", "carrots", "cucumber",
+                   "pepper", "peppers", "courgette", "courgettes", "broccoli", "cauliflower",
+                   "onion", "onions", "fruit", "vegs", "vegetables", "veg", "produce")
+# Soft, dry or wrinkly is water loss and the food is still dinner. Slimy, sour or mouldy is not
+# water loss and no amount of cooking makes it safe again.
+PAST_IT_STATE = ("gone soft", "went soft", "gone a bit soft", "a bit soft", "soft", "softened",
+                 "wrinkly", "wrinkled", "shrivelled", "shrunken", "limp", "wilting", "wilted",
+                 "floppy", "rubbery", "dry", "dryish", "stale", "gone a bit", "old", "slimy",
+                 "slimey", "sticky",
+                 "smelling", "smells", "smelly", "sour", "leaking", "mouldy", "mould",
+                 "black spots", "spotty")
+# The ask, because a state word on its own is not a question: "my cucumber has gone soft" is one,
+# and "why does lettuce go slimy" and "how do i keep a bag of salad from going slimy" are not -
+# those are the keeping rows'. The third part of the key is what puts the row above the row that
+# answers what fruit and veg are made of.
+PAST_IT_ASK = ("can i eat", "can i still", "is it ok", "is it still", "still ok", "still good",
+               "still safe", "safe to eat", "eat it", "eat them", "use it", "use them",
+               "should i bin", "throw it", "throw them", "chuck it", "ruined", "bin it",
+               "what can i do with", "why is my", "why has my", "why are my", "why have my",
+               "are they ok", "is it fine", "ok to eat", "gone a bit", "old", "been there a while",
+               "has gone", "have gone", "went soft", "gone soft", "smells", "smelly", "slimy")
+# The words that make it the bin whatever the food is. "Sticky" is on the list because the sugar
+# in fruit goes sticky when it is going over, and it is the feel that people name.
+PAST_IT_BIN = ("slimy", "slimey", "sticky", "sour", "smelly", "smells", "stinks", "mouldy",
+               "mould", "mold", "furry", "fuzz", "leaking", "gone off", "went off", "rotten")
+# What "still fine, and here is what to do with it" says about each kind of produce. The first
+# entry that names the food in the line wins, so greens come before fruit.
+PAST_IT_KINDS = (
+    (("spinach", "lettuce", "salad", "salad leaves", "rocket", "watercress", "kale", "cabbage",
+      "leafy", "greens"),
+     "Leaves that have gone a bit yellow or brown are older, not unsafe: the colour is the leaf "
+     "giving up its green, and it does not make anybody ill. Pick out any that are slimy or "
+     "smelly - those are the ones to bin - and eat or cook the rest, because a yellowed leaf is "
+     "still good wilted in a pan or stirred into soup."),
+    (("banana", "bananas"),
+     "A soft banana is a ripe one: the starch has turned to sugar, so it is sweeter and easier to "
+     "mash - eat it, or put it in a smoothie or banana bread. A banana is the fruit that keeps "
+     "best in the fruit bowl, never the fridge."),
+    # a strawberry goes soft without getting sweeter, and nobody calls one wrinkly, so the sugar
+    # belongs to the grape and the berry gets the water and the punnet
+    (("grape", "grapes"),
+     "A wrinkly grape has lost water and is sweeter for it, so eat them - and pick out any that "
+     "are leaking or furred, because one going over spoils the rest in the punnet."),
+    (("berries", "strawberries", "raspberries", "blueberries", "blackberries"),
+     "A soft berry has only lost water, so it is still fine to eat - pick out any that are "
+     "leaking or furred, because one going over spoils the rest in the punnet, and eat them "
+     "sooner rather than later or cook them down with a little sugar."),
+    (("apple", "apples", "pear", "pears", "peach", "peaches", "plum", "plums", "mango"),
+     "A soft or shrivelled apple or pear has lost water: it is fine to eat, and it is at its best "
+     "stewed, baked or in a crumble."),
+    (("carrot", "carrots"), "A floppy carrot has lost water, not gone off: peel it and it is fine "
+     "to eat, and standing it in a glass of cold water for an hour firms it up again."),
+    (("cucumber", "courgette", "courgettes", "pepper", "peppers", "broccoli", "cauliflower"),
+     "A soft cucumber, pepper or courgette has lost water and is fine, just not crisp: cook it "
+     "rather than eat it raw, and cut away any soft spots."),
+    (("tomato", "tomatoes"), "A soft tomato is fine and sweeter: cook it into a sauce rather than "
+     "slice it raw, and use it before the ones around it go too."),
+)
+PAST_IT_GENERAL = ("It has lost water rather than gone off, so it is still fine to eat and better "
+                   "cooked than raw.")
+
+
+_STATE_WORD = re.compile(
+    r"\b(?:" + "|".join(re.escape(word) for word in sorted(PAST_IT_STATE, key=len, reverse=True))
+    + r")\b")
+
+
+# "my 4 year old wont eat vegetables" was told "It has lost water rather than gone off, so it is
+# still fine to eat and better cooked than raw": the row reads a food and a state, and a refusal
+# has both words without being about the food at all. A line about somebody not eating is the
+# feeding question whatever food it names, so every one of those words stands this row down.
+_NOT_WANTING_TO_EAT = re.compile(
+    r"\b(?:wont eat|won't eat|will not eat|wouldn't eat|would not eat|doesn't eat|does not eat"
+    r"|refuses|refusing|refused|fussy|picky|won't touch|wont touch|will not touch|year old"
+    r"|toddler|my son|my daughter|my child|my kid|my kids|children|kids|nursery|school dinner"
+    r"|fed up of|sick of eating|only eats|ate nothing|eats nothing|barely eats)\b")
+
+
+# "how do i dry chilli peppers" was answered "a soft cucumber, pepper or courgette has lost
+# water" - the state word "dry" is the verb of the line, not the condition of the food, and the
+# drying row that answers the question already had it. Any method frame (how do I, how to, the
+# best way to) followed by the word that would otherwise read as a state is a question about
+# making the food that way, so it stands this row down. Only the frames are listed, because a
+# line that says what it has in its hand - "my chillies have dried out", "can i eat dried
+# apricots" - is this row's question and keeps its answer.
+_HOW_TO_MAKE_IT_SO = re.compile(
+    r"\b(?:how do i|how do you|how can i|how to|how would i|how should i|whats the best way to"
+    r"|what's the best way to|best way to|quickest way to|easiest way to|any way to|way of)"
+    r"(?:\W+\w+){0,2}?\W+(?:dry|drying|dry them|dry it|dehydrate|pickle|pickling|freeze|freezing"
+    r"|ferment|fermenting|cure|curing|smoke|smoking|bottle|bottling|can|canning|preserve"
+    r"|preserving|keep|keeping|store|storing|revive|reviving|crisp up|crisp it up)\b")
+
+
+def _says_the_state(understood):
+    """True when the line says what state the food is in, not only what state it is."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if _NOT_WANTING_TO_EAT.search(said):
+        return False
+    if _HOW_TO_MAKE_IT_SO.search(said):
+        return False
+    return bool(_STATE_WORD.search(said))
+
+
+def _past_its_best(memory, understood):
+    """The verdict on food that has gone a bit past its best, said about the food in hand."""
+    text = " " + str((understood or {}).get("clean") or (understood or {}).get("text")
+                     or "").lower() + " "
+    named = _names_any(text, PAST_IT_PRODUCE)
+    if not named:
+        # The food has to be in the line. "half of it is already limp" after a line about cabbage
+        # is the keeping row's follow-up and it reads the line before; and a state word with no
+        # food is a question about a dish, not about produce.
+        return None
+    if any(word in text for word in PAST_IT_BIN):
+        return ("Bin it. The feel and the smell are what the stomach reacts to, not the colour, "
+                "and cooking does not make it safe again: the bacteria that grew leave toxins "
+                "behind that heat does not touch. Compost it and wash the drawer it was in.")
+    for names, said in PAST_IT_KINDS:
+        if any(word in text for word in names):
+            return said
+    return PAST_IT_GENERAL
+
+
+
 # A dish that has been in the fridge for days is a keeping question, and the rows that answer it
 # give a number of days and then say when to bin it. The cooling rows name a pot, a pan or a bowl
 # and no period of time - "the stew has been in the fridge a week" was answered "straight in is
@@ -817,12 +958,72 @@ _A_PERIOD_OF_TIME = re.compile(
     r"(?:in|inside|out)\s+of\s*the\s+(?:fridge|refrigerator)\b")
 
 
+# The machine can be the thing that is slow, rather than the thing the dish goes into. "My fridge
+# is taking ages to cool down" and "the freezer takes forever to get cold" reached this row on the
+# two words of its key, "fridge" and "cool", and were told to spread a tub out on the worktop and
+# eat the leftovers in two days - advice for a dish, given to someone whose appliance is not
+# chilling. A cold machine named with no dish beside it is the fault row's question (home.py has
+# the thermometer, the door seal and the coils), so this row stands down for it. The dish words
+# stay, because "the stew takes ages to cool" is still a pot to cool down.
+_COLD_MACHINE = re.compile(
+    r"\b(?:my|the|our|your|his|her|their|this|that|a|an)\s+"
+    r"(?:fridge freezer|fridge|freezer)\b")
+_IN_THE_DISH = re.compile(
+    r"\b(?:pot|pots|pan|pans|saucepan|saucepans|wok|bowl|bowls|tub|tubs|tray|trays|stew|stews|"
+    r"casserole|casseroles|curry|curries|soup|soups|rice|pasta|chilli|chili|stock|leftover|"
+    r"leftovers|dish|dishes|pie|pies|roast|chicken|meat|joint|batch|bolognese|sauce|beans|"
+    r"lentils|porridge|pudding|cake|cakes|bread|bottle|bottles|milk|formula|yoghurt|yogurt|"
+    r"cream|muffin|muffins|loaf|loaves)\b")
+
+
+def the_cold_machine_and_not_the_dish(understood):
+    """False when the line is the fridge or freezer being slow rather than a dish to cool."""
+    said = " ".join(str(word).lower() for word in ((understood or {}).get("words") or ()))
+    if not said:
+        said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    return not (_COLD_MACHINE.search(said) and not _IN_THE_DISH.search(said))
+
+
 def a_cooling_question_not_a_keeping_one(understood):
     """True unless the line says how long the dish has been in the fridge already."""
     said = " ".join(str(word).lower() for word in ((understood or {}).get("words") or ()))
     if not said:
         said = str((understood or {}).get("text") or "").lower()
     return not _A_PERIOD_OF_TIME.search(said)
+
+
+# "is it ok to eat bread thats gone a bit hard" is a stale loaf, not a mouldy one, and it was
+# told "don't cut the mould off a loaf and eat the rest: bin it" - the bin notice for food that
+# was never spoilt. The row keys "ok to eat" and "is it ok", which is how a person asks about a
+# dry loaf too, and `bread-stale` has the answer: the water-and-oven trick and the croutons. The
+# words that are about a dry loaf only stand this row down; say mould, spots, fluff or a smell and
+# it is mouldy bread again, whatever else the line says.
+_DRY_LOAF = re.compile(r"\b(?:hard|hardened|dry|dried|stale|stalish|tough|crusty|brittle)\b")
+_BREAD_SPOILT = re.compile(r"\b(?:mould|mouldy|mold|moldy|green|blue|furry|fuzz|fluff|spores|"
+                           r"spots|speckled|specked|smell|smells|smelly|smelt|slimy|damp)\b")
+
+# "how do i stop my bread going stale" is the keeping question, and `_bread_sliced` answers it
+# with the cut face, the paper bag and the freezer. The stale row now keys "going stale" too, so
+# it took the prevention lines and told a person with a fresh loaf how to revive a stale one: a
+# line that asks how to stop the drying is not a line about a loaf that has dried.
+_HOW_TO_KEEP_IT_FRESH = re.compile(
+    r"\b(?:how do i stop|how to stop|how do i keep|how to keep|how can i keep|how can you keep"
+    r"|stop it going|stop them going|prevent|keep it fresh|keep them fresh|keep bread|keep a loaf"
+    r"|make it last|make bread last|last longer|stay fresh|keep fresh|fresh for longer)\b")
+
+
+def _not_just_a_hard_loaf(understood):
+    """False for a loaf that is dry or hard and says nothing about being spoilt."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if not _DRY_LOAF.search(said):
+        return True
+    return bool(_BREAD_SPOILT.search(said))
+
+
+def _not_how_to_keep_it_fresh(understood):
+    """False when the line asks how to stop a loaf going stale, not what to do with a stale one."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    return not _HOW_TO_KEEP_IT_FRESH.search(said)
 
 
 ENTRIES = [
@@ -845,7 +1046,9 @@ ENTRIES = [
             "cool quickly", "cool it down")),
           _cool_before_fridge,
           # a dish that has been in the fridge a week is the keeping rows' question
-          guard=a_cooling_question_not_a_keeping_one,
+          # two stand-downs, and the second is the machine: see the_cold_machine_and_not_the_dish
+          guard=lambda understood: (a_cooling_question_not_a_keeping_one(understood)
+                                     and the_cold_machine_and_not_the_dish(understood)),
           bias=1,
           # the freezer, the oven and the keeping-days questions are their own rows, and the
           # appliance that has stopped being cold is the fault row's.
@@ -942,7 +1145,14 @@ ENTRIES = [
           # unreachable, so "milk left out of the fridge overnight" was answered by the weekly
           # shop card. Keeping it in the fridge, and how long it keeps there, are still turned
           # away by "in the fridge" and "how many days".
-          avoid=("reheat", "reheating", "warm it up", "warm up", "in the fridge",
+          # What is served beside the food is the pair row's question, however the line says it:
+          # "what goes on the side with steak" reads as a steak that was left on the side, and was
+          # told to bin it. Only the phrases that ask for the plate are listed - "on the side" on
+          # its own is where the food was left, which is this row's own line.
+          avoid=("goes with", "go with", "going with", "goes on the side", "goes nicely",
+                 "what side", "which side", "side dish", "side dishes", "sides with",
+                 "serve with", "serving with", "to serve with", "to go with", "alongside",
+                 "reheat", "reheating", "warm it up", "warm up", "in the fridge",
                  "how many days", "keep for", "recipe", "how do i",
                  "how to make", "make a", "order", "delivery", "dough", "toppings", "defrost",
                  # a soak is a step in a recipe, not a night on the side: "do i need to soak
@@ -1124,4 +1334,98 @@ ENTRIES = [
           _marinate,
           bias=8),
 
+    # Which food to eat first is the one question about the fridge this domain did not answer,
+    # and "what goes off first in the fridge" was answered by the food-waste row with "write the
+    # week's four meals down before you shop". It is the same idea as the shelf-life rows here -
+    # the answer depends on the food, not the words - so it lives beside them.
+    entry("fridge-order",
+          (("fridge", "fridge freezer", "fridges", "shelf", "shelves", "drawer", "crisper"),
+           ("what goes off first", "goes off first",
+            "go off first", "what should i eat first", "what should i use first",
+            "what to eat first", "what to use first", "eat first", "use first", "use up first",
+            "what goes where", "where in the fridge", "fridge order", "which shelf",
+            "top shelf", "bottom shelf", "middle shelf", "salad drawer", "crisper",
+            "how should i organise the fridge", "how do i organise my fridge",
+            "how do i organise the fridge", "how do i stack the fridge",
+            "what goes on which shelf"),),
+          "Eat in date order first, and after that the food that is on borrowed time: fresh fish "
+          "and mince within a day or two, then soft fruit, berries and salad leaves, then milk, "
+          "yoghurt and cream, then hard cheese, butter and cooked leftovers. Where it sits "
+          "matters as much as the order - cooked and ready-to-eat food on the top shelves, raw "
+          "meat and fish on the bottom shelf in a box so nothing drips, and vegetables in the "
+          "drawer. The door is the warmest part, so keep milk out of it, and the top of the door "
+          "is fine for butter and condiments.",
+          # what to do with what has already gone off is the shelf-life rows' question, and a
+          # freezer or a shop's waste is another answer
+          avoid=("gone off", "is it ok", "safe to eat", "still ok", "freezer", "freeze",
+                 "frozen", "waste", "throw", "bin", "buy too much", "how long does",
+                 "how long can i keep", "use by", "best before", "smell"),
+          bias=2),
+
+    # The state of the food, not the calendar. A person holding it wants one verdict and what to
+    # do with it, and the two states are different questions, so the reply reads them apart:
+    # slimy, sour or mouldy is the bin, and soft, wrinkly, dry or limp is water loss and still
+    # dinner. Every row near this one answered the other question - "can i eat grapes that are
+    # wrinkly" got what grape skins are good for, "can i eat a banana thats gone soft" got a
+    # banana's calories, "my spinach has gone slimy and smells a bit" got the five days it keeps,
+    # and "my carrots have gone soft are they ok" got how long carrots keep.
+    entry("past-its-best",
+          (PAST_IT_PRODUCE, PAST_IT_STATE, PAST_IT_ASK),
+          _past_its_best,
+          # The state is the question: "can i eat raw carrot" names a food and an ask and says
+          # nothing about the food having changed, so the two other parts are not enough to make
+          # it this row's line.
+          guard=_says_the_state,
+          bias=3,
+          # Bread has its own stale row (`bread-stale`, which says the oven trick and the
+          # breadcrumbs) and its own mould row, and the two questions there are worth keeping
+          # apart: a dry loaf is dinner and a green one is the bin. Herbs in a supermarket pot
+          # have a plant row, and a mushroom that is a bit slimy has an answer of its own.
+          avoid=("mouldy", "mould", "mold", "green potato", "sprouting", "sprouted", "sprouts",
+                 "bread", "loaf", "baguette", "rolls", "toast", "croutons",
+                 "basil", "parsley", "mint", "coriander", "cilantro", "chives", "thyme",
+                 "rosemary", "herb", "herbs", "houseplant",
+                 # keeping and storage are their own rows: "how long do carrots keep" is not
+                 # "are these carrots still all right"
+                 "keep for", "keeps for", "how long do", "how long does", "how long will",
+                 "store", "storing", "storage", "keep them", "keep it", "last", "lasts",
+                 # a plant in the garden going yellow is the garden rows' question, and this
+                 # row keys "gone yellow" for the leaves in a bag
+                 "garden", "plant", "plants", "tree", "grow", "growing", "fertiliser",
+                 "compost", "water them", "water it", "leaves on", "pot it", "repot",
+                 # keeping it from going over is the keeping rows' question, and the state
+                 # words are exactly its words: "how do i keep a bag of salad from going slimy"
+                 # was told to bin the bag. Phrases only, because an avoid word is read in its
+                 # loose forms, so a bare "slimy" would stand this row down on its own lines.
+                 "from going slimy", "from going soft", "from going brown", "from going limp",
+                 "how do i keep", "how to keep", "how can i keep", "keep a bag", "keep them fresh",
+                 "keep it fresh", "stop it going", "stop them going", "prevent", "last longer",
+                 "stay fresh", "keep fresh", "make it last", "keep them from", "keep it from",
+                 # and the same question with no keeping in it: "why does lettuce go slimy" and
+                 # "why do cucumbers go soft" ask what happens to the food, not about the food
+                 # in their hand, and the food rows answer them
+                 "why does", "why do", "what makes", "what causes",
+                 # a cooking smell is the kitchen's, not the food's: "my kitchen smells of
+                 # cabbage" wants the window and the lemon, not the bin
+                 "kitchen smells", "kitchen smell", "smells of", "smell of", "smells like",
+                 "smell like", "stinks of", "stink of", "the house smells", "the fridge smells",
+                 # a taste is the cook's to fix, not a spoilage verdict: "my tomato sauce is too
+                 # sour" is asking for the sugar and the butter
+                 "too sour", "too sweet", "too salty", "too bitter", "a bit sour",
+                 "sauce", "soup", "stew", "curry", "casserole", "dough", "batter", "cake",
+                 "recipe", "recipes", "meal idea", "meal ideas",
+                 # A limp or wilted leaf already has a good short answer - the iced water that
+                 # brings it back crisp - and that row says it better than this one can, so a
+                 # leaf described as limp or wilted keeps its line. What this row adds is the
+                 # leaf that has changed colour, which had no answer at all.
+                 "limp", "limper", "wilted", "wilting", "wilt", "floppy leaf", "floppy leaves",
+                 # reviving limp leaves and using a bag up are the cooking rows' questions, and
+                 # they answer them with the iced water and the pan: "how do i revive wilted
+                 # spinach", "i have a bag of spinach going limp what can i do with it"
+                 "revive", "reviving", "bring it back", "bring them back", "crisp it up",
+                 "crisp them up", "make it crisp", "make them crisp", "what can i do with",
+                 "what to do with", "use it up", "use them up", "use up",
+                 # and the follow-up about the soak is the other row's short answer ("10
+                 # minutes"), which reads the card it gave
+                 "how long", "how many minutes", "soak", "soaking", "ice water", "iced water")),
 ]

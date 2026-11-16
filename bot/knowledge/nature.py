@@ -9,7 +9,7 @@ line, then add the practical part when there is one.
 import datetime as _dt
 import re
 
-from .lookup import entry
+from .lookup import A_WHAT_TO_WEAR, entry
 
 ANSWERS = ("nature-and-weather",)
 
@@ -20,6 +20,18 @@ ANSWERS = ("nature-and-weather",)
 # shapes in the group, not in the subject, so it is written once here.
 WHAT_MAKES = ("what makes", "what causes", "what cause", "what made", "what makes it",
               "what causes it", "makes it", "causes it", "how come")
+
+# A line about a bad night is a sleep question, not an astronomy one. "i cant sleep when theres a
+# full moon" and "the full moon keeps me awake" were both answered with the length of a lunar
+# cycle: the person was telling you they cannot sleep, and the moon was the reason they offered.
+# The sleep cards answer it ("same wake-up time, no caffeine after early afternoon, not much
+# alcohol"), so the two moon rows stand down for the words below. `bot/knowledge/work.py` keeps
+# the same family of words as SLEEP_TALK; this row cannot import that module (its answers import
+# this one), so the words are written here too.
+A_BAD_NIGHT = ("cant sleep", "can't sleep", "cannot sleep", "couldnt sleep", "couldn't sleep",
+               "wont sleep", "won't sleep", "not sleeping", "sleep badly", "sleeping badly",
+               "slept badly", "keeps me awake", "keep me awake", "kept me awake",
+               "awake all night", "toss and turn", "tossing and turning", "insomnia")
 
 
 # A new moon, and the length of one full cycle of phases, for the next-full-moon answer.
@@ -120,9 +132,29 @@ def _not_the_definition(understood):
     return not (words & _SETTING_CROPS and _PLANT_TROUBLE.search(line))
 
 
+# The harvest is the other question the word "fruit" is asked in: "will my tomatoes still fruit
+# this year" was told "Botanically a tomato is a fruit that grows from the flower and holds its
+# seeds. Cooks call it a vegetable ...", which answers a question nobody asked. The produce word
+# is the same word; the ask is about the crop, and garden.py's ripening rows answer it.
+THE_HARVEST_ASK = (
+    "still fruit", "will it fruit", "will they fruit", "will my fruit", "fruit this year",
+    "still crop", "will it crop", "will they crop", "crop this year", "still produce",
+    "more fruit", "set fruit", "setting fruit", "fruiting", "yield", "harvest",
+    "how much fruit", "any fruit", "still get fruit", "get fruit this",
+)
+
+
+def _fruiting_of_a_crop(line):
+    """True when the line asks whether a plant will crop, not what kind of thing the crop is."""
+    return any(word in line for word in THE_HARVEST_ASK)
+
+
+
 def _fruit_or_berry(memory, understood):
     """Whether the produce in the line is a fruit, a berry or a root, and why."""
     line = (understood.get("text") or understood.get("clean") or "").lower()
+    if _fruiting_of_a_crop(line):
+        return None
     word = ""
     for name in PRODUCE:
         if name.endswith("y"):
@@ -186,6 +218,52 @@ def _the_wet_day(memory, reading):
         said += (" If it is set in for the week, pick one proper indoor day rather than a wet walk "
                  "every day, and keep the evenings for the things that need no weather at all.")
     return said
+
+
+# A plant the person is looking after is a plant of theirs going wrong, and the season is not the
+# question. The line "and should i take the yellow leaves off" names no plant at all - it names the
+# leaf - so the leaf word alone reached this card and the person was told why trees drop their
+# leaves in autumn, three turns after asking about their tomatoes. Any plant they own in the last
+# few turns is enough to stand this card down; a tree is not on the list, because a tree's leaves
+# in autumn are exactly this question.
+_PLANTS_IN_HAND = (
+    "tomato", "tomatoes", "pepper", "peppers", "courgette", "courgettes", "cucumber",
+    "cucumbers", "chilli", "chillies", "chili", "potato", "potatoes", "aubergine", "aubergines",
+    "strawberry", "strawberries", "raspberry", "raspberries", "blueberry", "blueberries",
+    "basil", "mint", "parsley", "coriander", "thyme", "rosemary", "sage", "chives", "oregano",
+    "houseplant", "houseplants", "house plant", "house plants", "monstera", "orchid",
+    "peace lily", "spider plant", "snake plant", "pothos", "aloe", "cactus", "succulent",
+    "bonsai", "ficus", "fern", "seedling", "seedlings", "cutting", "cuttings", "my plant",
+    "my plants", "veg", "vegetables", "allotment",
+)
+
+
+def _the_older_turns(memory, keep=3):
+    """What the last few turns said, for a follow-up that names only the part."""
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list):
+        return ""
+    said = " ".join(str(turn.get("user") or "") for turn in turns[-keep:]
+                    if isinstance(turn, dict))
+    return " " + re.sub(r"[^a-z0-9' ]+", " ", said.lower()) + " "
+
+
+def _a_plant_they_own_is_the_subject(memory):
+    """True when the conversation is about a plant the person is looking after."""
+    said = _the_older_turns(memory)
+    return any(" %s " % word in said or " %ss " % word in said
+               for word in _PLANTS_IN_HAND)
+
+
+def _the_autumn_leaves(memory, reading):
+    """Why leaves turn, unless the leaves are a plant of theirs going wrong."""
+    if _a_plant_they_own_is_the_subject(memory):
+        return None
+    return (
+        "Shorter days tell trees to stop making chlorophyll, the green stuff, and as it fades "
+        "the yellow and orange pigments underneath show through; some trees also make red "
+        "pigments. The tree then seals off each leaf and lets it drop, so it loses less water "
+        "over winter.")
 
 
 def _the_tide(memory, reading):
@@ -377,7 +455,9 @@ ENTRIES = [
                         "what is") + WHAT_MAKES),
           "The sun evaporates water, it rises and cools into cloud droplets, and the droplets "
           "bump together until they're heavy enough to fall. Rain is just that water coming back "
-          "down, usually after a cloud has grown thick and tall."),
+          "down, usually after a cloud has grown thick and tall.",
+          # what to wear in it is a clothes question, and the clothes rows answer it
+          avoid=A_WHAT_TO_WEAR),
     entry("sunset-orange", ("sunset", ("orange", "red", "sky", "why", "sunrise", "evening")),
           "Low sun sends its light through far more atmosphere, which scatters the blues away and "
           "leaves the reds and oranges to reach you. Dust and cloud make it stronger, which is why "
@@ -408,7 +488,8 @@ ENTRIES = [
                     "what", "what is") + WHAT_MAKES),
           "Snow forms when water vapour freezes straight into ice crystals high in a cloud, and the "
           "crystals stick together as they fall. It only reaches the ground as snow if the air "
-          "stays cold all the way down, which is why a cold snap often brings sleet instead."),
+          "stays cold all the way down, which is why a cold snap often brings sleet instead.",
+          avoid=A_WHAT_TO_WEAR),
     entry("wind", (("wind", "winds", "windy", "breezy", "gale", "gales"),
                    ("why", "blow", "blows", "does", "form", "cause", "windy", "so windy",
                     "what", "what is") + WHAT_MAKES),
@@ -419,7 +500,9 @@ ENTRIES = [
           # moment "windy" joined the subject. The feeling words are the fence; the bloating row
           # keeps those lines exactly as it had them.
           avoid=("feel windy", "feeling windy", "felt windy", "bloated", "bloating", "trapped wind",
-                 "fart", "farting", "gas", "my gut", "stomach", "tummy", "how windy")),
+                 "fart", "farting", "gas", "my gut", "stomach", "tummy", "how windy")
+                 # and what to put on against it is a clothes question, not a science one
+                 + A_WHAT_TO_WEAR),
     # "why do we have seasons" put the ask before the subject, and the two parts of a key are
     # read in the order they are written, so the row scored nothing and the baby-food spice
     # table answered it. The subject-first phrasings go in the first part beside the words.
@@ -475,6 +558,11 @@ ENTRIES = [
                  "planets", "moon", "year", "years", "movie", "film", "book", "shift", "work",
                  "here", "room", "rooms", "kitchen", "bedroom", "hallway", "outside", "screen",
                  "phone", "camera", "photo", "photo is", "hair", "skin", "nail", "nails",
+                 # "hours" is this row's word for the length of the day, and "how many hours of
+                 # revision a day" and "how many hours should i study a day" are asking how long
+                 # to work, not when the sun goes down: the activity is the subject of the line.
+                 "revision", "revise", "revising", "study", "studying", "studied", "coursework",
+                 "homework", "exam", "exams", "revised",
                  "earth", "night", "nights", "tonight", "today", "tomorrow", "sky", "stars",
                  "eclipse", "horizon", "eyes", "sleep", "blind", "circles", "bags", "under my eyes",
                  "spots", "patches", "stains", "roots", "hair dye", "boiler", "radiator",
@@ -517,6 +605,15 @@ ENTRIES = [
                  "always", "feel cold", "feeling cold", "feel the cold", "get cold", "getting cold",
                  "hands", "feet", "toes", "fingers", "shivery", "shiver", "i am cold", "im cold",
                  "i'm cold", "in bed", "bedroom", "house", "flat", "office", "coat", "jumper",
+                 # a building that is cold is a heating question, not the tilt: the house rows
+                 # answer it, and a shed, a cellar and a basement were all told that winter is
+                 # cold because the Earth leans away from the Sun, which is true of the season
+                 # and not of the room the person is standing in.
+                 "shed", "sheds", "cellar", "cellars", "basement", "basements", "workshop",
+                 "workshops", "garage", "garages", "conservatory", "loft", "attic", "hallway",
+                 "hall", "porch", "caravan", "bungalow", "cottage", "kitchen", "living room",
+                 "sitting room", "lounge", "room", "rooms", "home", "homes", "housemate",
+                 "outbuilding", "outbuildings", "greenhouse", "tent", "car", "van", "classroom",
                  # "why is it cold in the morning" and "at night in the desert" are forecast
                  # lines and a desert night is a different physics: neither is the tilt.
                  "morning", "mornings", "at night", "night", "nights", "desert", "the desert",
@@ -551,10 +648,7 @@ ENTRIES = [
     entry("leaves-autumn", (("leaf", "leaves"), ("change", "colour", "color", "autumn", "fall",
                                                  "turn", "brown", "red", "yellow", "lose", "drop",
                                                  "tree")),
-          "Shorter days tell trees to stop making chlorophyll, the green stuff, and as it fades "
-          "the yellow and orange pigments underneath show through; some trees also make red "
-          "pigments. The tree then seals off each leaf and lets it drop, so it loses less water "
-          "over winter.",
+          _the_autumn_leaves,
           avoid=("plant", "houseplant", "basil", "pot", "indoor", "tips", "house", "sick",
                  # a named tree in a pot losing leaves is the bonsai card's question: "my bonsai
                  # is dropping leaves" was told why leaves fall in autumn
@@ -566,7 +660,11 @@ ENTRIES = [
                  # a named houseplant with brown or crispy leaves is an indoor question, and
                  # garden.py's houseplants entry answers it
                  "monstera", "orchid", "peace lily", "spider plant", "snake plant",
-                 "pothos", "aloe", "cactus", "succulent", "fiddle leaf", "potted")
+                 "pothos", "aloe", "cactus", "succulent", "fiddle leaf", "potted",
+                 # a leaf in a bag is food, not a season: "can i eat a yellow spinach leaf" was
+                 # told why trees drop their leaves
+                 "spinach", "kale", "lettuce", "rocket", "greens", "cabbage", "chard",
+                 "eat", "eating", "ate", "bag of", "salad")
                  + NAMED_PLANTS,
           # "why do leaves turn yellow in autumn" also fits garden's yellow-leaf triage, and
           # the season fact is the one asked for. One point of bias wins it on the merits,
@@ -826,12 +924,16 @@ ENTRIES = [
           "when the blue is deeper. Around new moon it sits too close to the sun in the sky to "
           "see at all."),
     entry("full-moon-next", (("full moon", "moon"), ("next", "when", "coming", "due")),
-          _next_full_moon),
+          _next_full_moon,
+          # a night that would not come is the sleep rows' answer, not the date of the full moon
+          avoid=A_BAD_NIGHT),
     entry("moon-phases", ("moon", ("phases", "phase", "shape", "crescent", "change",
                                                             "different", "full")),
           "The Moon doesn't change shape; half of it is always lit by the sun, and we see a "
           "different slice of that lit half as it orbits the Earth. A full moon takes about 29.5 "
-          "days to come round again."),
+          "days to come round again.",
+          # the same fence: "does a full moon affect sleep" is about the night, not the phases
+          avoid=A_BAD_NIGHT),
     entry("fruit-or-berry", (PRODUCE,
                              ("fruit", "fruits", "berry", "berries", "vegetable", "vegetables",
                               "botanically", "really")),

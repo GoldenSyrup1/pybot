@@ -32,6 +32,9 @@ from . import history
 # so they are allowed in front of and behind the shape, and nothing else is: a line with a
 # subject or an object of its own ("i love you both", "i love your nan") is about somebody else.
 _SOFT_LEAD = r"(?:oh |aw+ |ah |ha+ |lol |tbh |honestly |ok |okay |well |and |but |still |even so )*"
+# "no thats wrong" is the same correction with the disagreement left in front: "no" is not one of
+# the softeners, it is the person saying the answer was not right as well as wrong.
+_NO_LEAD = r"(?:(?:no+|nah|nope)(?:,)? )?"
 _SOFT_TAIL = (
     r"(?:,? (?:too|also|lots|loads|honestly|tbh|really|so much|very much|you know|though|tho|"
     r"me|at all|at this|at that|ha+|lol))*"
@@ -95,6 +98,59 @@ _ON_FORM = re.compile(
 # module), but said as a statement it got the shrug "Got it. Is there anything you'd like a hand
 # with?", which answers neither half. The reply agrees, says what it is in a few words, and does
 # not pretend to a life - then leaves the person something to do with it.
+# A correction is said far more ways than "youre wrong", and the rest of them were left at the two
+# replies that fit any line: "you got that wrong", "thats the wrong one", "thats not what i meant"
+# and "no i meant the other one" all met "Got it. Is there anything you'd like a hand with?" or
+# "I'm listening \u2014 say more if it helps." Each shape below is anchored to the whole line and
+# built only from the correction itself, so a line that says what is wrong with the world rather
+# than with the answer ("i got the wrong bus", "the app gets it all wrong") reaches another reader.
+#
+# "you got that wrong", "youve got it wrong", "you got it back to front".
+_GOT_IT_WRONG = re.compile(
+    r"^" + _SOFT_LEAD +
+    r"(?:you|u)(?:'?ve| have)? (?:just |really |actually |clearly |totally |completely )?"
+    r"(?:got|get|had) (?:that|this|it) "
+    r"(?:wrong|mixed up|back to front|the wrong way round)" + _SOFT_TAIL + r"$")
+# "thats the wrong one", "the wrong address", "this is the wrong day": the answer named as the
+# wrong one rather than called wrong. Either the thing pointed at or "the" has to be there - a bare
+# "wrong number" is as likely to be a call someone took - and the noun has to be one of the ones an
+# answer, a record or a direction comes in.
+_THE_WRONG_THING = re.compile(
+    r"^" + _SOFT_LEAD +
+    r"(?:(?:that|this|it)(?:'?s| is| was)?|the) (?:the )?wrong "
+    r"(?:one|address|day|time|name|number|answer|thing|word|date|price|place|person|direction|"
+    r"link|order)" + _SOFT_TAIL + r"$")
+# "thats not what i meant", "that isnt what i was asking about", "not what i meant". "said" is
+# left out on purpose: bot/memory/warmth.py already answers "thats not what i said" as a question
+# missed (MISSED_ASK_REPLIES), which is the right reply for it.
+_NOT_WHAT_I_MEANT = re.compile(
+    r"^" + _SOFT_LEAD +
+    r"(?:(?:that|this|it)(?:'?s| is| was)? |you )?"
+    r"(?:not|isnt|isn'?t|wasnt|wasn'?t) (?:really |quite |at all |exactly )?"
+    r"what i (?:meant|mean|was asking about|asked about|was after|wanted|needed)"
+    + _SOFT_TAIL + r"$")
+# "you mixed it up", "youve got them mixed up", "you muddled the two up".
+_MIXED_UP = re.compile(
+    r"^" + _SOFT_LEAD +
+    r"(?:you|u)(?:'?ve| have)? (?:just |really |clearly |totally |completely )?"
+    r"(?:got (?:it|that|this|them) )?(?:mixed|muddled|confused) "
+    r"(?:it|that|this|them|the two|two things)? ?up" + _SOFT_TAIL + r"$")
+# "no i meant the other one", "i meant the other day", "sorry, the other address".
+_THE_OTHER_ONE = re.compile(
+    r"^" + _SOFT_LEAD +
+    r"(?:no |nope |nah |sorry,? |actually )?(?:i )?(?:meant|mean) the other "
+    r"(?:one|option|day|address|name|thing|number|person)" + _SOFT_TAIL + r"$")
+# "no not that one", "no not this one" - and only with the "one" on the end. A bare "no" is a
+# different thing, a person turning something down and leaving it there, and the same words
+# without the "one" are that turn-down with the thing named: after "what shall i do this
+# weekend" and an idea, "nah not that" means not that idea, not that the answer was wrong.
+_NO_NOT_THAT = re.compile(
+    r"^" + _SOFT_LEAD +
+    r"(?:no|nope|nah),? (?:not|no) (?:that|this) one" + _SOFT_TAIL + r"$")
+# The shortest correction of all: "wrong", "wrong again", "ok wrong".
+_BARE_WRONG = re.compile(
+    r"^" + _SOFT_LEAD + r"wrong(?: again| then| still)?" + _SOFT_TAIL + r"$")
+
 _MACHINE = re.compile(
     r"^" + _SOFT_LEAD +
     r"(?:you(?:'?re| are)(?: just| only| really| basically)?(?: an?)? "
@@ -168,7 +224,7 @@ _NO_HELP = re.compile(
 # "youre wrong" is the person correcting the bot itself, which is a different thing from being
 # told it is no help: the next move is to find out which bit, not to change the subject.
 _WRONG = re.compile(
-    r"^" + _SOFT_LEAD +
+    r"^" + _SOFT_LEAD + _NO_LEAD +
     r"(?:you(?:'?re| are)|that(?:'?s| is)?|this is|you(?:'?ve| have) got it)"
     r" (?:just |completely |totally |so )?(?:wrong|way off|not right|incorrect|making that up)"
     r"(?: about (?:it|that|this))?" + _SOFT_TAIL + r"$")
@@ -395,6 +451,14 @@ _BACK_TO_SOMETHING = re.compile(
     r"|(?:you|u) mentioned (?:it|that|this)? ?(?:before|earlier)"
     r"|(?:the|that) (?:one|thing|bit) (?:we|you and i) (?:discussed|talked about|mentioned)"
     r"|we (?:talked|spoke|went) (?:about|over|through) (?:this|that|it)"
+    # A chat claimed from before, in the shapes people say it in: "we spoke yesterday", "we talked
+    # last week", "we were chatting earlier" was answered "Good to hear. What was the best bit?" -
+    # a question about a conversation nobody had.
+    r"|we (?:spoke|talked|chatted)(?: (?:yesterday|today|earlier|before|last (?:night|week"
+    r"|time|month)))?"
+    r"|we(?:'?ve| have)(?: already)? (?:spoken|talked|chatted)(?: (?:about|over) (?:it|this|that))?"
+    r"|we (?:were|have been|had been) (?:just )?(?:chatting|talking|speaking)"
+    r"(?: (?:about (?:it|this|that)|earlier|before|yesterday|last (?:night|week)))?"
     r"|we(?:'?ve| have)? been (?:through|over|round) (?:this|that|it)"
     r"|(?:youve|you have|you(?:'?d| had)) (?:forgotten|lost|dropped) (?:what|that) i "
     r"(?:said|told you)"
@@ -453,6 +517,17 @@ def reply(text, memory):
         return pick(WARM_REPLIES, memory, seed_text=str(text or ""))
     if _ON_FORM.match(clean):
         return pick(PRAISED_REPLIES, memory, seed_text=str(text or ""))
+    # The corrections below are about an answer the bot has already given, so there has to be a
+    # line before them: said as the very first thing, "wrong" has nothing before it to have got
+    # wrong, and a first line keeps whatever reading the bot already has for it.
+    nothing_before_it = not any(
+        str((turn or {}).get("user") or "").strip() for turn in (memory.get("turns") or []))
+    if not nothing_before_it and (
+            _GOT_IT_WRONG.match(clean) or _THE_WRONG_THING.match(clean)
+            or _NOT_WHAT_I_MEANT.match(clean) or _MIXED_UP.match(clean)
+            or _THE_OTHER_ONE.match(clean) or _NO_NOT_THAT.match(clean)
+            or _BARE_WRONG.match(clean)):
+        return pick(WRONG_REPLIES, memory, seed_text=str(text or ""))
     if _MACHINE.match(clean):
         return pick(MACHINE_REPLIES, memory, seed_text=str(text or ""))
     # A line about the conversation, on the first line of one: the pools below answer an earlier

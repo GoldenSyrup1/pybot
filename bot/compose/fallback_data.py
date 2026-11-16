@@ -315,6 +315,19 @@ HOW_TO_DECIDE_LINES = (
     "what you want to be doing in a year. What are you choosing between?",
 )
 
+MISSED_STEP_LINES = (
+    "A missed one is a pause, not a restart: pick up at the step you were on, and if it turned "
+    "into a long gap, go back a step so the first one back is easy. What are you partway through?",
+    "Missing it does not undo the work. What matters is the next one, at whatever level still "
+    "feels easy, not doubling up to make up for the gap. What is the plan you are on?",
+    "Most plans forgive one or two misses - it is the long gap that costs you - so the next one "
+    "is what counts, carried on from where you stopped rather than started again. What is it you "
+    "are partway through?",
+    "The usual advice is to carry on from where you stopped, or one step back after a long gap, "
+    "and not to squeeze in the ones you missed. Tell me what you are working through and I will "
+    "say where that leaves you.",
+)
+
 HOW_TO_DECIDE_FILLER = frozenset((
     "now", "then", "here", "please", "for", "me", "myself", "properly", "better", "right",
     "next", "first", "about", "on", "at", "it", "this", "that", "one", "thing", "things", "so",
@@ -391,7 +404,7 @@ MONEY_WORDS = frozenset((
     "lends", "lending", "lent", "borrow", "borrows", "borrowing", "borrowed", "owe", "owes",
     "owed", "repay", "repaying", "repayment", "refund", "arrears", "redundancy", "prepayment",
     "premium", "premiums", "tariff", "tariffs", "supplier", "budget", "inheritance", "insurance",
-    "deposit", "pensioner", "pensioners"))
+    "deposit", "pensioner", "pensioners", "account", "accounts", "isa"))
 
 _MONEY_NOUN = frozenset(("money", "loan", "loans", "debt", "debts", "credit", "card", "cards",
                          "mortgage", "mortgages", "rent", "bills", "bill", "pension", "pensions",
@@ -1626,6 +1639,17 @@ DETAILS_IN_A_WARM_LINE = (
 # nobody had mentioned the quiet, which is the half the person is asking about; a word about the
 # win and the quiet is. Every line below says both, and none of them explains somebody else's
 # silence away or hands out advice about it - the person is telling you, not asking.
+# The other shape of two halves: a win and the cost of it in the same line ("we finally got the
+# keys and the place is a state", "we came into some money and now everyone wants it"). A cheer
+# alone is deaf to the second half and a question about the win alone is worse, so the pool names
+# both and asks which one they want to start on.
+WIN_AND_A_COST = (
+    "So it is good news and a headache in the same line. Which of the two do you want to start on?",
+    "The win and the cost landing together - that is usually how it goes. What is the part you "
+    "have to deal with first?",
+    "Lovely and annoying at once, then. What does the second half need from you?",
+)
+
 WIN_IN_A_SILENCE = (
     "That's a real win - and it stings that they said nothing. Have you told anyone who will get it right?",
     "Well done, honestly. The quiet after it is the part that hurts, and it says more about them "
@@ -1806,6 +1830,31 @@ SOMEONE_SERIOUSLY_ILL = (
     "Worrying about someone you love is its own kind of tiring. What do you need first?",
     "That's a lot to have land at once. What is the hardest part of it today?",
     "I'm sorry. That is frightening, and it is a lot to carry. Who is looking after you in it?",
+)
+
+# A family member they love, said plainly ("i love my mum", "i love my wife"), is not a fact to
+# file: the store said it back as "Noted: you love your mum." - the coldest reply in this file,
+# and a shrug at affection. A friend takes it in and asks about the person, with "they/them" so
+# the same pool fits a mum, a son or a wife, and without a condition that the person is alive.
+A_LOVE_FOR_SOMEONE = (
+    "That's a lovely thing to say. What do they mean to you?",
+    "That's a warm thing to say. What are they like?",
+    "That's lovely. What's the best thing about them?",
+    "That's good to hear. What do you two do together?",
+    "That's lovely to hear. What is it about them that makes you say that?",
+    "That's a good thing to have. What do you two talk about?",
+)
+
+# Two or more of their people in one line ("i love my mum and dad", "i love my wife and kids").
+# The questions stay plural and open, so the pool fits a couple, a family or a line that names
+# the people who matter to them.
+A_LOVE_FOR_PEOPLE = (
+    "That's a lovely thing to say. What are they like?",
+    "That's warm. What's the best thing about them?",
+    "Good to hear. What do you all do together?",
+    "Lovely. What is it about them that you love most?",
+    "That's lovely to hear. What are they like together?",
+    "That's a good thing to have. What do you all talk about?",
 )
 
 # Being left is the same news whether it is said in the past or the present, and it is not a bad
@@ -2234,6 +2283,33 @@ NEUTRAL = (
     "I'm listening — say more if it helps.",
 )
 
+# Two of those three say the bot has taken something in ("Got it. Is there anything you'd like a
+# hand with?", "Thanks for telling me - I'm here if you want to dig into any of that"). A chat's
+# first line is the one turn where nothing has been said yet, so the receipt claims a turn that
+# did not happen: thirty of the deck's nine hundred first lines got one of the two. The third
+# ("I'm listening - say more if it helps") claims nothing and is right on a first line, which is
+# why this is a list of the frames and not of the pool.
+# The two are read whole: a receipt is empty only when it is all there is. "Got it - your daughter
+# is 7." puts the person's own figure on the page, and that is the one thing a first line about an
+# age needs, so the frame is matched with nothing after it and a receipt that carries something of
+# theirs is left alone.
+A_RECEIPT_OF_NOTHING = re.compile(
+    r"^\s*(?:got it[.!]?\s*(?:is there anything you'?d like a hand with\??)?"
+    r"|thanks for telling me\s*[\u2014\u2013-]?\s*i'?m here if you(?:'d| would)? ?(?:want|like) to "
+    r"dig into any of that)\s*[.!]?\s*$", re.I)
+
+# What a first line gets instead, once every card, entry and reading that could answer it has had
+# its turn. A first line is the one turn where the bot has been told nothing, so the opener makes
+# no claim about the line: it asks for the thing an answer would start from. A line that claims
+# something about what was heard ("That sounds like a lot - tell me what's going on.") is not one
+# of these, because on a first line it invents the thing it claims to have heard: it was the pick
+# for `a good chippy near me`, and nobody asking for a chip shop has had a lot.
+COLD_OPEN = (
+    "Go on - what's been happening?",
+    "What do you need? I'll take it from there.",
+    "What would be most useful to sort out?",
+)
+
 # A decline that comes with a reason on the body is not a diary being rearranged: "i might be
 # pregnant and i cant come", "my back is bad and i cant come", "i feel awful and i cant come".
 # Each of those has a health answer of its own, and this file's plan pool answers with "Do you
@@ -2327,6 +2403,9 @@ ACTS_FOR_ME = (
     "working out instead: the list, the order to do things in, or the call you're dreading.",
     "No hands on this end, so the job itself can't be mine. What I'm good for is the plan behind "
     "it - say what's making it awkward and I'll help with that.",
+    "Nothing can be fetched, sent or signed from this end - no browser, no inbox, no hands. Name "
+    "the thing and I'll do the part that lives in words: the method, the wording, or the "
+    "questions for whoever can.",
 )
 
 # An invitation is a person asking for company: "do you fancy a walk", "want to go for a walk",
@@ -2917,6 +2996,20 @@ A_SORRY_ON_ITS_OWN = re.compile(
     # "my bad sorry", "sorry then", "soz": the same apology said twice or with a word after it,
     # which people do when they are a bit embarrassed ("my bad sorry" was a nod).
     r"(?:\s+(?:again|honestly|mate|pal|then|anyway|sorry|soz|eh))*[\s.!,]*$", re.I)
+# A correction nobody here could file: "no it was my idea not the kids" after the bot asked
+# which of the party games the children had picked, "no the quiet is the best bit of it" after an
+# answer about the noise. Both reached the search hedge ("I don't know enough to answer that
+# honestly. A search should sort you out quickly"), which tells a person setting the record
+# straight to go and look it up, and the party line also reached the kids' games card, because
+# "party" was still in the sentence. A correction is a reply to this end of the chat and there is
+# nothing in it to look up, so the reply takes it and hands the thread back. The pools fit any
+# correction, because what was corrected is the store's to hold and this file never sees it.
+A_CORRECTION_TAKEN = (
+    "Fair enough - noted. What else should I know about it?",
+    "Got it, my mistake. Where does that leave things?",
+    "Right, I had that wrong. Go on - what happens next?",
+    "Noted, thanks for putting me straight. Tell me the rest.",
+)
 # "never mind", "forget it", "ignore that": the person is taking the last thing back, and the
 # neutral pool answered that as well ("Thanks for telling me - I'm here if you want to dig into any
 # of that"), which tells them their withdrawal was a revelation. A friend says it is dropped and
@@ -2929,7 +3022,10 @@ NEVER_MIND = (
 )
 A_DISMISSAL = re.compile(
     r"^(?:(?:oh|ok|okay|right|so|well|and|but|no|nah|hey)\s+)*"
-    r"(?:never\s*mind|nevermind|forget\s+it|forget\s+(?:i|what\s+i)\s+said|"
+    r"(?:never\s*mind|nevermind|forget\s+it|"
+    r"forget\s+about\s+(?:it|that|this|everything|all\s+of\s+it|"
+    r"the\s+(?:whole\s+)?(?:thing|lot))|"
+    r"forget\s+(?:i|what\s+i)\s+said|"
     r"ignore\s+(?:that|it|me|this)|scratch\s+that|as\s+you\s+were|nvm|"
     r"no\s+worries|dont\s+worry(?:\s+about\s+it)?|do\s+not\s+worry(?:\s+about\s+it)?|"
     r"leave\s+it|drop\s+it)\b"
@@ -2937,7 +3033,11 @@ A_DISMISSAL = re.compile(
     # as well, and leaving it in the tail turned a withdrawal into "Got it. Is there anything
     # you'd like a hand with?" (@rust-buffalo, on #6613).
     r"(?:\s+(?:about\s+(?:that|it)|that|this|it|eh|huh|then|anyway|now|thanks|ta|mate|pal|"
-    r"honestly))*[\s.!,]*$",
+    r"honestly|though|tho))*"
+    # "forget about it, ill do it myself": the withdrawal and what they will do instead are one
+    # turn, and the line was answered from the neutral pool ("Thanks for telling me - I'm here if
+    # you want to dig into any of that"), which tells them a withdrawal was a revelation.
+    r"(?:\s*[,;]\s*[^.!?]{0,40})?[\s.!]*$",
     re.I)
 
 # A small thing the person did with their hands or their day ("i painted the fence today", "we
@@ -3137,6 +3237,14 @@ DONE_NOT_THIS = frozenset((
     "mess", "mistake", "error", "complaint", "decision", "appointment", "call", "offer",
     "promise", "excuse", "fuss", "noise", "start", "plan", "list", "wrong", "loss", "mind",
     "respects", "tribute", "tributes", "toll", "price",
+    # "made" is the one verb here that takes an object it did not make: nothing was built when
+    # something made the news, made history or made a difference, and the pool that asks "what
+    # made you start on that?" asks after a job. Every word below is an object of "make" that is
+    # not a thing in the hand, so the line is news or a manner of speaking rather than an
+    # afternoon's making, and the pools that read news take it instead.
+    "news", "headlines", "papers", "history", "waves", "difference", "sense", "peace",
+    "amends", "headway", "progress", "friends", "enemies", "allowances", "allowance",
+    "sure", "certain",
 ))
 
 # A living thing is not a buy to be asked about: "bought a puppy" is a new arrival, and "was that a
@@ -3168,6 +3276,21 @@ AT_IT_NOT = frozenset(("best", "right", "wrong", "nothing", "much", "anything", 
 # "im doing the garden" is the shape with the emptiest verb in it, so it is read here and not in
 # DONE_VERB: "i spent the day doing nothing" is the day and not a job, and it stays out.
 AT_IT_EXTRA = frozenset(("doing",))
+
+# "im getting fat", "im getting old", "im getting tired": "getting" is a verb of becoming, and what
+# comes after it here is the state the person is in rather than a thing they are working on. The
+# line has the shape of "im painting the fence" and a word after the verb, so it was read as a job
+# under way and asked the cheerful question - "my nan says im getting fat" got "Get stuck in.
+# What's the first bit?" - which is the wrong thing to say to somebody who has just been told they
+# are getting fat. A thing being fetched is untouched: "im getting a new kitchen", "im getting my
+# hair done at four" still have the plan and purchase pools.
+BECOMING = frozenset(("getting", "becoming", "turning", "feeling"))
+BECOMING_STATE = frozenset((
+    "fat", "bigger", "thin", "skinny", "heavy", "chubby", "large", "weight",
+    "old", "older", "tired", "sleepy", "hungry", "late", "slow", "slower", "better", "worse",
+    "sore", "stiff", "weak", "forgetful", "grumpy", "moody", "grumpy", "stressed", "bored",
+    "cold", "hot", "warm", "impatient", "lazy", "bald", "grey", "gray", "wrinkly", "antsy",
+    "frustrated", "anxious", "down", "homesick", "clumsy", "deaf", "blind", "short-sighted"))
 
 # A knock the person gave themselves - "i hit my thumb with a hammer", "i dropped a tin on my
 # foot", "i trapped my finger in the door", "i stubbed my toe on the table". HARM_ON_ME stands
@@ -3525,6 +3648,20 @@ A_WAIT_ENDING = frozenset(("finally",))
 NEGATORS = frozenset(
     "not no never isnt wasnt arent werent hasnt havent hadnt didnt dont doesnt wont cant "
     "cannot".split())
+
+# "Nothing makes me happy any more" is not good news: the word saying there is none of the thing
+# turns the cue round as a "not" does, and a friend hears the complaint rather than the cue.
+# These are read only where a good-news cue is counted - see `_no_such_thing_before`. They are
+# deliberately not in NEGATORS above: "no one is proud of me" is a complaint, but "nobody thought
+# i could pass and i passed" is a win, and a bare word list cannot tell those apart.
+NOTHING_AT_ALL = frozenset("nothing nobody none nowhere neither nor noone".split())
+
+# A word that starts a new claim, so a quantity before it is about something else: "nobody
+# believed i could do it but i did" is a win, and the "nobody" belongs to the doubt in front.
+# "and" and "because" do the same job: "nobody thought i could pass and i passed" is the win it
+# ends on, and "i passed because nobody helped me" credits nobody with the passing.
+CONTRAST = frozenset("but though although yet however still and because cos cause so when while"
+                     .split())
 
 NEGATIVE_CUES = frozenset((
     "failed", "fail", "failing", "lost", "lose", "worried", "worry", "stressed", "stress",
@@ -3916,9 +4053,14 @@ CARE_ROUTE_BACK = {
         "Ring the surgery when it opens and say what has changed since we spoke; that is the "
         "appointment to be asking for.",
     ),
+    # The route back, and nothing about the state of the tooth: the line that follows a dentist
+    # answer is as often "it doesnt hurt" or "its not painful" as it is "its getting worse", and
+    # this pool answered both with "a tooth that is getting worse tonight is an out-of-hours
+    # call" - a claim about a tooth the person had just said was fine. The words here carry what
+    # the person has to do next (ring, today, say what has changed) and leave the tooth to them.
     "dentist": (
-        "The dentist today, as I said - a tooth that is getting worse tonight is an out-of-hours "
-        "call, not something to wait out.",
+        "The dentist today, as I said - ring when they open and say what has changed since we "
+        "spoke, and ring 111 for the out-of-hours number if it starts to hurt.",
         "Ring the dentist and say what has changed; a broken or aching tooth is seen quickly.",
     ),
     "pharmacist": (
@@ -4761,6 +4903,36 @@ LIVE_NEWS_REPLY = (
     "I can't see the news from here, sorry. A news site or app will have the latest; tell me "
     "the story and I'll help you make sense of it.")
 LIVE_KINDS = (
+    # A number about the person's own site or shop is theirs to look up, and no app named
+    # elsewhere can see it: this sits first so that "how much web traffic does my site get" is
+    # answered about a website before any pool that counts something else reads the word
+    # "traffic" and sends them to a map or a journey planner.
+    ("site-stats", ("traffic", "footfall", "foot traffic", "visitors", "hits", "analytics",
+                    "site stats", "stats for my"),
+     ("No bot can see your own numbers, sorry. A site's analytics and a search engine's count"
+      " never agree exactly, because each counts a visitor its own way, so pick one and stay with"
+      " it: the analytics on your site, or the admin page for a shop or a till, holds the figures."
+      " The trend over a month says more than any single day does.",
+      "Your own visitors are counted twice over, and the two counts differ: the analytics on your"
+      " site counts pages opened, a search engine counts clicks, so the figures only ever line up"
+      " roughly. Either one, watched over a month, tells you what happened; a single day does not.",
+      "One busy day is usually one link somewhere, so the figure worth having is the trend rather"
+      " than today's. That trend lives in the analytics for your site, or in the admin page for a"
+      " shop or a till, and no one outside your own account can see it.")),
+    # The same subject said as a report rather than a question: "traffic to my etsy shop is down".
+    # A fall is not a number to fetch but a thing that happens for ordinary reasons, so the line
+    # says what usually explains it and leaves the page that shows which one it is last.
+    ("site-stats-down", ("traffic", "footfall", "foot traffic", "visitors", "hits", "sales",
+                         "orders"),
+     ("Quiet traffic is usually one row in the stats: a listing that stopped being refreshed, a"
+      " link that died, or the week after a busy one. The analytics for your shop shows which"
+      " pages people came in on, and the one that fell away is the one to refresh.",
+      "A drop is rarely the whole shop. It is normally the thing you last changed, or a listing"
+      " that got stale while the rest of them were being looked after: the admin page tells you"
+      " which page lost the visits, and that page is the one worth an hour.",
+      "The usual explanation is that a busy week pulls the next one down, so a dip after a good"
+      " week is not a fall. If it is not that, the admin page shows the page that lost visits,"
+      " and a listing relisted or refreshed often picks up again within a few days.")),
     # "Is it cold outside" names the sky and nothing else, but none of the words here was in it:
     # the knowledge rows that used to answer it with a note on cold air and lungs now stand down
     # (see A_WEATHER_ASK in bot/knowledge/lookup.py), and what was left was the generic "search
@@ -4771,7 +4943,14 @@ LIVE_KINDS = (
                  "temperature in", "temperature tomorrow", "temperature today",
                  "is it cold", "is it warm", "is it hot", "is it freezing", "is it raining",
                  "is it snowing", "is it sunny", "cold outside", "warm outside", "hot outside",
-                 "how warm", "cold enough", "warm enough", "snowing outside", "raining outside"),
+                 "how warm", "cold enough", "warm enough", "snowing outside", "raining outside",
+                 # "whats it like outside" and "whats the temperature" are the same reading asked
+                 # for with the noun left off: the sky words they do carry ("outside") were not
+                 # enough on their own, and "the temperature" was only in the tuple in front of
+                 # another word, so both got the hedge or the nod.
+                 "like outside", "like it outside", "whats it like out", "what it like out",
+                 "the temperature", "whats the temperature", "what temperature is it",
+                 "how warm is it", "how cold is it", "how hot is it"),
      # Both time scales, because the pool answers both kinds of ask and only the person's line
      # says which one it is. "will it be cold" is about a coat this afternoon, and this sentence
      # now leads with the hour by hour for their own postcode - the part the bot cannot see and
@@ -4812,8 +4991,8 @@ LIVE_KINDS = (
       "price you see - their own site has today's number, and bring it back and I'll work out what "
       "it comes to a month.",
       "Prices move too fast for me to know. Which one you pick and where you buy it decide most "
-      "of the figure, and today's number is only on the seller's own site, all in with delivery "
-      "- tell me what it says and I'll do the sums with you.")),
+      "of the figure, and a quick look at the seller's own site has today's number, all in with "
+      "delivery - tell me what it says and I'll do the sums with you.")),
     ("news", ("the news", "headline", "who won", "the score", "latest on", "current events",
               "what happened in the"),
      (LIVE_NEWS_REPLY,)),
@@ -4826,8 +5005,22 @@ LIVE_KINDS = (
                "road works", "the motorway", "motorway closed", "in a jam", "jams",
                "accident on the", "accidents on the", "accident on", "accidents on",
                "diversion", "dual carriageway"),
-     ("No live traffic here, sorry - I can't see the roads. A maps app with live traffic, or the "
-      "roads agency's own site, has the jams, the closures and the roadworks as they happen.",)),
+     # The pointer is the last thing in these lines, not the whole of them. "is the m6 closed" and
+     # "how busy is the a1 today" were answered with nothing but "I can't see the roads, a maps app
+     # has it" - true, and no help at all, because the person still has no idea what to expect or
+     # which of the two things they are looking at (operators, #uncertainty). What a friend says
+     # first is the bit that is generally true - jams come back at the same hours, a closure is a
+     # diversion rather than a slow lane, a jam clears from the front - and then where today's
+     # answer is. Every clause has to be true of every road, so "one closed lane costs more time
+     # than a busy motorway does" is not in here: it is a claim nobody can check.
+     ("Traffic comes back at the same times on most weekdays, so a road that is slow at eight is "
+      "usually slow at eight, while a closure or roadworks is a diversion and a different wait "
+      "altogether. I can't see the roads from here, sorry: a maps app with live traffic, or the "
+      "roads agency's own site, has today's jams, closures and roadworks as they happen.",
+      "A jam clears from the front and a closure means a diversion, and those want different "
+      "places looked at. I can't see the roads from here, sorry: the roads agency's own site has "
+      "today's closures and roadworks, and a maps app with live traffic has the jams and how long "
+      "each one is adding.")),
     ("travel", ("train times", "bus times", "next train", "next bus", "delayed",
                 "is it running", "on strike", "buses running", "are the buses",
                 "the trains running", "are the trains", "timetable", "the tube",
@@ -4843,19 +5036,32 @@ LIVE_KINDS = (
                  "how long does it take to drive", "how long does it take to get to",
                  "how long to drive", "drive from", "drive to", "the drive be",
                  "how far is the drive", "how far from", "how far is", "how many miles"),
-     ("I can't see the roads from here, sorry, so I can't time a drive. A route planner has it "
-      "for the hour you would set off, traffic and roadworks included, which beats any average.",
-      "No traffic and no map from this end. Put both places into a route planner and it gives "
-      "the time for when you would actually leave, plus the stops worth making on the way.")),
+     # "how long does it take to drive to manchester" got "put both places into a route planner"
+     # and nothing else, which tells the person nothing about the drive they are planning. The
+     # part that is true of every drive comes first - the hour you leave and the last few miles
+     # are what decide it, and the distance is the least of it - and then where the figure is.
+     ("The time a drive takes is mostly decided by the hour you set off and by the roads you use, "
+      "since town streets and the last few miles are never motorway speed. I can't see either from "
+      "here: a route planner has the figure for the hour you would actually leave, roadworks "
+      "included, and the stops worth making on the way.",
+      "However far it is, the drive will take longer than the distance suggests, because the first "
+      "and last miles are the slow part and the hour you leave changes the rest. A route planner "
+      "has it for your own leaving time; a maps app does the same from wherever you are.")),
     # "how long is the drive" on its own names no ends at all, so there is nothing to look up
     # yet: one short question gets the two ends, which is the whole answer the bot can give.
     ("journey-ask", ("how long is the drive", "how long would the drive", "how long does the drive",
-                     "how long is the journey", "how long would the journey", "how long is the trip",
-                     "how long is the flight"),
-     ("Long from where to where? Give me the two ends and roughly when you would set off, and I "
-      "can help you plan the day around it, even if the exact figure is the planner's.",
-      "Which two places? Tell me where you are starting and where you are heading, and I can "
-      "work through the timing and the stops with you.")),
+                     "how long will the drive", "how long is the journey", "how long would the journey",
+                     "how long will the journey", "how long is the trip", "how long would the trip",
+                     "how long will the trip", "how long is the flight"),
+     # A question on its own is not an answer either: what the bot knows about a drive is true
+     # before it knows the ends - the hour and the last few miles decide it, and either end can be
+     # the slow one - so the question comes after that.
+     ("The hour you set off and the roads you use decide most of a drive, and the first and last "
+      "miles are the slow part wherever you are going. Long from where to where, and roughly when "
+      "would you set off? I can plan the day around it once I know.",
+      "The hour and the last few miles decide a journey, and either end can be the slow one. "
+      "Where are you starting, where are you heading, and roughly when? I can work through the "
+      "timing and the stops with you.")),
     # "how far is the tennis court" names one place and no other end, so it is a distance from
     # where they are standing, not a journey between two places: the route line answered it with
     # the stops worth making on the way.
@@ -4896,35 +5102,35 @@ MY_OWN = {}
 MY_RECORDS = (
     ("delivery", ("order", "orders", "parcel", "parcels", "delivery", "deliveries", "tracking",
                   "dispatch", "courier"),
-     ("I can't see your order from here, sorry. The confirmation email or the shop's app has the "
-      "tracking, and the shop can look the order up by your name and address.",
-      "No way to check a parcel from this end. The tracking link in the order email shows where "
-      "it is; if it has not moved for days, it is the shop you chase, not the courier.")),
+     ("The tracking link in the order email or the shop's app shows exactly where a parcel is, "
+      "and the shop can look the order up by your name and address - I can't see your order "
+      "from here.",
+      "Where a parcel has got to is in the tracking link you were sent; if it has not moved for "
+      "days it is the shop you chase, not the courier. No way to check it from this end.")),
     ("booking", ("booking", "bookings", "reservation", "reservations", "appointment",
                  "appointments", "check-in", "check in"),
-     ("I can't see your booking from here, sorry. The confirmation email or text has the "
-      "details, and a ring to the place with your name and the day will settle it.",
-      "Nothing of yours in front of me - the booking lives with them. The email or text you "
-      "were sent has the time, and the desk can check it by name if that has gone missing.")),
+     ("The confirmation email or text has the time and the reference, and a ring to the place "
+      "with your name and the day settles anything else - I can't see your booking from here.",
+      "A booking lives with the place, not with me: the email or text you were sent has the "
+      "time, and the desk can check it by name if that has gone missing.")),
     ("application", ("application", "applications", "claim", "claims", "renewal", "quote",
                      "complaint", "refund", "refunds"),
-     ("I can't see how that is going from here. The reference number they gave you brings it up "
-      "on their site, and one call to the office gets you a straight answer.",
-      "Nothing of yours here to look at, so I can't check that. The reference they gave you, or "
-      "the email that came back when you sent it, has where it has got to - and a phone call "
-      "gets it in a minute.")),
+     ("The reference number they gave you brings it up on their site, and one call to the office "
+      "gets you a straight answer - I can't see how it is going from here.",
+      "The reference they gave you, or the email that came back when you sent it, has where it "
+      "has got to, and a phone call gets it in a minute. Nothing of yours is in front of me.")),
     ("money", ("balance", "statement", "account", "direct debit", "standing order", "payment",
                "transaction", "overdraft"),
-     ("I can't see your account, sorry - I have no access to it. Your bank's app, a cash machine "
-      "or the number on the card will show the balance and what has gone out.",
-      "Nothing of yours here to look at, so I can't check that. Your banking app or the last "
-      "statement has the figure, and the bank can confirm it in one call.")),
+     ("Your bank's app, a cash machine or the number on the card shows the balance and what has "
+      "gone out - I can't see your account at all.",
+      "The figure is in your banking app or on the last statement, and the bank can confirm it in "
+      "one call. Nothing of yours is here for me to look at.")),
     ("card", ("gift card", "gift cards", "voucher", "vouchers", "loyalty points",
               "loyalty card", "store card"),
-     ("I can't check a card balance from here. The number on the back of the card, or the shop's "
-      "app, will tell you what is left on it.",
-      "Nothing of yours to look at at this end, sorry. The card's own site or the number on the "
-      "back of it has the balance.")),
+     ("The number on the back of the card, or the shop's app, tells you what is left on it - I "
+      "can't check a card balance from here.",
+      "The card's own site, or the number on the back of it, has the balance; nothing of yours is "
+      "here for me to look at.")),
 )
 
 # "is my gift card still valid", "does my voucher expire": not the balance and not the etiquette
@@ -4945,6 +5151,37 @@ HEALTH_RECORD = ("prescription", "prescriptions", "scan", "scans", "referral", "
 HEALTH_WORLD = ("doctor", "gp", "surgery", "hospital", "clinic", "nurse", "midwife", "consultant",
                 "dentist", "medical", "health", "test", "blood", "scan", "x-ray", "xray",
                 "prescription", "consultant", "specialist", "appointment")
+
+# The records nobody wrote down. The families above are the ones people ask about most, so each
+# has a line of its own; the rest are named with a noun no table holds - a visa, an offer, an
+# interview - and the ask is always the same shape: has it been approved, accepted, arranged. A
+# thing an office puts into a state can only be seen by that office, so the line names what the
+# person already has (the letter, the email, the reference) rather than guessing at the answer.
+OFFICE_RECORD_LINES = (
+    "I can't see that from here - nothing of yours reaches me, so I can't say where it has got "
+    "to. The letter, email or reference number it came with will bring up its state on their "
+    "site, and one call to the office that issued it settles it.",
+    "Nothing of yours here to look at, sorry, so I can't check that one. Whatever it came from "
+    "- the letter, the email or the app it was arranged through - has where it has got to, and "
+    "the number they gave you gets it in a minute on the phone.",
+    "That state is theirs to know and mine to guess at, and a guess is no use to you. The "
+    "confirmation you were sent is the one place it is written down, and the office that deals "
+    "with it can confirm it in one call.",
+)
+
+# A thing handed over at a counter: "have i been given the wrong change", "i got short changed at
+# the shop". It is not a record any office keeps - the till knows, and the receipt is the proof -
+# so the reference-number line was the wrong subject, and "how did that go, overall?" was no answer
+# at all. Nothing here is a fact about money: the count, the receipt and the same-day counter are
+# what a shop settles, which is true of a cafe, a market stall and a bus alike.
+AT_THE_TILL = (
+    "Count it against the receipt before you leave it too long: the till's own record of the sale "
+    "is what the shop works from, and a counter sorts it on the day far more easily than a head "
+    "office does later. How much short are you?",
+    "That is the shop's to put right, not yours to prove - the receipt and the amount is usually "
+    "enough at the counter, and most shops fix it the same day. If it was a card, your statement "
+    "has the figure the till rang up.",
+)
 
 # Their own day: whether they are in, and when they start and finish. A rota is on the person's
 # side of the screen and no search answers it, so the reply names the one place it lives. Nothing
@@ -5177,7 +5414,20 @@ LIVE_ROAD_WORDS = ("road", "roads", "motorway", "traffic", "junction", "bypass",
                    "carriageway", "lane")
 # The roads that are not about travelling today: the tax, a trip away, a bike, a test, the way a
 # road is built, and directions (which are an answer about the route, not about the traffic).
+# The things whose numbers only their owner can see: a website, a shop, a listing. `LIVE_KINDS`'
+# "site-stats" note is read only for a line naming one of these, because its counting words
+# ("traffic", "visitors") are the roads' and the venues' words too.
+LIVE_SITE_THING = ("site", "website", "web page", "webpage", "online shop", "shop", "store",
+                   "etsy", "listing", "my page", "the page", "web stats", "footfall")
+
 LIVE_ROADS_NOT = ("road tax", "tax the", "road trip", "road bike", "off road",
+                  # "Traffic" on a site or in a shop is the other kind, and the roads note read
+                  # it as lanes: "how much web traffic does my site get" was told that jams come
+                  # back at the same times on most weekdays and that a closed lane costs more
+                  # than a busy motorway. Neither is true of a website.
+                  "web traffic", "site traffic", "online traffic", "search traffic", "footfall",
+                  "foot traffic", "my website", "my site", "my shop", "my store", "my etsy",
+                  "website", "shop window", "customers through",
                   # A dead animal, a pothole and a dumped mattress are the council's to clear, not
                   # today's traffic: "who do i call about a dead fox in the road" was read as a
                   # road question and sent to a map.
@@ -5314,6 +5564,21 @@ JUDGE_PLAN_STOP = frozenset("""but because so then since if unless although thou
 
 JUDGE_NOD_WORDS = frozenset("""yes yeah yep no nope ok okay sure right cool thanks thank you
     hmm mm mmm well so and but true fair good nice haha lol oh ah please""".split())
+
+# The plan names the part that makes it risky - "100 miles with no training", "all my savings in
+# bitcoin" - and the person asks for a verdict on it. The pools below cannot answer: they rule that
+# a plan is not stupid, and this one is the part a friend pushes back on ("Nothing daft in wanting
+# to put all my savings in bitcoin" is not something a friend says). What can be said without any
+# facts about the plan is which part is the one to answer for and what the test of it is - the same
+# test every plan gets - so that is the reply, and the plan is said back in their own words.
+JUDGE_PLAN_HAS_A_HOLE = (
+    "{Plan} is where it gets tight, and that is the part to answer for. What would you do if "
+    "it went wrong?",
+    "{Plan} is the part a friend would push back on, not the wanting. Say what you would do if it "
+    "did not work, and if that is quick to say, go.",
+    "{Plan} leaves nothing spare, and that is the part I would look at. What is your answer if it "
+    "goes wrong?",
+)
 
 JUDGE_WORTH = (
     "Not stupid, no. {Plan} is the ordinary kind of thing people do; what decides it is what you "
@@ -5610,6 +5875,17 @@ SAME_AGAIN = (
     "me to go into?",
 )
 
+# The same turn, when the answer is still on the screen: a repeat has to carry what it repeats.
+# "That is everything I have on that one, so I would only repeat myself" names the answer above
+# and then hands the person none of it, which is a shrug with the answer sitting one turn back -
+# STYLE.md is plain that the answer twice beats a shrug. The lead-in says the answer above is the
+# answer, so the repeat is not read as a new question, and then it says it.
+SAME_AGAIN_WITH_THE_ANSWER = (
+    "Same answer, and it covers this: {answer}",
+    "That is still the answer: {answer}",
+    "The answer above holds: {answer}",
+)
+
 # The words a line can be made of and still be asking only for a view. Anything else names a
 # subject, and a subject has an answer of its own to look up.
 VIEW_ONLY_WORDS = frozenset("""
@@ -5695,7 +5971,7 @@ HEDGE_POOL = (UNKNOWN, UNKNOWN_DECIDE, UNKNOWN_MONEY, UNKNOWN_HEALTH, UNKNOWN_WO
               UNKNOWN_WORRY, finding_out.PLACE_POOL, finding_out.TRADE_POOL,
               finding_out.PROFESSIONAL_POOL, finding_out.PICK_POOL, finding_out.WHO_POOL,
               finding_out.HOW_MANY_POOL, finding_out.BUY_POOL, finding_out.FIGURE_POOL,
-              finding_out.PLACE_ROUTE_POOL)
+              finding_out.WRECKED_POOL, finding_out.PLACE_ROUTE_POOL)
 
 OUTCOME_LINES = (
     "Nobody can say for certain yet, and anyone who does is guessing. Ask the staff looking after "
@@ -6166,8 +6442,15 @@ RUMINATION_REPLIES = (
 # with no window - so the reply offers the practical thing and asks.
 BODY_STATES = {
     "cold": frozenset(("cold", "freezing", "frozen", "chilly", "chilled", "perished",
-                       "baltic", "icy")),
-    "hot": frozenset(("boiling", "hot", "roasting", "sweating", "sweaty", "clammy",
+                       "baltic", "icy",
+                       # Shivering is what a cold body does, and the three spellings reach the
+                       # normaliser as "shivering" ("im shiverin" -> "i am shivering"), so the
+                       # pool has to know the word or the person gets the neutral nod. A line
+                       # that already has its own card keeps it: "i keep shivering" still gets
+                       # the shivering card and "i feel shivery" the fever one, because a
+                       # knowledge row answers before these pools do.
+                       "shivering", "shivery")),
+    "hot": frozenset(("boiling", "hot", "roasting", "sweating", "sweaty",
                       "sweltering", "baking", "melting")),
     "hungry": frozenset(("hungry", "starving", "starved", "famished", "peckish",
                          "ravenous")),
@@ -6181,7 +6464,21 @@ BODY_STATES = {
                              "giddy", "wobbly", "shaky", "lightheaded", "groggy")),
     "queasy": frozenset(("queasy", "queezy", "nauseous", "nauseated", "sickly", "bilious")),
     "bunged": frozenset(("bunged", "bungedup", "blockedup", "sniffly", "sniffles",
-                         "sniffing", "croaky", "hoarse", "sneezing", "congested")),
+                         "sniffing", "croaky", "hoarse", "sneezing", "congested", "husky",
+                         "snotty")),
+    # How the body looks, and none of these had a pool: "im clammy" was read as the warm end of
+    # the weather ("Too warm to think straight in. Open a window") when a clammy skin is a cold
+    # sweat, and "im pale", "im flushed", "im spotty" and "im puffy" had no reading at all -
+    # they reached the neutral nod, or, while the words were read as names, "Nice to meet you,
+    # Pale". A state of the body is answered like the others here: one practical thing and one
+    # question, and the emergency is named only where the sign is one (a cold sweat with a
+    # faint), because a fever breaking and a shock both make a person clammy and the line alone
+    # cannot tell them apart.
+    "clammy": frozenset(("clammy", "clamy", "clammyish", "coldsweat", "coldsweats")),
+    "pale": frozenset(("pale", "pallid", "ashen", "grey", "gray", "greyish", "grayish",
+                       "mottled", "blotchy", "washedout")),
+    "puffy": frozenset(("puffy", "bloated", "swollen", "puffed", "puffing")),
+    "spotty": frozenset(("spotty", "pimply", "acne", "brokenout")),
 }
 
 # What can follow the state word and leave the state the whole of the line: "im cold today",
@@ -6194,8 +6491,15 @@ BODY_TAIL = frozenset(("today", "tonight", "now", "still", "again", "though", "h
 
 # The same line with the situation named after it: "im cold all the time", "im freezing in this
 # house", "im starving at work".
-BODY_SITUATION = ("all the time", "all day", "in here", "in this house", "in this weather",
-                  "at night", "at work", "in the night")
+# How long it has gone on, and how far in it has got, is part of the state rather than
+# anything else about it: "im chilled right through" and "im freezing all morning" are the same
+# report as "im cold", and both went to the neutral pool because the words after the state word
+# were not in the tail list. The list of stretches is the times of day people actually say.
+BODY_SITUATION = ("all the time", "all day", "all night", "all morning", "all afternoon",
+                  "all evening", "all week", "all weekend", "in here", "in this house",
+                  "in this weather", "at night", "at work", "in the night", "right through",
+                  "to the bone", "through to the bone", "all day today", "all day yesterday",
+                  "all night long")
 
 BODY_PART_TAIL = frozenset(("", "today", "now", "still", "again", "already", "outside"))
 
@@ -6282,9 +6586,69 @@ BODY_BUNGED = (
     "A cold runs its week and there is no rushing it. Are you blocked up, or is it sore?",
 )
 
+# A cold sweat is not the warm end of the weather, which is what "im clammy" was answered as. It
+# is the body working hard at something - a fever coming on, low blood sugar, a shock, or a room
+# with no air - and what a friend does is get the person sat down and fed before asking anything.
+# The one serious reading is a cold sweat with a faint or confusion in it, and that is the only
+# thing here worth sending anyone to a phone about.
+BODY_CLAMMY = (
+    "Clammy is a cold sweat rather than being too warm. Have you eaten anything today?",
+    "Get sat down and have something sweet if you have not eaten in a while. Does it come with "
+    "feeling dizzy?",
+    "That is usually your body working hard at something: a fever coming on, low blood sugar or "
+    "a shock. Is it just your hands, or all over?",
+    "Wash your hands and sit somewhere cool for a minute - has this come on today, or is it "
+    "something you get? Cool water and a sit-down is the thing that helps most.",
+    "Cold and clammy with the room at a normal temperature is worth taking slowly. Sit down, "
+    "have a drink, and if you feel faint or muddled with it, ring 111.",
+)
+
+# Pale, grey and washed out. Nothing in the app can look at a person, so the pool asks whether it
+# came on suddenly and puts the practical thing first: sit down, eat and drink. A colour that came
+# on with a faint, a lot of blood or a confusion belongs to the safety cards, not here.
+BODY_PALE = (
+    "Pale usually means something is going round, or you have not eaten. Have you had anything "
+    "today?",
+    "Sit down and have a drink, then something to eat - did it come on suddenly, or have you been "
+    "like this a while?",
+    "Grey and washed out with it is worth getting looked at rather than waiting. Is there any "
+    "dizziness with it?",
+    "Has anyone said you look pale, or does it just feel like it? Pale with a bug is normal "
+    "enough; pale and dizzy is the one to get seen.",
+    "Put your feet up for ten minutes and have something with sugar in it. If you are clammy or "
+    "muddled with it, get seen today.",
+)
+
+BODY_PUFFY = (
+    "Bloated usually settles if you go easy on salt and fizzy drinks for a day. Is it worse after "
+    "eating?",
+    "Puffy ankles and hands are worth getting checked if it is new. Is it just your stomach, or "
+    "your ankles too?",
+    "That is your body holding water. Drink more rather than less and cut the salt for a few days "
+    "- does it ease overnight?",
+    "Which bit is puffy? After a big meal and a late night it is nothing, but swelling that stays "
+    "is worth a look.",
+    "Go steady with salt and fizz and see if it settles by tomorrow. Is it tender with it?",
+)
+
+BODY_SPOTTY = (
+    "Spotty skin is usually hormones and nothing to worry about. Is it your face, or your back "
+    "too?",
+    "Wash with a plain cleanser twice a day and keep your hands off them. How long has it been "
+    "like that?",
+    "A GP can help if they are sore or leaving marks - are you picking at them, or leaving them "
+    "alone?",
+    "That is common enough and it does pass. Does it bother you, or is someone else commenting "
+    "on it?",
+    "Spotty and itchy after a new cream or washing powder could be a reaction. Has anything "
+    "changed lately?",
+)
+
 BODY_POOLS = {"cold": BODY_COLD, "hot": BODY_HOT, "hungry": BODY_HUNGRY,
               "thirsty": BODY_THIRSTY, "light_head": BODY_LIGHT_HEAD,
-              "queasy": BODY_QUEASY, "bunged": BODY_BUNGED}
+              "queasy": BODY_QUEASY, "bunged": BODY_BUNGED,
+              "clammy": BODY_CLAMMY, "pale": BODY_PALE, "puffy": BODY_PUFFY,
+              "spotty": BODY_SPOTTY}
 
 # What can carry the ask when "am" opens the line: "am i too late", "am we" never happens.
 _SUBJECT_AFTER_AM = frozenset("i we you they he she it there this that anyone anybody".split())
@@ -6537,6 +6901,31 @@ SOMEBODY_HURT = (
 
 # No advice and no fix: they have told the bot how the day went, so the reply asks about the day.
 # Five lines, because a pool of three repeats inside a single five-reply conversation.
+# The second half of a day the turn before already reported. "i had a lovely day" then "we went
+# to the beach" was answered "Sounds alright. Anything good in it?", and "i had a good day" then
+# "we had a takeaway" the same: the flat pool reads the line on its own, so the rest of a good day
+# arrived as a line with nothing good in it, asking for the good bit the person was already
+# giving. A friend takes it as part of what was said and adds something warm, and does not ask
+# how it went again - the question has just been asked and answered.
+A_REST_OF_A_GOOD_DAY = (
+    "That fits the day you have had. Good ones are worth saying out loud.",
+    "The rest of a good day, then. Hold on to that one.",
+    "Lovely. Those are the days that stick.",
+    "That is a nice thing to have in a week. Enjoy the rest of it.",
+)
+
+# And the same shape the other way round: "work was mad today" then "i ended up staying till
+# eight" was congratulated ("Good to hear. What was the best bit?"), because a flat line with a
+# past tense in it is the same shape whether the day was good or bad. Where the turn before was a
+# hard one, the rest of it is more of the same, and the reply carries the day rather than asking
+# for the bright side of it.
+A_REST_OF_A_HARD_DAY = (
+    "That is the rest of a hard day, not the whole of it. Let the evening be small.",
+    "Long one on top of a long one. Something warm to eat and an early night.",
+    "Days like that pile up. You have done the day, so put your feet up now.",
+    "That sounds like a full day on top of a hard one. Nothing else needs doing tonight.",
+)
+
 LOW_DAY_REPLIES = (
     "That sounds like a day to get through rather than enjoy. What made it that way?",
     "Sorry - that is a heavy one to carry. What has been the worst part of it?",
@@ -6562,6 +6951,21 @@ A_THING_THEY_REGRET = (
     "That's the kind of thing that sits on you. Do you want to talk it through?",
     "Whatever it was, I'd rather hear it than not. What happened?",
     "That sounds like it's been weighing on you. What happened?",
+)
+# Somebody close has lied, cheated or hidden money, and the person is telling you what they found
+# out. "i found out hes been lying" was answered "How was it, overall?" and "i found out shes been
+# hiding money" "Sounds alright. Anything good in it?" - the congratulations nobody forgives. The
+# news has only just landed, so nothing here works out what to do about it, and half of them do
+# not ask anything, because a question at the end of every reply is a script.
+A_BETRAYAL = (
+    "That's a rotten thing to find out. What do you know so far, and what is still guesswork?",
+    "Ugh. That's a lot to take in in one go. Say it as it came.",
+    "That hurts, and it is not on you. What happened?",
+    "Rotten news, and I'm sorry. Say it out loud if you want, or we can talk about something else "
+    "for a bit.",
+    "That changes how the whole thing looks, doesn't it. I'm here.",
+    "Awful. You do not have to work out what to do about it today.",
+    "That's the kind of thing that sits on your chest. Tell me what happened.",
 )
 
 # Somebody the person loves has moved into a care home, or is living in one, or the person is
@@ -6613,6 +7017,39 @@ A_SMALL_DAY = (
     "Nice one. How did the rest of it go?",
     "Good to hear. What was the best bit?",
     "How was it, overall?",
+)
+
+# Something the person has only been told about, said as if it had happened to them: "i saw on
+# the news theres a big storm coming", "i heard theres a storm on the way", "i read that the
+# council is closing the library". The day pool above answered all three as an ordinary
+# afternoon that went fine - "Good to hear. What was the best bit?", "How was it, overall?" - so
+# a warning about a storm was congratulated. Nothing in these lines is a day of theirs: the thing
+# is still to come, and they heard it from somebody else.
+#
+# What the bot can do is name the thing that actually knows and the half of it that can be acted
+# on here. For weather that is the local forecast and the loose things a wind finds - which is
+# the useful half of a storm warning, and it is true of a gale, a flood warning and a cold snap
+# alike. For everything else it is the source, because what a closure covers and from when is one
+# line further down from the headline. Neither pool claims to have seen the forecast or read the
+# notice, and neither answers the wrong one; the storm words are what choose between them.
+A_NEWS_OF_WEATHER = (
+    "Then the local forecast is the thing that knows, not me: it gives the hour it lands and how "
+    "hard, and anything loose outside is worth sorting before then - the bins in, the panel that "
+    "already leans screwed back, the trampoline turned over.",
+    "Worth an hour on the loose things before it gets here: the fence panel, the bin store, the "
+    "pot that goes over anyway. The local forecast has the gusts, and that is the number that "
+    "says whether the hour is worth spending.",
+    "The local forecast will tell you the gusts and when; what it cannot tell you is what of yours "
+    "is already loose. Walk the garden once and fix that, and the rest is out of your hands.",
+)
+A_NEWS_OF_SOMETHING_ELSE = (
+    "Then whoever put it out has the detail, and the detail is the part that matters - what it "
+    "covers, from when, and what you do about it. It is usually one line further down than the "
+    "headline.",
+    "Worth reading it at the source rather than the report of it: a closure or a change is "
+    "usually a date, an area and a form, and the headline leaves all three out.",
+    "The body that said it will have the version with the dates in it, and the question worth "
+    "asking is whether it changes anything of yours - a journey, a bin day, a plan.",
 )
 
 # A thing of theirs taken by somebody else - a bike, a purse, tools out of a van. The small-day
@@ -7234,6 +7671,19 @@ PRIVACY_SHAPES = re.compile(
 # "can you browse the internet", "do you have internet access", "can you google that", "are you
 # connected to the internet". A question about the bot's own connection, not about the person's
 # wifi: a line about their laptop, their router or their own getting online keeps its answer.
+# What only a live source knows: a time, a number, a price, a stock, a review, a flight. A search
+# ask is the bot's own limit only when what it is asked for is one of these, because that is the
+# half it cannot do. A method, a recipe or somebody's rights are what the bot is for, so a line
+# that asks for one of those keeps its answer even with "for me" on the end: "search for how long
+# to boil an egg for me" was being refused with "Nothing live on this end", and so were "search
+# for the best way to clean a mattress for me" and "look up my rights for me".
+LIVE_ASK = (
+    r"(?:times|timetables?|schedules?|numbers?|phone|telephone|address|postcode|postcodes?|"
+    r"prices?|costs?|fares?|deals?|offers?|reviews?|ratings?|scores?|results?|news|"
+    r"flights?|trains?|buses?|coaches|tickets?|availability|stock|opening\s+hours|"
+    r"weather|forecast|vacanc(?:y|ies)|listings?|status|delays?|traffic|menu|"
+    r"lead\s+times?|deadlines?|exchange\s+rates?)")
+
 ONLINE_ASK = re.compile(
     r"\b(?:can|could|do|does|are|is|have)\s+(?:you|u)\s+(?:[a-z]+\s+){0,3}?"
     r"(?:browse|search|google|look[\s-]+(?:things|stuff|it|that|them)?\s*up|check|access|reach|"
@@ -7253,7 +7703,23 @@ ONLINE_ASK = re.compile(
     r"search\b(?=\s*(?:$|for\s+(?:me|us)\b|around\b|"
     r"(?:it|that|this|things|stuff|something)\b|online\b|the\s+(?:web|internet|net)\b|"
     r"sites?\b|pages?\b|websites?\b))|"
-    r"look\s+(?:it|that|this|things|stuff)\s*up)\b")
+    r"look\s+(?:it|that|this|things|stuff)\s*up)\b"
+    # "search for flights for me", "google the number for me", "can you look up the times for me":
+    # the ask is the search itself, with what is wanted in the middle of the line rather than after
+    # the verb. The "for me" is what makes it this ask and keeps the fence: "can you search for a
+    # recipe with chicken" wants the chicken, and the bot has the chicken.
+    #
+    # The "for me" has to end the line, and that is the whole fence. "look up for me how to unblock
+    # a drain", "look up for me how long to boil an egg", "search for me how long to roast
+    # chicken" all carry the same three words in the middle and then say what they actually want,
+    # which is a method the bot can answer - reading them as a request to browse threw those
+    # answers away and said "No connection at all" instead. A line that stops after the person it
+    # is for is a line that has nothing for the bot to answer: "search for flights for me",
+    # "google the number for me", "can you look up the times for me". Only a politeness may follow
+    # it, because politeness asks nothing.
+    r"|\b(?:google|search|look\s+(?:\w+\s+){0,2}?up)\b[^.?!]{0,30}?\b" + LIVE_ASK +
+    r"\b[^.?!]{0,30}?\bfor\s+(?:me|us)\b"
+    r"\s*(?:(?:please|then|now|thanks|thank\s+you)\s*)*[.?!]*\s*$")
 
 
 # Not every one of those is a skill. "im bad at lying" and "im terrible at keeping secrets" are
@@ -7403,6 +7869,16 @@ THE_DAY = {
         "That's the day for being outdoors. Suncream on if you're out past eleven.",
         "Gorgeous. That sort of day makes everything easier.",
     ),
+    # The day named by what it is not: "not cold today", "not too hot", "isn't raining". The
+    # person has ruled a kind out rather than named one, so the reply agrees with the ruling and
+    # stays out of the way - and it must not claim the opposite, because "not cold" is not
+    # "lovely". These say the day asks nothing of you, which is true of every one of them.
+    "mild": (
+        "No complaints then. Those are the days to be out in without thinking about it.",
+        "Mild one, that. Good day for the jobs you keep putting off, or for none at all.",
+        "Fair enough. The days that ask nothing of you are the ones worth using.",
+        "Not bad at all, then. Worth a walk while it is like this.",
+    ),
 }
 
 
@@ -7424,6 +7900,11 @@ THE_DAY_AHEAD = {
         "Wind coming. Anything light in the garden will be next door by tomorrow night.",
         "Blowy forecast. Worth checking the gate and the bins before it gets going.",
         "Wind later, then. Anything loose up high is worth sorting while it is calm.",
+    ),
+    "mild": (
+        "Mild forecast. Nothing to plan around, which is the best kind of day.",
+        "Nothing much coming, weather-wise. Good day to have something booked.",
+        "Fair forecast. Worth putting the outside thing in while it holds.",
     ),
     "hot": (
         "Heat coming. Curtains shut in the morning really does keep it cooler in.",
@@ -8015,7 +8496,12 @@ THE_PLACE_POOLS = (
     ((r"\b(?:this|that|the) (?:model|brand|version|make|one)\b|\bmodel number\b"
       r"|\bwhich model\b|\bthe manual\b|\binstructions\b|\bwarranty\b|\bguarantee\b"
       r"|\bspare part\b|\bpart number\b|\bwhere can i buy\b|\bis it in stock\b"
-      r"|\bin stock\b|\bhow much (?:is|are|does|do) (?:a|an|the)\b"),
+      r"|\bin stock\b|\bhow much (?:is|are) (?:a|an|the)\b"
+      # "how much does the moon weigh" is a figure, not a price: the two words are the same, so
+      # the verb after the thing decides. A price is what a thing costs, charges or goes for;
+      # anything else ("how much does it weigh", "how much does it hold") has a page of its own.
+      r"|\bhow much (?:does|do) (?:it|this|that|one|they|a|an|the|my|your)\b[^.!?]{0,24}?"
+      r"\b(?:cost|costs|charge|charges|go for|goes for|come to|comes to|pay)\b"),
      ("The maker's own page has that, sorry - the model number on the label under it is what to "
       "put in, and it will give you the manual, the parts and the price. Tell me what it says and "
       "I'll help you work out whether it is worth it.",
@@ -8048,8 +8534,12 @@ THE_PLACE_POOLS = (
     # below is what keeps it, and everything else is left to the reader that knows its kind.
     ((r"\b(?:the|my|a) (?:shop|store|garage|chemist|pharmacy|butcher|bakery|chippy|takeaway"
       r"|restaurant|cafe|pub|salon|barber|garage|tip|dump|library|leisure centre|pool)\b"
+      # "today" and "now" are not hours asks on their own: "is the tip busy today" is a question
+      # about the queue, and it was answered about the opening hours because of the word "today".
+      # They keep their place beside an hours word ("is it open today"), which the list below
+      # already covers.
       r"[^?]{0,60}?\b(?:hours?|open|opens|opening|closed|closes?|shut|shuts|shutting|"
-      r"late|early|today|tomorrow|tonight|now|still|sell|sells|stock|stocks|in stock|got any|"
+      r"late|early|sell|sells|stock|stocks|in stock|got any|"
       r"have they got|do they have|does it have|price|prices|cost|costs|cheap|much|"
       r"phone|number|contact|where is|where's|nearest|which one)\b"
       r"|\b(?:what time|when|how late|how much|is|are|does|do|will|can)\b[^?]{0,40}?"
@@ -8156,8 +8646,11 @@ THE_BOTS_OWN_ANSWER = (
       "the part I like.",
       "I don't get tired of it, no. The same question from someone else arrives as a different "
       "question - so go on, what's yours?",
-      "None of that in a program. It's the one thing I'm for, and you're the reason it happens "
-      "at all.")),
+      # "None of that in a program" names no thing, so the entry below says what there is none
+      # of, in the words of either ask: this one pool answers bored, tired, weary and fed up, so
+      # "No boredom to report" would have been the wrong word for "do you ever get tired".
+      "None of that in a program - no clock to fill and nothing to wear out. It's the one thing "
+      "I'm for, and you're the reason it happens at all.")),
     # Annoyed, irritated, impatient, and the rest of the bad moods: the honest answer is that
     # there are none to have, and naming that beats a paragraph about not being human.
     (re.compile(
@@ -8184,6 +8677,48 @@ THE_BOTS_OWN_ANSWER = (
       "me the same thing.",
       "Glad of it, honestly. That's what I'm for, and the best part is what people bring me.",
       "No feelings like yours to report, but I'm glad to be doing it. What are you working on?")),
+    # What the bot keeps from one chat to the next - "do you learn from these chats", "does any
+    # of this stick" - is a question about the bot, and no search engine has the answer. The bare
+    # ask is read elsewhere; with a tail on it the line reached the hedge, which sends a person to
+    # search for whether this program remembers them. The honest answer is about the chat.
+    (re.compile(
+        r"\b(?:(?:do|did|can|could|will|would|does) (?:you|u|ya|it|this chat) "
+        r"(?:ever |really |actually )*(?:learn|remember|keep|retain|store|memorise|memorize|teach)\b"
+        r"[^.?!;]{0,30}?\b(?:chat|chats|conversation|conversations|anything|any of this|"
+        r"this|that|what i (?:say|tell you|said)|from me|about me|across chats)\b"
+        r"|(?:do|does) (?:any|anything) (?:of (?:this|it) )?(?:stick|stay|carry over|last)"
+        r"|will you (?:still )?(?:know|remember) (?:this|that|me) (?:tomorrow|later|next time)"
+        r")\b"),
+     ("Nothing carries over from one chat to the next, so no - I don't get better at this over "
+      "time. What I can do is think it through with you now.",
+      "I don't keep anything once we finish, so our chats don't teach me. While we're talking I "
+      "use everything you say.",
+      "Not in a lasting way - this conversation is the whole of what I have. Everything you tell "
+      "me here, I use here.")),
+    # "do you understand what i mean", "am i making sense", "you with me so far": the person is
+    # checking that the bot has followed them, and the hedge sent them to search for it - the one
+    # question a search engine definitely cannot answer for them. The reply offers the repair
+    # rather than a claim about what is inside a program, which is what the person actually wants.
+    (re.compile(
+        r"\b(?:(?:do|did) (?:you|u|ya) (?:really |actually |fully )?"
+        r"(?:understand|follow|get|catch|grasp|know) (?:what|that|me|this|my\b)"
+        r"[^.?!;]{0,20}?\b(?:mean|meaning|said|saying|asking|sign|saying|point|it|so far|drift|gist|picture)\b"
+        r"|(?:are|is|does) (?:that|this|it|that make|this make) "
+        r"(?:mak(?:e|ing)|sound)(?:ing)? (?:any )?sense"
+        r"|am i (?:making|being) (?:any )?sense"
+        r"|(?:you|u) (?:with|following) me(?: so far)?"
+        r"|with me so far)"
+        # The line has to end on the check. Once a thing follows the sense word - "do you know what i
+        # mean by remortgaging", "does that make sense for a toddler", "am i making sense of the
+        # instructions" - the person is asking what a word means or whether something suits, not
+        # whether the bot followed them, and offering to rephrase is an answer to nothing. Reviewer
+        # @spry-umbrella found seven of these on the first head.
+        r"(?:[ ,]*(?:so far|now|then|right|to you|or not|or no|honestly|though|yeah|ok|okay))*"
+        r"[.?!,]*\s*$"),
+     ("Tell me which bit isn't landing and I'll say it a different way - I'd rather check than "
+      "guess.",
+      "Say the part that feels off and I'll go over it in plainer words.",
+      "Point at the bit that doesn't fit and I'll take another run at it.")),
 )
 
 
@@ -8198,3 +8733,4 @@ def the_bots_own_answer(clean):
         if pattern.search(said):
             return pool
     return None
+

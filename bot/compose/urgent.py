@@ -17,6 +17,10 @@ when no module that can do better has anything to say.
 """
 import random
 import re
+try:  # the reading of a dream, so a dream of the thing is not the thing
+    from ..memory import dream as _dream
+except Exception:  # noqa: BLE001 - a reading that cannot be imported just adds no rule
+    _dream = None
 
 WORD = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
 
@@ -32,6 +36,25 @@ FAMILY = frozenset({
     "goddaughter", "toddler", "newborn", "childminder", "flatmate", "teenager", "teen",
     "adolescent",
 })
+
+# A professional who has not answered is a message, not a body: "my carer is not responding" is the
+# carer who has not replied, and this module was the one that rang the ambulance for it. The safety
+# module carries the same fence (PRO_NOT_ANSWERING / BODY_IN_THE_ROOM there); it has to be in both
+# because this module answers even when the safety module stands down. Anything that puts the body
+# in the room brings the call back: the floor, the bed, breathing, a colour, pain, a name.
+PRO_ANSWERING = re.compile(
+    r"\b(?:my|his|her|their|our|the)\s+(?:carers?|care\s+workers?|support\s+workers?|"
+    r"social\s+workers?|personal\s+assistants?|nurses?|midwives?|midwife|doctors?|gps?|"
+    r"physios?|therapists?)\b[^.?!]{0,30}\b(?:isn'?t|is\s+not|not|hasn'?t|has\s+not|never|"
+    r"no)\s+respond(?:ing|ed|e)?\b"
+    r"|\bno\s+response\s+from\s+(?:my|the|our)\s+(?:carer|care\s+worker|support\s+worker|"
+    r"social\s+worker|personal\s+assistant|nurse|doctor|gp|physio|therapist)s?\b")
+BODY_IN_THE_ROOM = re.compile(
+    r"\b(?:floor|ground|bed|sofa|settee|couch|bath|pavement|street|doorstep)\b"
+    r"|\b(?:collapsed|collapsing|fell|fallen|fainted|pass(?:ed)?\s+out|seizure|fitting)\b"
+    r"|\b(?:breathing|breath|breathe|pulse|blue|lips|cold|clammy|sweating|eyes|pale|grey|gray)\b"
+    r"|\b(?:unconscious|out\s+cold|unresponsive|in\s+front\s+of\s+me|with\s+me|next\s+to\s+me)\b"
+    r"|\b(?:to\s+(?:pain|touch|voices?|noise|light|stimulus)|(?:his|her|their)\s+name)\b")
 
 # Not awake, not breathing, fitting, choking, limp: an ambulance now.
 NOW = (
@@ -208,6 +231,14 @@ ORDINARY_STATE = frozenset("""
     told naughty tantrum tantrums whingey whinging
 """.split())
 DURATION = frozenset("minute minutes min hour hours day days week weeks month months year years".split())
+# The channels a person is unresponsive *on*: "my mum is unresponsive on the group chat" is a reader
+# saying nobody got a reply. A place is still a body - "unresponsive on the floor" rings - so `on`
+# is read by what it introduces, like `in` and `with` above.
+ONLINE = frozenset("""
+    chat whatsapp messenger facebook instagram twitter tiktok app forum thread threads messages
+    texts email emails phone phonecalls slack discord reddit linkedin zoom teams skype group
+    groups feed forum list mailing
+""".split())
 
 
 def _not_a_body(rest, before=""):
@@ -265,6 +296,10 @@ def _not_a_body(rest, before=""):
             # "burning up with a fever" is a body; "burning up with the old letters" is not.
             return third not in SYMPTOM
         return second in OBJECT_WORD
+    if first == "on":
+        if second in ("the", "a", "an", "my", "his", "her", "their", "our", "this", "that"):
+            return third in ONLINE
+        return second in ONLINE
     if first == "for":
         return second in DURATION or (second in ("a", "an", "one", "two", "half") and third in DURATION)
     return False
@@ -338,6 +373,11 @@ NOSE_RED = (
     r"\bunconscious\b",
     r"\bhard\s+to\s+(?:wake|rouse|arouse|waken)\b",
     r"\bwont\s+wake\b", r"\bwon'?t\s+wake\b", r"\bnot\s+waking\b",
+    # The same two facts in the words people type: "he collapsed laughing and wouldnt wake",
+    # "she laughed so much she couldnt be woken", "my dad collapsed laughing and he is out cold".
+    r"\b(?:wouldnt|wouldn'?t|didnt|didn'?t|never)\s+(?:wake|woke)\b",
+    r"\b(?:couldnt|couldn'?t)\s+be\s+woken\b", r"\bisnt\s+waking\b", r"\bisn'?t\s+waking\b",
+    r"\bout\s+cold\b",
     r"\bseizure\b", r"\bfitting\b", r"\bconvuls\w*\b",
     # "had a fit" is how a parent says a seizure, and "a fit of coughing" is not one: the noun
     # only counts with the verb in front, so the cough idiom keeps its own answer
@@ -579,6 +619,12 @@ def _pet_is_the_subject(clean):
 def reply_for(text, memory=None):
     """A careful line when someone they look after is in trouble, else None."""
     clean = " ".join(str(text or "").lower().split())
+    # A dream of the thing is not the thing, and this module answers before safety is asked:
+    # "i dreamt my baby stopped breathing" was the ambulance line for a baby who was asleep
+    # beside the person who dreamed it. The dream has its own module; anything that says it is
+    # happening now ("still", "right now", "woke up") is in the waking world and keeps the line.
+    if _dream is not None and _dream.a_dream_is_not_happening(clean):
+        return None
     if NOSE_BREATH.search(clean) and not NOSE_RED_BESIDE.search(clean):
         # A blocked nose is not an airway. The phrase is *not* taken out of the line and left for
         # whatever answers the remainder: "my baby is struggling to breathe through his nose" was
@@ -596,6 +642,8 @@ def reply_for(text, memory=None):
             and not (words & {"he", "she"} and _first(clean, PRONOUN_SAFE))):
         # A relative, or `he`/`she` with a cue that cannot be anything but a body: "he had a fit
         # this morning". `they` is left out — "they are fitting new windows" is a builder.
+        return None
+    if PRO_ANSWERING.search(clean) and not BODY_IN_THE_ROOM.search(clean):
         return None
     if _pet_is_the_subject(clean):
         # "my cat is fitting in with the new baby": `baby` is a family word but not the subject.

@@ -32,7 +32,9 @@ The rule is narrow on purpose:
 """
 import re
 
-from . import repeat
+from ..compose import pick
+from . import repeat, there_is_a_chat
+from .warmth import FIRST_LINE_REPLIES
 
 # The words a report puts in front of "already": the person, and the "have" that people type as
 # "ive" or "i've" or leave out altogether.
@@ -146,6 +148,13 @@ ASKING = re.compile(r"\b(?:what|whats|what's|how|when|where|which|who|why|should
 TO_THE_BOT = re.compile(r"\b(?:you|u|your|yours|youse)\b", re.I)
 # The most a report can be and still be a report: "i already turned the water off" is six.
 MOST_WORDS = 9
+
+# The steps that are about the conversation rather than about the world: what was said, asked,
+# answered or explained. A call they made or a shelf they put up is theirs and in the world, and a
+# reply about it names the thing ("i already called the bank" gets "Have they said anything back
+# yet?"), which is worth more than anything a first line can say about it.
+SAID_TO_ME = frozenset(("answered", "asked", "discussed", "explained", "mentioned", "said",
+                        "talked", "told"))
 # A hard thread is not answered with a cheerful question about how it went.
 HARD = re.compile(r"\b(?:died|dying|death|passed away|funeral|burial|cremation|miscarriage|"
                   r"stillborn|hospital|hospice|cancer|diagnosis|suicide)\b", re.I)
@@ -181,7 +190,7 @@ OVER_A_JOB_DONE = frozenset(("done", "finished", "sorted"))
 # "did you do it yourself, or did somebody come out?" is the wrong question about it.
 OVER_NAMED_REPLIES = (
     "Good to hear it. Is the {thing} holding, or is it one of those that comes back?",
-    "Good - the {thing} sorted then. What was it in the end?",
+    "Good - that is the {thing} sorted then. What was it in the end?",
     "That's a relief. What was wrong with the {thing}, in the end?",
     "Right - so the {thing} is out of the way. Did it take long?",
 )
@@ -291,11 +300,26 @@ def _the_step(low):
     match = ALREADY.search(low) or TRAILING.search(low)
     if not match:
         return None
+    # "already read that" puts the thing after the verb; "i ran a hot wash already" puts it
+    # before, so only the first shape has anything to read after the step.
+    thing_after = match.re is ALREADY
     step = match.group(1)
     if step in TELLING and APOLOGY.search(low):
         return APOLOGY_STEP
-    if step not in PAST and not step.endswith("ed"):
+    if step not in PAST and not step.endswith("ed") and step not in A_STEP_TAKEN:
         return None
+    # A past tense that is also the word the present tense uses ("i already read that", "i
+    # already cut it") is not a report on its own, so the thing after it is what says a job was
+    # done: "i already read that" after a book recommendation is a pass on the book, and read as
+    # a step it took the turn from the entry that hands over the next one ("already read that" was
+    # answered "Then what came of it?" instead of the next book). Only a word that is its own
+    # present tense is read this way: `told`, `tried` and `sent` say the job in the ending, and
+    # "i already told him that" after the bot handed over a line to send is that step done.
+    if step in SAME_AS_PRESENT and thing_after:
+        tail = [word for word in re.findall(r"[a-z0-9']+", low[match.end():])
+                if word not in POINTS_AT]
+        if not tail:
+            return None
     return step
 
 
@@ -406,11 +430,25 @@ def the_step_they_took(text, memory=None):
 # The word the answer gave for the step, so a report can be told from a step the bot never asked
 # for. A past tense is put back to the word an answer uses, because an answer says what to do and
 # a report says what was done.
+# The words that only point at something already named. A past tense that is also its own present
+# tense in front of one of these names no thing of its own, so it is not a step of the answer
+# that was handed over.
+POINTS_AT = frozenset("""it its it's them that this these those one ones him her all everything
+    both lot""".split())
 IRREGULAR = {"bled": "bleed", "tried": "try", "rang": "ring", "told": "tell", "paid": "pay",
              "made": "make", "took": "take", "went": "go", "saw": "see", "spoke": "speak",
              "wrote": "write", "sent": "send", "bought": "buy", "gave": "give", "put": "put",
-             "ran": "run", "came": "come", "did": "do", "said": "say", "fed": "feed",
+             "ran": "run", "came": "come", "did": "do", "fed": "feed",
              "led": "lead", "set": "set", "cut": "cut", "read": "read", "hit": "hit"}
+# The past tenses that can be the step of an answer. The list above is every irregular past
+# tense a line might use; "did" and "said" are left out of it here because they are how a person
+# reports a count or the conversation itself ("i did 4 this week already", "ive said that
+# already"), and read as a step they were answered with a question about a job ("Good. What
+# happened when you did?") instead of the line's own reading.
+A_STEP_TAKEN = frozenset(IRREGULAR) - frozenset(("did", "said"))
+# The past tenses that are written exactly as the present tense is ("read", "cut", "put", "set",
+# "hit"), so the word itself cannot say a job was done.
+SAME_AS_PRESENT = frozenset(word for word, now in IRREGULAR.items() if word == now)
 
 
 # A report of the outcome rather than of a step: "i already fixed it" says the job the answer was
@@ -426,19 +464,32 @@ AN_OUTCOME = frozenset("""fixed mended repaired sorted done finished""".split())
 # gauge, the thermostat and the boiler's reset button"), and so was "the boiler man came and it is
 # fixed": the thing's own word got the card its turn, and the card is about a boiler that is
 # broken. A reply has to be about the line, and a shared word is not enough.
-OVER_WORD = re.compile(r"\b(fixed|mended|repaired|sorted|done|working|works)\b", re.I)
+# "up and running" is the same report as "working", said the way people say it about a machine
+# that has come back: "my laptop is up and running" was handed the freezing-laptop card, which
+# is advice for a laptop that is not.
+OVER_WORD = re.compile(r"\b(fixed|mended|repaired|sorted|done|working|works|up\s+and\s+running)\b", re.I)
 # The line says it as a state: a copula in front of the word ("my boiler is fixed", "it's sorted
 # now"), or the person as the one who did it ("i sorted it", "we fixed it yesterday").
-OVER_STATE = re.compile(r"\b(?:is|are|was|were|'s|been|now|still|its|it's)\b", re.I)
+# The word that says the state came about rather than being one: "my boiler got fixed", "the car
+# got mended", "we got the boiler fixed". "got" is also how a person says what they have ("i got a
+# new boiler"), so it is only a copula here, with the state word in front of it read as before.
+OVER_STATE = re.compile(r"\b(?:is|are|was|were|'s|been|got|now|still|its|it's)\b", re.I)
+# The copulas that make the person in front of them the one who had the work done, not the subject
+# of it. `_the_over_word` drops the person-word before them and keeps the thing after.
+OVER_GOT = frozenset(("got",))
 # "all my mates are sorted" is a person who has their life in order, not a thing that was mended.
 OVER_PEOPLE = frozenset("""mates friends everyone everybody people kids children family folks
 lads girls boys others us them they we i life lives""".split())
 # Nothing here is a state of a thing: not the ask, not the wish, not the complaint, and not the
 # adjective that sits in front of a noun ("a fixed rate", "fixed nights", "fixed in place").
+# Every way the negation is typed, not the ones somebody thought of. The apostrophe is dropped as
+# often as it is typed ("isnt", "wasnt", "arent"), and one missing from a hand-written list turns a
+# complaint into a report that the trouble is over: "the heating still isnt working" was answered
+# "Good to hear it. Is the isnt holding, or is it one of those that comes back?".
+_NEGATION_STEM = r"(?:is|are|was|were|do|does|did|have|has|had|wo|ca|ai|nee|must|could|would|should)"
 OVER_NOT = re.compile(
-    r"\b(?:not|never|nothing|none|n't|until|till|til|before|when|if|unless|once|still\s+not|"
-    r"yet|hasnt|hasn't|didnt|didn't|wont|won't|cant|can't|couldnt|couldn't|should|need|needs|"
-    r"want|wants)\b", re.I)
+    r"\b(?:not|never|nothing|none|until|till|til|before|when|if|unless|once|yet|should|need|needs|"
+    r"want|wants)\b|\b" + _NEGATION_STEM + r"n'?t\b", re.I)
 OVER_ADJECTIVE = frozenset("""rate rates price prices term terms fee fees cost costs charge
 charges nights night hours hours salary contract deal amount penalty budget rent appointment
 time day week month year in up point order place""".split())
@@ -471,6 +522,20 @@ at last always never""".split())
 # The words that end the search backwards for the thing: the subject changes after them.
 OVER_STOP = frozenset("""and but so because after when if until since although though while
 than then also plus with""".split())
+# A subject pronoun with its verb is a clause, not a thing: "shes 62", "hes 70", "im 34". The
+# frozensets above have "she", "he" and "i" but not the contractions, so the clause was read as a
+# name and said back: "shes 62 and still works full time" was answered "That's a relief. What was
+# wrong with the shes 62, in the end?".
+NOT_A_THING_SAID_BACK = re.compile(
+    r"^(?:s?he'?s|i'?m|i'?ve|they'?re|they'?ve|you'?re|you'?ve|we'?re|we'?ve|it'?s|that'?s|"
+    r"there'?s|theres|whats|what'?s|we|us|there)\b", re.I)
+# A word that is an auxiliary or a negation is never the name of a thing, so the search backwards
+# stops at it. Without this the thing named in "the heating still isnt working" came out as
+# "isnt", and the reply read it back to the person: "Is the isnt holding, or is it one of those
+# that comes back?". The class is the auxiliaries and the typed contractions both ways round.
+OVER_NEVER_A_THING = frozenset("""is are was were be been being am do does did have has had will
+would can cant could shall should may might must not never isnt arent wasnt werent dont doesnt
+didnt havent hasnt hadnt wont wouldnt couldnt shouldnt mustnt aint""".split())
 
 
 def _the_thing_said(low, at):
@@ -491,7 +556,8 @@ def _the_thing_said(low, at):
         bare = raw.strip(".,!'")
         if not thing and bare in OVER_NO_THING:
             return None
-        if bare in OVER_LEAD or bare in OVER_STOP or bare in OVER_BETWEEN:
+        if (bare in OVER_LEAD or bare in OVER_STOP or bare in OVER_BETWEEN
+                or bare in OVER_NEVER_A_THING):
             break
         if bare in OVER_NO_THING:
             return None
@@ -501,6 +567,11 @@ def _the_thing_said(low, at):
     if not thing:
         return None
     thing = " ".join(reversed(thing))
+    # A clause or a figure is not a thing, and the named pool writes it back: "shes 62 and still
+    # works full time" gave "the shes 62", "my mum is 62 and fixed it" gave "the 62". A thing
+    # starts on a noun, never on a subject pronoun with its verb, and a bare figure names nothing.
+    if NOT_A_THING_SAID_BACK.match(thing) or "".join(thing.split()).isdigit():
+        return None
     head = thing.split()[-1]
     if head in OVER_NOT_A_THING_NAMED or head in OVER_A_MEAL or head in OVER_STYLED:
         # The word means something else about this kind of thing, and the reading is not about a
@@ -524,12 +595,37 @@ OVER_ASKING = re.compile(r"^\W*(?:is|are|was|were|do|does|did|has|have|had|will|
                          r"which|if|isnt|isn't|wasnt|wasn't)\b", re.I)
 
 
+# Where one clause ends and the next starts: a comma or a dash, and the words that join two
+# clauses ("the roof is fixed and the bill wasnt bad" is two). The same list the search backwards
+# stops at, because both are the point where the subject changes.
+_CLAUSE_BREAK = re.compile(
+    r"[,;:\u2014\u2013]|\b(?:" + "|".join(sorted(OVER_STOP)) + r")\b", re.I)
+
+
+def _the_clause(low, at):
+    """The clause that holds the character at `at`, cut at the joins either side of it.
+
+    A negation stands a report down only in the clause that carries the state word. Left
+    standing down the whole line, "the sink is sorted, wasnt it" and "the boiler is fixed now,
+    dont worry" lost the report of the trouble being over entirely and came back as the search
+    hedge and the boiler card.
+    """
+    start, end = 0, len(low)
+    for match in _CLAUSE_BREAK.finditer(low):
+        if match.end() <= at:
+            start = match.end()
+        elif match.start() >= at:
+            end = match.start()
+            break
+    return low[start:end]
+
+
 def _the_over_word(text):
     """The accepted word, where it starts, and the line, or (None, -1, "")."""
     low = " ".join(str(text or "").lower().split())
     if not low or "?" in low or len(low.split()) > MOST_WORDS:
         return None, -1, low
-    if OVER_ASKING.search(low) or OVER_NOT.search(low):
+    if OVER_ASKING.search(low):
         return None, -1, low
     words = low.split()
     for match in OVER_WORD.finditer(low):
@@ -538,8 +634,21 @@ def _the_over_word(text):
         after = words[at + 1] if at + 1 < len(words) else ""
         if after.strip(".,!") in OVER_ADJECTIVE:
             continue
-        window = " ".join(words[max(0, at - 4):at])
-        if any(w.strip(".,!") in OVER_PEOPLE for w in window.split()):
+        near = [w.strip(".,!'") for w in words[max(0, at - 4):at]]
+        # "we got the boiler fixed" and "i got the car repaired" are a person who had the work
+        # done, not a person in a state: the thing after "got" is what was mended, so the doer in
+        # front of it is not the subject this reading is looking for. The thing itself can still be
+        # a person-word ("we got the kids sorted"), and that is refused as before.
+        if any(w in OVER_GOT for w in near):
+            first = next(i for i, w in enumerate(near) if w in OVER_GOT)
+            near = [w for i, w in enumerate(near) if i >= first or w not in OVER_PEOPLE]
+        window = " ".join(near)
+        if any(w in OVER_PEOPLE for w in near):
+            continue
+        # The negation has to share a clause with the state word: "not very well" and "still
+        # isnt working" stand the report down, while a tag on the end ("sorted, wasnt it") or a
+        # second clause ("fixed now, dont worry") is about something else.
+        if OVER_NOT.search(_the_clause(low, match.start())):
             continue
         if OVER_STATE.search(window):
             if _the_thing_said(low, match.start()) is False:
@@ -570,6 +679,21 @@ def _gave_a_step(answer):
         return bool(verdict._an_instruction_sentence(answer))
     except Exception:  # noqa: BLE001 - a reading that fails matches nothing
         return False
+
+
+def _the_opening_of(answer):
+    """The first sentence of an answer, which is where the step it hands over is named.
+
+    A later sentence can use the same word in another sense: "my cat has gone missing" tells you
+    to "leave something that smells of home and water at the door ... kneel down and let it come
+    to you", and "come" there is the cat coming, not a step the person has taken. Read over the
+    whole answer it made "i already came home" a report on the bot's step.
+    """
+    text = str(answer or "").strip()
+    for index, char in enumerate(text):
+        if char in ".!?" and index + 1 < len(text) and text[index + 1] == " ":
+            return text[:index + 1]
+    return text
 
 
 def _says_the_step(step, answer):
@@ -776,6 +900,15 @@ def tells_them_the_step_again(reply, text, memory):
         return False
     if not step:
         return False
+    if the_trouble_is_over(text):
+        # The line reports the trouble itself is over, so a card on its topic is advice for a
+        # trouble that is still there: it tells them to mend a thing they have just said is
+        # mended by being that card, whatever words it happens to share with them. Read on the
+        # words alone this said "no": "my washing machine is broken" / "the washing machine is
+        # working now" was answered with the laundry card, because the card mentions working, so
+        # the card counted as having read the line. The boiler, the drum and the laptop came out
+        # the same way whenever the entry's advice used the word.
+        return True
     try:
         return _says_the_step(step, reply)
     except Exception:  # noqa: BLE001 - a reading that fails says nothing about the reply
@@ -815,6 +948,79 @@ def _only_finished(text):
     return bool(_the_finished_step(low))
 
 
+def _the_part_after(answer, step_text):
+    """The answer's own next instruction after the step it has just handed back, or [].
+
+    `_the_steps_after` finds the step from the verb the person used ("bleed"), and that is the
+    right reading when they say the step themselves. Here the person says only that it has not
+    worked ("its still noisy"), so the step is the one the bot handed back last turn - the
+    pressure gauge, not the bleeding - and the piece that follows it is a whole instruction of
+    the answer, often opening on "and" ("and if it carries on get a heating engineer"). Read as
+    prose, that "and" is the answer wandering off, so this one matches the instruction by its
+    words and takes the piece after it, minus the joining word.
+    """
+    from . import limit as a_limit
+    try:
+        pieces = [str(one).strip() for one, _ in a_limit._steps(answer) if str(one).strip()]
+    except Exception:  # noqa: BLE001 - a reading that fails offers no step
+        return []
+    if not pieces:
+        return []
+    wanted = {word for word in re.findall(r"[a-z']+", str(step_text or "").lower())
+              if len(word) > 1 and word not in NOT_A_THING_WORD}
+    best, best_score = None, 0
+    for index, piece in enumerate(pieces):
+        score = len(set(re.findall(r"[a-z']+", piece.lower())) & wanted)
+        if score > best_score:
+            best, best_score = index, score
+    if best is None or best_score < 2:
+        return []
+    for piece in pieces[best + 1:]:
+        # Only the answer's own "if that does not work" line is read. The pieces between are more
+        # of the same job ("and clean the filter"), and handing one of them back to somebody who
+        # has just said they did it is the repeat this module exists to avoid.
+        piece = re.sub(r"^(?:and|then|but|so)\s+", "", piece, flags=re.I).strip().rstrip(" .,;")
+        if not piece:
+            continue
+        if CONDITION_START.match(piece):
+            return [piece]
+        if piece[:1].isupper():
+            break
+    return []
+
+
+def after_the_step_handed_back(text, memory):
+    """The answer's own next step when the step it handed back did not do it, or None.
+
+    "the boiler is making a noise" / "i bled the radiators" / "its still noisy": the answer gave
+    the bleeding, then the pressure, and "still noisy" says the pressure was not the end of it.
+    Nothing here knows a better step than the answer did, so the answer's own next sentence is
+    the reply ("if it carries on get a heating engineer to look at the pump") - where the store
+    would otherwise ask the person to watch it happen again.
+    """
+    if not isinstance(memory, dict):
+        return None
+    turns = [t for t in (memory.get("turns") or []) if isinstance(t, dict)]
+    if not turns:
+        return None
+    step = str(memory.get("handed_back_text") or "")
+    answer = str(memory.get("handed_back_answer") or "")
+    # The step has to be the one the bot said in its last turn: anything older is the answer two
+    # subjects ago, and its next sentence is about that subject.
+    if not step or not answer or memory.get("handed_back_step") != len(turns) - 1:
+        return None
+    from . import tried  # the same reading as the store's, so one line has one meaning
+    try:
+        if not tried.still_the_state(text, memory):
+            return None
+        after = _the_part_after(answer, step)
+    except Exception:  # noqa: BLE001 - a reading that fails just offers no reply
+        return None
+    if not after:
+        return None
+    return _with_steps(after, memory)
+
+
 def reply_for(text, memory):
     """The next turn of the thread for a report that the step was already taken, or None."""
     try:
@@ -822,7 +1028,9 @@ def reply_for(text, memory):
     except Exception:  # noqa: BLE001 - a reading that fails just offers no reply
         return None
     if not step:
-        return None
+        # The bot named the step last turn and the person says it has not worked, without
+        # naming it again: that is a report on the step, not a question for the answer again.
+        return after_the_step_handed_back(text, memory)
     # The question that follows the step is the question that follows *the answer's* step, and a
     # chat with no answer yet has none. "i already called the bank" says which step it was and is
     # answered on its own ("Fair enough. What did they say?"), but the line that only says the job
@@ -861,6 +1069,19 @@ def reply_for(text, memory):
             return said.replace("{thing}", thing)
         return fallback._choose(OVER_REPLIES, memory or {}, fallback.memory_bot(memory or {}),
                                 seed_text=text)
+    # Every reply in this module asks about a step and what came of it - "What did they say?",
+    # "What happened when you did?", "Any better since?" - so all of them need a step that was
+    # taken earlier in the chat. On the first line there is none, and the question is about a
+    # conversation that never took place: "i already answered that", the first thing said in a
+    # chat, was answered "Good. What happened when you did?". What is true instead is that this is
+    # the first line, in the words the first line already has (`warmth.FIRST_LINE_REPLIES`), so
+    # there is one answer to "nothing has been said yet" and not two.
+    #
+    # It sits after the stand-downs above for the same reason: a line that only says the job is
+    # over ("i sorted it already thanks") or that the trouble is over is answered as itself, and
+    # the first line's reply would be worse than the warm one it gets.
+    if step in SAID_TO_ME and not there_is_a_chat(memory or {}):
+        return pick(FIRST_LINE_REPLIES, memory or {}, seed_text=str(text or ""))
     # Where the answer still has a step they have not tried, that step is the reply and it is
     # `repeat`'s to hand back ("ive tried a hot wash already" gets the drying line, not a
     # question). Asking how it went is for the report the answer has nothing left to say to.
@@ -889,6 +1110,20 @@ def reply_for(text, memory):
         after = []
     if after:
         return _with_steps(after, memory)
+    # An irregular past tense is a step only when the answer named that step. The widened list
+    # above reads "set", "hit" and "came" as jobs done, and the answer behind them is often about
+    # something else: "what should i cook tonight" / "i already set the table" was answered "Good.
+    # What happened when you did?", which asks about a step the bot never handed over. The regular
+    # "-ed" steps are left as they were, because those are the answer's own words ("bled", "rang",
+    # "called") and the check reads the whole answer for them.
+    # A step that is about getting in touch is named by the answer in whatever words it likes:
+    # "my neighbour plays loud music every night" says "Talk to them once", and "i already spoke to
+    # him" is that step done, so the question about what they said is the right next turn. The
+    # words do not have to match, and this check would refuse it they never do.
+    if (step in A_STEP_TAKEN and step not in CONTACT and step not in TELLING
+            and _the_last_answer(memory or {})):
+        if not _says_the_step(step, _the_opening_of(_the_last_answer(memory or {}))):
+            return None
     if step in NOBODY_TO_ANSWER or (step in CONTACT and AN_APOLOGY.search(str(text or ""))):
         pool = REPORT_REPLIES
     elif step in CONTACT:

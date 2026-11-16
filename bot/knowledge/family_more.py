@@ -18,9 +18,74 @@ import datetime
 import re
 
 from .lookup import entry
-from .family import _ADULT_RELATION, _a_phone_rule_and_an_age, _a_teenager_is_named
+from .family import (_ADULT_RELATION, _a_phone_rule_and_an_age, _a_teenager_is_named,
+                     _the_child_pronouns)
 
 ENTRIES = []
+
+# --- someone of theirs is going to live in another country --------------------------------
+# The subject is the person going, not the place. "my daughter is leaving for australia" and
+# "my brother is emigrating" were answered "Noted: your daughter is leaving for australia" - a
+# receipt - and "my daughter is off to australia in september" and "my mate is going to
+# australia" got the picks for a holiday in Australia ("Sydney for the harbour and the
+# beaches"), which is advice for the wrong person about the wrong thing.
+#
+# A leaving word and a person are not enough on their own: "my daughter is leaving school in
+# july", "my husband is leaving his job", "my sister is leaving her husband" and "my dad is
+# moving to leeds" are all a person and a leaving word, and none of them is somebody going to
+# live in another country. The line has to say another country - a country named, or one of the
+# words that means leaving this one - so that is the guard, and the leaving phrases can stay
+# wide because of it.
+_LEFT_THE_COUNTRY = re.compile(
+    r"\b(?:emigrat\w*|abroad|overseas|moving country|leaving the country|left the country)\b")
+
+
+def _another_country_is_in_the_line(understood):
+    """True when the line says the person is going to some other country, not just away.
+
+    A country's name is the plainest way to say it, so the names the knowledge base already
+    holds are the test rather than a second list to keep. "moving to" with a town in it is a
+    move down the road: the line has to name somewhere in another country, or say `abroad`,
+    `overseas` or `emigrating`.
+    """
+    low = " " + " ".join(str(part or "") for part in
+                         (understood.get("text"), understood.get("clean"))).lower() + " "
+    if _LEFT_THE_COUNTRY.search(low):
+        return True
+    from . import geography  # noqa: PLC0415 - loaded here so the row costs nothing until asked
+
+    return any((" " + name + " ") in low for name in geography.COUNTRIES)
+
+
+ENTRIES.append(entry(
+    "a-person-going-to-live-abroad",
+    (("leaving for", "leaving to", "leaves for", "is leaving", "left for", "is off to",
+      "off to live", "moving to live", "moving to", "is moving to", "going to live in",
+      "going to live there", "going to live abroad", "emigrating", "is emigrating",
+      "emigrated", "has emigrated", "moving abroad", "is moving abroad", "moving overseas",
+      "is moving overseas", "going abroad", "is going abroad", "going overseas",
+      "going travelling", "going traveling", "is going travelling", "leaving the country",
+      "moving away to", "has left the country", "left the country"),
+     ("daughter", "son", "child", "kid", "kids", "mum", "mom", "mam", "mother", "dad",
+      "father", "brother", "sister", "nan", "gran", "granny", "grandma", "grandad",
+      "grandpa", "aunt", "uncle", "cousin", "niece", "nephew", "grandson", "granddaughter",
+      "family", "best friend", "mate", "friend", "girlfriend", "boyfriend", "partner",
+      "fiance", "fiancee", "husband", "wife")),
+    "Say the hard thing while they are still here rather than at the airport: one evening "
+    "just the two of you, and tell them what they have been to you. Then put the contact in "
+    "the diary before they go - a real time each week rather than 'we'll see'. The first "
+    "month after is the quiet one, so have one thing in it that is only yours.",
+    # a holiday is not a life abroad ("my nan is off to spain for a week"), a move down the
+    # road is not another country, and a care home is neither
+    guard=_another_country_is_in_the_line,
+    avoid=("holiday", "holidays", "for a week", "for a fortnight", "for two weeks",
+           "for ten days", "for a month", "on holiday", "coming back", "comes back",
+           "visiting", "care home", "nursing home", "sheltered", "a flat", "a house",
+           "a bungalow", "new place", "next door", "same town", "the city",
+           # a move of their own, down the road, or into somebody's flat is not another country
+           "own flat", "own place", "own house", "his own", "her own", "their own",
+           "down the road", "moving in with", "in with his", "in with her", "in with us"),
+    bias=1))
 
 # --- the questions a parent asks in the first years, which had no row at all -----------
 # All six of these were a shrug or a wrong answer on main: "how much should a newborn
@@ -50,7 +115,19 @@ ENTRIES.append(entry(
     # answered with this row on the words bottle and how do i. The line has to name the baby.
     ask=("baby", "babies", "newborn", "newborns", "infant", "little one", "my son", "my daughter",
          "my child", "my kid", "weeks old", "week old", "month old", "months old", "breastfed",
-         "breastfeeding", "nursery", "childminder", "him", "her"),
+         "breastfeeding", "nursery", "childminder", "him", "her",
+         # "how do i introduce a bottle" and "how do i start formula" name the feed being
+         # started and no baby at all, so the baby-word gate stood this row down: the bottle
+         # line got the scan picture and the formula line got the spreadsheet card, off the
+         # word "formula". Introducing the bottle *is* what this row answers.
+         "introduce a bottle", "introducing a bottle", "introducing the bottle",
+         "introduce the bottle", "introduce bottles", "introducing bottles",
+         "start a bottle", "start bottles", "start formula", "introduce formula",
+         "introducing formula", "introduce a formula", "introducing a formula",
+         "introduce the formula", "a formula", "the formula",
+         "switch to formula", "switching to formula",
+         "combination feed", "combination feeding", "combi feed", "combi feeding",
+         "mixed feeding", "top up with formula"),
     # a baby who has stopped feeding is the under-three-months red flag, and a bottle to
     # sterilise, wash, pack or buy is a different question again
     avoid=("not feeding", "isnt feeding", "isn't feeding", "refusing feeds", "reduced feeds",
@@ -68,10 +145,28 @@ ENTRIES.append(entry(
            "stop giving", "stop the bottle", "stop using", "give up the bottle",
            "drop the bottle", "dropping the bottle", "coming off the bottle",
            "come off the bottle", "off the bottle",
+           # "how do i introduce a bottle at night" is the night-feed row's question, which
+           # ends the feed rather than starting one, and "at night" is how people say it
+           "at night", "night time", "night-time", "nighttime", "overnight",
+           # a bottle offered to a cat is nonsense in every reading: the pet-intro cards and
+           # the two-people script are both wrong, and a punt is better than advice on teats
+           "dog", "dogs", "cat", "cats", "kitten", "kittens", "puppy", "puppies", "pet", "pets",
            "water bottle", "gym", "flight", "flying", "liquids", "100ml", "100 ml",
            "sterilise", "sterilizer", "sterilise", "steriliser", "washing", "wash", "clean",
            "pump", "breast pump", "which bottle", "best bottle", "brand", "cost", "buy",
-           "how many bottles", "how many") + _ADULT_RELATION,
+           "how many bottles", "how many",
+           # "a formula" is a maths word too, and a key phrase is read wherever it appears in
+           # the line: adding "a formula" and "the formula" for "how do i introduce a formula"
+           # also took "the formulas" and "rearrange a formula", so a maths revision question
+           # was answered with how to offer a bottle and the maths row that owns it never got
+           # the turn. A maths word means the formula is the one on the sheet. The words are
+           # the ones a maths or spreadsheet line carries and a feed line never does; a maths
+           # word reaches only its own line, so nothing that names a feed stands down.
+           "maths", "math", "mathematics", "algebra", "equation", "quadratic", "trigonometry",
+           "geometry", "percentages", "gcse", "a level", "physics", "chemistry",
+           "revision", "revising", "revise", "coursework", "exam", "exam paper", "mock exam",
+           "spreadsheet", "excel", "autosum", "rearrange", "formula sheet",
+           "learn the formula", "remember the formula") + _ADULT_RELATION,
 ))
 # A child with a grown-up's age on them, or a grown-up's life, is not the worry this card is
 # written for. "i keep worrying about my daughter, shes 19 and out all night" was answered with
@@ -172,6 +267,10 @@ ENTRIES.append(entry(
            "chicken", "turkey", "cook", "cooks", "cooking", "cooked", "roast", "roasted",
            "bake", "baked", "juicy", "moist", "tender", "oven", "grill", "grilled", "fry",
            "fried", "pan", "boil", "poach", "recipe", "dinner", "sausages", "breast of",
+           # a bottle of milk for a baby is the freshness question, not a talk about growing
+           # up: "how do i store breast milk" and "how do i freeze breast milk" were answered
+           # with this card because "breast" and "how do i" were the only words they shared
+           "breast milk", "breastmilk", "expressed milk", "formula milk", "pumped milk",
            # "body" is in the key, so "how do i get rid of body fat" was answered with the
            # how-to-talk-about-puberty card. Fat and calories are the health domain's; the
            # shape words are only the shape asks, not the bare "weight", because "how do i
@@ -1055,3 +1154,117 @@ ENTRIES.append(entry(
            "husband", "wife", "boss", "colleague", "friend", "road rage", "hits", "hitting",
            "hit me", "hits me", "bangs his head", "bangs her head", "self harm", "himself",
            "herself", "hurt himself", "hurt herself", "puppy", "dog", "cat")))
+
+
+def _the_age_in_the_line(understood):
+    """"a 15 year old" in the line, or None.
+
+    The two cards below are about a rule with an age in it, and a card that says "14" to a line
+    about a 16 year old is a different child and a different rule. So the age the parent gave is
+    the one the answer names, and the fallback is the rule's own wording ("under 18") rather than
+    a guess at the child.
+    """
+    reading = understood if isinstance(understood, dict) else {}
+    text = str(reading.get("clean") or reading.get("text") or " ").lower()
+    pattern = (r"\b(1[0-9]|[89])\s*(?:year|yr)s?\s*old\b|\bis\s+(1[0-9]|[89])\b"
+               r"|\bat\s+(1[0-9]|[89])\b|\baged\s+(1[0-9]|[89])\b")
+    for pair in re.findall(pattern, text):
+        for one in pair:
+            if one:
+                return one
+    return None
+
+
+def _a_teenagers_tattoo(memory, understood):
+    """The tattoo rule first, because a tattoo is what the line asked about."""
+    reading = understood if isinstance(understood, dict) else {}
+    text = str(reading.get("clean") or reading.get("text") or " ").lower()
+    age = _the_age_in_the_line(understood)
+    if re.search(r"\b18th\b|\b(?:is|turns|turning|she is|he is)\s+18\b|\b18\b", text) \
+            and not age:
+        return ("At 18 it is her own decision and no consent is needed, so the useful thing now is "
+                "which studio rather than whether: licensed only, ask to see the licence and the "
+                "sterile sealed needles opened in front of you, and look at healed work rather "
+                "than the photographs they choose. A design drawn now and lived with for a few "
+                "months is what saves the cover-up later. A piercing is a different rule: 16 "
+                "without consent for lobes and most placements, and a parent with ID below that.")
+    if age:
+        who = ("In the UK a tattoo is 18 with no exceptions, so a %s year old cannot be tattooed "
+               "at all - and a studio that would do one is breaking the law and is the studio to "
+               "avoid" % age)
+    else:
+        who = ("In the UK a tattoo is 18 with no exceptions, so nobody under 18 can be tattooed "
+               "at all - and a studio that would do one is breaking the law and is the studio to "
+               "avoid")
+    return (who + ". What you can say yes to now is the design: have them draw it and live with "
+            "it on paper for a year, because a good studio will still be there at 18. Piercings "
+            "are the smaller ask, and a different rule: 16 without consent for lobes and most "
+            "other placements, and under that a parent is usually there with ID, so ring the shop "
+            "first because the rules differ by council.")
+
+
+def _a_teenagers_piercing(memory, understood):
+    """The piercing rule first: the person asked about an ear, not about a tattoo."""
+    age = _the_age_in_the_line(understood)
+    he, him, his, does = _the_child_pronouns(memory, understood)
+    if age and age.isdigit() and int(age) >= 16:
+        lead = ("At %s %s can have lobes and most other placements pierced without a parent's "
+                "consent, so this one is up to %s" % (age, he, him))
+    elif age:
+        lead = ("At %s a piercing needs you there: most studios want a parent present with ID, "
+                "and many will only do lobes below 16" % age)
+    else:
+        lead = ("Under 16 a piercing usually needs a parent there with ID, and 16 is when lobes "
+                "and most other placements stop needing consent")
+    return (lead + ". Ring the shop before you go, because the age rules and the placements "
+            "allowed differ by council, and only a licensed studio is worth using: gloves, "
+            "sterile sealed needles, a hollow needle rather than a gun for anything but lobes, "
+            "and written aftercare. A nose ring or a navel heals for months and wants cleaning "
+            "twice a day, so agree who does that before the appointment. A tattoo is a different "
+            "rule: 18, no exceptions.")
+
+ENTRIES += [
+    # "my 14 year old wants a tattoo" was acknowledged and dropped ("I'll remember that"),
+    # and "can my 15 year old get her ears pierced" reached nothing. A parent is asking what is
+    # allowed and what they are letting themselves in for, which is answerable - and the two are
+    # two rows, because the first sentence has to be the rule for the thing that was asked
+    # about: one card opened a piercing question with "a tattoo is 18" and told a 16 year old
+    # about a 14 year old.
+    # The rule is asked about in the abstract as well as about a named child: "what age can you
+    # get a tattoo in the uk" was answered by the ageing card ("Ageing is the slow build-up of
+    # small damage") and "how old do you have to be to get a tattoo" was a search hedge, because
+    # both rows named only the child. The age words are a person here: a line that asks what age
+    # it is allowed is asking about the child whoever it belongs to.
+    entry("a-teenager-wants-a-tattoo",
+          (("daughter", "son", "teenager", "teenagers", "teen", "my girl", "my boy",
+            "year old", "13 year old", "14 year old", "15 year old", "16 year old",
+            "17 year old", "is 13", "is 14", "is 15", "is 16", "is 17",
+            "what age", "how old", "old enough", "legal age", "age limit", "is it legal",
+            "whats the age", "minimum age", "too young", "under 18", "under 16",
+            # "is a tattoo legal at 16" was answered with a school penalty notice: the age is
+            # there as "at 16" rather than as a year old, and the ask was the law itself
+            "legal", "illegal", "allowed", "against the law", "is it legal"),
+           ("tattoo", "tattoos", "tattooed", "tattooing")),
+          _a_teenagers_tattoo,
+          ask=("my", "can", "should", "is", "what", "how"),
+          # a piercing is its own row, and so is an adult's own tattoo
+          avoid=("hair", "dye", "hair dye", "school", "tattoo removal", "remove a tattoo",
+                 "laser", "my tattoo", "infected", "infection", "swollen", "my ear",
+                 "piercing", "piercings", "pierced", "pierce")),
+    entry("a-teenager-wants-a-piercing",
+          (("daughter", "son", "teenager", "teenagers", "teen", "my girl", "my boy",
+            "year old", "13 year old", "14 year old", "15 year old", "16 year old",
+            "17 year old", "is 13", "is 14", "is 15", "is 16", "is 17",
+            "what age", "how old", "old enough", "legal age", "age limit", "is it legal",
+            "whats the age", "minimum age", "too young", "under 18", "under 16",
+            # "is a tattoo legal at 16" was answered with a school penalty notice: the age is
+            # there as "at 16" rather than as a year old, and the ask was the law itself
+            "legal", "illegal", "allowed", "against the law", "is it legal"),
+           ("piercing", "piercings", "pierce", "pierced", "ears pierced", "ear pierced",
+            "earrings", "belly button", "nose ring", "navel", "helix", "tragus", "lobe",
+            "lobes")),
+          _a_teenagers_piercing,
+          ask=("my", "can", "should", "is", "what", "how"),
+          avoid=("hair", "dye", "hair dye", "school", "infected", "infection", "swollen",
+                 "nosebleed", "my ear hurts", "tattoo", "tattoos")),
+]

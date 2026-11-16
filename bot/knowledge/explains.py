@@ -17,7 +17,7 @@ why ice floats). This file owns the made things: networks, screens, the kitchen,
 """
 import re
 
-from .lookup import entry
+from .lookup import A_WHAT_TO_WEAR, entry, not_the_ask_about_the_order
 
 ANSWERS = ("technology", "science", "home-and-diy")
 
@@ -219,8 +219,14 @@ def _as_written(words):
 # only thing the row needed beside the acronym. The spelling-out is the answer only when the ask
 # is *of* the acronym: "what does btw mean", "btw stands for what", "explain lol", "how do you
 # spell btw", or the acronym on its own.
+# "what about" is never the ask: it turns a line into a different subject ("what about only in
+# the evenings"), and the answers module puts exactly that in front of every probe it builds from
+# a follow-up. So "the wifi keeps dropping / only in the evenings" was answered with what WiFi
+# stands for: the probe "what about only in the evenings wifi keep dropping" had "what" 29
+# characters before the letters, and "what about" is the one way of saying "what" that asks
+# nothing about a word.
 _ASK_BEFORE = re.compile(
-    r"(?:what|whats|what's|what do|what does|what is|what are|explain|explained|define|"
+    r"(?:(?:what|whats|what's)(?!\s+about\b)|what do|what does|what is|what are|explain|explained|define|"
     r"meaning of|stand for|spell|spelled|spelling|how do you spell)\b"
     # the ask and the letters can have a few words between them - "whats the difference between
     # a url and a link" is the letters' question - but not a full stop, which is what separates
@@ -407,7 +413,10 @@ ENTRIES = [
              "when the signals arrive from four of them fix your spot to a few metres - the "
              "satellites never learn where you are, your phone does the sum. Thick buildings and "
              "tunnels block the signals, which is why the arrow jumps there."),
-    _explain("explain-router", ("router", "routers", "modem", "hub"),
+    # "modem" was in this key because people use the two words for the same box, and it meant
+    # "what is a modem" was answered with a sentence that began "The router is the box". The box
+    # is described either way, so the word modem has its own row in technology.py now.
+    _explain("explain-router", ("router", "routers", "hub"),
              "The router is the box that joins your home network to the line from your provider "
              "and gives every device in the house its own address, so they can find each other "
              "and the internet. A modem is the part that speaks to that line; most homes now "
@@ -563,9 +572,18 @@ ENTRIES = [
              # full of scale what do i use" and "my kettle is furred up what do i use" were told
              # how the element heats the water. Not the bare "limescale", because the row's own
              # sentence is about limescale on the strip.
+             # A line that names a boiler is the heating's, and the word that brought it here is
+             # "kettling" - the noise a scaled boiler makes, not the thing on the worktop. The
+             # sound report reached `boiler-kettling` on its own ("my boiler is making a kettling
+             # noise"), but a line that went on to ask about it ("my boiler has started making a
+             # noise like kettling what is that") was read as a "what is a kettle" ask and got how
+             # the element heats the water. The boiler stands this row down whatever the rest of
+             # the line asks.
              avoid=("full of scale", "scaled up", "scaled inside", "furred up", "furring up",
                     "chalky", "white bits", "white flakes", "descale", "descaling",
-                    "descaled", "descaler", "white stuff in")),
+                    "descaled", "descaler", "white stuff in",
+                    "boiler", "boilers", "combi", "central heating", "heat exchanger",
+                    "radiator", "radiators")),
     _explain("explain-toaster", ("toaster", "toasters"),
              "Thin wires inside, usually nichrome, glow red when current passes and the bread "
              "absorbs that as radiant heat. A latch holds the bread down against a spring and a "
@@ -576,7 +594,12 @@ ENTRIES = [
              "and off to hold the temperature on the dial. A fan oven blows that air around, so "
              "it browns more evenly and cooks about 20C cooler and a little faster than a "
              "conventional one; the dial is only an average, which is why an oven thermometer "
-             "earns its place."),
+             "earns its place.",
+             # a dutch oven and a casserole dish are pots, and the row that answers what a
+             # piece of kit is owns them: "what is a dutch oven" was getting the heating
+             # elements card here, because the word "oven" is in both.
+             avoid=("dutch oven", "dutch ovens", "casserole dish", "casserole dishes",
+                    "ovenproof dish", "baking dish", "cast iron pot", "braiser")),
     _explain("explain-freezer", ("freezer", "freezers"),
              "It is the fridge's colder twin - a pump circulates a refrigerant that expands and "
              "gets very cold, taking heat out of the air, and the heat leaves at the back. Because "
@@ -1331,7 +1354,10 @@ ENTRIES = [
           "protection that works is updating the system, keeping to official app stores and never "
           "opening a file you did not expect.",
           avoid=("have i got", "do i have", "i have a", "symptoms", "remove", "removing",
-                 "clean", "cleaning", "scan", "check", "virus")),
+                 "clean", "cleaning", "scan", "check", "virus",
+                 # ransomware has its own definition, and this row's first sentence is about
+                 # malware in general
+                 "ransomware", "ransom")),
     _name("explain-ip-name", ("ip address", "ip", "ipv4", "ipv6"),
           "An IP address is the number that identifies a device on a network, a bit like a house "
           "number: your router has one on the internet and gives each phone and laptop inside the "
@@ -1412,11 +1438,20 @@ ENTRIES = [
           # spain" plus "how much" beat the day-rate row: "how much money for a week in spain"
           # answered with "about £2 a day or £10 a month" of EU roaming, and "how much spending
           # money do i need for a week in spain" the same. A length of trip is money for the trip.
+          # A card used abroad is money, not data: the key takes any line with a place word and a
+          # price word in it, so "how much is a card fee abroad" was read as a roaming question and
+          # lost the travel-card answer ("pay in the local currency") that used to win the turn.
+          # The words that carry the fix are the ones that name a fee or a way of getting
+          # money, and none of them sits beside "roaming" in a real sentence. A card used to
+          # pay is not one of them: "will i be charged for roaming if i pay by card in spain"
+          # names roaming and must keep the roaming answer, so the card-payment family is not
+          # in this list (the review on this PR found two lines lost that way).
           avoid=("turn off", "turn on", "what is", "mean", "vpn",
                  "spending money", "spending cash", "money for", "money to take",
                  "money should i take", "much money", "week in", "days in", "nights in",
-                 "fortnight", "does a week", "is a week", "cost of", "much is a week"),
-          bias=1),
+                 "fortnight", "does a week", "is a week", "cost of", "much is a week",
+                 "card fee", "card fees", "cash machine", "cashpoint", "atm", "withdraw",
+                 "withdrawal", "exchange rate", "travel money", "holiday money"), bias=1),
 
     # The number on the box, not the meaning of the unit: "how many gb do i need on a phone" was
     # a screen-time agreement and "is 128gb enough" was a shrug.
@@ -2403,7 +2438,12 @@ DIFFERENCES += (
 # a question when the line is short ("sprain or strain", "annuals or perennials"), because most long
 # lines with two nouns and an "or" are a choice - "shall i have jam or marmalade on my toast" - and
 # a choice belongs to the entry that picks one.
-DIFFERENCE_ASKS = ("difference", "differences", "different", "whats the difference",
+# "diff" is how the word is typed on a phone: "whats the diff between jam and marmalade" was the
+# search hedge while "whats the difference between jam and marmalade" answered, on the same table,
+# and it is not one pair - "whats the diff between lager and ale" and "whats the diff between a
+# muffin and a cupcake" were hedges too. The word is short for the same ask, so it belongs with the
+# ask and not in any one row.
+DIFFERENCE_ASKS = ("difference", "differences", "different", "diff", "whats the difference",
                    "what is the difference", "versus", "vs", "distinguish",
                    # "compare a sprain and a strain" and "how does X compare with Y" ask the same
                    # question as "what is the difference between X and Y", and the table holds the
@@ -2420,7 +2460,8 @@ DIFFERENCE_ASKS = ("difference", "differences", "different", "whats the differen
 
 # The shapes that are a question however long the line is. Everything else in the asks above has to
 # earn it by being short, or by asking which.
-DIFFERENCE_STRONG_ASKS = ("difference", "differences", "different", "versus", "vs", "distinguish",
+DIFFERENCE_STRONG_ASKS = ("difference", "differences", "different", "diff", "versus", "vs",
+                          "distinguish",
                           "compare", "compares", "comparing", "compared", "contrast",
                           "contrasting", "which is which", "what separates", "same as", "the same", "same thing",
                           "identical", "interchangeable", "no difference", "one and the same",
@@ -2713,7 +2754,40 @@ _MOVE_OR_STAY = (
     "have first - a sofa bed is £500, a garden office is £3,000 - and move when the thing you "
     "lack is space you will use every day rather than sometimes.")
 
+# A job against a trade is the same choice as the ones below, and it was the one that had no row:
+# "hire a builder or do it myself" was answered with the package-holiday card, because the trade
+# row's ask never recognised "hire" and the travel row keys "do it myself" for a holiday booked
+# separately. The split is not about skill, it is about what has to be certified and what a
+# mistake costs, so the answer gives the line between them and the price of crossing it.
+_DIY_OR_A_TRADE = (
+    "Do it yourself on the cosmetic jobs - painting, tiling a splashback, hanging a door, laying a "
+    "floor - and pay a trade for anything on gas, the consumer unit or a new circuit, anything "
+    "structural (a wall out, a lintel, a new opening), and full bathroom or kitchen plumbing, "
+    "because those need a certificate, building control or both, and your buildings insurance "
+    "will ask who did the work. Most trades charge £150 to £250 a day, so get three written "
+    "quotes that name a price, a start date and what is included. The test is what a mistake "
+    "costs: a repaint is a weekend, a leak through a ceiling or an unsigned gas job is not.")
+
+# the trades in the words people type, and the trade bodies that gate the three that need one
+_TRADES = ("builder", "builders", "plumber", "plumbers", "electrician", "electricians",
+           "decorator", "decorators", "painter", "painter and decorator", "tiler", "tiler",
+           "plasterer", "joiner", "carpenter", "roofer", "gas engineer", "heating engineer",
+           "handyman", "fitter", "someone in", "someone to do it", "a professional", "a pro",
+           "trade", "tradesman",
+           # the job is as good as the trade: "do it myself or pay someone to rewire the house"
+           # names no plumber or electrician, and the line had no row to reach
+           "rewire", "rewiring", "rewired", "electrics", "plumbing", "gas work", "loft",
+           "loft conversion", "extension", "roof", "roofing", "plastering", "tiling",
+           "the work", "the job")
+_DO_IT_MYSELF = ("do it myself", "do it ourselves", "diy", "myself", "ourselves",
+                 "get someone in", "pay someone", "get a professional", "get a trade",
+                 "get a tradesman", "do the work myself")
+
 CHOOSING = (
+    ( _TRADES, _DO_IT_MYSELF,
+     ("hire", "hiring", "get", "getting", "should i", "should we", "worth it", "or do it",
+      "or get", "or pay", "cheaper", "or a trade", "or someone", "do i need"),
+     _DIY_OR_A_TRADE),
     # Moving is a one-off bill plus a new set of bills; staying is the annoyance that made them
     # ask. The line almost never says what the extra room is for, so the answer is the test.
     (("bigger flat", "bigger place", "bigger house", "bigger home", "move house", "moving house",
@@ -2936,8 +3010,414 @@ def _choosing(memory, understood):
 
 # The pair has to be named and the ask has to be the choice: a line that says "my boiler is
 # making a noise" names one of these words and asks nothing about choosing.
+def _one_of_them_is_actually_named(understood):
+    """The entry answers only on a line that names a pair its own rows cover.
+
+    The key is the union of every row's two sides, so a single word from it - "boiler" - is enough
+    to score, and it scored above the costs row: "how much does a new boiler cost" was handed to
+    this entry, which then had no row to read and could not answer, and the price line lost its
+    card. A name is not a pair until the row that owns the pair has read the line.
+    """
+    # ...and an ask for the order of the steps is not a choice between two things:
+    # "moving house what should i do first" is the moving plan's line, and the "should i" in it
+    # was read as the decision row's ask (see lookup.the_ask_is_the_order_of_steps).
+    return (_choosing(None, understood) is not None
+            and not_the_ask_about_the_order(understood))
+
+
 ENTRIES.append(entry("choosing-between",
                      (CHOOSING_NAMES, CHOOSING_ASKS),
                      _choosing,
                      ask=CHOOSING_NAMES,
+                     guard=_one_of_them_is_actually_named,
+                     # a line that asks what to wear names its weather or its occasion, and both
+                     # are in the names above ("hot", "cold", "school"): "what should i wear when
+                     # its hot" was a choice between two things the person never mentioned. The
+                     # clothes rows answer that line, so this one stands down for it.
+                     avoid=A_WHAT_TO_WEAR,
                      bias=1))
+
+
+# --- the machinery of government ------------------------------------------------
+#
+# "how does parliament work" and "how does a bill become law" are school-level civics questions
+# about a system, which is what this file is for, and main sent every one of them to a search
+# hedge or to a card about something else: a bill that becomes law reached the money rows (a
+# "bill" is also an invoice) and got Citizens Advice, and "how do laws get passed" reached the
+# older person's bus pass. Each row is keyed on the words that make the thing that thing, and
+# the second half carries the asking shapes, because the subject alone says nothing - "general
+# election" appears in "who won the general election" too, and that is not this question.
+_GOVERNMENT_ASK = ("how do", "how does", "how often", "how many", "what is", "what are",
+                   "what does", "what do", "which", "why", "explain", "mean", "means",
+                   "work", "works", "become", "becomes", "becoming", "made", "make", "pass",
+                   "passes", "passed", "elected", "election", "elections", "held", "called",
+                   "vote", "voting", "vote for", "system", "happen", "happens", "next",
+                   "first past the post", "role", "job", "members", "member", "seats",
+                   "difference between", "different from", "do", "does", "is", "are")
+
+# A line about paying, complaining or booking is not a line about the constitution: "bill",
+# "law", "court" and "cabinet" are everyday words, and the money, consumer, lifeadmin and DIY
+# rows own their own lines. Every avoid word here is checked against the row's own questions in
+# tests/test_how_the_country_is_run.py, because an avoid word that folds onto the subject
+# ("lord" folds onto "lords") denies every line the row exists for.
+_NOT_CIVICS = ("energy bill", "gas bill", "electric bill", "electricity bill", "water bill",
+               "phone bill", "mobile bill", "broadband bill", "vet bill", "council tax",
+               "bill came", "my bill", "the bill was", "bill is", "bill for", "pay my bill",
+               "pay the bill", "split the bill", "restaurant bill",
+               "solicitor", "divorce", "custody", "court date", "court case", "small claims",
+               "employment tribunal", "eviction", "arrears", "police", "arrested", "caught",
+               "fined", "parking ticket", "speeding",
+               "my mp", "contact my mp", "write to my mp", "who is my mp", "find my mp",
+               "register to vote", "voter id", "polling station", "postal vote", "proxy vote",
+               # how to vote is a form and a date, which main already answers with the register
+               # service; the system is a different question
+               "how do i vote", "how to vote", "where do i vote", "how do you vote",
+               # a name that shares a word with a row but asks something else: the lord mayor is
+               # a city office, a bill of rights is a document, and a hung parliament or a
+               # coalition is a result, not the machinery
+               "lord mayor", "bill of rights", "hung parliament", "coalition",
+               "mps paid", "mp salary", "mps earn", "how much do mps",
+               "bathroom cabinet", "kitchen cabinet", "medicine cabinet", "filing cabinet",
+               "cabinet door", "cabinet hinge")
+
+
+# A guard, not an avoid word, for "the us" and for a party's own tally: a line that reaches
+# nothing is read a second time with "we/us/our" turned into "i/me/my" (lookup._other_reading),
+# which turns "in the us" into "in the me" and lets the row back in past its own avoid list.
+# The guard sees the line as typed, so the words that say which country is meant hold.
+_ANOTHER_COUNTRY = re.compile(
+    r"\b(?:the\s+us|usa|u\.s\.|america|american|presidential|electoral\s+college|"
+    r"congress|senate|canada|australia|new\s+zealand|ireland|france|germany)\b", re.I)
+_A_PARTY_TALLY = re.compile(
+    r"\b(?:conservative|tory|tories|labour|liberal\s+democrat|lib\s+dem|snp|green\s+party|"
+    r"reform\s+party|dup|sinn\s+fein)\b", re.I)
+
+
+def _only_this_country(understood):
+    """True when the line is about how this country is run, not another one's elections."""
+    text = (understood or {}).get("text") or (understood or {}).get("clean") or ""
+    return not _ANOTHER_COUNTRY.search(str(text))
+
+
+def _not_one_party(understood):
+    """True when the line asks about parliament's members, not how many one party has."""
+    text = (understood or {}).get("text") or (understood or {}).get("clean") or ""
+    return not _A_PARTY_TALLY.search(str(text))
+
+
+# The names the four newest rows are *about*. They sit in _NOT_CIVICS because they used to be
+# stolen by the Lords, bill and election rows; the rows below own them now, so a row about one of
+# them must not carry its own subject in its avoid list. Everything else the shared list holds
+# still applies to them.
+_OWN_SUBJECT = ("lord mayor", "bill of rights", "hung parliament", "coalition",
+                "mps paid", "mp salary", "mps earn", "how much do mps")
+_NOT_CIVICS_ELSE = tuple(w for w in _NOT_CIVICS if w not in _OWN_SUBJECT)
+
+
+# The shapes every row in this block answers with. `asks=` is the key's second half and `ask=`
+# is the test the line has to pass, and they are not the same list: "when" is a key word for the
+# election row but was not in this test, which is how "when is the next general election" fell
+# through to a reminder card.
+_CIVICS_ASK = ("how", "what", "who", "why", "explain", "mean", "means",
+               "how many", "difference", "work", "works")
+
+
+def _civics_new(id, subject, reply, also=(), avoid=(), asks=None, guard=None):
+    """_civics, for a row whose subject is one of the names the older rows stand down on."""
+    return _civics(id, subject, reply, also=also, avoid=avoid, asks=asks, guard=guard,
+                   blocked=_NOT_CIVICS_ELSE)
+
+
+def _civics(id, subject, reply, also=(), avoid=(), asks=None, guard=None,
+            blocked=_NOT_CIVICS, ask=None):
+    """One row about how the country is run: the thing named, plus how it is asked about.
+
+    `asks`: the shapes this row answers with, when the whole asking set is too wide. The row that
+    tells parliament and government apart is the case: with every ask word in its second half it
+    tied with the definition row on "what is the difference between parliament and government" and
+    the earlier row won, so it is keyed on the difference phrases alone.
+    """
+    return entry(id, (subject, tuple(asks) if asks is not None else _GOVERNMENT_ASK) + tuple(also), reply,
+                 ask=ask if ask is not None else _CIVICS_ASK,
+                 avoid=blocked + tuple(avoid), guard=guard)
+
+
+# "what is local government" was answered "Parliament is the Commons, the Lords and the monarch",
+# and "how does the council work" was a search hedge: the councils are a different set of bodies
+# doing different jobs, so they get their own row rather than a fence on parliament's.
+ENTRIES.append(_civics(
+    "local-government",
+    ("local government", "local council", "local councils", "council", "councils",
+     "parish council", "district council", "county council", "borough council",
+     "unitary authority", "town hall", "civic centre"),
+    "Your council is the layer below parliament, and it is usually two layers: a district or "
+    "unitary council for bins, housing, planning permission and licensing, and a county council "
+    "for schools, social care, libraries and most roads. It is paid for by council tax plus "
+    "business rates and grants, and the councillors are elected locally every four years.",
+    asks=("how", "what", "who", "which", "explain", "mean", "means", "work", "works", "does",
+          "do", "run", "responsible", "help"),
+    avoid=("council tax", "council tax bill", "council tax rebate", "council tax reduction",
+           "council flat", "council house", "council housing", "housing benefit",
+           "parking permit", "parking fine", "parking ticket", "wheelie bin", "bin collection",
+           "bins", "missed collection", "recycling", "planning permission for my",
+           "how many councillors", "councillor", "councillors",
+           # a council that will not deal with a problem is a job to chase, not a body to
+           # describe: "the council wont fix the damp in my bathroom, what do i say" was told
+           # what a council is and how it is paid for. The rows that chase it own the line.
+           "wont fix", "won't fix", "will not fix", "not fixing", "wont do", "won't do",
+           "refuse", "refuses", "refused", "ignored", "ignoring",
+           "damp", "damp in", "mould", "mold", "leak", "leaking", "repair", "repairs",
+           "complain", "complaint", "complain about", "escalate", "ombudsman",
+           "what do i say", "what should i say", "who do i call", "who do i ring",
+           "report it", "report a", "how do i get them")))
+
+ENTRIES.append(_civics(
+    "how-parliament-works",
+    ("parliament", "westminster", "the government", "government", "uk parliament"),
+    "Parliament is the Commons, the Lords and the monarch, and it makes the law, votes the taxes "
+    "and holds the government to account. The government is separate: the prime minister and "
+    "about 20 ministers running the departments, sitting inside parliament - which is why a "
+    "government with a majority usually gets its laws through.",
+    avoid=("scottish parliament", "senedd", "stormont", "holyrood", "european parliament",
+           "parliament square", "parliament hill", "difference between", "different from",
+           "versus", "vs",
+           # "how does the government help with childcare costs" is a money question that names
+           # the government, and the definition of parliament is no answer to it
+           "childcare", "benefit", "benefits", "universal credit", "council tax", "tax credit",
+           "help with", "entitled", "cost", "costs", "price", "pay for",
+           # the councils are the layer below, and they have their own row above
+           "local government", "local council", "local councils", "council", "councils",
+           "councillor", "councillors", "parish", "district council", "county council")))
+
+ENTRIES.append(_civics(
+    "bill-becomes-law",
+    ("bill", "bills", "law", "laws", "legislation", "act of parliament", "new law"),
+    "A bill is a draft law: it has to pass both Houses, then get royal assent from the monarch. "
+    "In each House it goes through a first reading (just the title), a second reading where the "
+    "principle is voted, then committee, report and third reading. The Lords can delay a bill "
+    "for about a year, but not kill it.",
+    also=("become law", "becomes law", "become a law", "passes", "get passed", "gets passed",
+          "get made", "gets made", "how a bill", "royal assent", "law get", "law gets"),
+    # "how are laws passed in the us" got the Commons, the Lords and royal assent: an `avoid`
+    # word cannot hold this, because "in the us" is read a second way as "in the me". The same
+    # guard the election row uses keeps another country's law-making out of this one.
+    guard=_only_this_country,
+    avoid=("restaurant bill", "vet bill", "bill of sale",
+           # The household fuels were all named here and one was missing: "how do i save money
+           # on my heating bill" got the stages of a bill through parliament, because "heating"
+           # is not "energy" or "gas" as far as a list of words goes. The heating-bill card has
+           # the answer ("heating and hot water are most of the bill"), and every way of naming
+           # that fuel belongs in this fence: the boiler, the radiators, the oil, the units.
+           "heating", "heating oil", "boiler", "boilers", "radiator", "radiators", "kwh",
+           "heat pump", "wood burner", "log burner", "night storage", "storage heater",
+           # a bill you owe and a bill going through parliament are the same word with nothing
+           # else in the line to tell them apart: "how do i pay a bill" and "how do i pay a bill
+           # i dont recognise" got the stages of a bill. The paying words stand this row down, and
+           # the money rows answer.
+           "pay", "paying", "paid", "payment", "payments", "overdue", "unpaid", "i owe",
+           "owe", "direct debit", "standing order", "refund", "refunded", "arrears",
+           "recognise", "recognize", "dont recognise", "don't recognise", "in credit",
+           "meter reading", "how much do i owe",
+           # "what is a law of gravity" was answered with the stages of a bill: a scientific law
+           # and the law on a subject are both "law", and neither is how one is made
+           "law of gravity", "laws of physics", "law of physics", "law of motion",
+           "laws of motion", "law of thermodynamics", "law of attraction", "law of averages",
+           "sods law", "murphys law", "law of the land",
+           "civil and criminal", "civil law", "criminal law", "family law", "employment law",
+           "law on", "against the law", "breaking the law", "break the law")))
+
+ENTRIES.append(_civics(
+    "house-of-commons",
+    ("house of commons", "the commons", "commons", "mps"),
+    "The Commons is the elected half of parliament: 650 MPs, one per constituency, and the party "
+    "with a majority of those seats forms the government. MPs vote on the laws, question "
+    "ministers - prime minister's questions is the Wednesday set-piece - and sit on select "
+    "committees that go through a department's work line by line.",
+    also=("how many mps", "how many members of parliament", "select committee",
+          "select committees"),
+    guard=_not_one_party,
+    avoid=("my mp", "contact my mp", "write to my mp", "who is my mp", "find my mp", "mp for")))
+
+ENTRIES.append(_civics(
+    "house-of-lords",
+    ("house of lords", "the lords", "lords", "life peers", "peers"),
+    "The Lords is the unelected half: about 800 members, mostly life peers appointed for their "
+    "expertise, plus 26 bishops and a handful of hereditary peers. It revises bills line by line "
+    "and sends them back to the Commons, but it can only delay one for about a year, and it "
+    "cannot touch a money bill at all.",
+    avoid=("landlord", "landlords", "landlady", "landladies")))
+
+ENTRIES.append(_civics(
+    "cabinet",
+    ("cabinet", "cabinet minister", "cabinet ministers", "front bench", "senior ministers"),
+    "The cabinet is about 20 senior ministers picked by the prime minister, each running a "
+    "department - the chancellor at the Treasury, the home secretary, the foreign secretary. It "
+    "meets weekly to settle the big calls, and collective responsibility binds them: argue "
+    "inside the room, then defend it outside or resign.",
+    avoid=("cabinet door", "cabinet hinge", "cabinet handle", "cupboard", "wardrobe")))
+
+ENTRIES.append(_civics(
+    "who-can-vote",
+    ("who can vote", "who can vote in", "who can vote at", "who may vote",
+     "who is allowed to vote", "who gets to vote",
+     "who is entitled to vote", "eligible to vote", "right to vote", "can i vote",
+     "am i allowed to vote", "can my child vote"),
+    "Anyone 18 or over can vote in a general election if they are a British, Irish or qualifying "
+    "Commonwealth citizen on the electoral register - members of the Lords cannot vote, and EU "
+    "citizens can vote in local elections only. The register is at gov.uk/register-to-vote, and "
+    "you have to be on it about 12 working days before polling day.",
+    # "who can vote in a general election" reached the election row, which answers when an
+    # election is and how a seat is won and never says who may vote; the one sentence about the
+    # franchise sat at the end of it. Who may vote is its own fact, so it gets its own row, which
+    # is written before the election row so that an equal score goes to the franchise.
+    ask=_CIVICS_ASK + ("can", "could", "am i", "am i allowed"),
+    # The election a franchise line names is its setting, not its question - and a line naming
+    # one is exactly the line the election row also reaches, where it scores the same and wins
+    # on having named the thing. So the setting is a part of its own here: "who can vote in a
+    # general election" then out-scores "when is the next general election"'s card instead of
+    # tying with it, and the when question is left to that card.
+    also=("vote in a general election", "vote in the next election", "vote in an election",
+          "vote in elections", "vote in local elections", "vote in the local elections",
+          "vote at the election", "voting in a general election", "vote on polling day"),
+    guard=_only_this_country,
+    avoid=("vote for", "vote leave", "vote remain", "tactical vote", "swing vote",
+           "vote labour", "vote conservative", "how many people voted", "turnout",
+           "in the us", "american")))
+
+ENTRIES.append(_civics(
+    "general-election",
+    ("general election", "election", "elections", "polling day", "poll", "polls"),
+    "A general election has to be held at least every five years, and the prime minister can "
+    "call one sooner. All 650 seats are fought on one day, and under first past the post the most "
+    "votes in a constituency wins it, even without a majority there. Whoever can command a "
+    "majority of the Commons is then asked by the monarch to form a government. To vote you have "
+    "to be 18, on the electoral register, and not a member of the Lords.",
+    # "when" is not one of the shared ask words, so "when is the next general election" failed
+    # the ask test on this row and fell through to a reminder card ("Nothing so far - you haven't
+    # mentioned anything coming up"). The when-shapes are this row's question, so they are asked
+    # for here.
+    ask=_CIVICS_ASK + ("when", "when is", "when will", "when does", "what date"),
+    also=("how often", "when is", "when will", "when does", "next election",
+          "next general election", "date of the next election"),
+    guard=_only_this_country,
+    avoid=("union election", "union elections", "local election", "local elections",
+           "council election", "council elections", "by-election", "by-elections",
+           "byelection", "byelections", "by election", "by elections",
+           "election result", "election results", "who won",
+           # the answer is the UK's five-year rule under first past the post, which is wrong
+           # advice for a question about another country's elections
+           "in the us", "in america", "the usa", "us election", "us elections",
+           "american", "presidential", "electoral college",
+           "conservative party", "labour party", "liberal democrats", "snp", "green party",
+           "reform party", "how many mps are in")))
+
+ENTRIES.append(_civics(
+    "referendum",
+    ("referendum", "referenda", "referendums", "peoples vote", "people's vote"),
+    "A referendum is one yes-or-no question put to the whole electorate instead of to parliament "
+    "- the 2016 vote on leaving the EU, and the 2014 vote on Scottish independence before it. It "
+    "is not legally binding in UK law, but no government could ignore a clear result, so in "
+    "practice it settles the question."))
+
+ENTRIES.append(_civics(
+    "constituency",
+    ("constituency", "constituencies", "parliamentary seat", "boundary review",
+     "boundary changes"),
+    "A constituency is the area that elects one MP: 650 of them, roughly 70,000 to 80,000 voters "
+    "each. The boundaries are redrawn every few years as people move, which is why a seat can "
+    "change shape or vanish. Your MP is the one for the constituency your postcode sits in.",
+    avoid=("my mp", "contact my mp", "write to my mp", "find my mp")))
+
+ENTRIES.append(_civics(
+    "supreme-court",
+    ("supreme court", "supreme court of the united kingdom", "justices"),
+    "The UK Supreme Court opened in 2009 and has 12 justices; it is the last appeal court for "
+    "civil cases and for devolution questions. It cannot strike an Act of Parliament down the "
+    "way the US Supreme Court can, because here parliament is sovereign - but it can rule that a "
+    "minister went beyond their powers.",
+    avoid=("us supreme court", "united states", "american")))
+
+ENTRIES.append(_civics(
+    "devolution",
+    ("devolution", "devolved", "scottish parliament", "holyrood", "senedd",
+     "northern ireland assembly", "stormont", "welsh parliament"),
+    "Devolution is power handed down from Westminster to three parliaments: Scotland's at "
+    "Holyrood (129 MSPs), Wales's Senedd (60 members) and Northern Ireland's at Stormont (90 "
+    "MLAs). They make law on health, education, housing and transport; defence, foreign policy "
+    "and most benefits stay at Westminster.",
+    also=("what powers", "reserved matters")))
+
+ENTRIES.append(_civics(
+    "select-committee",
+    ("select committee", "select committees", "committee of mps", "backbench committee"),
+    "A select committee is a small cross-party group of MPs - or peers - that examines one area, "
+    "like the Treasury committee or the health committee. They take evidence from ministers, "
+    "officials and outside experts and publish reports the government has to answer, which is "
+    "where a lot of the detail a debate never reaches comes from."))
+
+ENTRIES.append(_civics(
+    "voting-system",
+    ("first past the post", "fptp", "voting system", "electoral system",
+     "proportional representation"),
+    "First past the post means the candidate with the most votes in a constituency wins the seat, "
+    "even with only 35% of the vote, and it is how all 650 MPs are elected. It usually gives one "
+    "party a working majority on well under half the national vote - which is why smaller parties "
+    "argue for proportional representation, where seats match vote share.",
+    avoid=("my mp", "contact my mp")))
+
+ENTRIES.append(_civics_new(
+    "hung-parliament",
+    ("hung parliament", "hung parliaments", "coalition", "coalitions", "no majority",
+     "balance of power", "confidence and supply"),
+    "A hung parliament is one where no single party has a majority of the 650 seats, so the "
+    "largest party has to govern with the support of others: the 2010 coalition with the Liberal "
+    "Democrats, and in 2017 the Conservatives paying the DUP for a confidence and supply deal. "
+    "The sitting prime minister stays on and gets the first chance to form a government, and if "
+    "that fails the monarch asks the next party.",
+    also=("what happens", "what is", "who governs", "who forms", "form a government")))
+
+ENTRIES.append(_civics_new(
+    "mps-pay",
+    ("mps paid", "mp salary", "mps salary", "mps earn", "mps wages", "mp pay",
+     "how much do mps", "how much does an mp", "mp expenses", "mps expenses", "salary of an mp"),
+    "An MP's basic salary is £91,346 a year, set by the Independent Parliamentary Standards "
+    "Authority rather than voted by MPs, and it goes up with public sector pay. Office costs, "
+    "staff and travel are claimed separately against receipts and published, so the headline "
+    "figure and the expenses are not the same pot. A minister or the prime minister gets extra "
+    "on top for the job.",
+    also=("how much", "what is", "what are", "earn", "paid")))
+
+ENTRIES.append(_civics_new(
+    "bill-of-rights",
+    ("bill of rights", "human rights act", "human rights", "civil liberties",
+     "european convention on human rights", "echr"),
+    "The UK has no single written constitution and no bill of rights in the American sense; "
+    "rights come from the Human Rights Act 1998, which wrote the European Convention on Human "
+    "Rights into UK law, plus ordinary statutes. Under it a court can declare a law incompatible "
+    "with a Convention right, but only parliament can change the law - which is why a British "
+    "bill of rights is argued about so often and settled so rarely.",
+    avoid=("consumer rights", "refund", "warranty", "guarantee", "tenancy", "my rights at work",
+           "employment rights", "landlord", "patient", "data protection", "gdpr")))
+
+ENTRIES.append(_civics_new(
+    "lord-mayor",
+    ("lord mayor", "lord mayor of london", "city of london", "lord mayors"),
+    "The Lord Mayor of London is the ceremonial head of the City of London - the square mile of "
+    "banks, not the whole city - elected for one year, and the job is to promote the financial "
+    "district and host visiting heads of state. The mayor of London is a different job: elected, "
+    "full time, and running transport and policing for the whole city.",
+    also=("what does", "what is", "who is", "do", "role", "job"),
+    # the elected mayor of London is a job main already answers with a name and a date, and this
+    # row took it: "who is the mayor of london" is not the City of London's ceremonial head
+    avoid=("mayor of london", "who is the mayor", "metro mayor", "combined authority",
+           "elected mayor", "mayor of greater manchester")))
+
+ENTRIES.append(_civics(
+    "parliament-vs-government",
+    ("parliament", "government", "commons", "lords", "westminster"),
+    "The government runs the country day to day - the prime minister, the cabinet and their "
+    "departments - and parliament makes and checks the laws. The government sits inside "
+    "parliament, so the same people are in both, and the roles are opposite: ministers propose, "
+    "and parliament scrutinises, its own backbenchers included.",
+    asks=("difference between", "different from", "versus", "vs", "distinction",
+          "same thing", "how is parliament different")))

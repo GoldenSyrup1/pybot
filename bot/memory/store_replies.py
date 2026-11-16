@@ -8,6 +8,7 @@ import datetime
 import random
 import re
 from ..compose import pick
+from ..compose import ruledout
 from ..compose.recall import with_a_tail
 from ..memory import (content, current, forget, forms, is_follow_up, keywords, last_bot,
                       last_module, last_user, log, name, note, others, plan_line, plan_sentence,
@@ -18,6 +19,7 @@ from ..memory.places import (A_QUESTION_ASKED, NOT_A_PLACE_VALUE, OTHER_PLACE, O
                              PLACE_ENDS, _a_place, _a_town_moved, _asked_person, _other_place,
                              _said_places, _the_place_alone)
 from ..memory import change as a_change
+from ..memory import when as a_when
 from ..memory import cause as a_reason
 from ..memory import pending
 from ..memory import another as second_half
@@ -49,11 +51,13 @@ from ..memory import resize
 from ..memory import reject as turned_down
 from ..memory import repair as a_repair
 from ..memory import told as told_about
+from ..memory import whathurts as a_hurting_part
 from ..memory.when import (already_answer, asks_what_today_is, the_part_asked, until_answer,
                              when_answer)
 from ..memory.topics import ACKS, GREET, STOPWORDS
 from ..memory import topics as _topics
 from ..memory.repeat import HEDGE as _HEDGE
+from ..memory.repeat import a_narrowing_and_its_line as _a_narrowing_and_its_line
 from ..memory.topics import subject as topic_subject
 from ..memory.thread import about as _about_the_chat
 from ..understanding import breeds, understand
@@ -223,6 +227,7 @@ from ..memory.relations import (ABOUT_PERSON_ASK, AGE_ADVERB, AGE_AGAIN, AGE_ASK
                           _pronoun_fits, _pronoun_for, _relation_reply, _relations_of,
                           _same_as_last, _same_name, _same_name_however_they_wrote_it,
                           _same_thing, _the_group_names_typed, _the_group_was_said,
+                          the_pronoun_said_with_a_name,
                           _the_group_word, _the_names_a_pronoun_gave,
                           _the_names_of_the_group, _the_names_they_typed, _their_job,
                           _their_taste, _they_like_sentence, _tidy_name,
@@ -461,6 +466,22 @@ REPEAT_ASK = re.compile(
     # person is not asking for a different answer, they are asking for that one again at a speed
     # they can follow, and the echo ("Got it — say that slower.") said nothing.
     r"|\bsay (?:that|it) (?:again|once more|slower|slowly|simpler|clearer)\b"
+    # The same ask with the verbs people reach for when the answer was long: "explain that
+    # again", "go over that again", "run that by me again". Every one of them names the last
+    # thing said and nothing of its own, and REPEAT_WORDS keeps the rest out, so "go over the
+    # rules of chess" and "explain why the sky is blue" stay about the thing. Before this the
+    # line fell to the composer, and "explain that again" was answered "Got it - explain that
+    # again" with the answer still on the screen.
+    r"|\bexplain (?:it|that|this)(?: (?:again|once more|slower|more slowly|simply|more simply))?\b"
+    r"|\b(?:go|walk|talk)(?: me)? (?:over|through) (?:it|that|this)\b"
+    r"|\brun (?:it|that|this) by me\b"
+    r"|\brun (?:it|that|this) (?:again|once more)\b"
+    # The same ask pointed at a part: "the last bit again", "the last part again". "the last
+    # bit" is the last thing said, not a thing of its own, so a line whose only subject is that
+    # is asking for the answer again.
+    r"|\bthe (?:last|final) (?:bit|part)\b"
+    # The ask said as a complaint about the answer: "you lost me", "sorry you lost me there".
+    r"|\b(?:you(?:'ve| have)? lost me|i lost you)\b"
     r"|\bwhat was that\b"
     r"|\bcome again\b"
     r"|\bpardon\b"
@@ -483,8 +504,9 @@ LAST_LINE_ASK = re.compile(
 
 REPEAT_WORDS = frozenset("""
 say said repeat again tell told speak word pardon missed catch hear one time just last line
-remind reminded you please sorry come that this it me now thing
+remind reminded you please sorry thanks thank cheer cheers ta come that this it me now thing
 slower slowly simpler clearer bit
+explain explained go going through walk talk run ran by part parts lose lost there
 how long much many often soon when where time
 earlier ago previously minute moment before already so far up to now until now
 """.split())
@@ -504,8 +526,10 @@ WHOLE_ASK = re.compile(
 
 REPEAT_START = re.compile(
     r"^(?:(?:and|so|but|ok|okay|oh|then|well|right|hmm|um)\s+)*"
-    r"(?:say|repeat|tell|read|hear|catch|can|could|would|will|what|sorry|pardon|come|again|"
+    r"(?:say|repeat|tell|read|hear|catch|can|could|would|will|what|sorry|pardon|please|thanks|"
+    r"thank you|cheers|ta|come|again|"
     r"how|when|where|remind|reminded|one more|i missed|i didn't catch|i didnt catch|"
+    r"explain|go|walk|talk|run|the|you|i lost|"
     r"didn't catch|didnt catch|do you|excuse me)\b")
 
 REMINDER_MID = re.compile(
@@ -1803,7 +1827,12 @@ ABOUT_A_NAME = re.compile(
     r"\b(?:do|did|can)\s+(?:you|i)\s+(?:ever\s+)?(?:know|remember|tell|told|mention|say|said)\b"
     r"[^?]{0,30}?\babout\s+([a-z][a-z'-]{1,20})\b", re.I)
 
-CHILDREN_ABOUT = re.compile(r"\b(?:kids?|children|child)\b", re.I)
+# The ask that wants the children as a group. It is read with every word a group of children goes
+# by, not only "kids": "what do you know about my girls" and "what have you got on my sons" were
+# both answered with the search hedge a turn after the same chat gave their ages, because the
+# children were filed under the word the person used ("girls", "sons") and this asked for another.
+CHILDREN_ABOUT = re.compile(r"\b(?:kids?|children|child|boys?|girls?|sons?|daughters?|"
+                            r"twins?|lads?|lasses|youngest|eldest|oldest)\b", re.I)
 
 ABOUT_PERSON_MORE = re.compile(r"\b(?:else|other|more|anything)", re.I)
 
@@ -1937,6 +1966,12 @@ def _asks_the_line(low, text):
     """Whether this line, read whole, asks about a fact the store keeps for someone else."""
     low = str(low or "")
     if OTHER_ASK.search(low):
+        return True
+    if _asks_for_a_limit_not_advice(low) and (
+            ASK_WORD.search(low) or ASK_START.search(low)
+            or str(text or "").strip().endswith("?")):
+        # "does she need to avoid anything" names the limit and asks for it; it is the same ask
+        # as "is she vegan", and none of the sets below hold the word "avoid".
         return True
     if DIET_ASK.search(low) and not DIET_HOW_TO.search(low):
         return False  # "what's my diet" is about them, whatever is kept for someone else
@@ -2479,12 +2514,61 @@ def _which_thing_was_it(low, memory):
         return None
     return thing
 
+# The phrases that say *when* rather than *what*. "my laptop fan is loud all the time now" is a
+# line about the fan: the "time" in it is how long for, not a thing they told the store about.
+# Read as a thing, though, it made a bare "whats the time" a recall of that line, and the store
+# answered the clock with the person's own words ("You said: \"my laptop fan is loud all the
+# time now\"") while the clock was right there to be said. The same shape is in "its loud all
+# day", "most of the time", "at the time" and "right now", so the phrases go before the word is
+# looked for, and never the other way round.
+A_WHEN = re.compile(
+    r"\b(?:all|most|some|any|each|every|next|last|this|that|another|half|plenty\s+of|lots\s+of|"
+    r"a\s+(?:long|short|little|bit\s+of|lot\s+of)|the\s+whole|the\s+entire)\s+(?:the\s+)?time\b"
+    r"|\b(?:at|in|on|before|after|by|of)\s+the\s+time\b"
+    r"|\btime\s+(?:to|for)\b"
+    r"|\b(?:all|most|some|any|each|every|the\s+whole|these|those)\s+"
+    r"(?:day|days|night|nights|week|weeks|month|months|year|years|morning|evening|afternoon)\b"
+    r"|\b(?:right|just)\s+now\b")
+
+
+def _without_the_when(line):
+    """The line with the phrases that say when taken out, so "all the time" is not "the time"."""
+    return A_WHEN.sub(" ", line)
+
+
+# "what time is it", "have you got the time": the clock, asked in the words people use for it.
+# The "it" in them points at nothing the chat has said, so a detail reader that leans on a
+# pointing word is reading a referent that is not there.
+A_CLOCK_ASK = re.compile(
+    r"^(?:and |so |but |oh |right |ok |okay |hi |hello |sorry )*"
+    r"(?:(?:whats|what's|what is|whats?) the time"
+    r"|what\s+time\s+is\s+it"
+    r"|(?:have|has|do|did)\s+(?:you|u)\s+(?:got|have|know)\s+the\s+time"
+    r"|(?:got|know)\s+the\s+time)\b")
+
+
+def _a_clock_ask(line):
+    """True for a line that asks what the clock says."""
+    return bool(A_CLOCK_ASK.match(str(line or "").strip().lower()))
+
+
 def _said_word(word, memory):
-    """Whether the person used this word, or one of its forms, in one of their last lines."""
+    """Whether the person named this word, or one of its forms, in one of their last lines.
+
+    A word inside a phrase that says when does not name anything: "all the time" is how long
+    the fan has been loud, not something they told the store about the time of day. And a
+    question they asked is not a thing they named: "what time is it" then "whats the time" is
+    the same ask twice, and reading the first one as the thing the second is about handed the
+    fan line back under "You said: ...". This is the rule the rest of the store already
+    follows - an ask is kept as the question it was, never as the fact.
+    """
     mine = forms(word)
     for turn in recent(memory, 8):
-        line = turn.get("user") or ""
-        if not line:
+        said = str(turn.get("user") or "")
+        if not said.strip() or _asks(said):
+            continue
+        line = _without_the_when(said)
+        if not line.strip():
             continue
         if any(mine & forms(seen) for seen in content(line)):
             return True
@@ -2518,7 +2602,12 @@ def _elided_ask(text, memory, low=""):
     if not line or set(line.split()) - ELIDED_WORDS:
         return "", False
     raw = " ".join(str(text or "").lower().split())
-    if not (ELIDED_ASK.search(line) or (ELIDED_AGAIN.search(line) and "again" in raw)):
+    # The asking word is the one the folded line drops, and two of the shapes in ELIDED_ASK are
+    # a recall only because of it: "what was it again" folds to "what was it", which is a question
+    # about the thing and not about the conversation. So the raw line is tried as well as the
+    # folded one - it is where "again" still is.
+    if not (ELIDED_ASK.search(line) or ELIDED_ASK.search(raw)
+            or (ELIDED_AGAIN.search(line) and "again" in raw)):
         return "", False
     turns = memory.get("turns") or []
     named = _named_slots(line)
@@ -2781,7 +2870,13 @@ PLACES_ASK = re.compile(
     # the extractor files as where they are from.
     r"\bwhere (?:did|do|does) (?:i|we) (?:grow|grew|grown) up\b|"
     r"\bwhere (?:was|were) (?:i|we) (?:raised|brought up|brung up)\b|"
-    r"\bwhere did (?:i|we) (?:live|grow up) (?:before|originally|as a kid|as a child|growing up)\b")
+    r"\bwhere did (?:i|we) (?:live|grow up) (?:before|originally|as a kid|as a child|growing up)\b|"
+    # The move said as a move: "where did i move from" asks the same fact as "where am i from",
+    # and it was answered with a search hedge. It is asked this way after "i moved to preston
+    # last year" - the line names only the destination, so the origin is the question.
+    r"\bwhere (?:did|do|does) (?:i|we) (?:move|moved) (?:here |over |away )?from\b|"
+    # And the move named with the destination in the question: "which town did i move from".
+    r"\b(?:which|what) (?:city|town|place|county|country) did (?:i|we) move (?:from|away from)\b")
 
 SELF_WORD = re.compile(r"\b(?:i|i'm|im|i've|ive|i'd|id|me|my|mine|we|we're|us|our|ours)\b")
 
@@ -3186,6 +3281,11 @@ def _the_store_reply(text, memory):
             if _same_as_last(reply, memory):
                 return _said_another_way(reply) or reply
             return reply
+    # "and which knee was it": read before the store's own reply, which answers a line it does
+    # not know with the last thing they said ("You said: \"its on the outside of the knee\"").
+    part_asked = a_hurting_part.the_part_asked(memory, low)
+    if part_asked:
+        return part_asked
     reply = _respond(text, memory)
     if not reply:
         # "no i meant the front room" names no fact to move - the thing it swaps is the subject of
@@ -3222,6 +3322,9 @@ def _the_store_reply(text, memory):
         # left out: "hes a labrador, 9 weeks old" then "what breed is he" was asked back, which
         # says the chat was not listening.
         reply = _pet_part_reply(memory, low)
+    if not reply:
+        # "and which knee was it": the store holds the part and the side it was said with.
+        reply = a_hurting_part.the_part_asked(memory, low)
     if not reply:
         # The rate of their own doing, asked back late: "how often was that again" after "i go to
         # the gym twice a week". Read before the detail ask-back, which asks them the question
@@ -3264,6 +3367,34 @@ DETAIL_ASKS = (
 DETAIL_LEAN = re.compile(r"\b(?:it|that|this|they|them|those|we|you|your|he|she|him|her)\b", re.I)
 
 BARE_MEASURE = re.compile(r"\bhow (?:much|many|long|old)\b", re.I)
+
+# A price the answer on the screen already states. "i've got a dentist appointment" then "how
+# much is that" was asked back - "You haven't said - how much is that?" - while the answer two
+# lines up said "An NHS check-up is £27.40 in England." A detail already given is not a detail
+# left out, and asking for it reads as if the chat had not read its own answer.
+MONEY_SAID = re.compile(r"£\s?\d|\b\d[\d,.]*\s*(?:pounds?|quid|euros?|dollars?)\b", re.I)
+
+LOOK_BACK_ANSWER = 3
+
+
+def _the_answer_already_gives(detail, memory):
+    """True when the newest answer on the screen states the detail this line asks about.
+
+    Only the price is read. Nearly every answer states a count or a length ("four to five hours",
+    "three things to check"), so a guard on those would take away ask backs that are right; a
+    price is stated when it is meant, and a line asking for it has its answer already.
+    """
+    if detail != "money":
+        return False
+    said = [turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)]
+    for turn in reversed(said[-LOOK_BACK_ANSWER:]):
+        if turn.get("module") not in ANSWER_MODULES:
+            continue
+        reply = " ".join(str(turn.get("bot") or "").split())
+        if not reply or reply.rstrip().endswith("?"):
+            continue
+        return bool(MONEY_SAID.search(reply))
+    return False
 
 ASK_OPENER = re.compile(
     r"\A(?:how|what|whats|when|where|which|why|who|whose|is|are|was|were|can|could|should"
@@ -3346,6 +3477,13 @@ def _detail_they_left_out(memory, low):
     line = str(low or "").strip()
     if not line or len(line.split()) > 9:
         return None
+    if _a_clock_ask(line) and not a_when.EVENT_WORD.search(str(last_user(memory) or "")):
+        # "what time is it" is a question about the clock, not a detail of their news: the "it"
+        # in it points at nothing the chat has said, so asking it back ("You haven't said - what
+        # time is it?") tells them nothing while the clock is right there to be said. After a
+        # line that names something in a diary - "i have a dentist appointment" - the time is
+        # that appointment's, and the ask back is the honest answer.
+        return None
     if _about_the_bot_here(memory):
         # "where are you" and "where are you from" ask the bot, not for a detail of the person's
         # own news; the chat's own identity answer is the one that speaks to them.
@@ -3410,6 +3548,8 @@ def _detail_they_left_out(memory, low):
     if known is not None and not narrower and known.search(previous):
         return None
     if detail == "time" and HOW_LONG_IT_TAKES.search(line):
+        return None
+    if _the_answer_already_gives(detail, memory):
         return None
     if detail == "money" and re.search(r"\bcost\b", line):
         return "You didn't say what it cost - how much was it?"
@@ -3903,6 +4043,119 @@ def _someone_said_back(said, memory):
             return "Your " + who + " is " + str(age) + "."
     return None
 
+# A category of food, and the words people use for it. Only a category is read: "do i eat
+# halloumi" is a question about a food and the kitchen entries answer it, while "do i eat meat"
+# is a question about the rule they gave the store.
+FOOD_CATEGORIES = (
+    ("meat", ("meat", "chicken", "beef", "pork", "lamb", "bacon", "ham", "sausage", "sausages",
+              "steak", "mince", "turkey", "burger", "burgers", "veal", "venison")),
+    ("fish", ("fish", "salmon", "tuna", "prawn", "prawns", "shellfish", "cod")),
+    ("dairy", ("dairy", "milk", "cheese", "butter", "cream", "yoghurt", "yogurt")),
+    ("eggs", ("egg", "eggs")),
+    ("gluten", ("gluten", "wheat", "bread", "pasta", "flour")),
+    ("nuts", ("nut", "nuts", "peanut", "peanuts")),
+    ("alcohol", ("alcohol", "beer", "wine", "booze", "spirits", "cider")),
+)
+# Words that say how much of the food, not which food it is: "do i eat red meat" is still meat.
+NOT_THE_FOOD = frozenset((
+    "red", "white", "processed", "raw", "cooked", "fresh", "any", "more", "much", "some", "the",
+    "a", "bit", "of", "lot", "still", "either", "anymore", "again", "now", "it", "that", "this",
+    "at", "all",
+))
+# What each rule the store keeps takes off the table. The diet is its own words ("vegetarian",
+# "no alcohol"), an allergy names the food, and a condition names what it rules out: the reader
+# asks this table instead of guessing from the words of the line.
+A_DIET_RULES_OUT = {
+    "vegetarian": ("meat",),
+    "vegan": ("meat", "fish", "dairy", "eggs"),
+    "pescatarian": ("meat",),
+    "no meat": ("meat",),
+    "no dairy": ("dairy",),
+    "dairy free": ("dairy",),
+    "dairy-free": ("dairy",),
+    "gluten free": ("gluten",),
+    "gluten-free": ("gluten",),
+    "no alcohol": ("alcohol",),
+}
+A_CONDITION_RULES_OUT = {
+    "coeliac": ("gluten",),
+    "celiac": ("gluten",),
+    "coeliac disease": ("gluten",),
+    "lactose intolerant": ("dairy",),
+}
+# The ask is "do i eat meat", "do i drink alcohol": a yes/no about the rule they gave the store.
+# "do i have milk" is not this ask - it is a look in the fridge - so `have` is not read here.
+# The `can i eat` shape is left alone - the kitchen entries answer it with the substitutes, which
+# is a better answer than the rule said back.
+# The lead-in is stripped, then the ask is read: "so do i eat meat" is the same question as
+# "do i eat meat", and a person who asks it that way has been mid-conversation for a while.
+# "did i eat meat" is a question about the meal they had, not about the rule: the rule cannot
+# answer what was on the plate last night, so the ask is the present one only.
+EATING_ASK = re.compile(
+    r"^\W*do\s+i\s+(?:still\s+|really\s+|actually\s+|now\s+|ever\s+)?"
+    r"(?:eat|drink)\s+(.+)$", re.I)
+LEAD_IN = re.compile(r"^(?:so|and|but|ok|okay|well|sorry|hey|right|quick one)[, ]+", re.I)
+
+
+def _the_food_named(rest):
+    """The category a bare food phrase names, or "" when it names none of them."""
+    said = [word for word in re.findall(r"[a-z']+", str(rest or "").lower())
+            if word not in NOT_THE_FOOD]
+    if not said:
+        return ""
+    for category, words in FOOD_CATEGORIES:
+        if all(any(word == one or word == one.rstrip("s") or word.rstrip("s") == one.rstrip("s")
+                   for one in words) for word in said):
+            return category
+    return ""
+
+
+def _the_rule_that_rules_it_out(known, category):
+    """The rule they gave the store that takes this food off the table, said back, or ""."""
+    diet = " ".join(str(known.get("diet") or "").lower().split())
+    taken = list(A_DIET_RULES_OUT.get(diet) or ())
+    if known.get("no_meat") and "meat" not in taken:
+        taken.append("meat")
+    if category in taken:
+        if diet:
+            return "No \u2014 " + _clause("diet", known.get("diet")) + "."
+        return "No \u2014 you don't eat meat."
+    for allergy in known.get("allergies") or []:
+        said = str(allergy).lower()
+        if any(said == one or said.rstrip("s") == one.rstrip("s")
+               for one in dict(FOOD_CATEGORIES)[category]):
+            return "No \u2014 " + _clause("allergies", known.get("allergies")) + "."
+    for condition in known.get("condition") or []:
+        word = " ".join(str(condition).lower().split())
+        if category in (A_CONDITION_RULES_OUT.get(word) or ()):
+            return "No \u2014 you've told me you're " + word + ", so " + category + " is out."
+    return ""
+
+
+def _a_rule_on_eating(text, memory):
+    """A yes/no about eating or drinking a food, answered from the rule the store keeps.
+
+    "im vegetarian" / "do i eat meat" was answered "I'm not sure about that one, sorry" - a
+    search hedge about something the person had just told the bot - because the confirmation
+    reader looks for a fact of the same shape ("i eat meat") and what the store was told is the
+    rule. Only a rule that takes the food off the table is answered: a food their rule allows is
+    read by the kitchen entries, which know the substitutes, and a food no rule mentions is left
+    to them as well.
+    """
+    line = " ".join(str(text or "").lower().split())
+    match = EATING_ASK.match(LEAD_IN.sub("", line))
+    if not match:
+        return None
+    category = _the_food_named(match.group(1).strip(" ?!."))
+    if not category:
+        return None
+    known = user(memory)
+    if not isinstance(known, dict):
+        return None
+    rule = _the_rule_that_rules_it_out(known, category)
+    return rule or None
+
+
 def _confirmation(text, memory):
     """Answer a yes/no question about something they told you, from what they told you."""
     statement = _statement(text)
@@ -4224,6 +4477,19 @@ def _fact_fixed_this_turn(text, memory):
     return said
 
 def _respond(text, memory):
+    # "whats our plan", "what have we decided", "what do we know so far": the ask is for
+    # everything the chat holds, so the answer is the list (`_summary_reply`) - not the newest
+    # line, not a choice the chat never made ("You haven't picked one yet"), and not a card. It
+    # goes first because the readers below each answer a question of their own: `decided` reads
+    # "what have we decided" as a choice and denies a chat that made several.
+    low_here = " ".join(str(text or "").lower().split())
+    if _summed_up(low_here):
+        # A chat that holds nothing of theirs has nothing to sum up, and the list's tail would
+        # name the ask's own verb as the subject ("we've been on the decided"). The recap's own
+        # "we're still at the beginning" is the honest reply to a summary of an empty chat.
+        if not any(str(value or "").strip() for value in user(memory).values()):
+            return _vary(NOTHING_STARTED, memory)
+        return _summary_reply(memory)
     renamed = _name_fixed_this_turn(text, memory)
     if renamed:
         return renamed
@@ -4410,6 +4676,14 @@ def _respond(text, memory):
     said_until = until_answer(text, memory)
     if said_until:
         return said_until
+    # "where did i say we were going", "how often did i say i go": an ask about what they said, and
+    # the answer is the line itself. It comes before the date reader, which took the "say" for the
+    # event and answered a question about a trip with "No - that's in February."; the quotation
+    # cannot be wrong the way that was, and where nothing matches it says so rather than guessing.
+    from ..compose.own_facts import said_back
+    the_line_back = said_back(text, memory)
+    if the_line_back:
+        return the_line_back
     # "did i already go", "have i been yet": the date is filed, but which side of today it is on
     # is a question of its own and "In June." does not answer it.
     said_side = already_answer(text, memory)
@@ -4515,6 +4789,12 @@ def _respond(text, memory):
         return remembered
     # "am i vegetarian?", "is my name sam?" — a yes/no question about the person, answered from
     # what they told you rather than guessed at.
+    # "do i eat meat" after "im vegetarian": the rule they gave the store, asked back as a yes/no
+    # about a food. It came before the confirmation reader found nothing and the turn fell to a
+    # search hedge about a fact the bot had been told a turn earlier.
+    ruled_out = _a_rule_on_eating(text, memory)
+    if ruled_out:
+        return ruled_out
     confirmed = _confirmation(text, memory)
     if confirmed:
         return confirmed
@@ -4770,7 +5050,7 @@ def _respond(text, memory):
             # plans ask ("what was i planning to do about it?") and the "nothing yet" line below
             # is the answer, not a hedge. Falling out of this branch keeps that.
         else:
-            asked = _topic_reply(memory, low)
+            asked = _topic_reply(memory, low, again=bool(ASKING_AGAIN.search(folded)))
             if asked:
                 return asked
     if _summary_ask(low):
@@ -5285,6 +5565,20 @@ def _the_date_behind_that(memory, low, plans):
 _A_DATE_AT_THE_END = re.compile(
     r"^(?P<subject>.*?)\s+(?P<date>(?:in|on|at|next|this)\s+[a-z0-9' ]+\.?)$", re.I)
 
+def _the_whole_word_in(text, word):
+    """Where the word sits in the line as a word of its own, or -1.
+
+    "when are my exams again" holds "exam", but only as the front of "exams", and the letter left
+    over was read as the verb the ask named: the plan "exam on the 14th of june" came back "Your
+    exam ses is on the 14th of June". The plural is the same thing said again, and the plan said
+    as it is answers it.
+    """
+    if not word:
+        return -1
+    found = re.search(r"(?<![\w'])" + re.escape(word) + r"(?![\w'])", str(text or ""))
+    return found.start() if found else -1
+
+
 def _third_person(word):
     """The form a verb takes after "he": "start" -> "starts", "go" -> "goes", "try" -> "tries"."""
     word = str(word or "").strip(".,!?;:")
@@ -5368,7 +5662,7 @@ def _the_verb_they_asked(plan, low, line=""):
     if subject.split()[-1] in ("is", "are", "was", "were"):
         subject = " ".join(subject.split()[:-1])
     asked = " ".join(str(low or "").split()).strip("?.! ")
-    at = asked.find(subject)
+    at = _the_whole_word_in(asked, subject)
     if at < 0:
         return plan
     rest = asked[at + len(subject):].strip()
@@ -5395,6 +5689,13 @@ def _the_verb_they_asked(plan, low, line=""):
     if words[0].lower() in ("is", "are", "was", "were", "will", "would", "can", "could",
                             "has", "had", "does", "did"):
         return subject + " " + " ".join(words) + " " + match.group("date")
+    if words[0].lower().endswith("s") and not words[0].lower().endswith("ss"):
+        # A word already said in the plural after the thing is more of the thing, not the verb:
+        # "when are my dentist appointments" is the appointment they told me about, and reading
+        # "appointments" as a verb made "Your dentist appointmentses is on the 3rd of June". A verb
+        # the ask names comes in the form the ask is built with ("when does my course start"), and
+        # a verb misspelled in the plural loses nothing by being left out.
+        return plan
     words[0] = _third_person(words[0])
     return subject + " " + " ".join(words) + " " + match.group("date")
 
@@ -5508,7 +5809,7 @@ def _plans_reply(memory, low):
                 if _about_kind("trip", plan, memory, phrase=True):
                     return plan_sentence(plan, plan_line(memory, plan)) + "."
         return None
-    thing = _when_thing(low)
+    thing = _when_thing(low, wide=not plans)
     if thing:
         # The plan that names the thing they asked about answers "when is the wedding?".
         asking = [p for p in plans if _names_the_thing(p, thing, memory)]
@@ -5697,15 +5998,35 @@ def _names_something_of_its_own(low, start):
         return True
     return False
 
-def _when_thing(low):
+def _when_thing(low, wide=False):
     """The thing a when ask names, as a content word: "when is the wedding" -> "wedding".
 
     "" when there is nothing definite named ("when is the next full moon"), which keeps a
-    question about the world out of the store's plans."""
+    question about the world out of the store's plans.
+
+    `wide` reads past a vague lead word, because English puts one where the thing should be:
+    "when is the *next* general election", "when is the *next* bank holiday", "when is the
+    *next* leap year". Reading only the first word left the thing invisible, so the line reached
+    the empty-store line ("Nothing so far - you haven't mentioned anything coming up") in front
+    of an answer the bot already has. Only a content word counts, and a phrase that is still
+    vague after the lead ("the next time we meet", "my next thing") gives nothing, so the asks
+    about their own diary keep the store's answer. Used where nothing they told us is a plan, so
+    a conversation that has plans in it is read exactly as it was.
+    """
     found = WHEN_THING.search(low) or WHEN_THING_VERB.search(low)
     if not found:
         return ""
-    for word in keywords(found.group(1)):
+    said = keywords(found.group(1))
+    if wide and said and all(word in WHEN_VAGUE for word in said):
+        for word in re.findall(r"[a-z][a-z'-]*", low[found.end():])[:4]:
+            words = keywords(word)
+            if not words:
+                continue
+            if words[0] in WHEN_VAGUE:
+                return ""  # "the next time we meet" is still their own diary
+            said = words
+            break
+    for word in said:
         if word not in WHEN_VAGUE:
             return word
     return ""
@@ -6224,14 +6545,24 @@ def _last_answer(memory):
     return reply if isinstance(reply, str) else ""
 
 def _one_half_of_the_dish(food, taste):
-    """True when the food the guest reader found is one half of the dish the line names."""
+    """True when the food the guest reader found is one half of the dish the line names.
+
+    Only "and" and "with" make a dish out of two foods. "i dont want pasta or rice tonight" is
+    two things turned down, and reading "pasta" as one half of a dish called "pasta or rice" meant
+    the whole family went unanswered ("Noted: you don't want pasta or rice tonight") while a
+    single "i dont like pasta" got "no pasta in anything I suggest".
+    """
     if not isinstance(taste, dict):
         return False
     thing = str(taste.get("thing") or "").strip().lower()
     food = str(food or "").strip().lower()
     if not thing or not food or thing == food:
         return False
-    return " " + food + " " in " " + thing + " "
+    joined = re.match(r"^(?P<one>.+?)\s+(?P<how>and|with|&)\s+(?P<two>.+)$", thing)
+    if not joined:
+        return False
+    return bool(re.search(r"\b" + re.escape(food) + r"\b",
+                          joined.group("one") + " " + joined.group("two")))
 
 def _dislikes_here(text):
     """[(food, kind)] in the line, a taste nobody else is named for read as their own.
@@ -6268,6 +6599,13 @@ def _a_dislike_told(text, memory):
         # module keeps the dish whole.
         return None
     foods = [food for food, kind in found if kind in ("user", "other")]
+    alone = []
+    if not foods and _last_answer(memory):
+        # A bare "no mushrooms" answers the suggestion the bot has just made, and nothing in the
+        # line has a verb for `found` to read. It is only a dislike when there is a suggestion
+        # for it to be about: "no milk" on its own is as likely to be about the fridge.
+        alone = guest.turned_down_alone(text)
+        foods = alone
     if not foods:
         return None
     previous = _last_answer(memory)
@@ -6275,7 +6613,19 @@ def _a_dislike_told(text, memory):
         revised = guest.revise(previous, foods)
         if revised:
             return revised
-    own = [guest.plain(food) for food, kind in found if kind == "user"]
+        # The answer on the table does not name the food, so this is a steer on that answer and
+        # not a fresh dislike: "what can i cook with mince" then "i dont want a lasagne" is
+        # `ruled_out`'s line, which says the answer still stands. Promising to leave lasagne out
+        # of everything is an answer to a question nobody asked, and it takes the turn from the
+        # module built for the shape. The hook is the one the arbiter already asks for it.
+        try:
+            if ruledout.takes_as_it_comes(text, memory):
+                return None
+        except Exception:  # noqa: BLE001 - a hook that raises claims nothing
+            pass
+    a_pair = len(foods) > 1
+    own = [guest.plain(food, a_pair) for food, kind in found if kind == "user"]
+    own = own or [guest.plain(food) for food in alone]
     own = [food for food in own if food]
     if own:
         return guest.left_out(own)
@@ -6589,6 +6939,10 @@ def _diet_reply(memory, low=""):
 
 AGE_COMPARE = re.compile(
     r"\bwho(?:'s|s| is| was)?\s+(?:the\s+)?(?:older|younger|eldest|oldest|youngest)\b|"
+    # "which one is older", "which of them is younger": the same ask as a choice out of two,
+    # and it fell to the search hedge the same way. The person has just been told about a pair.
+    r"\bwhich(?:\s+one|\s+of\s+(?:them|those|the\s+two))?\s+(?:is\s+|was\s+)?(?:the\s+)?"
+    r"(?:older|younger|eldest|oldest|youngest)\b|"
     r"\b(?:am|is|are|was|were)\b[^.!?]{0,40}\b(?:older|younger) (?:than )?\b|"
     r"\bhow (?:much|many years)\s+(?:older|younger)\b|"
     r"\b(?:older|younger) (?:than )?(?:me|him|her|them)\b", re.I)
@@ -6596,6 +6950,18 @@ AGE_COMPARE = re.compile(
 BARE_AGE_WHO = re.compile(
     r"^\W*(?:so|and|ok|okay|but|well)?[\s,]*who(?:'s|s| is| was)?\s+(?:the\s+)?"
     r"(?:older|younger|oldest|youngest|eldest)\b[^.?!]*$", re.I)
+
+# The same bare ask as a choice between two: "which one is older", "which of them is younger".
+# The person who says this has just been told about two people and wants the two numbers put
+# against each other, and it is the same question as "who is older" however it is worded.
+# The gap asked for with a pronoun instead of a name: "how much older is he". It is read with
+# the two people the store holds, which is the only pair the line can be about.
+THE_AGE_GAP = re.compile(r"\bhow (?:much|many years)\s+(?:older|younger)\b", re.I)
+
+
+WHICH_ONE_AGE_WHO = re.compile(
+    r"^\W*(?:so|and|ok|okay|but|well)?[\s,]*which(?:\s+one|\s+of\s+(?:them|those|the\s+two))?"
+    r"(?:'s|s| is| was)?\s+(?:the\s+)?(?:older|younger|oldest|youngest|eldest)\b[^.?!]*$", re.I)
 
 PEOPLE_WORDS = re.compile(r"\b(?:she|her|hers|he|him|his|they|them|us|we|me|i|myself|mine)\b", re.I)
 
@@ -6660,6 +7026,24 @@ def _age_compare(memory, low):
         if pointed is None:
             return None
         sides = [me, pointed]
+    elif (not named and me is None and len(by_who) == 2
+          and not re.search(r"\b(?:me|myself|mine|i|im)\b", low)
+          and (BARE_AGE_WHO.match(low) or WHICH_ONE_AGE_WHO.match(low))):
+        # "who is older" names nobody and the person has given no age of their own, so the
+        # comparison is the two people the store holds an age for: after "my daughter is 4 and
+        # my son is 7" that question is the whole of it, and it was answered with the search
+        # hedge ("I can't look that up from here, sorry"). Two is the number the line can be
+        # about; with three ages and nobody named it could be about either pair, so the turn
+        # stays free rather than guessing.
+        sides = list(by_who.values())
+    elif (not named and me is None and len(by_who) == 2 and THE_AGE_GAP.search(low)
+            and not re.search(r"\b(?:me|myself|mine)\b", low)
+            and _the_pronoun_is_one_of_the_two(by_who, low)):
+        # "how much older is he" asks for the gap between the two people the store holds, and
+        # it fell to the search hedge because the line names nobody with "my": the pronoun is
+        # the only person named. A pronoun that fits neither of the two is a question about
+        # somebody the store has no age for, so it keeps the turn free.
+        sides = list(by_who.values())
     else:
         return None
     try:
@@ -6813,6 +7197,22 @@ def _which_comes_first(memory, low):
             later[0] + "."
     tail = ", then ".join(later)
     return first + ", so that one is first \u2014 then " + tail + "."
+
+def _the_pronoun_is_one_of_the_two(by_who, low):
+    """Whether a pronoun in the line fits one of the two people the store holds an age for.
+
+    "how much older is she" about two sons is not a question about either of them, and answering
+    it from their two ages puts a girl in the answer they never mentioned. A line with no
+    pronoun at all is the pair itself, so it passes.
+    """
+    if re.search(r"\b(?:she|her|hers)\b", low):
+        fits = extract.SHE
+    elif re.search(r"\b(?:he|him|his)\b", low):
+        fits = extract.HE
+    else:
+        return True
+    return any((entry.get("who") or "").lower() in fits for entry in by_who.values())
+
 
 def _pointed_at(aged, low):
     """The person an age comparison points at with a pronoun, or the last one heard of.
@@ -6968,6 +7368,56 @@ def _limit_reply(memory, low=""):
                       "Same answer: " + said[0].lower() + said[1:]], memory)
     return said
 
+# A question can be asked without a question mark, and then the fact in front of it is only the
+# context for it: "my sister is veggie and she's coming to dinner, what can i cook" ends on the
+# ask, and the store's receipt for the fact ("Your sister is veggie.") answers something nobody
+# asked while the card that answers the dinner waits behind it (hf:lewtun, #general 126189).
+AN_ASK_AT_THE_END = re.compile(
+    r"(?:^|[\s,;])(?:what|which|how|where|when|who|why)\b[^.!?]*$"
+    r"|(?:^|[\s,])(?:can|could|should|shall|would|will|do|does|did|is|are|am)\s+"
+    r"(?:i|we|you|he|she|they|it)\b[^.!?]*$", re.I)
+
+# The composer's own way of saying it has nothing: no receipt is worth less than this.
+HEDGED = re.compile(
+    r"\b(?:don'?t know enough|beyond what i know|not sure about that one|"
+    r"rather not guess|a (?:quick )?search\b|searching for it|look it up)\b", re.I)
+
+
+def _the_answer_the_ask_gets(text, memory):
+    """What the cards say to this line as a question, or "" when they have nothing to say.
+
+    A hedge is not an answer: "I don't know enough to answer that honestly" is the composer
+    giving up, and a fact the store can say back is better than that.
+    """
+    from ..modules import answers  # noqa: PLC0415 - answers imports this package
+    fresh = {"turns": [], "aside": True}
+    for key in ("user", "others", "facts_log"):
+        if key in memory:
+            fresh[key] = memory[key]
+    try:
+        reply = answers.respond(text, fresh) or ""
+    except Exception:  # noqa: BLE001 - a store that cannot ask is a store that says the fact
+        return ""
+    said = " ".join(str(reply).split())
+    if not said or HEDGED.search(said):
+        return ""
+    return said
+
+
+def _the_ask_beats_the_receipt(text, memory):
+    """True when a line that ends on a question is a question the cards can answer.
+
+    Asked of the cards rather than assumed, because a line whose ask they cannot answer
+    ("my wife is vegan and we are going out, where can we eat") keeps its receipt, which is at
+    least true, instead of falling through to a shrug.
+    """
+    if not isinstance(text, str) or "?" in text:
+        return False
+    if not AN_ASK_AT_THE_END.search(" ".join(text.split())):
+        return False
+    return bool(_the_answer_the_ask_gets(text, memory))
+
+
 def _a_diet_told(text, memory, low):
     """"she doesnt eat meat" said about someone: "Your mum doesn't eat meat."
 
@@ -6977,6 +7427,12 @@ def _a_diet_told(text, memory, low):
     diet is not here: that is a line about them, and the echo handles it.
     """
     if not isinstance(text, str) or "?" in text:
+        return None
+    if _the_ask_beats_the_receipt(text, memory):
+        # The line ends on a question the cards can answer, so the fact is only what that question
+        # is about: filing it is the whole job, and the receipt is a line nobody asked to have said
+        # back. "my sister is veggie ... what can i cook" gets the dinner card, not "Your sister is
+        # veggie."
         return None
     if _about_this_chat(text, memory) or OTHER_ASK.search(low) or REMINDER_MID.search(low):
         return None
@@ -7861,7 +8317,13 @@ def _about_a_person_reply(memory, low, text=""):
     # york" says the age, and "Your mum is 72. You told me your mum is 72 and lives in york"
     # says it twice. The facts lead only when they add something the line left out.
     if said and (not facts or _covers(said, clauses)):
-        answer = _vary(["You told me " + said, "You said " + said], memory) + "."
+        # A line that was itself a telling comes back without the store's frame: "You told me you
+        # told me about your mum" says the telling twice, and the echo already carries who told
+        # whom. Same rule as `told._quote`.
+        if TELLING_ALREADY.match(said):
+            answer = said[0].upper() + said[1:] + "."
+        else:
+            answer = _vary(["You told me " + said, "You said " + said], memory) + "."
     elif facts and said and _tokens(said) <= _tokens(facts):
         # The facts already say everything the line says: the line adds nothing to it.
         answer = facts + "."
@@ -7905,6 +8367,16 @@ def _about_the_children_reply(memory, low):
             # turns after the names were typed.
             clauses.append("your " + str(entry.get("who") or "children") + " are called "
                            + _a_list_of_names([_called(one) for one in names]))
+        elif entry.get("ages"):
+            # A group given its ages as a list - "my kids are 4 and 7" - is one fact about the
+            # children, and the store kept it as a list. Read only as a single age, the group had
+            # no clause at all and the answer was "You've told me you have two kids, and nothing
+            # more about them yet" a turn after the ages were typed.
+            ages = [age for age in entry["ages"] if isinstance(age, int)]
+            who = str(entry.get("who") or "children")
+            said = (", ".join(str(age) for age in ages[:-1]) + " and " + str(ages[-1])
+                    if len(ages) > 1 else str(ages[0]))
+            clauses.append("your " + who + _is_are(who) + said)
         elif entry.get("months") and not entry.get("age"):
             # A baby's age was given in months, and is said back in months.
             clauses.append((name or ("your " + str(entry.get("who") or "child")))
@@ -8049,6 +8521,12 @@ def _a_state_told(text, memory, low):
     nothing.
     """
     if not isinstance(text, str) or "?" in text:
+        return None
+    if _the_ask_beats_the_receipt(text, memory):
+        # The line ends on a question the cards can answer, so the fact is only what that question
+        # is about: filing it is the whole job, and the receipt is a line nobody asked to have said
+        # back. "my sister is veggie ... what can i cook" gets the dinner card, not "Your sister is
+        # veggie."
         return None
     if _about_this_chat(text, memory) or OTHER_ASK.search(low) or REMINDER_MID.search(low):
         return None
@@ -8213,6 +8691,13 @@ def _a_pronoun_age(memory, low):
                 age = int(age.strip())
             if not isinstance(age, int):
                 continue
+            # A pronoun is never a name: when the store holds this same age for the one animal
+            # the chat has been told about, the age is said with the animal in it ("Your greyhound
+            # is 2.") rather than with the pronoun it was pointed at with. The rule and why the
+            # name has to be earned are in `relations.the_pronoun_said_with_a_name`.
+            named = the_pronoun_said_with_a_name(memory, age)
+            if named:
+                return named
             return _one_age(pronoun, age, str(entry.get("turns") or ""))
     return None
 
@@ -8488,10 +8973,13 @@ def _other_person_reply(memory, low):
     the retired entry is about, which is the one the user just gave a fact about.
     """
     undeclared = _the_person_still_in_hand(low, memory)
+    bare_limit_ask = _a_bare_limit_ask(low, memory)
     if not (undeclared or OTHER_FACT.search(low) or EAT_ASK.search(low)
-            or CANT_HAVE.search(low) or CAN_HAVE.search(low) or CAN_THEY_HAVE.search(low)):
+            or CANT_HAVE.search(low) or CAN_HAVE.search(low) or CAN_THEY_HAVE.search(low)
+            or bare_limit_ask):
         return None
-    if CAN_THEY_HAVE_A_FOOD.search(low) and not _a_limit_kept_for_them(low, memory):
+    if CAN_THEY_HAVE_A_FOOD.search(low) and not _a_limit_kept_for_them(low, memory) \
+            and not bare_limit_ask:
         # Which foods have nuts in them is the cooking entries' reading, not the store's: an
         # allergy alone answers "what are they allergic to", not "can he eat cake".
         return None
@@ -8509,7 +8997,27 @@ def _other_person_reply(memory, low):
         # answer about the mum, not "you haven't mentioned an allergy to me". A line that asks
         # for advice ("what should my mum eat after the op") is a real question and is left to
         # the modules that answer those.
-        if not who or HELP_ASK.search(low):
+        if _a_bare_limit_ask(low, memory):
+            # Before HELP_ASK, because "what can she not eat" has "can" in it and would be read
+            # as a request for help. It is the same ask as "is she vegan" from the other side.
+            return _nothing_kept_about_them(low)
+        if HELP_ASK.search(low):
+            return None
+        if not who:
+            # A bare "she"/"he"/"they" with nobody in the chat behind it: the line asks about a
+            # person the store was never told about, and what it has kept is nothing. That is
+            # still an answer, and the only true one. Left unsaid, these lines fell to the
+            # composer's search hedge - "I don't know enough to answer that honestly. A search
+            # should sort you out" - which points at the open web for a fact that can only come
+            # from the person themselves, and it was the reply to "what was she allergic to
+            # again", "is she vegan" and "what meat did i say he doesnt eat". The offer is the
+            # part that helps: the fact is one line away, and the next line is where it is kept.
+            # The first person is not this case ("do i have any allergies" is the store's own
+            # already, and it says "you haven't mentioned an allergy to me"), so the line has to
+            # be about somebody else before the store speaks for them.
+            if _nobody_else_kept(memory) and _the_pronoun_in(low) \
+                    and _asks_for_a_limit_not_advice(low):
+                return _nothing_kept_about_them(low)
             return None
         if OTHER_FACT.search(low):
             return "You haven't told me about an allergy of your " + who + "."
@@ -8566,6 +9074,137 @@ def _other_person_reply(memory, low):
             return None
         return _no_diet(who)
     return _diet_sentence(who, diet)
+
+# A person named only by a pronoun, when the chat holds nobody for it to be. The pronoun is said
+# back rather than replaced with "they", because the person used it and the store has heard it.
+THE_PRONOUN = re.compile(r"\b(she|her|hers|he|him|his|they|them|their)\b", re.I)
+
+
+# A limit asked for rather than advised about. The store was never told about the person, so the
+# only true answer is that nothing is kept - but a question about the world is not that question:
+# "how do i introduce allergens to my baby" and "how much notice does he have to give" are jobs for
+# the knowledge base, and "what does he eat" is answered better by "you would have to ask him".
+# What is left is the ask for the fact itself: an allergy or a diet named outright, or a line that
+# says it is asking again ("what was she allergic to again", "what did i say she doesnt eat").
+A_LIMIT_NAMED = re.compile(r"\b(?:allerg\w*|allergies|vegan|vegetarian|pescatarian|coeliac|celiac|"
+                           r"intolerant|intolerance|di(?:ae)?t|avoid\w*)\b", re.I)
+ASKING_AGAIN = re.compile(r"\b(?:again|remind me|did i (?:say|tell|mention)|what did i (?:say|tell|"
+                          r"mention)|what i (?:said|told|mentioned))\b", re.I)
+ADVICE_NOT_A_FACT = re.compile(r"\bhow\b|\bwhat should\b|\bwhat can we\b|\bwhere\b|\bwhen\b"
+                               r"|\bwhy\b|\bhow much\b", re.I)
+
+
+# The line that says the limit and asks about it in one breath - "my son is 7 and has a nut
+# allergy, what is he allergic to" - states a fact, so it is not a line with nothing behind it:
+# the fact is kept from the same line, and the store answers from what it has just been told.
+# "does she have any allergies" says the same words as a statement of one and asks a question
+# instead: the "have" is the question's auxiliary, not the person's. Read as a statement, the line
+# kept its hedge even though it names the limit and asks nothing else.
+A_HAVE_QUESTION = re.compile(r"\b(?:does|do|did)\s+\w+\s+(?:have|has|had|got)\b"
+                             r"|\b(?:has|have)\s+(?:she|he|they|anyone|anybody|your)\b")
+STATES_A_LIMIT = re.compile(r"\b(?:has|have|had|got)\b[^.!?]{0,24}?\ballerg\w*"
+                            r"|\bis\s+allergic\b|\bare\s+allergic\b"
+                            r"|\b(?:is|are|am)\s+(?:a\s+)?(?:vegan|vegetarian|coeliac|celiac)\b",
+                            re.I)
+
+
+# The same words inside a question: "remind me what hes allergic to" is folded to "what he is
+# allergic to", which has "is allergic" in it and states nothing. Only a line without an
+# interrogative in front of the verb is telling the store something.
+A_ASK_FRAME = re.compile(r"\b(?:what|which|who|tell me|remind me|if|whether|wonder|know)\b"
+                         r"[^.!?]{0,24}?\b(?:is|are|was|were|has|have|does|do|can)\b", re.I)
+
+
+def _asks_for_a_limit_not_advice(low):
+    """True for a line that asks for a kept fact about somebody's allergies or diet."""
+    text = str(low or "")
+    if ADVICE_NOT_A_FACT.search(text):
+        return False
+    if STATES_A_LIMIT.search(text) and not A_HAVE_QUESTION.search(text) \
+            and not A_ASK_FRAME.search(text):
+        return False
+    if re.search(r"\bnot\s+eat\b", text):
+        # "what can she not eat" asks for the limit from the other side, and it is the same ask as
+        # "is she vegan". The positive "what does he eat" is not this line: it is answered by
+        # saying they would have to be asked, and it keeps its own answer.
+        return True
+    if CANT_HAVE.search(text):
+        # "what can she not eat" asks for the same limit as "is she vegan", from the other side.
+        # A positive "what does he eat" is not this line: that one is answered by saying they
+        # would have to be asked, and it keeps its own answer.
+        return True
+    return bool(A_LIMIT_NAMED.search(text) or ASKING_AGAIN.search(text))
+
+
+def _the_pronoun_in(low):
+    """The pronoun the line named its person with: "she", "he", "they", or "" for none."""
+    found = [m.group(1).lower() for m in THE_PRONOUN.finditer(str(low or ""))]
+    for word in found:
+        if word in ("she", "her", "hers"):
+            return "she"
+        if word in ("he", "him", "his"):
+            return "he"
+    for word in found:
+        if word in ("they", "them", "their"):
+            return "they"
+    return ""
+
+
+def _nobody_else_kept(memory):
+    """True when the store holds no fact about anybody else.
+
+    Read, not called through `others()`: that one files an empty list into the memory it is asked
+    about, and a store that was never asked about another person then carries an "others" key for
+    the rest of the chat. It is a side effect no reader should be able to cause by looking, and
+    measured on the deck it moved 12 turns of conversations that had nothing to do with it.
+    """
+    if not isinstance(memory, dict):
+        return True
+    kept = memory.get("others")
+    return not (isinstance(kept, list) and kept)
+
+
+A_MEAL_WORD = re.compile(r"\b(?:cook|cooking|cooked|recipe|recipes|meal|meals|dinner|tea|lunch|"
+                         r"breakfast|snack|menu|shop|shopping|bake|baking)\b", re.I)
+
+
+def _a_bare_limit_ask(low, memory):
+    """A limit asked for about somebody named only by a pronoun, with nobody in the chat behind it.
+
+    "is she vegan", "does she have any allergies" and "what can she not eat" name a person the
+    store could look up only if the chat had ever said who "she" is. It has not, so the asks that
+    need a relation never took the line, and the composer's search hedge answered a question about
+    the person in front of the bot: "That's beyond what I know well, sorry. Searching for it will
+    turn up better sources". Nothing kept is itself the answer, and `_nothing_kept_about_them`
+    says it; this is the gate that lets the line reach it.
+    """
+    text = str(low or "")
+    # A line that also says what it is for - "is she vegan, shes coming for dinner" - is asking
+    # for a meal, and the answer modules have a real one; the store's "you haven't told me" is
+    # only the right answer to the bare ask.
+    if A_MEAL_WORD.search(text):
+        return False
+    return bool(_nobody_else_kept(memory) and _the_pronoun_in(text)
+                and _asks_for_a_limit_not_advice(text))
+
+
+def _nothing_kept_about_them(low):
+    """What the store says when a limit is asked about a person it was never told about.
+
+    Nothing kept is an answer, and it is the only one that is true. The offer matters as much as
+    the admission: the next line is where the fact comes in, and the bot says so.
+    """
+    pronoun = _the_pronoun_in(low)
+    if OTHER_FACT.search(str(low or "")):
+        theirs = {"she": "hers", "he": "his"}.get(pronoun, "theirs")
+        return ("You haven't told me about an allergy of " + theirs
+                + " yet \u2014 what is it? I'll keep it out of anything I suggest.")
+    if pronoun in ("she", "he"):
+        return ("You haven't told me how " + pronoun + " eats yet \u2014 what does " + pronoun
+                + " avoid? I'll plan the meals round it.")
+    return ("You haven't told me how they eat yet \u2014 what do they avoid? I'll plan the meals "
+            "round it.")
+
 
 def _did_you_mean_the_person(memory, low):
     """The one person the store holds, offered back when a pronoun fits nobody.
@@ -8833,6 +9472,29 @@ ALLERGY_IN_THE_WORLD = re.compile(r"\bwhy\s+(?:do|does|did|would|are|is|can)\b|"
                                   r"\bwhat\s+causes?\b|\bhow\s+common\b|"
                                   r"\bwhat\s+are\s+allergies\b", re.I)
 
+# A how-to at the front of a line is a request for advice, not a recall of a fact: "how do i
+# budget" was read as the budget fact and answered "You haven't told me a budget." to a person
+# asking how to make one, when the knowledge answer for budgeting was there to give. The diet
+# branch has kept this guard (`DIET_HOW_TO`) since the same bug in front of "my diet"; the other
+# facts needed it too. The frame has to be at the front, because a fact question can carry the
+# same words later on ("whats my budget", "how much can i spend").
+#
+# The frame is a how-to of *doing* the thing. A question of how much, how many or how long is a
+# quantity ask that happens to start with "how", not a how-to: "how much do i spend" after "my
+# budget is 200 a month" wants the 200 back, so the quantity words are not a frame at all.
+A_HOW_TO_ASK = re.compile(r"^\s*(?:so|and|ok|okay|hi|hello)?[, ]*\s*"
+                          r"(?:how (?:do|can|could|should|would|might|to)\b|"
+                          r"ways? to\b|any (?:tips|advice|ideas|suggestions|ways)\b|"
+                          r"tips for\b|help me\b|what can i do\b|what should i do\b)", re.I)
+# ...unless they are asking to be reminded of the figure they gave: "how do i know my budget
+# again" is a recall with a how-to shape, and the how-to answer ("write down what comes in each
+# month") is advice about budgeting, not their number. The recall word decides - and "know" is
+# one of them, because "how do i know my weight" is a how-to of knowing, which is a recall, while
+# "how do i lose weight" is a how-to of doing and stays advice.
+A_RECALL_WORD = re.compile(r"\bagain\b|\bremind me\b|\bdid i (?:say|tell|mention)\b|"
+                           r"\bwhat did i say\b|\bdo you remember\b|\byou know my\b|"
+                           r"\bwhat was my\b|\bwhats my\b|\bwhat's my\b|\bknow\b", re.I)
+
 def _height_reply(memory):
     """How tall they are, in the unit they gave it in.
 
@@ -8852,6 +9514,10 @@ def _height_reply(memory):
 def _fact_reply(memory, low, key=None):
     """The reply for one of their facts. key is the fact already read from the ask, so a wording
     the words do not name ("how much can I spend" is a budget) still gets the right answer."""
+    # A how-to in front of the fact word is advice, not a recall of it - unless a recall word is
+    # in the line, which is the ask underneath the shape.
+    if low and A_HOW_TO_ASK.search(str(low)) and not A_RECALL_WORD.search(str(low)):
+        return None
     known = user(memory)
     if key == "allergy" or "allerg" in low:
         if ALLERGY_IN_THE_WORLD.search(str(low or "")):
@@ -9196,6 +9862,17 @@ def _repeat_ask(text, low, memory=None):
 FIGURE_REPEAT = re.compile(
     r"\b(?:how long|how many|how often|how soon|what time|what temperature|"
     r"which temperature|what setting|how hot|when)\b")
+
+def asks_again(text, memory=None):
+    """True when the whole line asks to hear the bot's last reply again.
+
+    The store's own reading of the ask, published so the arbiter asks for it instead of keeping a
+    second copy of the frame in its own file: the copy missed "pardon" and "come again", and a
+    repeat that is not recognised as one is passed over as a line saying the same thing twice.
+    """
+    low = str(text or "").strip().lower()
+    return bool(low) and _repeat_ask(low, low, memory)
+
 
 def _repeat_reply(memory, text=""):
     turns = [turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)]
@@ -9637,6 +10314,12 @@ def _recall_reply(memory, low, text="", spoken=False):
     Returns None when the line does not name a thing, so the caller can answer with the topic
     instead of denying something the user did say.
     """
+    # "what did i say was hurting" asks about a complaint the store holds, and it holds the one
+    # that stands now: quoting the first line back contradicts the store's own record after a
+    # correction ("my knees..." then "my back hurts not my knees" quoted the knees).
+    hurt = a_hurting_part.what_is_hurting_reply(memory, low)
+    if hurt:
+        return hurt
     about = re.search(r"\babout\b(.*)$", low)
     part = None if about else _which_thing_was_it(low, memory)
     if about:
@@ -9740,6 +10423,9 @@ def _recall_reply(memory, low, text="", spoken=False):
             moved = _a_figure_put_right(hits[-1], memory)
             if moved:
                 return moved
+            narrowed = _a_narrowing_put_after(hits[-1], memory)
+            if narrowed:
+                return narrowed
         return _say_back(hits[-1], memory) if spoken else _recall_quote(hits[-1], memory)
     # The only line about it was a question, which they still said: "You asked: \"...\"" is
     # true where "You said" would put words in their mouth, and where a denial would be a lie.
@@ -10031,6 +10717,11 @@ def _recall_quote(line, memory=None, asked=False):
                 if re.search(r"\bwhat (?:did|have) i\b", (turn.get("user") or ""), re.I))
     return QUOTE_LEADS[asked % len(QUOTE_LEADS)] + said
 
+# The echo of a line that was itself a telling: "you told me about your mum". A frame on top of it
+# says the telling twice, and the echo already carries who told whom.
+TELLING_ALREADY = re.compile(r"^you (?:told me|said to me|mentioned to me)\b")
+
+
 A_BARE_PUT_RIGHT = re.compile(
     r"^\s*(?:sorry|no|nah|actually|oh|wait|hang on|hold on|i mean|my mistake|silly me|"
     r"correction)[\s,]*"
@@ -10083,6 +10774,23 @@ def _a_figure_put_right(line, memory):
         return (_recall_quote(line, memory).rstrip()
                 + " \u2014 then you put it right: " + value + ".")
     return ""
+
+def _a_narrowing_put_after(line, memory):
+    """The quoted line and the narrowing the person put after it, or "".
+
+    A recall can land on a line that narrows the one above it and says nothing on its own ("the
+    ones that are open on sunday", "the cheaper ones"), and quoted alone it is their fragment with
+    no thing in it. The reading of which lines those are is `repeat.a_narrowing_and_its_line`, so
+    the two recall paths cannot drift apart.
+    """
+    if not isinstance(memory, dict):
+        return ""
+    pair = _a_narrowing_and_its_line(line, memory)
+    if not pair:
+        return ""
+    before, after = pair
+    return (_recall_quote(before, memory).rstrip()
+            + " \u2014 then \"" + _trim(after, 80) + "\".")
 
 def _put_right_after_it(line, memory):
     """The quoted line and the correction that followed it, or "" when there is none.
@@ -10189,6 +10897,28 @@ def _activity_line(memory):
                    or _about_the_same(later, words) for later in newer):
                 return line
             return ""
+    return ""
+
+# "Again" is the licence to cross a turn that changed the subject: the person is pointing at
+# something they know they said, so an aside in between is not the chat moving on.
+ASKING_AGAIN = re.compile(r"\bagain\b|\bremind me\b", re.I)
+
+def _the_making_line_they_said(memory, back=8):
+    """The last line of theirs that says what they are making, without the trail check.
+
+    `_activity_line` stops the trail at the first line about something else, which is right for
+    "what was i cooking?" in a chat that has moved on to a dishwasher. "Again" asks for a line
+    the person knows they said, so what happened in between is not the subject to answer from:
+    "im making a cake for my sons birthday" / "by the way my back is killing me" / "what am i
+    making again" is still the cake. Without this the ask fell to a method card, or to "I'm not
+    sure about that one" in a chat that says plainly what it is making.
+    """
+    for turn in reversed(recent(memory, back)):
+        line = " ".join(str(turn.get("user") or "").split())
+        if not line or ASK_LINE.search(line) or ACTIVITY_ASK.search(line):
+            continue
+        if ACTIVITY_WORDS.search(line) or ACTIVITY_LOOSE.search(line):
+            return line
     return ""
 
 def _recap(line):
@@ -10318,12 +11048,16 @@ def _the_line_named(memory, low):
             return line
     return ""
 
-def _topic_reply(memory, low):
+def _topic_reply(memory, low, again=False):
     """Where we were, said back in a sentence: the thing, and what was asked about it.
 
     The line is never quoted: "we were on this: \"...\"" makes the person read their own
     words twice. `thread.restate` puts the last ask in the second person and fits the
     grammar, and a turn that only asks about the chat is not the thing we were on.
+
+    `again` says the person asked for a thing they know they said ("what am i making again").
+    Their own word for it comes off the line before it reaches here, so it is read from the
+    line as typed and passed in.
     """
     record = current(memory)
     real = _last_real(memory)
@@ -10356,6 +11090,8 @@ def _topic_reply(memory, low):
         # So a miss falls through to the answers this line got before the reader existed.
     named = NAMED_ACTIVITY.search(low or "")
     carried = _activity_line(memory) if ACTIVITY_ASK.search(low or "") else ""
+    if not carried and named and again:
+        carried = _the_making_line_they_said(memory)
     if not carried and named:
         # "what was i cooking?" after a chat about a dishwasher asks for the cooking line; the
         # topic we were on is a different thing, and naming it does not answer the ask.
@@ -10578,7 +11314,12 @@ def _lines_that_moved(memory):
         last[key] = text
     return moved
 
-SUMMARY_KEYS = frozenset(("name", "age", "job", "city", "pets", "tastes", "allergies",
+# The facts the summary above says for itself. A key named here is not said back as the line it
+# came in on, because the summary already says it better - so a key here with no branch in
+# `_summary_reply` is a fact that reaches no reply at all. `tests/test_a_fact_reaches_the_recap.py`
+# walks this set and asks the recap for each, which is the check that keeps the two in step.
+SUMMARY_KEYS = frozenset(("name", "age", "job", "city", "shift", "workplace", "from", "pets",
+                          "kids", "tastes", "allergies", "diet", "condition", "budget",
                           "plan", "plans"))
 
 def _the_summary_already_says(memory, flat):
@@ -11074,6 +11815,101 @@ def _without_the_age(line):
     without = AGE_SAID_IN_WORDS.sub("", str(line or ""), count=1).strip(" .,;:!?-")
     return re.sub(r"^(?:and|also|plus)\s+", "", without, flags=re.I).strip()
 
+def _the_words_of_a_fact(value):
+    """The words a stored fact is made of, whatever shape the store keeps it in."""
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(_the_words_of_a_fact(part) for part in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_the_words_of_a_fact(part) for part in value)
+    return ""
+
+
+def _a_fact_the_recap_does_not_say(memory, phrase, body_words):
+    """True when this line filed a fact the recap above does not say.
+
+    The topic guard in `_summary_reply` drops the newest line when the word the conversation is on
+    appears anywhere in the facts. That is a guess from the topic, so a fact outranks it: a line
+    that put something in the store which no part of the summary says is said back, and only the
+    lines that add nothing are dropped. The line is matched to its `facts_log` entries the way
+    `_recent_told` builds the phrase it says, so the match is the same line and not a lookalike.
+    """
+    said = _summary_words(body_words)
+    for entry in memory.get("facts_log") or []:
+        if not isinstance(entry, dict) or not entry.get("key"):
+            continue
+        text = " ".join(str(entry.get("text") or "").lower().split())
+        if " ".join(_told_phrase(extract.no_tone(text)).split()) != phrase:
+            continue
+        words = _summary_words(_the_words_of_a_fact(user(memory).get(entry["key"])))
+        if words - said:
+            return True
+    return False
+
+
+def _kids_told(memory):
+    """How many children the person said they have, or 0.
+
+    The count is kept on the person (`user.kids`) when they say it ("i've got two kids", "we have
+    three children", "i have 2 kids"), so the summary reads the record rather than the line.
+    """
+    told = user(memory).get("kids")
+    if isinstance(told, bool):
+        return 0
+    if isinstance(told, int):
+        return told if told > 0 else 0
+    if isinstance(told, str) and told.strip().isdigit():
+        return int(told.strip())
+    return 0
+
+
+def _a_child_is_described(memory):
+    """True when the store can say a child of theirs by name or age, which says the same thing."""
+    for entry in others(memory):
+        who = str(entry.get("who") or "").rstrip("s")
+        if who and who in CHILD and (entry.get("name") or entry.get("age") or entry.get("ages")):
+            return True
+    return False
+
+
+def _a_few_children(count):
+    """Two kids, one child, four children - the count the way a person says it."""
+    if count == 1:
+        return "one child"
+    in_words = {number: word for word, number in extract.KID_NUMBERS.items()}
+    return in_words.get(count, str(count)) + " kids"
+
+
+# The chat summed up as a whole, said the way people say it: "whats our plan", "what have we
+# decided", "what do we know so far", "tell me what we've agreed", "walk me through what we
+# decided", "so whats the state of play", "how far have we got". Every one of them asks for the
+# list the chat holds, not for the newest line ("where were we" is `_summary_ask`, and it is the
+# newest line) and not for one thing its words name. It has to be the whole line: "what have we
+# got for dinner" and "whats the plan for dinner" name a thing and are answered about it, so the
+# whole-line match is the fence, and the wrapper words in front ("ok", "so", "and right") and the
+# ones that only say when ("so far", "then") come off first.
+SUMMED_UP = re.compile(
+    r"^(?:ok |okay |right |so |and |but |also |well |quick |just )*(?:"
+    r"what (?:have|did) we (?:got|get|have|decided|decide|settled|settle|agreed|agree|know)|"
+    r"what do we (?:know|have|got)|"
+    r"what(?:'s|\u2019s|s)? (?:our|the) plan|what is (?:our|the) plan|"
+    r"tell me what we(?:'ve|\u2019ve|ve)? (?:agreed|decided|settled)|"
+    r"walk me through what we (?:decided|agreed|settled)|"
+    r"what(?:'s|\u2019s|s)? (?:the )?state of play|what is (?:the )?state of play|"
+    r"how far (?:have|did) we (?:got|get)|"
+    r"what(?:'s|\u2019s|s)? decided|what is decided"
+    r")(?: so far| then| now| again| already| on)*\s*[?.!]*$")
+
+
+def _summed_up(low):
+    """True for a line that asks for the whole chat summed up, rather than for one line of it."""
+    return bool(SUMMED_UP.match(str(low or "").strip()))
+
 def _summary_reply(memory):
     known = user(memory)
     parts = []
@@ -11179,6 +12015,19 @@ def _summary_reply(memory):
         if who and p_diet:
             parts.append("your " + who + " " + _a_diet_predicate(who, p_diet))
             named.add(who)
+    # A count of children is a fact they gave, and the summary could not say it: the count only
+    # ever came back as the line quoted ("you said you have got two kids"), so a chat that had
+    # said how many children it had answered "what do you know about me" with everything except
+    # them. A child the store can name or age is said as that child, and the count beside it would
+    # be the same fact twice.
+    told_kids = _kids_told(memory)
+    if told_kids and not _a_child_is_described(memory):
+        # "you've got a dog and two kids" reads as one line; two "you've got"s in a row reads
+        # like a list of records, so a part that already says "you've got" takes the count on.
+        if parts and parts[-1].startswith("you've got "):
+            parts[-1] += " and " + _a_few_children(told_kids)
+        else:
+            parts.append("you've got " + _a_few_children(told_kids))
     if known.get("diet"):
         diet = str(known["diet"])
         parts.append("you don't " + _diet_how(diet) + " " + diet[3:] if diet.startswith("no ")
@@ -11187,7 +12036,11 @@ def _summary_reply(memory):
         parts.append("you're " + ", ".join(str(c) for c in known["condition"]))
     if known.get("budget"):
         parts.append("your budget is " + str(known["budget"]))
-    plans = known.get("plans") or []
+    plans = list(known.get("plans") or [])
+    # A correction puts the plan itself under `user["plan"]` (`corrected.py`), and the summary read
+    # only the list, so a plan that had been put right was one the recap could not say at all.
+    if known.get("plan") and known["plan"] not in plans:
+        plans.append(known["plan"])
     last_plan = str(plans[-1]) if plans else ""
     # A plan often names what another part would say: "a picnic for my daughter" makes
     # "you mentioned your daughter" a repeat, so say it once, in the fuller line.
@@ -11252,9 +12105,21 @@ def _summary_reply(memory):
         for word in phrase.split():
             if len(word) > 3 and word.lower() not in SAY_BACK_VAGUE:
                 anchor_word = word.lower()
+        # The topic guard: the last word of the subject the chat is on, found anywhere in the
+        # facts above, means the line is about something already said. It is a guess from the
+        # topic, so it gives way to a fact: a line that filed something the recap does not say is
+        # never dropped for the topic's sake. Without that, "i live in bristol" set the topic to
+        # "live bristol" and the next line, "i've got two kids", was dropped because "bristol" was
+        # in the facts above - the count of children was in no reply at all:
+        #
+        #     i live in bristol        -> Bristol - what's it like there?
+        #     i've got two kids        -> Two kids - good to know. How old are they?
+        #     what do you know about me-> So far I know you live in Bristol.
+        on_topic = (from_current and head and head in facts_body.lower()
+                    and not _a_fact_the_recap_does_not_say(memory, phrase, body_words))
         if (covered or _already_said(told_words, body_words)
                 or (anchor_word and _summary_words(anchor_word) & _summary_words(body_words))
-                or (from_current and head and head in facts_body.lower())):
+                or on_topic):
             continue
         # One "you said" and then the facts on their own: "you said X; you said Y" repeats the
         # verb twice in a sentence, which reads like a log rather than a friend.
@@ -11974,12 +12839,26 @@ def _say_a_list(items):
         return items[0] + " and " + items[1]
     return ", ".join(items[:-1]) + " and " + items[-1]
 
+# The words a person puts between the frame and the verb of it: "i dont really want to talk about
+# it", "id honestly rather not say", "i dont actually need to go into it". Only the intensifier is
+# allowed and only one, so the frame is still the frame around it.
+INTENSIFIER = r"(?:really|honestly|actually|even|ever|particularly|especially|much)"
+
 CLOSE_SUBJECT = re.compile(
     r"\bi (?:just )?(?:want|wanna|would rather|'?d rather|need) to "
     r"(?:forget|drop|leave|skip) (?:it|that|this|all of it|all that)\b|"
-    r"\bi(?:'?d| would)? rather not (?:say|talk about it|go into it|get into it)\b|"
-    r"\bi (?:do not|don'?t|dont) (?:want|wanna|need) to (?:talk|think|speak|hear) about "
-    r"(?:it|that|this)\b|"
+    # An intensifier goes where the person puts it: "i dont REALLY want to talk about it" is the
+    # same closing as "i dont want to talk about it", and it was read as an ask about how to make
+    # conversation. It never changes which frame the line is in, so it sits inside every one.
+    r"\bi(?:'?d|\s+would)?\s+(?:" + INTENSIFIER + r"\s+)?rather\s+not\s+"
+    r"(?:say|talk about it|go into it|get into it)\b|"
+    r"\bi\s+(?:do\s+not|don'?t|dont)\s+(?:" + INTENSIFIER + r"\s+)?"
+    r"(?:want|wanna|need)\s+(?:" + INTENSIFIER + r"\s+)?to\s+"
+    # "go into it" and "get into it" are how people say this as often as "talk about it", and both
+    # were answered with a card about something else.
+    r"(?:(?:talk|think|speak|hear)\s+about\s+|(?:go|get)\s+into\s+)(?:it|that|this)\b|"
+    r"\bi\s+(?:can'?t|cannot|couldn'?t|won'?t|will not)\s+"
+    r"(?:go|get)\s+into\s+(?:it|that|this)\b|"
     r"\b(?:can|could|would) (?:we|you) (?:just )?not (?:talk|speak) about (?:it|that|this)\b|"
     r"\b(?:let'?s|lets) not (?:talk|speak) about (?:it|that|this)\b|"
     r"\bnot (?:going to|gonna) talk about (?:it|that)\b|"
@@ -12008,18 +12887,36 @@ CHANGE_SUBJECT = re.compile(
 
 CARRIES_ON_AFTER = re.compile(
     r"\b(?:it|that|this|all of it|all that)\s+"
-    r"(?:in|into|on|onto|for|to|at|from|with|about|between|among|and|then|when|if|after|before|"
-    r"until|till|while|overnight|so|because|as)\b")
+    r"(?:(?:in|into|on|onto|for|to|from|with|about|between|among|and|then|when|if|after|before|"
+    r"until|till|while|overnight|so|because|as)\b"
+    # "at" carries on ("drop it at the door") except in "at all", which is the closing itself:
+    # "i dont want to talk about it at all" was answered with an open-question card.
+    r"|at\b(?!\s+all\b))")
 
 ASKS_WHETHER_TO = re.compile(r"\b(?:should|shall|can|could|would|do|does|did)\s+i\b|\bi should\b")
 
 ASKS_FOR_HELP = re.compile(r"\b(?:can you help|help me|is it (?:wrong|bad|ok|okay|normal)|"
                            r"what should i|do you think i should|am i wrong)\b")
 
+# The words that say how long a closing holds: "not at all", "at the moment", "for now",
+# "right now", "any more". They are part of the closing, not the rest of the sentence, so they are
+# taken out before the fence that says the pronoun still has work to do ("leave it for 20
+# minutes" keeps its fence because "for 20 minutes" is not one of these).
+HOLDS_FOR_NOW = re.compile(
+    r"\b(?:at|for)\s+(?:the\s+)?(?:all|moment|minute|time\s+being|now)\b"
+    r"|\b(?:right|just)\s+now\b|\bany\s?more\b|\bagain\b|\byet\b")
 CLOSE_FILLER = frozenset("""and but so ok okay right then well anyway anyhow also now just
 please thanks thank you for a bit moment second though too as if that this at all never mind let
 lets we you i me my of on in to the good fine fair enough alright still only really can could
-would will shall not oh ah hmm yeah yes no actually wait it its""".split())
+would will shall not oh ah hmm yeah yes no actually wait it its
+today tonight now anymore any more again yet later tomorrow moment minute time being""".split())
+# The same set without the word for when: what a frame read before the word was allowed.
+CLOSE_FILLER_ALWAYS = CLOSE_FILLER - frozenset(
+    "today tonight now anymore any more again yet later tomorrow".split())
+# A closing carries the word for when it holds: "i dont want to talk about it ANYMORE", "not
+# today", "not again". Read as part of the sentence rather than the closing, those lines fell
+# through every frame and were answered with an open-question card - the commonest way people say
+# a temporary no. The words above say when, never what, so the frame is still the frame.
 
 CHECK_FOLLOWED = re.compile(
     r"^(?:(?:did|do|have|has|were|are)\s+(?:you|u)\s+"
@@ -12195,6 +13092,51 @@ def _plain_line(text):
     low = " ".join(str(text or "").lower().split())
     return " ".join(re.sub(r"[^a-z0-9' ]+", " ", low).split())
 
+# A closing names its subject as often as it says "it": "i dont want to talk about work", "i'd
+# rather not talk about him", "i dont want to talk about the row". The frames above spell the
+# pronoun out, so a named subject fell through them and an ask about how to make conversation took
+# the turn. The subject has to be the end of the line and short, and the words inside it may not be
+# the ones that turn a closing into a plan ("i dont want to talk about work BUT i have to, so
+# where do i start" is not a closing), so the frame is read here rather than inside CLOSE_SUBJECT.
+DECLINE_A_SUBJECT = re.compile(
+    r"\bi\s+(?:do\s+not|don'?t|dont)\s+(?:" + INTENSIFIER + r"\s+)?"
+    r"(?:want|wanna|need)\s+(?:" + INTENSIFIER + r"\s+)?to\s+"
+    r"(?:talk|speak|think|hear)\s+about\s+(?P<subject>.+)$|"
+    r"\bi(?:'?d|\s+would)\s+(?:" + INTENSIFIER + r"\s+)?rather\s+not\s+"
+    r"(?:talk|speak)\s+about\s+(?P<rather>.+)$|"
+    r"\b(?:let'?s|lets|can\s+we|could\s+we)\s+not\s+(?:talk|speak)\s+about\s+"
+    r"(?P<let>.+)$")
+
+# The words that turn the subject into the rest of a sentence: a plan, a reason or a second ask.
+NOT_A_SUBJECT = frozenset("""but and so because cos with without to about for then if when while
+    though although or yet also plus as since unless until before after once""".split())
+
+
+def _a_subject_to_leave_alone(low):
+    """True when the line is a closing that names its subject rather than saying "it"."""
+    for found in DECLINE_A_SUBJECT.finditer(low):
+        subject = (found.group("subject") or found.group("rather")
+                   or found.group("let") or "").strip()
+        words = subject.split()
+        if not words or len(words) > 4:
+            continue
+        if len(words) > 1 and words[0] in ("it", "that", "this"):
+            # "can we not talk about it today" is the pronoun frame with a word after it, and the
+            # frame above decides that one: a heavy subject answered by the grief reader with an
+            # offer of something ordinary is better than this line, so it is not taken here.
+            continue
+        if any(word in NOT_A_SUBJECT for word in words):
+            continue
+        # What is left in front of the frame is filler or nothing, exactly as in the frames above:
+        # "i told you already, i dont want to talk about work" opens with a claim about the chat,
+        # and that line is bot/memory/told.py's to answer - it knows what to do with the claim.
+        before = low[:found.start()].split()
+        if not all(word in CLOSE_FILLER for word in before):
+            continue
+        return True
+    return False
+
+
 def _closes_the_subject(text):
     """True when the whole line asks to leave the thing in the air alone."""
     low = _plain_line(text)
@@ -12207,16 +13149,35 @@ def _closes_the_subject(text):
         return False
     if ASKS_WHETHER_TO.search(low) or ASKS_FOR_HELP.search(low):
         return False
-    if CARRIES_ON_AFTER.search(low):
+    if CARRIES_ON_AFTER.search(HOLDS_FOR_NOW.sub(" ", low)):
         # "drop it in the pan" and "i want to leave it in the oven for 20 minutes" are about the
         # thing, not about leaving it alone: the pronoun has work to do in the rest of the line.
         return False
+    if _closes_by_a_frame(low):
+        return True
+    return _a_subject_to_leave_alone(low)
+
+
+def _closes_by_a_frame(low):
+    """True when one of the frames above covers the line and nothing else in it carries on."""
     for pattern in (CLOSE_SUBJECT, CHANGE_SUBJECT):
         for found in pattern.finditer(low):
             rest = (low[:found.start()] + " " + low[found.end():]).split()
             if all(word in CLOSE_FILLER for word in rest):
                 return True
     return False
+
+def _a_plain_frame_closes(low):
+    """True when the frames read the line with no help from this reader's newer allowances."""
+    for pattern in (CLOSE_SUBJECT, CHANGE_SUBJECT):
+        for found in pattern.finditer(low):
+            if re.search(INTENSIFIER, found.group(0)):
+                continue
+            rest = (low[:found.start()] + " " + low[found.end():]).split()
+            if all(word in CLOSE_FILLER_ALWAYS for word in rest):
+                return True
+    return False
+
 
 def _held_thread(memory):
     """True when a safety answer, rather than a topic, is the thing the chat is carrying."""
@@ -12251,7 +13212,16 @@ def _can_close(text, memory):
         return False
     if not current(memory) and not recent(memory, 2):
         return False
-    return not _held_thread(memory)
+    if _held_thread(memory):
+        return False
+    if _gentle_subject(memory) and not _a_plain_frame_closes(_plain_line(text)):
+        # A loss or a stay in hospital is answered better by the grief reader, which offers
+        # something ordinary to talk about instead ("tell me about something ordinary instead if
+        # that's easier today"). A closing the plain frames already read stays with it; the ones
+        # this reader newly recognises - the word in the middle, the named subject, the word for
+        # when - are the store's only on an ordinary subject.
+        return False
+    return True
 
 def _the_close(text, memory):
     """The answer to a person who has asked to leave the subject: a short yes, and no advice."""

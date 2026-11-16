@@ -19,9 +19,11 @@ import re
 # quantity ("dogs so much", "coffee a lot") or the article in front of a noun ("going to the").
 TAIL = frozenset("""
 tho though lol lmao haha hehe tbh ngl imo idk innit tbf anyhow anyway really actually
-right now today tonight either at all any more anymore yet still too also as well
+right now today tonight tomorrow weekend week weekday evening morning afternoon night
+either at all any more anymore yet still too also as well
 and or but with so much very loads lots lot quite pretty
 a an the of to for from in on at by about than then
+monday tuesday wednesday thursday friday saturday sunday christmas birthday
 """.split())
 
 # Where a thing ends, whatever the four words allow: the rest of the line can be a question

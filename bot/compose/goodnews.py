@@ -119,9 +119,42 @@ WIN = (
     re.compile(r"\b(?:got|getting|had)\s+(?:a|the|my|her|his)\s+(?:promotion|pay rise|payrise|"
                r"raise|new job)\b", re.I),
     re.compile(r"\bpromoted\b", re.I),
+    # A thing of theirs that was approved or granted: "my leave got approved", "my visa was
+    # approved", "my mortgage has been approved", "i got sanctioned leave approved". Nothing read
+    # these as news, so the day pool's "How was it, overall?" answered them. The thing has to be
+    # theirs - "the invoice was approved at work" is a task finished, not a person's news - and
+    # only an approval is here: a shift that is confirmed is not news, and an offer that is
+    # accepted is already read above.
+    re.compile(r"\b(?:my|our|his|her|their)\s+(?:\w+\s+){0,2}?"
+               r"(?:got|was|were|has\s+been|have\s+been|had\s+been|been)\s+"
+               r"(?:approved|granted)\b", re.I),
+    re.compile(r"\b(?:i|we)\s+(?:just\s+|finally\s+)?got\s+(?:\w+\s+){0,3}?"
+               r"(?:approved|granted)\b", re.I),
     re.compile(r"\b(?:won|win|wins)\s+(?:\w+\s+){0,3}?(?:cup|medal|prize|award|race|match|"
                r"competition|league|final|round|gold|silver|bronze)\b", re.I),
     re.compile(r"\bcame\s+(?:first|top|second)\b", re.I),
+    # A thing that was waiting on somebody else's yes and got one. "my leave got approved" was
+    # answered "How was it, overall?" and "my husband got his leave approved" with a condolence -
+    # the leaving reader's word for "leave" - so the approval is news here. The verb is the
+    # approval, and what is approved is a thing a person asks for: a leave request, a visa, an
+    # application, an offer, a mortgage, a transfer, planning permission.
+    re.compile(r"\b(?:my|our|his|her|their)\s+(?:\w+\s+){0,2}?"
+               r"(?:leave|holiday|time\s+off|visa|application|offer|mortgage|transfer|grant|"
+               r"funding|booking|planning\s+permission|request)\b[^.!?]{0,24}"
+               r"\b(?:got|was|were|is|been|just|now|finally)\s+(?:\w+\s+){0,2}?"
+               r"(?:approved|accepted|granted|signed\s+off|came\s+through|went\s+through)\b",
+               re.I),
+    re.compile(r"\b(?:my|our|his|her|their)\s+(?:\w+\s+){0,2}?"
+               r"(?:leave|visa|application|offer|mortgage|transfer|grant|funding|booking)\b"
+               r"[^.!?]{0,24}\b(?:came\s+through|went\s+through|signed\s+off)\b", re.I),
+    # The same news with the participle straight after the thing, which is how it is said when
+    # somebody else asked: "my husband got his leave approved" - and that line was answered with
+    # the pool for being left, because "leave" is also the verb.
+    re.compile(r"\b(?:my|our|his|her|their)\s+(?:\w+\s+){0,2}?"
+               r"(?:leave|visa|application|offer|mortgage|transfer|grant|funding|booking|"
+               r"request|day\s+off|time\s+off)\s+"
+               r"(?:(?:got|was|were|is|been|now|just|finally|all)\s+){0,2}"
+               r"(?:approved|accepted|granted|signed\s+off)\b", re.I),
     re.compile(r"\bgraduated\b", re.I),
     # A degree class or a set of top grades is a result said as the thing itself: "i got a 2:1 in my
     # degree" got "Sounds alright. Anything good in it?", "i got 3 a stars" the same shrug, and only
@@ -239,11 +272,13 @@ GOOD = BABY + PASSED + WIN + PRAISED
 ARRIVED = (
     re.compile(r"\b(?:we|i)(?:\s+(?:just|finally|only))?\s+(?:got|gotten|adopted|rescued|"
                r"rehomed|picked up|bought|chose)\s+"
-               r"(?:a|an|our|my|his|her|their|another|two|some)\s+"
+               r"(?:a|an|our|my|his|her|their|another|two|some|"
+               r"one|a few|a couple|a pair|three|four|five|six)\s+"
                r"(?P<thing>[a-z][a-z' ]{1,30})", re.I),
     re.compile(r"\b(?:we|i)(?:'ve|ve)\s+(?:just|finally|only)\s+(?:got|gotten|adopted|"
                r"rescued|rehomed|picked up|bought|chose)\s+"
-               r"(?:a|an|our|my|his|her|their|another|two|some)\s+"
+               r"(?:a|an|our|my|his|her|their|another|two|some|"
+               r"one|a few|a couple|a pair|three|four|five|six)\s+"
                r"(?P<thing>[a-z][a-z' ]{1,30})", re.I),
     re.compile(r"\b(?:we|i)\s*(?:'re|re|are)?\s+(?:getting|having)\s+"
                r"(?:a|an|our|another)\s+(?P<thing>[a-z][a-z' ]{1,30}?)\s+"
@@ -350,10 +385,34 @@ NEW_THING = (
 )
 
 
+# A count in front of the thing is not part of its name: "we got one of those baby monitors" is a
+# monitor that arrived, and reading the name from "of" stopped at the first word and left nothing
+# that named a thing, so the arrival was never answered at all. The count is in ARRIVED so the
+# pattern can match, and the pointer behind it is dropped here so the name starts at the thing.
+A_POINTER_IN_FRONT = re.compile(r"^of\s+(?:those|these|them|the|my|our|his|her|their)\s+", re.I)
+
+
+def _bare(word):
+    """The word without a plural ending, so "two puppies" names a puppy.
+
+    The thing lists are all written in the singular, and a line about two of something says the
+    plural - "we got two crates", "one of those baby monitors" - so a plural was never read as a
+    thing that arrived, and the news got a receipt instead of a question about it.
+    """
+    if len(word) > 3 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 3 and word.endswith("es") and word[-3] in "sxz":
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
 def _thing_words(match):
     """The thing that arrived, cut at the first word that is not part of its name."""
     kept = []
-    for word in (match.group("thing") or "").split():
+    said = A_POINTER_IN_FRONT.sub("", match.group("thing") or "")
+    for word in said.split():
         bare = word.strip(".,!?;:\"'")
         if not bare or bare in THING_STOPS or bare in NOT_AN_ARRIVAL or len(kept) == 3:
             break
@@ -387,7 +446,10 @@ def new_thing(clean):
         thing = _thing_words(match)
         if not thing or thing in ("new", "another", "first", "second"):
             continue
+        # Both the word as said and its bare form, because the lists are mostly singular
+        # ("kettle") and a few name the plural itself ("trousers", "shoes", "jeans").
         words = set(thing.split())
+        words |= {_bare(word) for word in words}
         if words & NOT_AN_ARRIVAL:
             continue
         # Only an animal, a job on the house, or an object the person now has can be asked
@@ -564,6 +626,37 @@ NOT_NEWS = re.compile(r"\b(?:did|do|does|will|would|are|is|was|were|can|could|sh
 # won" is not a win. One word list for the whole composer, and read here as the guard it is rather
 # than as a bad thing - "i almost gave up, but i finished it" is still a win.
 NOT_QUITE = re.compile(r"\b(?:" + "|".join(sorted(NEARLY)) + r")\b", re.I)
+
+# A win with the opposite said straight after it is not a win: "we came into some money and now
+# everyone wants it", "we're moving in together and my mum hates him". `but` and `except` are in
+# BAD below; this is the `and` that turns the same way, because the second clause is the sentence's
+# news and a congratulations on top of it is deaf to it. The `and` has to carry the hostility
+# itself - "we're moving in together and i cant wait" is still a win.
+A_TURN_IN_THE_TALE = re.compile(
+    r"\band\s+now\s+(?:every\w+|nobody|no\s+one|no-one|they|he|she)\b"
+    r"|\band\s+[^.!?]{0,40}\b(?:hates?|hate\b|disapproves?|refuses?|won'?t|wont|"
+    r"doesn'?t\s+(?:like|approve|want)|doesnt\s+(?:like|approve|want)|is\s+against|"
+    r"objects?)\b", re.I)
+
+# The same turn in the tale, told about a thing rather than a person: "we finally got the keys and
+# the place is a state", "we came into some money and now the boiler has packed in". The second
+# clause here is the cost, and it is the sentence's news. The words are the ones that name a
+# setback and nothing else - "and now we can fix the roof" and "and now we have two cats" are the
+# happy endings the win reader is there for.
+A_SETBACK_AFTER_THE_WIN = re.compile(
+    r"\band\s+(?:then\s+|now\s+)?[^.!?]{0,60}\b(?:broke|broken|breaks|packed\s+in|"
+    r"stopped\s+working|gone\s+wrong|went\s+wrong|on\s+the\s+blink|is\s+a\s+(?:state|mess|tip)|"
+    r"ruined|leaking|leaks?\b|flooded|cracked|worse|awful|terrible|horrible|nightmare|"
+    r"regrets?|cant\s+afford|cant\s+cope|i\s+cant\s+do\b|just\s+my\s+luck|"
+    r"died|dead)\b", re.I)
+
+
+# The other half of a win, said after the `and`: "and now we can fix the roof", "and we can
+# finally get the kitchen done". These are the endings a win reader is there for, so they are not
+# a cost even when the same line carries a setback word somewhere before them.
+A_GOOD_ENDING = re.compile(
+    r"\band\s+(?:now\s+|at\s+last\s+)?(?:we|i)\s+(?:can|could|get\s+to|are\s+able)\b"
+    r"|\band\s+(?:now\s+)?(?:that\s+means\s+)?"r"(?:we|i)\s+can\b", re.I)
 
 BAD = re.compile(r"\b(?:lost|miscarried|miscarriage|died|death|stillborn|failed|failing|"
                  r"not going|didn't|didnt|did not|haven't|havent|hasn't|hasnt|not yet|"
@@ -863,7 +956,7 @@ _COMING_UP = (
     # the same thing said the other way round: the job is the subject and it starts on the day
     re.compile(r"\b(?:new\s+)?(?:job|role|course|shift)\s+(?:starts|starting|begins|beginning)\b",
                re.I),
-    re.compile(r"\bmov(?:e|ing)\s+(?:house|into|in|out|to|away|abroad|back)\b", re.I),
+    re.compile(r"\bmov(?:e|ing)\s+(?:houses?|home|flats?|place|into|in|out|to|away|abroad|back)\b", re.I),
     # a birthday that is being counted down, with the date the rest of the line carries (see
     # `_COUNTED_UP`, kept apart because the sum in the line can make it not an age)
     _COUNTED_UP,
@@ -918,6 +1011,45 @@ def _a_money_clause(clean):
         if _MONEY.search(clause) and re.search(r"\d", clause):
             return True
     return False
+
+
+# The same "ahead of now" question asked on its own, for a reader that needs only that half: a
+# move is not news to look forward to, but it is a thing ahead, and the pool that asks about it
+# (`bot/compose/moving.py`) was held back from every line that says when in words. "we are moving
+# house in six weeks" was answered "Noted: you are moving house in six weeks.", "i am moving out in
+# a fortnight" was read as a move to a place called A Fortnight, and only the lines written in
+# figures ("in 3 weeks") reached the pool. A span of time counts however it is written, and the
+# hedge people put in front of it ("in about three weeks") is the same span.
+_AHEAD_SPAN = re.compile(
+    r"\bin\s+(?:the\s+)?(?:about\s+|around\s+|roughly\s+|nearly\s+|almost\s+|"
+    r"just\s+over\s+|over\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|a\s+few|a\s+couple\s+of|a|an)?\s*"
+    r"(?:hours?|days?|weeks?|fortnights?|months?|years?|"
+    r"spring|summer|autumn|winter|" + _MONTH + r")\b", re.I)
+
+
+# A move said as done ("i moved in on saturday", "we've moved house", "the move happened last
+# week") carries the day the same way the future does, so the "ahead" question is asked of a line
+# with nothing past-tense in it.
+_DONE_ALREADY = re.compile(
+    r"\b(?:moved|have\s+moved|had\s+moved|comes\s+home|we\s+did\s+move)\b"
+    r"|\b(?:yesterday|last\s+(?:week|month|year|weekend))\b|\balready\b", re.I)
+
+
+def ahead_of_now(text):
+    """Whether the line puts its thing ahead of now, by a date or by a span of time.
+
+    Only the date half of `reads_as_news_to_come`: no view on whether the thing is good news, and
+    no view on whether it has already happened - every caller asks its own second question.
+    """
+    clean = " ".join(str(text or "").lower().split())
+    if not clean or "?" in clean:
+        return False
+    # A move already made is behind the person, and "i moved in on saturday" carries the same
+    # words as "i move in on saturday": the day is not what decides it, the tense is.
+    if _DONE_ALREADY.search(clean):
+        return False
+    return bool(_AHEAD.search(clean) or _AHEAD_SPAN.search(clean))
 
 
 def reads_as_news_to_come(clean):
@@ -1127,6 +1259,178 @@ def reads_as_a_congratulation(reply):
     return bool(_A_CHEER.match(said))
 
 
+# A short detail added to news the bot has just cheered. The congratulations pool greets the win,
+# and the turn after it is often the best part said as plain words: "i passed my driving test" then
+# "first time", "third go", "we won on saturday" then "2-0". None of those has a subject of its
+# own, so the turn went to a card about the subject ("Most people need around 45 hours of lessons
+# plus 20 hours of private practice before they pass", "That's 2") or to a shrug ("Got it. Is there
+# anything you'd like a hand with?"), and the friend's reply is to take the detail and be gladder.
+#
+# Three shapes, because they are the ones a detail of news really comes in: which go it was, the
+# score, and the figures of a new baby. Anything else with a thing in it ("start monday") is a noun
+# the greeting pool already reads and answers.
+_AN_ATTEMPT = re.compile(
+    r"\b(?:first|second|third|fourth|fifth|sixth|1st|2nd|3rd|4th|5th|6th|last)\s+"
+    r"(?:time|go|try|attempt|sit)\b")
+_A_NUMBER = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+_A_SCORE = re.compile(_A_NUMBER + r"\s*(?:-|to)\s*" + _A_NUMBER + r"|" + _A_NUMBER + r"\s*nil")
+_OR_A_SCORE = re.compile(r"^\s*" + _A_NUMBER + r"\s*(?:-|to)?\s*(?:" + _A_NUMBER + r"|nil)\s*$")
+# "ten to two" is a time, not a result. `_A_SCORE` takes "N to M" for any `_A_NUMBER`, so a win
+# reported at ten to two was read as a score and cheered with "Ten to two - better than a plain
+# win." What tells the two apart is the minutes side of it: a clock's minutes are fifths of an
+# hour, and a score's are whatever the game produced. So "ten to two", "five to six",
+# "quarter to eight" and "20 to 9" are clocks, and "three to two" and "2 to 1" stay results.
+_A_CLOCK_MINUTES = (r"(?:5|10|15|20|25|30|35|40|45|50|five|ten|quarter|fifteen|twenty|twenty[- ]five"
+                    r"|thirty|thirty[- ]five|forty|forty[- ]five|fifty)")
+_AN_HOUR = (r"(?:1|2|3|4|5|6|7|8|9|10|11|12|one|two|three|four|five|six|seven|eight|nine|ten"
+            r"|eleven|twelve)")
+_A_CLOCK = re.compile(r"^\s*" + _A_CLOCK_MINUTES + r"\s*(?:past|to)\s*" + _AN_HOUR + r"\s*$")
+# A new baby's figures: "a boy, 8 pounds", "a girl, 7lb 2oz", "8 pounds 4", "he was 7 pounds".
+# The greeting pool reads "a girl" as the announcement and cheers it, and "a boy, 8 pounds" was
+# read as a question about a weight: the knowledge base answered it with the card about average
+# birth weights and the weigh-in appointments, five sentences of it, to somebody who had just said
+# their sister had a baby. What keeps a weight to the arrival is the birth in the chat, not the
+# figure on its own - "its 8 pounds an hour" after "i got the job" is a wage and stays where it is.
+_A_WEIGHT = re.compile(r"\b\d+(?:\.\d+)?\s*(?:lb|lbs|pounds?|kg|kilos?|oz|ounces?)\b", re.I)
+# ...and it is a detail only when the figures are all the line is. "is 8 pounds ok" asks about the
+# figure, "8 pounds, is that ok" asks at the end of it, and a friend answers either of those rather
+# than cheering them; "he was 7 pounds" is the detail. So every word of the line has to be the sex,
+# the figures, or the words that join them - the same whole-line test `_OR_A_SCORE` makes for a
+# score, for the same reason: a shape that reads a detail out of a question is worse than no shape.
+_AROUND_THE_FIGURES = frozenset("""
+    a an the its it's hes shes he she they theyre were was is are both and so just about exactly
+    weighing weighed weigh born baby twins boy girl little pound pounds lb lbs kg kilo kilos oz
+    ounce ounces gram grams g of on in at with each apiece together
+""".split())
+_A_FIGURE_IN_THE_LINE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:lb|lbs|pounds?|kg|kilos?|oz|ounces?|g|grams?)?", re.I)
+
+
+def _only_the_arrivals_figures(said):
+    """Whether every word of the line is the sex, a figure, or the words that join them."""
+    for word in str(said or "").lower().replace("\u2019", "'").split():
+        bare = word.strip(".,!;:\"'")
+        if not bare or bare in _AROUND_THE_FIGURES:
+            continue
+        if _A_FIGURE_IN_THE_LINE.fullmatch(bare):
+            continue
+        return False
+    return True
+# A detail is a short line with nothing asked in it. The words here are the ones that turn the same
+# shape into a question, a thanks or a goodbye, and none of them is part of a detail.
+_ASKS_OR_THANKS = re.compile(
+    r"\?|\b(?:what|how|why|when|where|who|which|can|could|should|would|will|shall|do|does|did|"
+    r"is|are|was|were|thanks|thank|thx|ty|ta|cheers|bye|goodbye|night|please|sorry)\b")
+
+
+# The wording for that detail. The cheer has just been given, so the pool takes the detail as the
+# news again: it never asks a question of its own ("how did it go?") and never guesses what the win
+# means, because the person has already said the part that matters.
+# No "Well done." in these: the cheer that took the news was the turn before, and saying it again
+# reads as a bot with one line ("Love that - well done. How are you celebrating?", then the detail,
+# then "...better than a plain win. Well done."). The detail line's job is to take the detail, not
+# to congratulate a second time.
+MORE_OF_THE_NEWS = (
+    "However many goes it took, you have it now.",
+    "The win is the whole of it, not which go it was.",
+    "{X} — the way to have it.",
+)
+MORE_OF_THE_NEWS_SCORE = (
+    "{X} — better than a plain win.",
+    "A score like that makes it a better story.",
+    "Even better than it sounded.",
+)
+# The arrival's figures. No word here about the weight itself: 8 pounds is a good weight and 4
+# pounds is a worry, and the friend's move on hearing either is to be glad the baby is here, not to
+# grade the figure. The cheer took the news on the turn before, so this line takes the detail.
+MORE_OF_THE_NEWS_ARRIVAL = (
+    "{X} — lovely news. Really pleased for you.",
+    "{X}. Really pleased for you.",
+    "{X} — that is the best kind of news.",
+)
+# The marks of one of those lines, for the arbiter: the pool is the one reply on the table that
+# reads the detail as news, so a card about the subject must not take the turn off it.
+_MORE_OF_THE_NEWS_MARKS = ("however many goes", "the win is the whole of it", "the way to have it",
+                           "better than a plain win", "makes it a better story",
+                           "even better than it sounded", "the best kind of news")
+
+
+def reads_as_the_detail_line(reply):
+    """Whether a reply is this module's own wording for a detail added to the news."""
+    said = " ".join(str(reply or "").lower().replace("\u2019", "'").split())
+    return any(mark in said for mark in _MORE_OF_THE_NEWS_MARKS)
+
+
+def the_reply_just_cheered(memory):
+    """Whether the reply the person just got came from the good-news pool.
+
+    `the_cheer_was_this_pool` compares the note the composer makes with the number of turns, and a
+    note made while the reply is being chosen counts the turns before it, so on the turn after the
+    cheer it is one short. This reads the note the way the next turn finds it: one back from the
+    turn just finished, and from this module, so a note left by an older cheer cannot answer for
+    the reply in between.
+    """
+    if not isinstance(memory, dict):
+        return False
+    note = memory.get("said_kind")
+    turns = memory.get("turns")
+    if not isinstance(note, dict) or note.get("kind") != "good_news":
+        return False
+    if not isinstance(turns, list) or not turns:
+        return False
+    last = turns[-1]
+    if not isinstance(last, dict) or str(last.get("module") or "") != "chat":
+        return False
+    return note.get("turn") == len(turns) - 1
+
+
+def a_detail_of_the_news(clean, memory=None):
+    """The shape of a detail added to good news, or "" for another line.
+
+    "attempt" for which go it was ("first time", "third go"), "score" for the result of the win
+    ("2-0", "three nil"), "arrival" for a new baby's figures ("a boy, 8 pounds", "7lb 2oz"). It
+    reads the line and the turn before it, nothing else: whether the cheer is the bot's own is
+    `the_cheer_was_this_pool`, which the caller knows.
+    """
+    said = " ".join(str(clean or "").split())
+    if not said or len(said.split()) > 6:
+        return ""
+    # The arrival's figures are the one shape read without the cheer: the birth in the chat is
+    # the news, and the cheer for it came from whichever module greeted it. Requiring this
+    # module's own note there left the figures to the card that reads a weight.
+    if (_A_WEIGHT.search(said) and "?" not in said and _only_the_arrivals_figures(said)
+            and a_birth_just_announced(memory)):
+        return "arrival"
+    if memory is not None and not (the_cheer_was_this_pool(memory) or the_reply_just_cheered(memory)):
+        return ""
+    if _AN_ATTEMPT.search(said):
+        return "attempt"
+    if _OR_A_SCORE.match(said) and _A_SCORE.search(said) and not _A_CLOCK.match(said):
+        return "score"
+    return ""
+
+
+def a_birth_just_announced(memory):
+    """Whether the person announced a birth in one of the two lines before this one.
+
+    The weight is what makes a birth detail a birth detail, and a weight on its own says nothing:
+    "its 8 pounds" is a wage or a parcel. The chat is what says which - the birth was the news, and
+    the figures are the detail of it.
+    """
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list):
+        return False
+    said = [str(one.get("user") or "") for one in turns[-2:] if isinstance(one, dict)]
+    return any(any(pattern.search(line) for pattern in BABY) for line in said if line)
+
+
+def reads_as_a_detail_of_the_news(clean, memory=None):
+    """Whether the line adds a detail to news the bot has just cheered, with nothing asked in it."""
+    if _ASKS_OR_THANKS.search(" ".join(str(clean or "").split())):
+        return False
+    return bool(a_detail_of_the_news(clean, memory))
+
+
 def reads_as_good_news(clean):
     """Whether a cleaned, lowercased line reports a happy event as a plain phrase."""
     if reads_as_news_to_come(clean):
@@ -1142,6 +1446,8 @@ def reads_as_good_news(clean):
         return False  # news with nobody's word on it is answered as both halves, not congratulated
     if reads_as_a_prize_in_a_message(clean):
         return False  # a prize that arrived in a text is a scam, not a celebration
+    if A_TURN_IN_THE_TALE.search(clean) or A_SETBACK_AFTER_THE_WIN.search(clean):
+        return False  # the clause after the "and" takes the win back
     if _a_hand_over([w.strip(".,!?;:\"'") for w in clean.split()]):
         return False
     if _I_PRAISED.search(clean) and not any(
@@ -1234,6 +1540,28 @@ def _the_silence_is_the_whole_of_it(text, match):
             break
         kept.append(bare)
     return all(bare in SILENCE_WORDS for bare in kept)
+
+
+def reads_as_a_win_a_cost_came_with(clean):
+    """Whether a line reports a win and the cost of it in the same breath: "we finally got the
+    keys and the place is a state".
+
+    The sibling of `reads_as_a_win_nobody_noticed` and read the same way: both halves are needed,
+    so a setback on its own is somebody's trouble and a win on its own is just good news. The
+    difference is what the second half says - a silence around the win, or the price of it.
+    """
+    text = " ".join(str(clean or "").lower().split())
+    if not text or "?" in text:
+        return False
+    if NOT_NEWS.search(text) or NOT_QUITE.search(text) or doubted(text):
+        return False
+    if not any(pattern.search(text) for pattern in GOOD):
+        return False
+    if not (A_TURN_IN_THE_TALE.search(text) or A_SETBACK_AFTER_THE_WIN.search(text)):
+        return False
+    # "we came into some money and now we can fix the roof": the clause after the `and` is the
+    # other half of the win, not a cost, and the cost words have to be there for it to be one.
+    return not A_GOOD_ENDING.search(text)
 
 
 def reads_as_a_win_nobody_noticed(clean):

@@ -17,7 +17,8 @@ throws away "smoking", which is the line every entry here is for.
 
 import re
 
-from .lookup import entry
+from .lookup import a_thing_has_stopped, entry
+from .wording import screens_are_somebody_elses
 
 # A bare "chewing" in the mouth row is what a follow-up needs, because the line carries no
 # subject of its own: "how do i stop it chewing things" after "my puppy is chewing everything"
@@ -99,9 +100,128 @@ def _mouth_tip(memory, understood):
         return None
     return MOUTH_TIP
 
+# Whose forgetting is it? "my mum keeps forgetting things" and "my husband keeps forgetting
+# things" were answered with the reminder card - how to stop forgetting an errand yourself -
+# because "keeps forgetting" and "things" are in this row's key. The memory-assessment entry
+# next door keys both lines too and answers them well, and it could not get a look in. So the
+# person word has to be the *subject* of the forgetting: a relative, a partner or another
+# adult in front of it, not the person the errand is for ("i keep forgetting to ring my mum"
+# is still this row's line, and the errand comes after the verb).
+_ANOTHER_ADULT = (
+    r"(?:mum|mom|mam|mother|dad|father|parent|parents|husband|wife|partner|spouse|"
+    r"other half|nan|nana|gran|granny|grandma|grandad|grandpa|grandmother|grandfather|"
+    r"son|daughter|child|kid|brother|sister|aunt|auntie|uncle|cousin|in law|"
+    r"mother in law|father in law|friend|neighbour|neighbor|boss|colleague|coworker|"
+    r"flatmate|housemate|landlord|carer|pal|chum|mate|nephew|niece|grandchild|grandson|"
+    r"granddaughter|fiance|fiancee|stepmum|stepdad|sister in law|brother in law|missus|"
+    r"other half|girlfriend|boyfriend)")
+# The forgetting can be said as a state as well as a deed: "my best friend seems forgetful lately"
+# and "my wife has become scatty" are the same worry as "my mum keeps forgetting things", and
+# only the verb forms were here, so the friend's line got no answer at all.
+_FORGOTTEN = (r"(?:forget|forgets|forgetting|forgot|forgotten|forgetful|forgetfulness|"
+              r"memory|remember|remembers|repeating|repeats|confused|confusion|"
+              r"getting confused|scatty|absent[- ]minded|away with it)")
+_SOMEONE_ELSE_FORGETTING = re.compile(
+    # "the wife keeps losing her glasses" says the person the same way "my wife" does: the
+    # article in place of the possessive is how people talk about their own household.
+    r"\b(?:my|his|her|our|their|the)\s+(?:\w+\s+){0,2}" + _ANOTHER_ADULT + r"\b"
+    r"[^.!?]{0,30}?\b" + _FORGOTTEN + r"\b|"
+    r"\b(?:he|she|they)\s+(?:keeps?|is|are|has|have|always|never|used to)\b"
+    r"[^.!?]{0,25}?\b" + _FORGOTTEN + r"\b")
+
+
+# The speaker's own memory said with an age: "im 50 and keep forgetting things" is asked as a
+# worry about getting older, and the reminder card answers it as though a system would fix it.
+_MY_AGE = re.compile(
+    r"\b(?:im|i am|i'm)\s+(?:nearly |almost |just |only )?"
+    r"(?:\d{2}|forty|fifty|sixty|seventy|eighty|ninety)\b|\bat my age\b|\bmy age\b|"
+    r"\bgetting older\b|\bas i get older\b|\bsince i turned\b")
+_FORGETTING = re.compile(
+    r"\b(?:forget|forgets|forgetting|forgot|forgotten|forgetful|memory|remember)\b")
+
+
+def _my_own_memory_and_my_age(understood):
+    """Whether the speaker is asking about their own memory coming with age. A `guard=` test."""
+    from ..compose.repair import line_of
+    said = line_of(understood)
+    if not said:
+        return False
+    text = " ".join(str(said).lower().replace("\u2019", "'").split())
+    return bool(_MY_AGE.search(text) and _FORGETTING.search(text))
+
+
+def _words_of(understood):
+    """The line and whatever the reading carried with it, as one lower-case string.
+
+    A follow-up is answered on the words of the line before it as well ("thats scary" after "my
+    mum keeps forgetting things" is still her memory), so a guard about *whose* forgetting it is
+    has to read the carried words too, not only the line as typed.
+    """
+    from ..compose.repair import line_of
+    said = [line_of(understood)]
+    if isinstance(understood, dict):
+        for key in ("leans_on", "ref", "topic"):
+            value = understood.get(key)
+            if isinstance(value, dict):
+                said.extend(str(item) for item in value.values() if isinstance(item, (str, int)))
+                words = value.get("words")
+                if isinstance(words, (list, tuple)):
+                    said.extend(word for word in words if isinstance(word, str))
+            elif isinstance(value, (list, tuple)):
+                said.extend(word for word in value if isinstance(word, str))
+    return " ".join(" ".join(said).lower().replace("\u2019", "'").split())
+
+
+def _someone_else_is_forgetting(understood):
+    """Whether another adult, not the speaker, is the one forgetting. A `guard=` test."""
+    text = _words_of(understood)
+    if not text:
+        return False
+    return bool(_SOMEONE_ELSE_FORGETTING.search(text)
+                or _MY_AGE.search(text))
+
+
 # "how do i help my husband stop drinking" is not the same question as "how do i stop
 # drinking": the answer for the person doing it is the wrong voice for the person watching,
 # so those lines go on to whichever entry handles somebody else's habit.
+# Who is doing the forgetting decides the card. A relative's forgetting is a memory question
+# (science.parent-memory), not the reminder system for the writer's own errands, and the two
+# rows share the words "keeps forgetting" - so the person has to come first in the line, the way
+# people say it: "my mum keeps forgetting things", "dad forgets what he went upstairs for".
+_A_RELATIVE = re.compile(
+    r"\b(?:my|his|her|their|our)\s+(?:mum|mom|mother|dad|father|parents|gran|granny|nan|nana|"
+    r"grandma|grandmother|grandad|grandpa|grandfather|grandparents?|wife|husband|partner|spouse|"
+    r"other half|son|daughter|brother|sister|aunt|auntie|uncle|cousin|boyfriend|girlfriend|"
+    r"friend|mate|neighbour|neighbor|mother in law|father in law)\b")
+# ... or the person is named by a pronoun, and it is not the writer: "he keeps forgetting",
+# "she forgets everything" - a line about the writer says "i keep forgetting".
+_SOMEBODY_ELSE = re.compile(
+    r"\b(?:he|she|they)\s+(?:keeps?\s+forgetting|forgets|is\s+forgetful|"
+    r"cant\s+remember|can't\s+remember|cant\s+recall|can't\s+recall|repeats|is\s+confused)")
+_SOMETHING_FORGOTTEN = re.compile(
+    r"\b(?:forgett?ing|forgets|forgetful|remember|remembers|recall|repeat(?:s|ing)?|"
+    r"confused|gets lost|losing|loses)\b")
+
+
+def _the_writer_is_the_one_forgetting(understood):
+    """True when the writer is the one with the errand, so the reminder card may answer.
+
+    A guard says whether its entry may answer, so this is the positive form: the card stands
+    down when the line names somebody else as the forgetter.
+    """
+    if not isinstance(understood, dict):
+        return True
+    said = " ".join(str(understood.get("clean") or understood.get("text") or "").split()).lower()
+    if not said:
+        return True
+    if _SOMEBODY_ELSE.search(said):
+        return False
+    relative = _A_RELATIVE.search(said)
+    if relative and _SOMETHING_FORGOTTEN.search(said[relative.end():]):
+        return False
+    return True
+
+
 # A line that says how bad the person feels is a line for the warm answer, not for a method:
 # "i quit smoking 3 days ago and i feel awful" wants "three days is the worst of it", which is
 # a different reply from "how do i quit smoking".
@@ -356,7 +476,8 @@ SMALL_HABIT_EXTRA_AVOID = {
                "security alarm", "security system", "alarm system", "alarm panel",
                "control panel", "the panel", "sensor", "sensors", "cctv", "smoke",
                "smoke alarm", "smoke detector", "carbon monoxide", "car alarm",
-               "alarm on my car", "pendant", "pendant alarm", "falls alarm",
+               "alarm on my car", "van", "vehicle", "fob", "key fob", "immobiliser",
+               "siren", "car park", "mechanic", "pendant", "pendant alarm", "falls alarm",
                "fall alarm", "personal alarm", "telecare", "careline", "lifeline",
                "care alarm", "panic alarm", "panic button", "medical alarm"),
 }
@@ -393,6 +514,34 @@ SMALL_HABIT_EXTRA_AVOID["worry"] = SMALL_HABIT_EXTRA_AVOID.get("worry", ()) + (
     "scan", "x-ray", "results")
 
 SMALL_HABIT_ASK = {"worry": WORRY_ASK}
+
+# Forgetting is the speaker's own job or it is somebody else's memory, and the person named
+# decides it. "my mum keeps forgetting things" and "my wife keeps forgetting things" were read as
+# the errand row above ("Set the reminder the moment you think of it"), which is advice for the
+# person doing the forgetting, not for the one watching it happen: the row's own key has "keeps
+# forgetting" and "things", and the third person in the line was not asked. science.py's
+# `parent-memory` answers that shape and says so in its own comment ("my wife keeps forgetting
+# things" is one of the lines it was extended for), so this row stands down for it.
+_ANOTHER_PERSONS_MEMORY = re.compile(
+    r"\b(?:mum|mom|mother|dad|father|parent|parents|grandma|grandmother|grandad|grandfather|"
+    r"gran|nan|nana|granny|wife|husband|partner|spouse|other half|mother in law|father in law|"
+    r"aunt|auntie|uncle|brother|sister)\b[^.?!]{0,40}"
+    r"\b(?:forgets?|forgetting|forgetful|forgot|keeps forgetting|repeats|repeating|confused|"
+    r"confusion)\b")
+
+
+def _the_errand_is_the_speakers_own(understood):
+    """False when the forgetting is somebody else's, so `parent-memory` answers it instead.
+
+    The job shape stays here: "my mum keeps forgetting to pay her bills" and "my brother keeps
+    forgetting to ring me" name a task with "to", and that is what this card tells you how to
+    remember, whoever ends up doing it.
+    """
+    said = str(understood.get("clean") or "").lower()
+    if not _ANOTHER_PERSONS_MEMORY.search(said):
+        return True
+    return bool(re.search(r"\bto\b", said))
+
 
 SMALL_HABIT_ENTRIES = [
     entry("stop-" + name, (keys, SMALL_HABIT_ASK.get(name, STOP_SMALL)), tip,
@@ -495,7 +644,13 @@ EXTRA_ENTRIES = [
           # the chat lane reads a big change on its own ("That is a big change. What does a normal
           # week look like now?"), and that line is warm but says nothing; this row has the shape
           # of the year and what to rebuild, so it has to outweigh it.
-          bias=3),
+          bias=3,
+          # "my oven has stopped working, what do i do" is the same words as a person's retirement
+          # and a different question: the machine that stopped has the plug and the fuse, and this
+          # card told a person with a broken oven that the first few months are the holiday. The
+          # guard stands this row down when the thing that stopped is a thing, so `home_craft.py`'s
+          # appliance rows answer it; a retirement or a job said by the person keeps this card.
+          guard=lambda understood: not a_thing_has_stopped(understood)),
 
     # "how do i stop being late" and "im always late" reached nothing: the only lateness row is
     # about telling your boss, which is the other question. Keyed on the punctuality phrases so
@@ -691,7 +846,13 @@ ENTRIES = EXTRA_ENTRIES + [
                  # bare "keep putting", which read "my landlord keeps putting the rent up" as a
                  # task being avoided. The rise is the same shape for every charge, so the whole
                  # family is held out here and `money.rent-rise` answers it.
-                 ) + _PUTTING_A_CHARGE_UP),
+                 ) + _PUTTING_A_CHARGE_UP,
+          # The card is about the writer forgetting their own jobs. When the person who forgets
+          # is somebody else - "my mum keeps forgetting things", "my wife keeps forgetting where
+          # she put things" - it is a question about that person's memory, and `science.parent-
+          # memory` is the card that answers it. Both matched this row on "keeps forgetting" and
+          # the errand card won on "things", so the memory question was told to set phone alarms.
+          guard=_the_writer_is_the_one_forgetting),
 
     entry("quit-vaping", (("vaping", "vape", "vapes", "vaper", "e cigarette", "e cigarettes",
                            "e cig", "elf bar", "nic salt"),
@@ -708,7 +869,20 @@ ENTRIES = EXTRA_ENTRIES + [
     entry("cut-down-drinking", (("drinking", "drink", "alcohol", "beer", "wine", "booze",
                                  "units", "pint", "pints", "vodka", "whisky", "gin"),
                                 STOP + ("less", "reduce", "reducing", "too much", "every day",
-                                        "every night", "how much is too much")),
+                                        "every night", "how much is too much",
+                                        # A rate beside a drink is this question, not a buying
+                                        # one and not a keeping one: "a bottle of wine a night is
+                                        # that ok" was the open-bottle card ("an open bottle keeps
+                                        # 3 to 5 days") and "she has a bottle of wine a night" was
+                                        # the wine shelf's ("buy the shop's own-label bottle").
+                                        # The words are safe here because the first group needs a
+                                        # drink in the line.
+                                        # Only the heavy rate, beside a drink in the line: a
+                                        # bottle or a pint a night is the question this card
+                                        # answers. A glass a day is the units card's - it gives
+                                        # the number - so "a day" is deliberately not here.
+                                        "a night", "every evening", "a bottle a night",
+                                        "a bottle every night", "a pint a day", "each night")),
           "Write down what you really drink for a fortnight - most people are surprised - then take "
           "three drink-free days a week as the first change, since days off are easier than smaller "
           "measures. Alternate each drink with a glass of water, keep nothing in the house on the "
@@ -734,6 +908,9 @@ ENTRIES = EXTRA_ENTRIES + [
                  "relentless", "lucozade", "sports drink", "sports drinks", "protein shake",
                  "caffeine", "espresso", "cola", "coke",
                  "chocolate", "sauce", "recipe", "braised", "marinade",
+                 # "is a glass of red wine a day good for you" asks about the benefit, and the
+                 # units card answers it with the number
+                 "good for you", "good for me", "healthy", "healthier", "benefit", "benefits",
                  # a hangover is a morning problem, not a habit to change
                  "hangover", "hungover", "drank too much", "last night", "so hard",
                  # an animal drinks too, and "is my dog drinking too much" is a thirst question,
@@ -761,6 +938,35 @@ ENTRIES = EXTRA_ENTRIES + [
     # phrase of `putting-things-off` above and a landlord putting the rent up is a rise, not a
     # postponement. This is the card for the first three; the fenced rows are held in their own
     # files.
+    # "my husband is always on his phone" is the mirror of `routines.phone-distraction`: the
+    # writer is not the one scrolling, so advice about their own notifications answers a
+    # different question. On main `35321d86` these lines reached the children's limit card
+    # ("Match the limit to the age"), which is advice for a parent about a child, and "my husband
+    # is always on his phone" reached nothing at all.
+    entry("their-phone-habit",
+          (("phone", "phones", "his phone", "her phone", "their phone", "screens", "screen",
+            "scrolling", "scroll", "instagram", "tiktok", "facebook", "social media", "tablet",
+            "ipad", "youtube"),
+           ("always on", "on his phone", "on her phone", "on their phone", "addicted", "glued to",
+            "too much", "never puts", "wont put", "won't put", "cant put", "can't put", "all day",
+            "all the time", "ignores me", "stuck on")),
+          "Say the thing you miss rather than a number of minutes, because a limit argued about in "
+          "the moment is a row about the phone and a request is something they can answer: \"I "
+          "miss talking at dinner\" works where \"you are on that thing again\" does not. Ask for "
+          "one phone-free slot a day, a meal is the easy one, and put your own phone face down for "
+          "it, because a rule that covers both of you holds and one imposed on them does not. If "
+          "the scrolling is new, or they seem flat as well as glued to it, the phone is the "
+          "symptom and a chat about how they are is the better move.",
+          ask=("how", "what", "any", "help", "should", "can i", "says", "told me", "wont",
+               "won't", "always", "spends", "is on", "on his", "on her", "on their", "glued",
+               "addicted", "never puts", "ignores me"),
+          # a child's screens are the parent's question in family.screen-time, and a phone that
+          # costs, breaks or dies is a technology question
+          avoid=("kid", "kids", "child", "children", "toddler", "son", "daughter", "teen",
+                 "teens", "teenager", "year old", "homework", "school", "screen time",
+                 "contract", "bill", "tariff", "price", "cost", "upgrade", "battery", "charge",
+                 "cracked", "repair", "replace", "lost", "stolen", "storage"),
+          guard=screens_are_somebody_elses),
     entry("forgotten-errand",
           (("keep forgetting", "keeps forgetting", "keep forgetting to", "keeps forgetting to",
             "always forgetting", "i forget to", "forget to", "forgetting to", "forgot to",
@@ -803,7 +1009,14 @@ ENTRIES = EXTRA_ENTRIES + [
                  # A "why" is asking for the reason, not for the system: `why do i keep
                  # forgetting things` had the explanation of how memories fade and was being
                  # given the reminder card instead. The explanation rows keep their why lines.
-                 "why", "what causes", "what makes", "is it normal"))
+                 "why", "what causes", "what makes", "is it normal"),
+          # Two more lines this row would otherwise take: somebody else's forgetting (the
+          # memory-assessment entry answers those, see _SOMEONE_ELSE_FORGETTING above), and the
+          # speaker's own memory said with an age ("im 50 and keep forgetting things" asked for a
+          # worry about getting older, not for a reminder to be set in the phone).
+          guard=lambda reading: (_the_errand_is_the_speakers_own(reading)
+                                 and not _someone_else_is_forgetting(reading)
+                                 and not _my_own_memory_and_my_age(reading)))
 ]
 
 ANSWERS = ("health",)

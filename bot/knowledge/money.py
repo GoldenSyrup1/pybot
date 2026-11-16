@@ -11,15 +11,95 @@ import math
 import re
 
 from ..compose.repair import owns_the_deed
+from ..memory import history
 from ..memory.facts import extract
 from .consumer import _a_hotel_room_or_no_home
 from .cooking import _crowd
+from .geography import _countries_said
 from .lifeadmin import _tipping
+from .prices import a_price_is_judged
 from .lookup import entry
 from .technology import APP_ACCOUNT_WORDS, PAID_SERVICES
 
+# "what is a survey" asks what the thing is and "do i need a survey" asks whether to have one.
+# The row answered both with "Yes, have one done -", which is not an answer to the definition.
+_SURVEY_ADVICE = (
+    "Yes, have one done - the lender's valuation is not a survey, and it only tells the lender the "
+    "house is worth what it is lending. A RICS level 2 homebuyer report is about £400 to £700 and "
+    "a level 3 building survey £600 to £1,500, which is the one for an old or unusual house; "
+    "level 1 is around £300 to £500 and is the basics only. Read the report for the things it "
+    "says to get checked by a specialist, and get quotes for those before you exchange, because "
+    "that is when you can still renegotiate."
+)
+_THE_SURVEY_ITSELF = (
+    "A house survey is a surveyor's inspection of the structure of the house you are buying, and "
+    "it comes in levels: a level 1 condition report is the basics only (about £300 to £500), a "
+    "level 2 HomeBuyer report is the usual one for a modern house in reasonable order (£400 to "
+    "£700), and a level 3 building survey is the one for an old, unusual or visibly tired house "
+    "(£600 to £1,500). It looks at the roof, walls, damp, drains and electrics rather than the "
+    "decoration, and it is not the mortgage lender's valuation."
+)
+_WHAT_IT_IS = re.compile(
+    r"\b(?:what is|what's|whats|what does|what do|define|definition of|meaning of)\b"
+    r"[^.?!]{0,30}\b(?:survey|surveyor|homebuyer|home buyer|report)\b", re.I)
+# "which survey should i get" and "how much does a level 3 survey cost" ask about the thing,
+# not whether to have one: the levels and their prices are the answer, and the advice opens
+# with "Yes, have one done -" because it was written for the whether question.
+_WHICH_OR_HOW_MUCH = re.compile(
+    # not "difference": "do we have to find the difference ourselves" is about the money after a
+    # low valuation, which is the advice, not the levels.
+    r"\b(?:which|how much|how many|what level|what sort|what kind|cost|costs|price|"
+    r"prices|cheapest)\b", re.I)
+
+
+def _the_survey(memory, understood):
+    """The levels when the line asks what or which or how much, the advice when it asks whether."""
+    clean = " ".join(str((understood or {}).get("clean") or "").lower().split())
+    if _WHAT_IT_IS.search(clean) or _WHICH_OR_HOW_MUCH.search(clean):
+        return _THE_SURVEY_ITSELF
+    return _SURVEY_ADVICE
+
+
+
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
 ANSWERS = ("money",)
+
+
+# "Take home" is the wage as soon as the line is asking about the money, and a border allowance
+# when the line names something to carry or says customs at all. The two hats are held in two
+# domains - this row and travel's duty-free table - so each asks the same question before it
+# answers, and the question is written here once.
+_SOMETHING_TO_CARRY = re.compile(
+    r"\b(?:wine|wines|beer|beers|spirits|whisky|whiskey|vodka|gin|rum|alcohol|cigarettes?|"
+    r"cigs?|tobacco|baccy|perfume|gifts?|presents?|souvenirs?|duty[- ]free|customs|allowances?|"
+    r"declare|declaring|declared|border|airport|abroad|overseas|france|spain|portugal|greece|"
+    r"italy|ireland|germany|holland|belgium)\b", re.I)
+
+
+# The ask that makes "take home" the word itself rather than a figure to work out: "what does take
+# home mean" is this row's, and "how much more will i take home if i get a rise" is the tax row's.
+_ASKS_WHAT_THE_WORD_MEANS = re.compile(
+    r"\b(?:take|bring)\s+home\s+(?:mean|means|meaning|definition)\b"
+    r"|\bwhat\s+(?:does|do|is|are)\s+(?:that\s+|it\s+)?(?:mean\s+for\s+)?(?:my\s+|the\s+|a\s+)?"
+    r"(?:take|bring)\s+home\b"
+    r"|\b(?:explain|define|meaning\s+of)\s+(?:the\s+|my\s+|a\s+)?(?:take|bring)\s+home\b", re.I)
+
+
+def _not_a_customs_line(understood):
+    """Keep the pay rows off the allowance question, which wears the same words.
+
+    "how much wine can i take home from france" reaches this row on "take home" and "how", and the
+    answer it wants is the customs table in travel.py, so a line that names a thing to carry or a
+    customs word is not this row's. The same key is a figure to work out in most other lines -
+    "how much more will i take home if i get a rise" is the tax bands' question - so the money
+    words carry this row only when the line is asking what the phrase means, or names a payslip.
+    """
+    text = understood.get("clean") or ""
+    if _SOMETHING_TO_CARRY.search(text):
+        return False
+    if re.search(r"\bpayslips?\b|\bpay\s+slips?\b|\bnet\s+pay\b", text, re.I):
+        return True
+    return bool(_ASKS_WHAT_THE_WORD_MEANS.search(text))
 
 
 def _a_first_meeting(text, understood):
@@ -137,11 +217,42 @@ def _income_tax_and_ni(income):
     return tax, ni
 
 
+# The pay a line introduces as its own. The reading is the one "i earn 1200 a month" already goes
+# through, so a price is a price: "my car cost 20000" and "i paid 250k for our flat" are not what
+# anybody is paid. A household's pay said as somebody else's - "my husband earns 40000" - is not
+# the person's own salary either, so the figure has to be theirs by the words in front of it.
+_MY_PAY = re.compile(
+    r"\b(?:i|we)(?:'m|m|'re|re|'ve|ve)?\s+(?:earn|earns|make|makes|get|gets|take|bring|on|am)\b"
+    r"|\b(?:my|our)\s+(?:salary|wage|wages|pay|income)\b", re.I)
+
+
+def _a_salary_they_said_before(memory):
+    """The salary an earlier line gave as their own pay, or 0.
+
+    "i earn 32000" then "how much tax do i pay" was answered "Tell me the salary and I'll work out
+    the take-home" - the salary was in the chat, one line up, and the ask was read as a line typed
+    on its own. A question about a figure is the same question whenever it is asked, so the pay
+    the chat already holds answers it; the newest one wins, because that is the one they stand by.
+    """
+    for line in reversed(history.the_lines_before(memory, look_back=8)):
+        low = line.lower()
+        if not _MY_PAY.search(low):
+            continue
+        if not any(_is_income(low, match) for match in _SALARY_NUMBER.finditer(low)):
+            continue
+        income = _salary_in(low)
+        if income:
+            return income
+    return 0
+
+
 def _take_home(memory, understood):
     """What a salary leaves in the bank, band by band."""
     reading = understood or {}
     text = str(reading.get("clean") or reading.get("text") or "").lower()
     income = _salary_in(text)
+    if not income:
+        income = _a_salary_they_said_before(memory)
     if not income:
         return ("Income tax starts above £12,570 a year: 20 per cent of it up to £50,270, then 40 "
                 "per cent, and National Insurance is 8 per cent above £12,570. Tell me the salary "
@@ -413,6 +524,63 @@ def _a_car_or_a_deal(understood):
     return bool(_A_CAR_OR_A_DEAL.search(said))
 
 
+# A rent or a bill named with a figure the person is choosing is a plan, not a debt. On main
+# `256b47bd1`, "our rent budget is 900 a month", "we can pay 250 a week rent" and "my budget is
+# about 250 a week on rent" were all answered by the arrears card - "tell the landlord in writing
+# before the next rent day, and ask the council about a Discretionary Housing Payment" - which is
+# advice for somebody who has already missed a payment. "how much rent can we afford on one wage"
+# was answered the same way. What decides it is not the word "budget" but whether the line says a
+# payment went wrong at all: a figure for a plan has no trouble in it, and every line that says
+# the trouble keeps the card.
+_A_PAYMENT_GONE_WRONG = re.compile(
+    r"\b(?:owe|owes|owed|owing|behind|arrears|arrear|missed|default\w*|late|short"
+    r"|cant pay|can't pay|cannot pay|not paid|havent paid|haven't paid|didnt pay|didn't pay"
+    r"|cant afford|can't afford|cannot afford|stop paying|stopped paying"
+    r"|no money|nothing left|lost my job|lost his job|lost her job|unemployed|redundant"
+    r"|struggling|overdrawn|overdraft|debt|debts|notice|evict\w*|bailiff|county court"
+    r"|cut off|disconnected|final demand|red letter|worried|scared|frightened)\b")
+# Working out what can be paid: a budget, a figure per week or month, or the move it is for.
+# A rate is a figure and a period together. The bare words "a week" were enough at first, and on
+# a chat that went "i rent, so is it my job or the landlords" -> "i rang them a week ago and nobody
+# came" that made a repair nobody turned up for into a figure somebody was working to, so the rent
+# question took it and answered a housing-repair line about a third of a take-home pay. Only a
+# number with the period after it is a rate; "a week ago" is a time, not a plan.
+_A_FIGURE_FOR_A_PLAN = re.compile(
+    r"\b(?:budget|budgets|budgeting|up to|can pay|could pay|would pay|how much"
+    r"|can we afford|could we afford|can i afford|could i afford"
+    r"|\d[\d,.]*\s*(?:pw|pcm|pcw)|pcw|pcm|pw|per week|per month"
+    r"|\d[\d,.]*\s*(?:k\b|grand\b|)?\s*(?:a|per|/)\s*(?:week|month|wk|mo)\b"
+    r"|(?:a|per)\s*(?:week|month)\s*(?:on rent|rent|for rent|on the rent|between us)\b)")
+_A_PLANNING_TO_MOVE = re.compile(
+    r"\b(?:thinking of moving|planning to move|going to move|we're moving|were moving"
+    r"|moving to|moving in|when we move|looking at (?:flats|houses|places)"
+    r"|looking for a (?:flat|house|place)|new (?:flat|house|place|home))\b")
+
+
+def _a_figure_for_a_plan_is_not_a_debt(understood):
+    """True unless the line is working out what it can pay, which is a plan and not arrears.
+
+    "my budget is about 250 a week on rent" is somebody choosing a flat; "i cant pay my rent on
+    friday" is somebody in trouble. Both name the rent, and the arrears card had no way to tell
+    them apart, so it answered both. The test is the trouble and not the subject: with one of the
+    trouble words in the line the card answers as before, and without one a figure somebody is
+    working to, or a move they are planning, is enough to stand it aside.
+    """
+    said = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not said:
+        said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if not said:
+        return True
+    if _A_PAYMENT_GONE_WRONG.search(said):
+        return True
+    return not (_A_FIGURE_FOR_A_PLAN.search(said) or _A_PLANNING_TO_MOVE.search(said))
+
+
+def _a_plan_and_no_trouble(understood):
+    """The other half of the same read: the rent question, when nothing has gone wrong yet."""
+    return not _a_figure_for_a_plan_is_not_a_debt(understood)
+
+
 # "my son wants a pension" can be a man of forty, so a bare son or daughter does not make the
 # line a child's; the words here cannot be anything but a child.
 _A_CHILDS_POT = ("child", "children", "kid", "kids", "grandchild", "grandchildren",
@@ -508,6 +676,47 @@ def _they_owe(memory):
 
 _MONEY = r"£?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|grand|thousand)?"
 
+# --- an age is not a sum of money ------------------------------------------------------------
+# "im 34 and my back has been sore for a week" was read as somebody with £34 for a week and
+# answered "That is £4.86 a day for a week. Buy the staples first - rice, pasta, eggs...", a
+# grocery budget for a bad back. The figure in a person frame - "im 34", "she's 8", "my mum is
+# 78", "34 years old" - is an age, and only loses that reading when the figure carries money of
+# its own: "im 34 and have £200 a week", "my son is 8 and i have 30 pounds to feed us".
+_A_PERSON = (
+    "i", "im", "i'm", "ive", "i've", "he", "hes", "he's", "she", "shes", "she's", "they",
+    "theyre", "they're", "we", "we're", "mum", "mom", "mother", "dad", "father", "son",
+    "daughter", "wife", "husband", "partner", "boyfriend", "girlfriend", "nan", "gran",
+    "granny", "grandma", "grandad", "grandpa", "brother", "sister", "niece", "nephew",
+    "cousin", "friend", "kid", "child", "boy", "girl", "baby", "lad", "lass", "hubby")
+# The frame in front of the figure: a person and "is"/"am", or "aged".
+_AGE_FRAME = re.compile(
+    r"(?:\b(?:my|his|her|our|their)\s+)?\b(?:" + "|".join(_A_PERSON) + r")\s*"
+    r"(?:is|are|was|were|am|'s|\u2019s)?\s*$|\baged\s*$", re.I)
+# ... and the money that takes the reading back, straight after the figure.
+_MONEY_AFTER = re.compile(
+    r"\s*(?:£|pounds?\b|quid\b|grand\b|k\b|thousand\b|a\b|per\b|each\b|every\b)", re.I)
+# "34 years old", "8 year old son", "34 yr old".
+_AGE_AFTER = re.compile(r"\s*(?:years?|yrs?|y/o)\s*(?:old)?\b|\s*(?:st|nd|rd|th)\b", re.I)
+
+
+def _an_age(text, match):
+    """True when the figure at `match` is a person's age rather than a sum of money."""
+    after = text[match.end():match.end() + 12]
+    if _MONEY_AFTER.match(after):
+        return False
+    return bool(_AGE_FRAME.search(text[:match.start()]) or _AGE_AFTER.match(after))
+
+
+def _sums_in(text):
+    """Every sum the line names, with an age left out: (value, match) pairs."""
+    for match in re.finditer(_MONEY, text or ""):
+        if _an_age(text or "", match):
+            continue
+        value = float(match.group(1).replace(",", ""))
+        if match.group(2):
+            value *= 1000
+        yield value, match
+
 
 # Money that is going by rather than by towards something: rent, a bill, a habit.
 GOING_OUT = ("rent", "mortgage", "bill", "bills", "spend", "spending", "spent", "cost", "costs",
@@ -588,10 +797,7 @@ def _target(text):
     """The biggest sum the line names that is not the rate the line puts aside."""
     monthly = str(_per_month(text) or "")
     best, biggest = 0, 0
-    for match in re.finditer(_MONEY, text):
-        amount = float(match.group(1).replace(",", ""))
-        if match.group(2):
-            amount *= 1000
+    for amount, match in _sums_in(text):
         # 24 characters, not 14: the words that can sit between the sum and the rate word are
         # cut off before the unit is read at 14, so "80 leftover a week" became the goal.
         if _rate_words(text[match.end():match.end() + 24]):
@@ -654,6 +860,25 @@ def _pay_off(memory, understood):
                 "interest. Check the total repayable rather than the monthly payment, and ask for "
                 "the settlement figure on what you owe now, since paying early can carry up to 58 "
                 "days' extra interest or an early repayment charge.")
+    # The answer has to be about the debt the line named: "is it worth overpaying my mortgage"
+    # was answered with a credit card nobody had mentioned, and a card at 20% is not the
+    # question when the money is going onto a mortgage at 4%.
+    if re.search(r"\bmortgages?\b|\bremortgag", line or "", re.IGNORECASE):
+        return ("Overpaying a mortgage almost always saves money, because the interest you save is "
+                "your mortgage rate for every year left on the term, and no savings account pays "
+                "that after tax. Check the early repayment charge first: most fixes let you "
+                "overpay 10% of the balance a year without one, and above that the fee can cost "
+                "more than the interest you save. Ask the lender to take the overpayment off the "
+                "term rather than the monthly payment unless the lower payment is what you need, "
+                "and keep three to six months of bills in savings before you start, since an "
+                "overpayment cannot be taken back.")
+    if re.search(r"\bloans?\b|\bfinance agreement\b|\bcar finance\b", line or "", re.IGNORECASE):
+        return ("Check the settlement figure before you overpay a loan: many carry an early "
+                "repayment charge, often 58 days' extra interest or a percentage of what is left, "
+                "and if that is bigger than the interest you would save, keep the money in "
+                "savings instead. Where there is no charge, overpaying a loan at 8% or more beats "
+                "any savings account, so it is the better use of spare money after a small "
+                "buffer.")
     return ("Compare the interest you'd save with what the savings earn: a credit card at 20% or "
             "more beats any savings account, so clear that first, and check the early repayment "
             "charge before overpaying a loan or mortgage (most mortgages allow 10% of the balance a "
@@ -767,9 +992,9 @@ def _is_income(text, match):
 def _income_target(text):
     """The biggest sum the line gives as pay, or 0."""
     best = 0
-    for match in re.finditer(_MONEY, text):
+    for amount, match in _sums_in(text):
         if _is_income(text, match):
-            best = max(best, _sum_amount(match))
+            best = max(best, amount)
     return best
 
 
@@ -777,12 +1002,11 @@ def _price_target(text):
     """The biggest sum the line gives as a price: not a rate, and not pay."""
     monthly = str(_per_month(text) or "")
     best = 0
-    for match in re.finditer(_MONEY, text):
+    for amount, match in _sums_in(text):
         if _is_income(text, match):
             continue
         if _rate_words(text[match.end():match.end() + 24]):
             continue
-        amount = _sum_amount(match)
         if str(amount) != monthly and amount > best:
             best = amount
     return best
@@ -1323,10 +1547,7 @@ def _goal_from_user(memory, amount):
             continue
         seen += 1
         best = 0
-        for match in re.finditer(_MONEY, said):
-            value = float(match.group(1).replace(",", ""))
-            if match.group(2):
-                value *= 1000
+        for value, match in _sums_in(said):
             if _rate_words(said[match.end():match.end() + 24]):
                 continue  # a rate they put by, not a pot they are aiming at
             if value > amount and value > best:
@@ -1638,6 +1859,14 @@ NOT_SPENT_ON_FOOD = (
     "borrow", "borrowed", "lend", "lending", "loan", "pay back", "paying back", "repaid",
     "owe", "owes", "how long does", "use by", "in the fridge", "freezer burn", "expire",
     "calories", "calorie", "diet", "lose weight", "how long will", "how long do",
+)
+
+# One sum in two currencies is an exchange rate, not a budget: "convert 20 pounds to euros" and
+# "how much is 300 euros in pounds" both name a second currency, and any money row that reads
+# "pounds" as money to spend has to stand down for them.
+ANOTHER_CURRENCY = (
+    "euro", "euros", "dollar", "dollars", "usd", "eur", "yen", "cents", "currency",
+    "exchange rate", "exchange", "convert", "conversion", "to the pound", "to the euro",
 )
 
 # Nothing coming in at all is the food bank; a thin week is the plan. "no money", "nothing to
@@ -2048,6 +2277,10 @@ def _dish_to_cook_cost(memory, understood):
     the people in the line, and which part of it is worth cutting.
     """
     text = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
+    # "is 2 pounds expensive for a loaf of bread" judges the price of the loaf on the shelf, and
+    # what the flour and the oven cost to make one is a different question about the same food.
+    if a_price_is_judged(text):
+        return None
     named = _the_dish_named(text)
     if not named:
         return None
@@ -2101,6 +2334,22 @@ def _rent_deposit(memory, understood):
                 "and the landlord must tell you which one. " + back)
     return ("Your deposit must be in a government-backed protection scheme within 30 days, and "
             "the landlord has to tell you which one. " + back)
+
+
+# The retirement row's second key part holds the plainest question openers, "what is" among
+# them, so a line that says "retires" and then asks anything at all reached it: "what is a good
+# present for a teacher who retires" was answered with the pot to aim for. A present for
+# somebody who is retiring is a present question, not a question about money, whatever else
+# the line says.
+_A_GIFT_OR_A_PARTY = re.compile(
+    r"\b(present|presents|gift|gifts|card|cards|flowers|bouquet|voucher|hamper|mug|"
+    r"party|leaving do|leaving present|send off|retirement do|speech|toast)\b")
+
+
+def _not_a_gift(understood):
+    """False when the line is about buying or giving something for a retirement."""
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
+    return not _A_GIFT_OR_A_PARTY.search(said.lower())
 
 
 def _retirement(memory, understood):
@@ -2171,6 +2420,14 @@ def _pension_choice(memory, understood):
                 "between insurers, and tell them about any health problems - they can raise the "
                 "income. It is the safe option rather than the generous one; most people now mix "
                 "an annuity for the bills with drawdown for the rest.")
+    # The fall-through is the tax-free lump sum, and it is the answer to a line that names one
+    # of the three. "what does that mean", said after the drawdown card, names none of them and
+    # was reaching this row through the chat's topic once the ask words took a definition - plus
+    # "mean" - so the guard says the line has to name what it is asking about.
+    if not any(word in text for word in ("annuit", "drawdown", "lump", "25%", "tax free",
+                                         "tax-free", "cash in", "release", "pension pot",
+                                         "pot")):
+        return None
     return ("You can usually take 25% of a defined contribution pot tax-free, up to about "
             "\u00a3268,000 in total, and the rest is taxed as income when you take it. So taking a "
             "big lump sum in one year can push you into a higher tax band: spread it over several "
@@ -2400,6 +2657,31 @@ _SERVICING_A_DEBT = re.compile(
     r"standing order|repayment)\b")
 
 
+# Asking the bank to give you an overdraft, or to raise the limit on it, is a question about an
+# overdraft rather than a purse that has run dry. `money-trouble` carries "overdraft" in its first
+# key group and the pronouns in its second, so "how do i ask my bank about an overdraft" scored two
+# parts and was answered with "Two calls free up the most cash fastest" - two cheaper tariffs for a
+# question about an overdraft. The phrases below are that shape and they name no state of the
+# purse, and the guard only stands this row down: the overdraft rows answer, and a person who says
+# they are skint in the same line keeps the purse answer.
+_ASKING_FOR_AN_OVERDRAFT = (
+    "ask my bank", "ask the bank", "ask our bank", "ask about an overdraft",
+    "about an overdraft", "for an overdraft", "get an overdraft", "getting an overdraft",
+    "open an overdraft", "set up an overdraft", "arrange an overdraft", "apply for an overdraft",
+    "an overdraft application", "overdraft limit", "increase my overdraft",
+    "increase the overdraft", "raise my overdraft", "bigger overdraft", "larger overdraft",
+    "overdraft with bad credit",
+)
+
+
+def _a_purse_in_trouble(understood):
+    """True when the line is a state of the purse or a debt, not a question about an overdraft."""
+    said = " ".join(str(word) for word in ((understood or {}).get("words") or ())).lower()
+    if any(phrase in said for phrase in _ASKING_FOR_AN_OVERDRAFT):
+        return False
+    return _a_debt_in_trouble(understood)
+
+
 def _a_debt_in_trouble(understood):
     """True when a debt named in the line has failed, or nothing in the line is a debt."""
     said = " ".join(str(word) for word in (understood.get("words") or ())).lower()
@@ -2626,10 +2908,7 @@ def _make_it_last(memory, understood):
     reading = understood or {}
     text = str(reading.get("clean") or reading.get("text") or "")
     amount = 0.0
-    for match in re.finditer(_MONEY, text):
-        value = float(match.group(1).replace(",", ""))
-        if match.group(2):
-            value *= 1000
+    for value, _match in _sums_in(text):
         amount = max(amount, value)
     label, days = _till_when(text)
     if amount and days and _A_WEEK_DAY_NAMED.search(text):
@@ -2819,6 +3098,22 @@ def _council_tax(memory, understood):
                 "councils apply one sooner. Tell the council the date it became empty - a short "
                 "spell while it is being sold or done up is usually exempt - and ask what their "
                 "rule is, because it differs by council.")
+    # A bill that is too high is a complaint about an amount, and "what can i do" asks for the
+    # actions in order. The words "what can i do" name nothing, so this line was reaching the
+    # posture card - the same shape as a water bill that is "too high", which the water entry
+    # learned for the same reason. The band comes first because a wrong band is the only one of
+    # the two that is backdated over years.
+    if any(w in line for w in ("too high", "so high", "too much", "expensive", "high",
+                              "higher", "huge", "massive", "sky high")):
+        return ("Check the band first, then the discounts, because a council tax bill is only "
+                "'too high' in one of those two ways. Compare your band with identical houses "
+                "on the council's valuation list, which is free to challenge through the "
+                "Valuation Office and is backdated if they agree, then confirm every discount "
+                "you are owed: 25 per cent for one adult, an exemption for a full-time student "
+                "household, and - the biggest one, and separate from the 25 per cent - the "
+                "council's own council tax reduction scheme if the income is low. Ring the "
+                "council tax line and ask them to go through the bill with you; they do it all "
+                "day.")
     return ("The two ways a council tax bill is wrong are the band and the discounts. Check the "
             "band against similar houses on your council's valuation list and challenge it with "
             "the Valuation Office if two identical houses differ, which is free. Then check the "
@@ -2911,6 +3206,105 @@ CREDIT_SCORE_MISSED = ("Yes, and it is the mark that hurts most: a missed or lat
                        "direct debit for at least the minimum so it cannot happen again, and keep "
                        "every other payment on time - lenders read the last 12 months hardest. It "
                        "does not reset the six years to start the clock again by paying it off.")
+
+# A shared cost that is not a table has no card of its own, and every neighbouring row claimed
+# it: "how do i split a taxi fare" was told to photograph the receipt for the employer, "how do i
+# split petrol money" was the payslip budget, and a hotel room and a holiday cottage were both
+# answered with who-had-the-wine. The subject in the line decides which of the three answers it
+# gets, and nothing here is a dinner, a bill or a shared flat - those keep their own rows.
+_SHARED_RIDE = re.compile(
+    r"\b(?:taxi|taxis|cab|cabs|uber|ride|rides|fare|fares|parking|"
+    r"toll|tolls|minibus)\b")
+# A tank of petrol is not a fare: "how should we split the cost of petrol" was answered with
+# "whoever was picked up first and dropped last pays most", and nobody is picked up for a tank.
+# Fuel is paid for by the miles each person drove, so it gets its own opening.
+_SHARED_FUEL = re.compile(
+    r"\b(?:petrol|petrol money|diesel|fuel|fuel money|tank of|fill up|filled up|"
+    r"mileage|miles|charging|charge point|electric car)\b")
+_SHARED_STAY = re.compile(
+    r"\b(?:hotel|hotels|room|rooms|cottage|cottages|airbnb|apartment|villa|caravan|"
+    r"holiday house|holiday home|house we rented|place we rented|bnb)\b")
+# A group holiday is not one bill and not a room: the big things are booked and paid for once,
+# and the rest is a kitty. "how do i split the cost of a holiday" and "... of flights" were told
+# who had the steak and the wine, because "split the cost" is the etiquette row's phrase.
+_SHARED_TRIP = re.compile(
+    r"\b(?:holiday|holidays|vacation|flight|flights|trip|trips|weekend away|week away|"
+    r"weekend break|city break|abroad|group holiday|group trip)\b")
+_SHARED_GIFT = re.compile(
+    r"\b(?:present|presents|gift|gifts|collection|whip round|kitty|leaving present|"
+    r"birthday present|wedding present|secret santa)\b")
+_SPLIT_ASK = re.compile(
+    r"\b(?:split|splits|splitting|share|shares|sharing|halves|go halves|between us|"
+    r"each pay|per head|per person|fair|fairly|fairest|who owes|who pays|put in|"
+    r"contribute|contribution|chip in|how much should|"
+    # a whip round is a shared cost with a name of its own, and the word "split" is usually
+    # absent from the line: "how do i do a whip round for a present" got a rehearsed speech.
+    r"whip round|whip-round|whipp round|collection|collection for|kitty)\b")
+# "should I chip in for a leaving present" is a social question - is it expected of me - and
+# the mechanics of a collection is the wrong answer to it. The gift rows keep those lines.
+_ASKING_IF_EXPECTED = re.compile(
+    r"\b(?:should\s+i|should\s+we|is\s+it\s+rude|is\s+it\s+ok|is\s+it\s+okay|"
+    r"is\s+it\s+weird|would\s+it\s+be\s+rude|am\s+i\s+expected|do\s+i\s+have\s+to)\b"
+    r".*\b(?:chip\s+in|go\s+halves|put\s+in|contribute|pay\s+in)\b"
+    r".*\b(?:present|presents|gift|gifts|collection|leaving|birthday|wedding|baby|"
+    r"retirement|farewell)\b")
+
+
+def _share_a_cost(memory, understood):
+    """Splitting a ride, a stay or a present: one opening sentence per subject, then the rule."""
+    reading = understood or {}
+    line = " ".join(str(reading.get(key) or "") for key in ("clean", "text")).lower()
+    if not line:
+        line = " ".join(str(word) for word in (reading.get("words") or ())).lower()
+    if _SHARED_FUEL.search(line):
+        return ("Split fuel by the miles each person actually drove, not by who was in the car: "
+                "note the odometer when you set off and when you get back, keep the receipt for "
+                "the tank, and divide it by the miles rather than by the passengers. Agree before "
+                "you set off whether the owner's wear is part of it - tyres and servicing are "
+                "already in the driver's own costs, and a passenger is paying for the journey. "
+                "One person pays at the pump, the rest send their share the same day, because a "
+                "tank remembered a fortnight later is always argued about.")
+    if _SHARED_RIDE.search(line):
+        return ("Split a fare by the journey each person actually made, not by head: whoever was "
+                "picked up first and dropped last pays most, and a taxi app already shows the "
+                "breakdown, so screenshot it into the group chat the same night. Say who is "
+                "paying the driver before anyone gets in, and let one person book and collect, so "
+                "there is a single number to divide rather than three arguments about it.")
+    if _SHARED_STAY.search(line):
+        return ("Split a shared place by the room and the nights, not by head: a couple in the "
+                "double pays more than the person on the sofa bed, and anyone staying three "
+                "nights out of seven pays for three. Work the total out per room per night, "
+                "round it to something easy, and take the deposits from everyone before the "
+                "booking is made so the person whose card it is on is never the one chasing.")
+    if _SHARED_TRIP.search(line):
+        return ("Book the big things - the flights, the house, the car - to one card and split "
+                "those equally, or by room if the rooms differ, then have everyone put the same "
+                "amount into a kitty for meals, taxis and tickets. Photograph every receipt and "
+                "count the kitty on the last night rather than after you get home, and refund "
+                "what is left to the person who paid it in, because a group holiday is a lot of "
+                "small shared costs rather than one bill.")
+    if _SHARED_GIFT.search(line):
+        return ("Fix the amount before anybody is asked, and ask for it once: a whip round works "
+                "when the target is a number - 'twenty pounds each, I'll get the vouchers' - and "
+                "fails when it is a collection with no total. Buy from one person's card, keep "
+                "the receipt and the list of who has paid in the group chat, and cover any "
+                "shortfall yourself rather than going round a second time.")
+    return ("Say the number before the thing is booked or ordered, then split by what each person "
+            "actually had rather than by head, and keep the reckoning in one place - a note in "
+            "the group chat or a splitting app - so nobody has to trust their memory. Whoever "
+            "pays up front collects, and it is fair to ask the same day rather than a fortnight "
+            "later.")
+
+
+def _shares_a_cost(understood):
+    """The shared-cost row's guard: the line has to be about a split, not just name a taxi."""
+    reading = understood or {}
+    said = " ".join(str(reading.get(key) or "") for key in ("clean", "text")).lower()
+    if not said:
+        said = " ".join(str(word) for word in (reading.get("words") or ())).lower()
+    if _ASKING_IF_EXPECTED.search(said):
+        return False
+    return bool(_SPLIT_ASK.search(said))
 CREDIT_SCORE_STEPS = ("Get your report free from Experian, Equifax or TransUnion, correct "
                      "anything wrong on it, register on the electoral roll and set up a direct "
                      "debit for at least the minimum on every card. Keeping card balances under "
@@ -3246,6 +3640,85 @@ _WHAT_INHERITANCE_TAX_IS = (
     "years.")
 
 
+# ---- which way a debt runs ---- -------------------------------------------------------------
+#
+# A debt is the one everyday question where the same words are the whole answer from both sides:
+# "i owe my brother 500" and "my brother owes me 500" carry the same person, the same verb and the
+# same money, and the two scripts are opposites. The rows list the phrasings ("owes me", "ask my
+# mate") and so miss the plainest report of all - "should i say something to my mate about the
+# money he owes" has no "me" in it anywhere - and the person chasing a debt was read as the one
+# who owes it: "I owe you £600, I can do £50 a week."
+#
+# So the line is read for which way the money runs, and the row answers the side it is on. "owed"
+# is money coming to the person (somebody else is the debtor), "owing" is money going out of
+# their pocket, and None is a line that does not say.
+_DEBT_FIRST = frozenset(("i", "im", "ive", "i've", "we", "weve", "we're", "were"))
+_DEBT_THIRD = frozenset((
+    "he", "she", "they", "him", "her", "them", "his", "their", "theirs", "hes", "shes",
+    "theyll", "he's", "she's", "they'll", "it", "its", "it's",
+    "mate", "mates", "friend", "friends", "brother", "brothers", "sister", "sisters", "mum",
+    "mam", "dad", "mother", "father", "parents", "son", "daughter", "family", "colleague",
+    "colleagues", "neighbour", "neighbours", "neighbor", "landlord", "ex", "partner", "husband",
+    "wife", "cousin", "uncle", "aunt", "boss", "flatmate", "roommate", "housemate", "lad", "bloke",
+))
+_DEBT_OWING = frozenset(("owe", "owes", "owed", "owing", "borrow", "borrows", "borrowed",
+                         "borrowing"))
+_DEBT_OWED = frozenset(("lend", "lends", "lent", "lending"))
+_DEBT_ME = frozenset(("me", "us"))
+
+
+def a_debt_that_runs_one_way(understood):
+    """Which way a debt in the line runs: "owed", "owing", or None when the line does not say.
+
+    The subject of the verb decides, because that is the word the two directions differ in: "i owe
+    my brother" and "my brother owes me" are otherwise the same sentence. `lend` flips the sense
+    (the one who lends is owed) and `borrow` does not. A verb with no subject in its clause reads
+    None, and the row keeps the answer it had.
+    """
+    clauses = (understood or {}).get("clauses") if isinstance(understood, dict) else None
+    if not clauses:
+        return None
+    for clause in clauses:
+        if not clause:
+            continue
+        for i, word in enumerate(clause):
+            if word not in _DEBT_OWING and word not in _DEBT_OWED:
+                continue
+            subject = next((w for w in reversed(clause[max(0, i - 6):i])
+                            if w in _DEBT_FIRST or w in _DEBT_THIRD), None)
+            if subject is None:
+                continue
+            if word in _DEBT_OWED:
+                return "owed" if subject in _DEBT_FIRST else "owing"
+            return "owing" if subject in _DEBT_FIRST else "owed"
+    return None
+
+
+# The two sides of one row. The debtor's script is what this row always said; the other side is the
+# person chasing money somebody else owes, and it is one message, one date and one consequence,
+# because asking twice vaguely is what makes it awkward.
+_THE_DEBTOR_SCRIPT = (
+    "Tell them the amount and the date in one message: \"I owe you £600, I can do £50 a week from "
+    "Friday, so it's clear by March.\" Put it on a standing order so it happens without a "
+    "conversation every month, and if you cannot pay this month say so before the date, not after "
+    "- a small, steady repayment keeps the relationship and the debt honest."
+)
+_THE_CHASE_SCRIPT = (
+    "Say it once, plainly and in writing, and put a date on it: \"You said £200 by the end of the "
+    "month - can you do the 30th?\" Naming the amount and a day is a request, not an accusation, "
+    "and a message is easier than a face-to-face. If money is tight for them, agree a standing "
+    "order of a small amount a week rather than another promise, and say what happens if it slips "
+    "- that is what keeps the friendship and the money."
+)
+
+
+def _the_debt_answer(memory, understood):
+    """The side of the debt the line is on: theirs to pay, or theirs to chase."""
+    if a_debt_that_runs_one_way(understood) == "owed":
+        return _THE_CHASE_SCRIPT
+    return _THE_DEBTOR_SCRIPT
+
+
 def _the_inheritance_tax(memory, reading):
     """The threshold, or what the claim really is when the money is asked for before it is released.
 
@@ -3272,10 +3745,111 @@ def _a_claim_that_asks_for_money_first(understood):
         return False
     return _a_prize_and_a_bill(understood)
 
+_CASH_ON_HAND = re.compile(
+    r"\bhow much cash\b|\bcash (?:at home|in the house|on me|in my purse|in my wallet)\b|"
+    r"\bkeep (?:some )?cash\b|\bemergency cash\b", re.I)
+
+_CASH_REFUSED = re.compile(
+    r"\brefuse[sd]? cash\b|\bcash only\b|\bno cash\b|\bnot tak(?:e|es|ing) cash\b|"
+    r"\bwont take cash\b|\bwon't take cash\b|\blegal tender\b|\bmust (?:a shop|they|shops) "
+    r"take cash\b", re.I)
+
+
+def _no_place_named(understood):
+    """A line that names a country is the travel-money answer, not the everyday choice.
+
+    "should i take cash or card to spain" wants two cards from different banks and the local
+    currency; the envelope-and-protection comparison is the same question with nowhere to go
+    (bronze-whistle).
+    """
+    clean = " ".join(str((understood or {}).get("clean") or "").lower().split())
+    return not _countries_said(clean)
+
+
+def _cash_or_card(memory, reading):
+    """Cash or card, said as a choice: the protection is the card's, the limit is the cash's."""
+    clean = " ".join(str((reading or {}).get("clean") or "").lower().split())
+    if _CASH_REFUSED.search(clean):
+        return ("A shop can set its own payment terms, so it can say card only or cash only as "
+                "long as it says so before you buy - 'legal tender' only means a court has to "
+                "accept it for a debt, which is why a bus or a corner shop can turn down a £50 "
+                "note. What it cannot do is take your money and then refuse the only way you can "
+                "pay, or refuse you for a protected reason. If it is a service you have no "
+                "alternative to, such as a council or an NHS car park, complain in writing and "
+                "quote the terms they published.")
+    if _CASH_ON_HAND.search(clean):
+        return ("Keep about £50 to £100 at home in small notes, and a few pound coins: enough for "
+                "a power cut, a taxi or a market stall on a day the card machines are down, and "
+                "not so much that losing it hurts. Keep it somewhere dry and not in the obvious "
+                "drawer, and top it up when you spend it rather than all at once.")
+    return ("Both, for different jobs. A card - credit for anything over £100 - is the one with "
+            "protection: Section 75 makes the card company jointly liable when something never "
+            "arrives or is not what was sold, and a debit card gives you a chargeback instead. "
+            "Cash is the one with a limit: an envelope of notes for the week is spending you can "
+            "see run out, which is why it works for people who overspend on the card, and small "
+            "shops, markets and tips still run on it. So pay for anything you might have to claim "
+            "on by card, and use cash for the everyday spending you want to cap.")
+
+
+
+# The plainest way a person says the money is owed, and the one shape that no card keyed: "i
+# havent paid my rent" was a chat nod and "i havent paid my phone bill" was "I'm listening",
+# while "im behind on rent", "i cant pay my rent" and "i havent paid my rent in two months" all
+# reached an answer. A negated payment put the words the tables look for in the wrong key - the
+# thing ("rent", "bill", "phone") is in the second key of these rows, and "havent paid" was in
+# the table only on `stopping-paying`, which fences out every bill it is said about. So the
+# shape is one tuple that the rows naming a thing you pay can pair with.
+NOT_PAID = ("havent paid", "haven't paid", "hasnt paid", "hasn't paid", "havent payed",
+            "haven't payed", "have not paid", "has not paid", "not paid yet", "didnt pay",
+            "didn't pay", "did not pay", "didnt payed", "never paid", "unpaid", "overdue",
+            # "i owe rent" is the shortest way of all, and a rent or a bill is never what is
+            # owed in a good way.
+            "owe rent", "owe the rent", "owe a bill", "owe on the",
+            # "short this month" and "missed this month" are deliberately not here: the rent
+            # row carries "short this month" already, and in the general debt row the phrase
+            # took "money is a bit short this month" - a person saying the week is long, which
+            # the composer answers with a question - and turned it into a lecture.
+            "missed the payment", "missed a bill")
+
 
 # The payment-plan answer is said twice: once for a line that names the bill, and once for
 # "will i be cut off if i stop paying", which names no bill at all. The words live here so
 # that the two rows cannot drift apart.
+# A payment-plan answer is written for a supplier: it names the priority services register, the
+# Warm Home Discount and a supply that could be cut off. All three are wrong for money owed to a
+# person, and "i havent paid the babysitter" reached it on the word "paid" alone, so three hours'
+# wages got a lecture about the Warm Home Discount. The test is not which noun follows "paid" but
+# whether the line is about a supply at all: the thing supplied has to be named, or the line has
+# to say the supply stopped. Anything else that owes money this way is a person, and money owed to
+# a person is friends.owe-friend-money.
+A_SUPPLIED_THING = re.compile(
+    r"\b(?:bill|bills|supplier|suppliers|account|direct debit|tariff|meter|reading|arrears|"
+    r"energy|gas|electric|electricity|leccy|water|heating|heat|fuel|broadband|internet|"
+    r"phone|mobile|insurance|premium|loan|mortgage|rent|council tax|credit card|catalogue|"
+    r"overdraft|tv licence|licence fee|subscription|standing order)\b", re.I)
+A_SUPPLY_STOPPED = re.compile(
+    r"\b(?:cut off|cut me off|cut us off|switched? (?:me|us) off|switch (?:me|us) off|"
+    r"disconnect(?:ed)?|disconnection|defaulted|defaulting|in arrears|behind on my payments?)\b",
+    re.I)
+
+
+def _a_bill_and_not_a_person(understood):
+    """True when what has not been paid is something a supplier provides.
+
+    A line that says the supply itself stopped ("will they cut me off") passes without naming
+    it, because being cut off is only ever a supplier's doing. A bare "not paid" or "havent
+    paid" does not: the thing owed has to be named, or the line is about money owed to a person
+    and the script for that is in friends.py.
+    """
+    said = " ".join(str(word) for word in ((understood or {}).get("words") or ())).lower()
+    if not said:
+        said = str(((understood or {}).get("clean")
+                    or (understood or {}).get("text") or "")).lower()
+    if A_SUPPLY_STOPPED.search(said):
+        return True
+    return bool(A_SUPPLIED_THING.search(said))
+
+
 PAID_AND_CUT_OFF_REPLY = (
     "Ring the supplier before the next bill, not after, and ask for a payment plan you can "
     "keep to: they have to offer one, and the letters stop while it runs. While you are on "
@@ -3286,8 +3860,103 @@ PAID_AND_CUT_OFF_REPLY = (
     "the calls with you for free. Nothing gets cut off today: that takes a warrant.",
 )
 
+# One row answers four shapes of the same question - what a fix is, the difference between the two
+# rates, which to take, and whether to take one - and it answered all four with the same
+# explanation. "should i get a fixed rate" and "fixed rate or variable" were told what the price
+# cap is and never which rate to have, so the first sentence said nothing the person had asked
+# for. The verdict is the first sentence for the ask that wants one, and the explanation keeps its
+# own opening for the ask that wants that. `wants` is not needed here: `asks` is the reading that
+# is already there, and the set below is the shapes, not the words of a line.
+_ENERGY_WANTS_THE_VERDICT = frozenset(("yesno", "recommend", "choice", "opinion"))
+_ENERGY_VERDICT = (
+    "Worth it only if the fix comes in under what the cap is likely to do over its term: a fix "
+    "buys certainty, so on a falling cap the certainty is all you are paying for and the variable "
+    "rate wins on price. Compare the unit rate and the standing charge against today's cap rather "
+    "than the monthly estimate, and check the exit fee before signing.")
+_ENERGY_EXPLANATION = (
+    "The price cap is a limit on the unit rate and standing charge of a standard variable "
+    "tariff, set quarterly, so it moves with the market; a fixed tariff holds your rate for "
+    "its term whether prices go up or down. Compare the unit rate and the standing charge "
+    "rather than the monthly estimate, and check the exit fee before signing a fix.")
+
+
+def _energy_tariff(memory, reading):
+    """The verdict for a choice or a yes/no about a fix, the explanation for what a fix is."""
+    asks = set((reading or {}).get("asks") or ())
+    return _ENERGY_VERDICT if asks & _ENERGY_WANTS_THE_VERDICT else _ENERGY_EXPLANATION
+
+# A bare "refund" is two words' work: HMRC's, and the money back for a parcel or a purchase.
+# The tax-refund scam row is the only row that reads a bare one, so it asks the line whose refund
+# it is. Without this, "my sister got a text about a parcel refund" and "i got a text about a
+# delivery refund" left the courier card - the one that names the fee-by-text trick - and got
+# HMRC's, which is true of neither. A shop, a courier or an order named beside "refund" means
+# the refund is theirs; HMRC named beside it means it is HMRC's.
+_NOT_THE_TAX_OFFICES_REFUND = frozenset((
+    "parcel", "parcels", "delivery", "deliveries", "courier", "couriers", "postage",
+    "royal mail", "evri", "hermes", "yodel", "dpd", "ups", "fedex",
+    "order", "orders", "ordered", "shop", "shops", "store", "stores", "retailer",
+    "amazon", "asos", "ebay", "argos", "seller", "returns", "returned",
+))
+_THE_TAX_OFFICE = frozenset(("hmrc", "inland revenue", "tax office"))
+
+
+def _a_refund_the_tax_office_sent(reading):
+    """True when the refund in the line is HMRC's rather than a shop's or a courier's."""
+    reading = reading or {}
+    words = {str(w).lower() for w in (reading.get("words") or ())}
+    if "inland revenue" in str(reading.get("text") or "").lower():
+        return True
+    if words & _THE_TAX_OFFICE:
+        return True
+    return not (words & _NOT_THE_TAX_OFFICES_REFUND)
+
+
+
 ENTRIES = [
     # --- budgeting and saving ----------------------------------------------------
+    # "should i use cash or card" was the shrug on main, and "should i pay with cash or card" was
+    # the card-on-a-phone answer about Apple Pay, because that row's key carries "pay" and "card"
+    # (bronze-whistle). Naming cash is what makes a line the choice between the two.
+    entry("cash-or-card",
+          (("cash or card", "cash or a card", "card or cash", "cash or contactless",
+            "pay cash", "paying cash", "pay in cash", "paid in cash", "use cash", "using cash",
+            "with cash", "in cash", "cash only", "legal tender", "cash at home",
+            "cash on me", "emergency cash", "keep cash", "refuse cash", "take cash",
+            "keep at home", "keep some cash"),
+           ("should i", "better", "which", "or", "worth", "how much", "can i", "can a shop",
+            "do i", "is it", "why", "refuse", "keep", "pay", "use")),
+          _cash_or_card,
+          # A payment phrase is a modifier, not a subject. "in cash", "pay cash", "use cash" and
+          # "take cash" sit inside other people's questions - "should i tip in cash", "should i
+          # pay cash in hand for a builder", "can a tradesman insist on cash", "do i get money
+          # off for paying cash" - and asking for one of them let this row take all of those.
+          # What makes a line this row's is the comparison itself, so the ask names the choice
+          # and not the way of paying: every line below says cash or card, either, better, which,
+          # how much cash, or that cash was refused. A row that keys a phrase needs its ask to
+          # key the question the phrase is evidence of.
+          ask=("cash or card", "card or cash", "cash or a card", "cash or contactless",
+               "or card", "or a card", "instead of card", "instead of cash", "or use cash",
+               # "worth" was in this list and it is a mood, not a question: "is it worth paying
+               # in cash for a discount" is the ask-for-a-discount line, and "worth" alone let
+               # this row take it.
+               "better", "which is", "which one", "which should", "how much cash",
+               "refuse", "legal tender", "keep at home", "keep some cash", "keep cash",
+               "cash on me", "emergency cash", "cash only"),
+          # a cash ISA, a cash machine and a cash flow are other questions; so is a card that
+          # was lost, which is not a choice about how to pay for the shopping
+          avoid=("isa", "cash machine", "atm", "cashback", "cash flow", "cash flow forecast",
+                 "lost my card", "stolen", "fraud", "overdraft", "payday", "savings",
+                 "cash for a car", "cash buyer",
+                 # taking money out of a machine abroad is the travel-money answer, which
+                 # names two cards and the local currency: "how do i take cash out abroad" is
+                 # not a choice between the two ways to pay for the shopping
+                 "abroad", "overseas", "travel", "holiday", "holidays", "withdraw", "cash out",
+                 "exchange rate", "foreign currency", "travel money"),
+          guard=_no_place_named,
+          # no bias: a place named in the line ("should i take cash or card to spain") is the
+          # travel-money answer, which names two cards and the local currency, and the choice
+          # between the two ways to pay is answered wherever nothing else claims the line
+          ),
     entry("save-goal-time",
           (("how long", "how many months", "how many years", "how many weeks", "how soon",
             "when will i have", "at a month", "a month", "a week", "a fortnight"),
@@ -3411,7 +4080,14 @@ ENTRIES = [
                          "put by", "putting by", "putting away", "putting aside"),
                         ("holiday", "trip", "summer", "christmas", "goal", "target", "present",
                          "wedding", "car", "month", "monthly")),
-          _save_goal),
+          # The money set aside for a trip is not the leave you have left: "i have 5 days holiday
+          # saved up from last year" is a carry-over question and this row answered it by
+          # working backwards from the date, so the leave words stand it down.
+          avoid=("days holiday", "days of holiday", "holiday days", "holidays left",
+                 "days leave", "days of leave", "annual leave", "holiday entitlement",
+                 "carry over", "carried over", "from last year", "use them", "use the days",
+                 "days off", "time off", "left over"),
+          reply=_save_goal),
     # "how do i start saving" is plans.saving-plan (the habit, with a standing order on pay day);
     # only the low-income version is left to say something new here.
 
@@ -3465,7 +4141,14 @@ ENTRIES = [
                  # chargeback row (section 75, 120 days) is the answer to it
                  "dispute", "disputed", "disputing", "chargeback", "charge back", "section 75",
                  "unauthorised", "unauthorized", "didnt authorise", "didn't authorise",
-                 "i didnt buy", "i didn't buy", "never arrived", "overcharged", "twice")),
+                 "i didnt buy", "i didn't buy", "never arrived", "overcharged", "twice",
+                 # A payment the state owes you is not a payment you missed: "my uc payment is
+                 # late" got the late-fee-and-interest card, which is the opposite way round.
+                 # The benefit rows answer it (lifeadmin, benefit-payment-not-arrived).
+                 "benefit", "benefits", "universal credit", "dwp", "jobcentre", "job centre",
+                 "pip", "esa", "tax credits", "child benefit", "hardship payment",
+                 # the benefit names people type short
+                 "uc", "universal credit payment", "benefit payment", "benefit money")),
 
     # "im skint this month" is not a plan and not a shrug: it is the one line where a person is
     # telling you the money has run out, and the useful thing is the two calls that take ten
@@ -3524,7 +4207,7 @@ ENTRIES = [
             "card", "credit card", "debit card", "overdraft", "debt", "debts", "balance",
             "payment", "interest", "minimum", "pound", "quid", "grand")),
           _money_trouble,
-          guard=_a_debt_in_trouble,
+          guard=_a_purse_in_trouble,
           # A rent or a bill that cannot be paid has its own answer, and so does a shop, a meal
           # or a night out: those entries say something concrete about the thing itself.
           # "run out before payday" is the weekly-pay question and has its own answer; a Mac
@@ -3609,6 +4292,11 @@ ENTRIES = [
                  # "£8 over 4 days is £2 a day" with the staples and the buy order - is not
                  # this row's line: it answers the same sum with less to put in the trolley,
                  # so the lines that reach that card keep their own answer.
+                 # days of leave are not a sum of money: "how much leave do i have left, i only
+                 # work 4 days a week" was answered with the £3-a-day food card, because "i have
+                 # left" and "week" are this row's two words
+                 "days leave", "much leave", "leave left", "leave balance", "leave allowance",
+                 "annual leave", "days of leave", "days a week", "days off", "holiday entitlement",
                  "last me", "last us", "to last", "pounds left", "quid left", "money left",
                  "left for the week", "left for the month", "left till", "left until",
                  "last a week", "last a month", "last a fortnight", "last the week",
@@ -3739,6 +4427,42 @@ ENTRIES = [
                  # and a line about a body is answered by the health modules, whatever period
                  # it happens to say ("feeling dizzy for a week, should i worry").
                  _BODY)),
+    # A conversion is money, and nothing in the module answered one: "how much is 100 euros in
+    # pounds" was the diet plan, because the only row that holds "pounds" is the weight one, and
+    # "why is the exchange rate so bad" was nothing at all. The rate cannot be quoted from here -
+    # it moves every day and this bot has no clock and no network - so the answer is where the
+    # rate comes from and what actually costs the money, which is the fee rather than the rate.
+    entry("currency-conversion",
+          # The left side is the *other* currency, never "pounds": a conversion always names the
+          # currency it is going to, so "how much is 100 pounds in euros" has "euros" in it and
+          # "i spend 4 pounds a day on coffee, how much is that in a year" has nothing here. The
+          # word "pound" in this key was worse than useless - it put a money word into the
+          # vocabulary of every line that weighs something, so "how much is 3 pounds of potatoes"
+          # lost its price card to a portion answer and "how much is 1 pound of chicken" to the
+          # roasting time. A row must not own a word that is another domain's subject.
+          (("euros", "euro", "dollars", "dollar", "currency", "exchange rate", "exchange",
+            "convert", "conversion", "sterling", "yen", "cents", "rupees"),
+           ("how much", "how many", "much is", "many is", "worth", "rate", "convert", "change",
+            "in euros", "in dollars", "against", "strong", "weak", "get for", "would i get",
+            "do i get", "buy")),
+          ("Exchange rates move every day, so I cannot give you a figure that will still be right "
+           "tomorrow: your bank's app or any currency converter has the rate this minute. What "
+           "costs more than the rate is the fee on top of it - a normal debit card abroad often "
+           "adds about 3% and hides a mark-up in the rate, while a travel card or a bank that uses "
+           "the mid-market rate adds nothing on weekdays, and the kiosk at the airport is the worst "
+           "rate you will find. For a purchase, pay in the local currency when the machine offers "
+           "to convert for you, because that conversion is the seller's own and it is always worse "
+           "than your bank's."),
+          # a body is weighed in pounds and a bag is limited in kilos: only money lines come here,
+          # and the diet plan has its own row for the other reading of the same word.
+          # a pound on its own is a sum of money spent on something, so the line also has to name
+          # a second currency or ask for a rate: that is what makes it an exchange question.
+          ask=("euros", "euro", "dollars", "dollar", "currency", "exchange rate", "exchange",
+               "convert", "conversion", "sterling", "yen", "cents", "rupees", "in pounds",
+               "in euros", "in dollars", "to the pound", "to the euro", "rate"),
+          avoid=("lose", "losing", "lost", "weight", "diet", "dieting", "slim", "kilos", "kilo",
+                 "kilograms", "stone", "stones", "how heavy", "baggage", "suitcase", "allowance",
+                 "per kilo", "pound of", "pounds of", "flour", "butter", "mince", "roast")),
     entry("track-spending", (("track", "tracking", "monitor", "work out where",
                               # "where does all my money go" is the same question without a verb.
                               "where does my money go", "where does all my money go",
@@ -4059,7 +4783,14 @@ ENTRIES = [
             "explained", "mean", "means", "understand", "dont understand",
             "don t understand", "difference", "differ", "arranged", "unarranged",
             "unauthorised", "unauthorized", "limit", "basic", "basics", "simple terms",
-            "how does an overdraft work")),
+            "how does an overdraft work",
+            # Asking the bank to give you one is the same card: "how do i ask my bank about an
+            # overdraft" names no definitional word at all, so it scored one part and the purse
+            # row (which carries "overdraft" in both its key groups) took it and answered with
+            # two cheaper tariffs. The asking words are the second part of this question.
+            "ask my bank", "ask the bank", "ask about", "ask for", "how do i ask", "what do i say",
+            "can i get", "how do i get", "get one", "get an overdraft", "arrange", "arranged one",
+            "set up", "open one", "apply", "apply for", "increase", "raise my", "bigger")),
           ("An overdraft is a loan from your bank that lets your balance go below zero. You agree a "
            "limit in advance and pay interest or a daily fee for the days you use it, so it is "
            "borrowed money rather than extra money, and it has to be paid back. Arranged means the "
@@ -4182,6 +4913,10 @@ ENTRIES = [
             "is debt advice free", "is it free", "do i pay for", "should i pay for",
             "debt is out of control", "debts are out of control", "out of control"),
            ("money", "debt", "debts", "advice", "help", "bills", "bill")),
+          # Only when the line names money, a debt or a bill: the plain word "help" was a subject
+          # of this row as well as an ask, so a line could reach it on its own asking words with
+          # nothing of the row's subject in it ("who can help me with the kids" was told where to
+          # get free debt advice). `ask` is the mechanism for exactly this. 
           "Don't pay anyone for it: Citizens Advice, StepChange and National Debtline all give "
           "debt advice free, and MoneyHelper is the government's own service. Ring StepChange if "
           "there are several debts and you want a plan written to the people you owe; ring "
@@ -4192,7 +4927,9 @@ ENTRIES = [
           # and a bare "debt" here would steal all three
           avoid=("borrow", "borrowing", "loan", "loans", "lender", "lenders", "credit card",
                  "payday", "cant pay", "can't pay", "cannot pay", "cant afford", "can't afford",
-                 "behind on", "skint", "broke", "frozen", "scam", "gambling", "payday loan")),
+                 "behind on", "skint", "broke", "frozen", "scam", "gambling", "payday loan"),
+          ask=("money", "debt", "debts", "bill", "bills", "owe", "owed", "owes", "arrears",
+               "creditor", "creditors", "overdraft", "out of control")),
     # The plain shapes of the question miss the key: "how do i get out of debt" names no
     # priority word, "how do i clear my debts" reached the UCAS clearing answer in study, and
     # "how do i start paying off my debt" went to overpay with the compare-the-interest answer.
@@ -4338,6 +5075,16 @@ ENTRIES = [
                                   # payday" is the smaller answer to it.
                                   "spare each month", "spare this month", "spare every month",
                                   "spare at the end of the month", "spare at the end of each month",
+                                  # the week as the period, and the one-word spelling: a sum left
+                                  # over "each week" is the same question as one left over "each
+                                  # month", and with the food rows standing down on the period the
+                                  # line had nowhere to go but the habit echo ("You have 200
+                                  # leftover each week. That's a habit now.")
+                                  "left over each week", "left over every week",
+                                  "leftover each week", "leftover every week",
+                                  "left over each month", "leftover each month",
+                                  "left over a week", "leftover a week",
+                                  "spare each week", "spare every week",
                                   # a want said flat: "i want to save more money" had no entry of
                                   # its own and work.py's "more money" key sent it to the pay-rise
                                   # meeting. The phrase is the want, not the sum.
@@ -4350,7 +5097,13 @@ ENTRIES = [
                                   # at the end of the month" is a sum and a month, and the standing
                                   # order is the thing to do with it
                                   "end of the month", "end of each month", "end of every month",
-                                  "spare", "it")),
+                                  "spare",
+                                  # the sum said as a leftover rather than as "spare", and in
+                                  # either spelling: with the food rows standing down on "each
+                                  # week" the line needed somewhere to land, and a sum left over
+                                  # each month is the standing order's question
+                                  "leftover", "leftovers", "left over",
+                                  "it")),
           ("Move the saving out on payday, not at the end of the month: a standing order for even "
            "£25 the day you're paid works better than saving whatever is left, because nothing is "
            "ever left. Raise it by £5 whenever a bill goes down."),
@@ -4381,7 +5134,10 @@ ENTRIES = [
            "for that one thing and stop when it is gone."),
           # "cut" is everywhere - hair, onions, grass - so this needs the spending words too.
           avoid=("hair", "onion", "onions", "grass", "hedge", "wood", "finger", "bread", "slice",
-                 "meat", "nail", "nails", "paper", "cable", "wires", "cardboard")),
+                 "meat", "nail", "nails", "paper", "cable", "wires", "cardboard",
+                 # "not cut out for teaching" is a doubt about a person, and "cut out" alone put
+                 # the spending card on it. The phrase, not the word, is the spending question.
+                 "cut out for", "cut out to")),
 
     entry("cook-vs-takeaway", (("cook at home", "cooking at home", "cook or takeaway",
                                 "takeaway or cook", "eat at home", "ready meal", "ready meals",
@@ -4580,6 +5336,15 @@ ENTRIES = [
     # that row's ask list, and "spend" and "much" are key words on both. The phone row now asks
     # for "time"; this is the money question, and a line that names the thing - a takeaway, a
     # coffee - has its own row earlier in this file, so it wins the tie and gets the sharper plan.
+    # The fault has a verb of its own and it names no amount: "how do i stop wasting money",
+    # "i fritter money away", "i blow my wages every weekend", "my wages are gone by the
+    # weekend". None of them says "spend" or "overspend", so the row that answers the question
+    # could not see them: two were the search hedge ("Happy to help - tell me what you've got so
+    # far"), three the listening noise ("I'm listening - say more if it helps"), "i blow my
+    # wages every weekend" was echoed back as a statement of fact, and "my wages are gone by the
+    # weekend" was "Thanks for telling me". The object of the verb is what makes a line this
+    # row's, so every phrase below carries money in it: a bare "waste" is the bin's word or the
+    # food-waste row's, and "i waste so much" alone stays where it was.
     entry("spend-too-much", (("spend too much", "spending too much", "spend so much",
                               "spending so much", "spends too much", "money goes",
                               # the same habit in one word, which is how people say it: "i
@@ -4587,10 +5352,42 @@ ENTRIES = [
                               # ("You overspend every month. That's a habit now.") and got no
                               # help at all, and the past tense "i overspent again" the same.
                               "overspend", "overspends", "overspending", "overspent",
-                              "over spend", "over spending"),
+                              "over spend", "over spending",
+                              # the verb of wasting, with its object in the phrase
+                              "waste money", "wasting money", "wasted money", "wastes money",
+                              "waste my money", "wasting my money", "waste the money",
+                              "wasting the money", "waste so much money", "wasting so much money",
+                              "waste money on", "wasting money on", "wasted money on",
+                              "money to waste", "nothing to waste",
+                              # the same complaint in the words people use for it
+                              "fritter", "fritters", "frittering", "frittered",
+                              "fritter away", "frittering away",
+                              "blow my wages", "blow my money", "blowing my money",
+                              "blowing my wages", "blows my money", "blown my money",
+                              "blow my pay", "blow the lot", "blow it all",
+                              "keep blowing", "keep wasting", "keeps wasting",
+                              "money disappears", "money just disappears", "money vanished",
+                              "money vanishes", "money goes on nothing", "spent on nothing",
+                              # the same thing said as a state rather than a verb: "my wages are
+                              # gone by the weekend", "there is no money left by payday", "i am
+                              # skint by the 20th". Nothing is spent in these, so the row could
+                              # not see them at all.
+                              "wages are gone", "wages gone", "money is gone", "money gone",
+                              # "i have no money left before payday" is the shortage card's, not
+                              # this one's: a habit needs a verb of spending, and having nothing
+                              # left is where the food bank and the two calls belong
+                              "nothing left by", "money left by",
+                              "money runs out", "money ran out", "runs out before payday",
+                              "skint by", "skint before", "gone by the weekend",
+                              "gone by payday", "spent by the"),
                              ("money", "month", "monthly", "each month", "payday", "week",
                               "clothes", "shopping", "shoes", "coffee", "coffees", "lunch",
                               "lunches", "stuff", "things", "everything", "always", "pay",
+                              # the wage is money too, and it is how most people say it: "i blow
+                              # my wages on nights out" named no money word at all, and "how do
+                              # i stop blowing my wages" got the vaguest reply the bot has
+                              "wage", "wages", "salary", "wage packet", "payslip", "weekend",
+                              "fortnight", "nights out", "night out",
                               # the bare line and the sale rail: "i spend too much" and "i
                               # spend too much in the sales" both name the habit and nothing
                               # else, and without a word here they reached nothing at all and
@@ -4604,11 +5401,21 @@ ENTRIES = [
           bias=1,
           ask=("spend", "spending", "spends", "spent", "too much", "so much", "money",
                # the one-word shapes need the word here too, or the row never gets the line
-               "overspend", "overspends", "overspending", "overspent"),
+               "overspend", "overspends", "overspending", "overspent",
+               # the wasting verbs are asks in their own right: "how do i stop wasting money"
+               # names no amount and no month, so the row has to read the verb itself
+               "waste", "wasting", "wasted", "fritter", "frittered", "blow my",
+               "disappears", "vanishes", "on nothing",
+               # the state rather than the verb: "my wages are gone by the weekend" names no
+               # spending at all, so the ask has to carry the words it does say
+               "wages", "wage", "gone", "left", "skint", "runs out", "ran out"),
           # a bill is an amount owed, not a habit: "i spend too much on my phone bill" wants the
           # provider's retention price, and a debt is the debt rows' question.
           avoid=("bill", "bills", "rent", "mortgage", "debt", "debts", "loan", "loans",
                  "overdraft", "insurance", "childcare", "fuel", "petrol", "time",
+                 # a duration is a sum, not a habit: "how long till my money runs out" asks how
+                 # many weeks the money buys, and the month's diary does not answer it
+                 "how long", "how many weeks", "how many months", "until payday", "till payday",
                  # the thing the money goes on has its own card, and on those lines the card is
                  # the answer: a phone or a broadband line wants the retention price, a train the
                  # advance fare, a laptop the price to pay. Widening this row's key so the bare
@@ -4764,6 +5571,12 @@ ENTRIES = [
                  # halves", which is about money and not about the work
                  "chores", "housework", "washing up", "hoovering", "dishes", "tidying",
                  "tidy up", "who does what", "restaurant", "dinner", "dine", "taxi", "takeaway", "with friends", "with mates",
+                 # "share" is in this row's subject side, so "should i turn on location sharing
+                 # with my boyfriend" was answered "pay in by what each of you earns, not by
+                 # halves". Sharing where you are is not a share of the money: the words below
+                 # are the only ones a location line brings, and the bills rows keep theirs.
+                 "location", "locations", "live location", "where i am", "where im",
+                 "where i'm", "tracking", "track me", "track my phone",
                  # a share of the work is not a share of the money: "how do i get my partner to
                  # do his share" was answered "pay in by what each of you earns, not by halves",
                  # which is the opposite kind of share. The phrases keep a work word with them,
@@ -4811,8 +5624,25 @@ ENTRIES = [
                  "divorce", "divorcing", "getting a divorce", "broke up", "broken up",
                  "breaking up", "walked out", "left me", "left him", "left her",
                  "he left", "she left", "we are over", "its over between", "it is over between",
-                 "no longer together", "not together anymore", "not together any more")),
-
+                 "no longer together", "not together anymore", "not together any more",
+                 # A place rented for a week by a group is a shared holiday, not a couple's
+                 # joint account: "how do i split a holiday cottage between 3 couples" was told
+                 # to pay in by what each of them earns. The holiday words are the subject, so
+                 # they stand this row down and share-a-cost answers.
+                 "cottage", "cottages", "airbnb", "villa", "caravan", "holiday cottage",
+                 "holiday house", "holiday home", "holiday let", "holiday place",
+                 "house we rented", "place we rented", "week away", "3 couples",
+                 "three couples", "two couples", "four couples",
+                 # The same place a *bill* for one occasion keeps: this row is the household's
+                 # ongoing money (rent, bills, food, a joint account), and a bill for a meal, a
+                 # night out or a holiday is split by what each person had, not by what each of
+                 # them earns. "how do we split the bill for the holiday" was told to "pay in by
+                 # what each of you earns, not by halves", which is the rent answer, and the
+                 # drinks card is the one that answers it.
+                 "the bill for", "bill for the", "bill for a", "the bill on", "bill on the",
+                 "holiday", "holidays", "on holiday", "went away", "weekend away",
+                 "night out", "for the weekend", "for the trip", "towards the trip",
+                 "the meals", "eating out", "pub", "drinks", "round of drinks")),
     # A relationship ending is the one money moment the couple's bills answer must not take.
     # "my husband and i are splitting up" was told to "pay in by what each of you earns, not by
     # halves", and "my wife and i are splitting up what about the house" the same, because the
@@ -4883,7 +5713,27 @@ ENTRIES = [
                  "green", "bunker", "tee", "swing", "handicap", "driver", "iron", "fairway",
                  "windscreen", "windshield", "paint", "paintwork", "car", "van", "windscreen wipers",
                  "plate", "mug", "cup", "bowl", "glaze", "nail", "tooth", "tile", "worktop",
-                 "sink", "table", "wood", "floor")),
+                 "sink", "table", "wood", "floor",
+                 # "should i chip in for a colleague's leaving present" was tried as a fence
+                 # here ("should i chip in", "is it rude", the question shape) and taken back
+                 # out: "how much should i chip in" is the same words and is this row's own
+                 # question, and `tests/test_a_chip_in_is_money.py` went red on it. The etiquette
+                 # note stays open in the PR rather than bought with the amount.
+                 # The potato is kept out of *this* row by its key, not by a word: a chip recipe
+                 # row that reaches a contribution line is fenced in cooking.py instead.
+                 # A cost shared away from an office is not a collection: this row gained
+                 # "split the cost" and "go halves" while share-a-cost was being written, and
+                 # it then answered "how should we split the cost of a hotel room" and
+                 # "...of petrol" with the whip-round card. The subject is the difference, so
+                 # every ride, stay and tank named here stands the row down.
+                 "taxi", "taxi fare", "cab", "uber", "fare", "fares", "minicab",
+                 "petrol", "petrol money", "diesel", "fuel", "fuel money", "tank of",
+                 "fill up", "filled up", "miles", "mileage", "parking", "toll", "tolls",
+                 "hotel", "hotel room", "a room", "the room", "rooms", "airbnb", "villa",
+                 "caravan", "cottage", "cottages", "holiday cottage", "holiday house",
+                 "holiday home", "house we rented", "place we rented", "week away",
+                 "flight", "flights", "holiday", "holidays", "trip", "weekend away",
+                 "city break", "abroad")),
     entry("split-bill", (("split the bill", "split a bill", "split it", "share the bill",
                           "who pays", "who owes", "splitting the bill", "restaurant bill",
                           # "how do i split a dinner bill" and "splitting the bill with mates"
@@ -4921,7 +5771,20 @@ ENTRIES = [
                           # a bill away from home is still a table: "how do we split the bill on
                           # holiday" named no dinner and no friends, so the couple's 60/40 answer
                           # took it. The holiday is the setting, not the subject.
-                          "holiday", "holidays", "on holiday", "trip", "weekend away")),
+                          # "holiday" and "trip" are NOT here: a word in this row's own key
+                          # cannot also fence it, and "split the cost of a holiday" is not a
+                          # table at all - it is share-a-cost's group-trip answer. "on holiday"
+                          # is the phrase that means a dinner away from home, and "split the
+                          # bill" is in the key already, so the setting still scores.
+                          "on holiday", "on our holiday", "on trips", "on a trip",
+                          # A bill *for* the holiday is the same table seen from the week
+                          # before: "how do we split the bill for the holiday" is what each of
+                          # them had while they were away, and with "on holiday" as the only
+                          # holiday wording the line reached the couple's income split instead.
+                          # The cost of the holiday itself - the flights, the house, the car - is
+                          # not a bill and is fenced off below, so share-a-cost keeps it.
+                          "for the holiday", "for our holiday", "the holiday bill",
+                          "for the trip", "for our trip")),
           _split_bill,
           # A tip is worked out, not split: the tipping answer knows who gets what. Sharing the
           # housework is family's answer (chores-fair), not a bill.
@@ -4931,10 +5794,21 @@ ENTRIES = [
                  "housemate", "housemates", "flatmate", "flatmates", "roommate", "roommates",
                  "household", "flat share", "house share", "shared flat", "shared house",
                  "council tax", "electricity", "broadband",
+                 # a cost shared away from a table - a taxi, a rented cottage, a whip round - is
+                 # share-a-cost's, and "holiday" in the second part used to pull the cottage here
+                 "cottage", "cottages", "airbnb", "villa", "caravan", "holiday house",
+                 "holiday home", "holiday cottage", "rented a house", "hotel room", "hotel",
+                 "whip round", "whip-round", "collection", "uber",
                  # a drink that is wanted cold is the cool-bag question, not a table sharing a
                  # bill: "what is the best way to keep drinks cold in the car" was the dinner
                  # split on "ways". The drink in a bill line is what was ordered, never how
                  # cold it is, so only the cold-shaped phrases stand this row down.
+                 # a holiday's big costs are booked once and put on one card, not shared as a
+                 # bill: "how do we split the cost of a holiday" and "... of flights" are
+                 # share-a-cost's group-trip answer, and the holiday setting above is only here
+                 # for a bill that was run up while they were there
+                 "cost of a holiday", "cost of the holiday", "cost of a trip", "cost of our trip",
+                 "cost of the flights", "the flights", "the house we", "the car hire",
                  "cold drink", "cold drinks", "drinks cold", "drink cold", "keep drinks",
                  "keep the drinks", "keep my drink", "keep your drink", "cool bag", "cool box",
                  # "who pays" is also how a leak, a crash, an injury and an insurance claim are
@@ -4957,10 +5831,63 @@ ENTRIES = [
                  # paying off a debt is not a bill divided between friends: the debt order and
                  # the overpayment answer own those lines, and this one kept taking them
                  "debt", "debts", "credit card", "overdraft", "payday loan", "pay off",
-                 "paying off", "paid off"),
+                 "paying off", "paid off",
+                 # a funeral bill is asked the same way as a table bill ("who pays for the
+                 # funeral") and is nobody's dinner: whose money it comes out of is the
+                 # first-days question, and this row's bias of 3 took it off that answer
+                 "funeral", "funerals", "cremation", "burial", "buried", "undertaker",
+                 "funeral director", "bereavement", "bereaved", "wake", "the deceased"),
           # a bill at a table is this answer even when "who pays" makes the couple's entry
           # rank just as high: two people living together who split the bills are not at dinner
           bias=3),
+    # A shared cost that is not a table: a taxi, a tank of petrol, a rented room, a whip round.
+    # Every neighbouring row claimed these. "how do i split a taxi fare" was answered with the
+    # employer's expense policy, "how do i split petrol money" with the payslip budget, and a
+    # hotel room and a holiday cottage with who-had-the-wine. The subject in the line picks the
+    # opening, and the guard keeps the row off a line that only mentions a taxi.
+    entry("share-a-cost",
+          (("taxi", "taxi fare", "cab", "uber", "fare", "fares", "petrol", "petrol money",
+            "fuel", "diesel", "parking", "toll", "tolls",
+            "hotel room", "hotel", "a room", "the room", "rooms", "cottage", "airbnb",
+            "apartment", "villa", "caravan", "holiday house", "holiday home",
+            "present", "presents", "gift", "gifts", "collection", "whip round", "kitty",
+            "leaving present", "wedding present", "secret santa",
+            "holiday", "weekend away", "trip", "night out",
+            # the big things a group holiday is booked on are the flight and the car, and
+            # "how do we split the cost of the flights" named neither a stay nor a holiday, so
+            # with no key of its own it fell past this row to a search hedge
+            "flight", "flights", "car hire", "hire car", "train fare", "train fares"),
+           ("split", "splitting", "share", "sharing", "halves", "go halves", "between us",
+            "each pay", "per head", "per person", "who owes", "who pays", "chip in",
+            "contribute", "contribution", "fair", "fairly", "fairest", "how much should",
+            "evenly", "equally")),
+          _share_a_cost,
+          ask=("how", "what", "should", "split", "splitting", "share", "sharing", "halves",
+               "fair", "fairly", "fairest", "who", "much"),
+          guard=_shares_a_cost,
+          bias=1,
+          # A dinner, a bill at a table, a shared flat's bills and a present's price all have
+          # their own answers, and this row is not one of them.
+          avoid=("bill", "bills", "restaurant", "dinner", "lunch", "drinks", "meal", "meal out",
+                 "waiter", "tip", "tips", "tipping", "service charge", "takeaway", "pub",
+                 # a tenancy's rent is split-house's, but "rented a cottage" is a stay shared
+                 # between friends: the bare word stood this row down for every line that named
+                 # what was rented, so the rent words here are the tenancy shapes only.
+                 "the rent", "rent is", "rent and", "our rent", "my rent", "monthly rent",
+                 "pay rent", "paying rent", "rent with", "split rent", "rent between",
+                 "rent money", "rent each",
+                 "mortgage", "council tax", "electricity", "gas", "broadband", "water bill",
+                 "flatmate", "flatmates", "housemate", "housemates", "roommate", "roommates",
+                 "house share", "flat share", "shared flat", "shared house", "student house",
+                 "housework", "chores", "cleaning", "laundry", "childcare",
+                 "how much does it cost", "how much is a taxi", "taxi fare to",
+                 "taxi cost", "cheap taxi", "minicab number", "book a taxi", "airport taxi",
+                 "how much should i spend", "how much to spend", "what should i get",
+                 "what to buy", "ideas", "expenses", "claim back", "receipt", "reimburs",
+                 "mileage", "claim", "tax return", "invoice",
+                 "share my location", "share a file", "share photos", "share the wifi",
+                 "share a photo", "share a post", "share a link", "screen share")),
+
     entry("card-declined", (("declined", "card declined", "card got declined", "payment declined",
                               "card rejected", "card not working", "card stopped working"),
                              ("card", "payment", "till", "shop", "checkout", "why", "what", "should",
@@ -5104,21 +6031,30 @@ ENTRIES = [
     # nothing, the row fell under MIN_SCORE and a garage's labour rate answered it. The second half
     # is the words a choice between rates is made of.
     entry("energy-tariff", (("tariff", "fixed rate", "variable rate", "price cap", "fix my rate",
-                             "fixed tariff", "variable tariff", "on a fixed rate"),
+                             "fixed tariff", "variable tariff", "on a fixed rate",
+                             # The choice said with the bare adjectives: "which is cheaper fixed
+                             # or variable" names no "rate" at all, so no row scored it and a
+                             # shrug answered it. The pair is the whole question, so it is the
+                             # phrase that is keyed rather than the two words apart.
+                             "fixed or variable", "fixed vs variable", "variable or fixed",
+                             "fix or variable"),
                             ("energy", "fix", "worth", "better", "choose", "cheap", "cheaper",
                              "variable", "fixed", "what", "mean", "means", "explain",
                              "get", "compare", "comparison", "switch", "switching", "supplier",
                              "bill", "bills", "electricity", "gas", "which", "difference",
                              "worth it", "should i")),
-          ("The price cap is a limit on the unit rate and standing charge of a standard variable "
-           "tariff, set quarterly, so it moves with the market; a fixed tariff holds your rate for "
-           "its term whether prices go up or down. Compare the unit rate and the standing charge "
-           "rather than the monthly estimate, and check the exit fee before signing a fix."),
+          _energy_tariff,
            # A fixed rate on a mortgage, a loan or a savings bond is that product's question: with
            # the words of a choice now in the key, this row took "should i get a fixed rate
            # mortgage" away from fix-or-track.
            avoid=("mortgage", "mortgages", "remortgage", "remortgaging", "home loan", "tracker",
-                  "savings", "isa", "bond", "bonds", "loan", "loans", "credit card")),
+                  "savings", "isa", "bond", "bonds", "loan", "loans", "credit card",
+                  # a drill with a fixed or variable speed is the drill's question
+                  "drill", "drills", "speed", "speeds", "rpm"),
+           # "do I need a fixed tariff" and "should we switch to a fixed tariff" name a fix and an
+           # ask about having one, and the switch row keys the same two words; the row that knows
+           # the cap is the one that can say whether a fix is worth it.
+           bias=1),
     # "how much is gas and electricity a month" was answered with what electricity *is* - the
     # physics entry - and "my gas and electricity is 200 a month" with nothing. Both ask what
     # people pay, which is a number, so it gets the numbers to compare against.
@@ -5336,6 +6272,15 @@ ENTRIES = [
                            "live alone", "alone", "single person", "25", "student", "students",
                            "empty", "how", "change", "name", "wrong", "moved", "move", "much",
                            "tenant", "cut",
+                           # A bill that is too high is the same complaint as a water or energy
+                           # bill that is too high, and it was answered by the posture card:
+                           # "council tax is too high what can i do" got "Most bad posture is the
+                           # chair and the sitting still". "high" is the amount and not a height,
+                           # and these words are what say so. The rise words are not here on
+                           # purpose: "my council tax has gone up a lot" is `bill-went-up`, which
+                           # answers the rise better than the size of the bill.
+                           "too high", "so high", "too much", "expensive", "high", "higher",
+                           "huge", "massive", "sky high",
                            # A name change is a form, not a disputed bill: these phrases are here
                            # so this entry outranks the letter entry main grew for arrears.
                            "change the name", "name on the bill", "name on the account",
@@ -5468,10 +6413,19 @@ ENTRIES = [
     entry("offer-on-a-house",
           (("house", "flat", "home", "property", "bungalow", "terraced", "semi", "detached",
             "asking price", "estate agent", "seller"),
-           ("offer", "offering", "offered", "make an offer", "put in an offer",
-            "how much under", "below", "under", "over", "negotiate", "haggle", "drop my asking",
-            "drop the asking", "reduce my asking", "accept", "accepted", "first offer",
-            "second offer", "final offer", "gazump", "gazundering", "worth offering")),
+           # Every word here has to show that a price is being discussed, because the group
+           # above is only the word "house" or "home": bare "offer", "under", "over" and
+           # "accept" made this row answer "i feel under pressure at home", "my brother is over
+           # at our house all the time", "should i offer to help my mum at home" and my gran's
+           # care with the sold-prices card.
+           ("offer on", "offer for", "offering on", "offering for", "offer under", "offer over",
+            "offer below", "offer above", "make an offer", "put in an offer",
+            "how much should i offer", "how much to offer", "what should i offer",
+            "how much under", "below asking", "under asking", "over asking", "above asking",
+            "asking price", "negotiate", "haggle", "drop my asking", "drop the asking",
+            "reduce my asking", "accept my offer", "accept the offer", "accept our offer",
+            "accept a lower", "accept anything", "first offer", "second offer", "final offer",
+            "gazump", "gazundering", "worth offering")),
           ("Offer against the sold prices, not the asking price: asking prices are hopes, and the "
            "only evidence is what the same sort of house on the same street actually sold for in "
            "the last year, which is free on the Land Registry sold-price site and in Rightmove's "
@@ -5583,7 +6537,12 @@ ENTRIES = [
                  # "what happens if i miss a mortgage payment" asked what happens, and got what a
                  # mortgage is: a payment that has failed is the missed-payment answer.
                  "miss", "missed", "missing", "cant pay", "can't pay", "not paid", "behind on",
-                 "arrears", "late", "overdue", "forgot", "payment")),
+                 "arrears", "late", "overdue", "forgot", "payment",
+                 # "how much can i overpay my mortgage" and "what happens if i overpay" are the
+                 # overpayment question, and what a mortgage is answers neither.
+                 "overpay", "overpaying", "overpayment", "overpayments", "pay off early",
+                 "paying off early", "paid off early", "early repayment", "lump sum",
+                 "settle early", "underpayment")),
     entry("remortgage", (("remortgage", "remortgaging", "switch my mortgage", "switching mortgage",
                            "switch mortgage", "switch lender", "mortgage deal",
                            "my mortgage rate"),
@@ -5598,6 +6557,24 @@ ENTRIES = [
     # to the free-advice punt, one to a definition, one to garage labour costs and one to a smart
     # watch. The penalty for drifting onto the standard variable rate is the figure that decides
     # it, so it is in the first sentence.
+    # A mortgage offer is the lender's yes, and the only thing people ask about it is how long it
+    # has left: "how long does a mortgage offer last" was answered with the fixed-versus-tracker
+    # card, which is a question about the rate and not about the piece of paper's expiry.
+    entry("mortgage-offer-validity",
+          (("mortgage offer", "mortgage offers", "the offer", "lenders offer", "lender's offer",
+            "offer letter"),
+           ("how long", "last", "lasts", "valid", "validity", "expire", "expires", "expiry",
+            "run out", "runs out", "months", "how many months", "still good",
+            "out of date")),
+          ("A mortgage offer usually runs three to six months from the date it is issued, six months "
+           "being the common one, and the clock starts when the lender sends it rather than when "
+           "you applied. If the purchase is close but not close enough, ask the lender for an "
+           "extension before it lapses - most will extend it for a fee or free - and do not "
+           "exchange contracts on an offer with only days left on it."),
+          bias=2,
+          avoid=("energy", "gas", "electricity", "tariff", "job offer", "job", "salary",
+                 "pay", "wage", "university", "uni", "school", "college", "house price",
+                 "make an offer", "offer on a house", "estate agent")),
     entry("fix-or-track", (("mortgage", "mortgages", "home loan", "tracker"),
                            ("fix", "fixed", "fixed rate", "tracker", "variable", "long",
                             "length", "how long")),
@@ -5731,6 +6708,11 @@ ENTRIES = [
            "A new driver pays £1,500 to £2,500 in the first year, so a telematics policy that "
            "scores your driving is usually the biggest saving there is."),
           avoid=("travel", "holiday", "home", "contents", "pet", "phone", "life",
+                 # the animal is what makes it pet insurance, and the line often names the animal
+                 # rather than the word "pet": "how much does a dog cost to insure" was answered
+                 # with three weeks-before-renewal car advice
+                 "dog", "dogs", "puppy", "puppies", "cat", "cats", "kitten", "kittens",
+                 "rabbit", "rabbits", "hamster", "horse", "pony", "guinea pig",
                  # the cover the law makes you buy is the entry below, not the price one
                  "minimum", "legal", "legally", "law", "by law", "third party", "third-party",
                  "comprehensive", "fully comp", "compulsory", "required")),
@@ -5763,8 +6745,14 @@ ENTRIES = [
                  "income protection", "critical illness", "health insurance", "dental",
                  "private health", "phone insurance", "contents insurance", "business cover",
                  "public liability", "gadget",
-                 # gap insurance is sold on the finance of a car, not the cover the law wants,
-                 # and it has its own row
+                 # "cover" is a cloth over a plant, a roof over a seat and an insurance policy,
+                 # and only the last one is this row: "do i need to cover my plants tonight" was
+                 # answered with third-party cover by law.
+                 "plant", "plants", "garden", "gardens", "allotment", "frost", "fleece",
+                 "greenhouse", "cloche", "seedlings", "tender", "shrubs", "vegetables", "veg",
+                 "tomatoes", "lawn", "beds", "flower bed", "hanging basket", "outside",
+                 "seat", "car seat", "pram", "buggy", "pushchair", "cot", "letting agent",
+                 # gap insurance is sold on the finance of a car, not the cover the law wants
                  "gap insurance", "gap cover", "gap protection")),
     # "do i need breakdown cover" reached nothing at all.
     entry("breakdown-cover",
@@ -5837,7 +6825,11 @@ ENTRIES = [
     # split on the question, not on the noun, and every short-side word here is in the avoid so
     # the split holds whichever entry the registry happens to reach first.
     entry("payslip", (("payslip", "pay slip", "pay slips", "payslips", "payslip line",
-                       "payslip lines", "take home pay", "net pay"),
+                       "payslip lines", "take home pay", "net pay",
+                       # the money itself, not the slip: "what does take home mean" and "what
+                       # is take home" are questions about gross and net, and the payslip row
+                       # is where that is explained
+                       "take home", "take-home"),
                       # "what does my payslip show" is a television question to a table that keys
                       # on "show", so the question words are keys here and the bias breaks the tie
                       ("read", "reading", "understand", "explain", "mean", "means", "show", "shows",
@@ -5867,7 +6859,7 @@ ENTRIES = [
                  "copy", "copies", "old payslips", "older payslips", "past payslips",
                  "replacement", "from a previous job", "from my old job", "find my payslips",
                  "where are my payslips"),
-          bias=1),
+          bias=1, guard=_not_a_customs_line, explain=True),
     # The copies question, not the reading one: where the payslips are kept and who to ask for
     # the ones that are missing. A payslip that came out short is `work.payslip-short`, and the
     # tax code is `tax-code`, so both stand this row down.
@@ -5924,7 +6916,16 @@ ENTRIES = [
                  "not joined", "havent joined", "have to pay into")),
     entry("retire-how-much", (("retire", "retirement", "retiring", "pension pot",
                                "take my pension", "draw my pension", "access my pension",
-                               "pension age", "state pension"),
+                               "pension age", "state pension",
+                               # the adequacy question asked about the pension itself: "is my
+                               # pension enough to live on" and "will my pension be enough" were
+                               # both handed the free-advice card, while this row - which says
+                               # what an income needs to be - was the answer behind it. The
+                               # phrases carry the "enough" sense, so the rate-you-pay row keeps
+                               # "how much should i pay in".
+                               "my pension enough", "pension be enough", "pension enough",
+                               "enough to live on", "live on my pension", "live off my pension",
+                               "pension do i need", "pension will i need"),
                               ("how much", "enough", "when can i", "when do i", "what age",
                                "how old", "at 55", "at 60", "at 62", "at 65", "need", "afford",
                                "how do i know", "did i save", "realistic", "early", "retire at",
@@ -5938,6 +6939,7 @@ ENTRIES = [
                                "before i am 60", "before im 60")),
           _retirement,
           bias=1,
+          guard=_not_a_gift,
           avoid=("should i opt out", "workplace pension", "employer", "contribution")),
     entry("pension-taking", (("annuity", "annuities", "drawdown", "lump sum", "cash in my pension",
                                "cash in the pension", "take my pension as", "take the 25%",
@@ -5945,7 +6947,13 @@ ENTRIES = [
                               ("should", "can i", "could i", "worth", "better", "what is", "what are",
                                "how", "or", "vs", "explain", "take", "tax", "taxed", "tax-free",
                                "tax free", "recommend", "recommended", "recommendation",
-                               "recommendations")),
+                               "recommendations",
+                               # "what does an annuity mean" is the same ask as "what is an
+                               # annuity", and the reading calls it one: `understood["asks"]` is
+                               # ["definition", "what"]. The row's ask words did not have a
+                               # definition word, so the line reached nothing and, after other
+                               # pension turns, the chat offered it no card at all.
+                               "mean", "means", "meaning", "definition", "explanation")),
           _pension_choice,
           bias=1,
           # "should i pay more in" and the dates questions are other answers, and so is the
@@ -6109,11 +7117,7 @@ ENTRIES = [
                           "pay back my", "pay back the money", "pay it back to"),
                          ("sister", "brother", "mum", "dad", "mother", "father", "parents",
                           "friend", "mate", "son", "daughter", "family", "in law")),
-          ("Tell them the amount and the date in one message: \"I owe you £600, I can do £50 a "
-           "week from Friday, so it's clear by March.\" Put it on a standing order so it happens "
-           "without a conversation every month, and if you cannot pay this month say so before "
-           "the date, not after - a small, steady repayment keeps the relationship and the debt "
-           "honest."),
+          _the_debt_answer,
           # Being owed money is the other way round and has its own answer in family.lent-money.
           # Asking for it back is that same question written as a job: "how do i ask a friend to
           # pay back money" carries "pay back" and "friend", the same two words this entry keys,
@@ -6129,6 +7133,45 @@ ENTRIES = [
                  # they already owe, not when they are plucking up the nerve to ask
                  "how do i borrow", "can i borrow", "could i borrow", "want to borrow",
                  "borrow off", "borrowed off", "borrowing off", "ask to borrow", "lend me")),
+    # A break from paying is the lender's to grant, and it has a cost the person has to be told
+    # about. Nothing answered it: "how do i get a payment holiday on my loan" was given the 5.6
+    # weeks of annual leave (work.holiday-entitlement counted the word "holiday"), and "can i
+    # pause my mortgage payments" reached nobody and got the name of a free advice line.
+    entry("payment-holiday",
+          (# the scheme's own names first, then the plain verbs people use for it
+           ("payment holiday", "payment break", "payment pause", "holiday from payments",
+            "holiday from my payments", "holiday on my loan", "holiday on my mortgage",
+            "holiday on my credit card", "pause", "pausing", "paused", "put on hold",
+            # "skip", "reduce" and "lower" are the plain verbs, and they are safe on this side
+            # only because the second group has to name the money: "can i skip a credit card
+            # payment this month" and "can i reduce my mortgage payments" both reached nobody.
+            "skip a payment", "skip payments", "skip a month", "skip the payment",
+            "skip", "skipping", "skipped",
+            "defer", "deferring", "deferred", "deferral", "take a break", "break from paying",
+            "break from payments", "reduce my payments", "lower my payments",
+            "reduce", "reducing", "lower", "lowering", "temporarily reduce",
+            "interest only", "switch to interest only",
+            "spread the payments", "extend the term"),
+           # and the money it is a holiday from, so "pause" alone is never this row. "rent" is
+           # not here: a rent a person wants lowered is the landlord conversation, not a
+           # payment holiday.
+           ("mortgage", "mortgages", "remortgage", "loan", "loans", "credit card",
+            "credit cards", "overdraft", "repayment", "repayments", "repaying",
+            "car finance", "finance", "hire purchase", "debt", "debts", "lender", "bank",
+            "payments", "payment")),
+          ("Ask the lender before you miss a payment, not after: ring or write, say what has "
+           "changed and what you can afford, and ask for a payment holiday, a switch to "
+           "interest-only for a while, or a longer term - mortgage lenders have to offer one of "
+           "those. Get their agreement in writing. Interest usually keeps building during the "
+           "break and is added to the balance, and a holiday can be marked on your credit file, "
+           "so ask what it costs first; for a card or a loan, a payment plan is often cheaper "
+           "than a holiday."),
+          # Money that has already gone wrong is the arrears and payment-plan answer, which is a
+          # different script: this row is the ask made before the payment is missed.
+          avoid=("cant pay", "cannot pay", "can't pay", "cant afford", "cannot afford",
+                 "behind on", "missed a payment", "missed payments", "already missed",
+                 "arrears", "default", "defaulted", "bailiff", "evict", "nothing left"),
+          bias=1),
     entry("cant-pay", (("owe money", "owe a lot", "owe thousands", "cant pay", "cannot pay",
                         "maxed out", "maxed", "at the limit", "to the limit", "over the limit",
                         "at my limit", "card is full",
@@ -6137,7 +7180,10 @@ ENTRIES = [
                         "cant afford", "cannot afford", "can't afford", "afford",
                         "behind on", "nothing left",
                         "struggling to pay", "arrears", "defaulted", "missed a payment",
-                        "a way out", "no way out", "cant see a way", "overwhelmed by"),
+                        "a way out", "no way out", "cant see a way", "overwhelmed by")
+                       # the same report without the "cant": "i havent paid my phone bill" and
+                       # "i havent paid my broadband" were both a nod, and the bill is named.
+                       + NOT_PAID,
                        ("money", "pay", "back", "rent", "bill", "council", "catalogue", "loan",
                         "debt", "tax", "card",
                         # the bill a person names is often the whole noun: "i cant afford my
@@ -6178,6 +7224,10 @@ ENTRIES = [
                  "sd card", "sdcard", "micro sd", "microsd", "memory card", "storage card",
                  "flash card", "sim card", "data card", "card is full of",
                  "full of photos", "full of videos", "full of pictures"),
+          # "how much rent can we afford on one wage" is a plan for a move and was answered by
+          # this card's "ring the company and offer a payment plan": see
+          # _a_figure_for_a_plan_is_not_a_debt.
+          guard=_a_figure_for_a_plan_is_not_a_debt,
           bias=1),
     # A sum that has to last, and the shopping order that makes it last. The savings card was
     # answering "i have 50 pound to last us a week" ("For £50: one month at £50 a month") and the
@@ -6188,7 +7238,7 @@ ENTRIES = [
     entry("money-to-last", (MAKE_IT_LAST, MONEY_TO_COVER), _money_to_last, bias=2,
           ask=("pound", "pounds", "quid", "money", "cash", "budget", "tenner", "fiver", "skint",
                "cheap", "cheapest", "food", "£"),
-          avoid=NOT_SPENT_ON_FOOD,
+          avoid=NOT_SPENT_ON_FOOD + ANOTHER_CURRENCY,
           # "i have no money this month" says a month and no sum: there is nothing to divide up,
           # and the two calls that free up cash are the answer. "i have no money" on its own is
           # the food bank, and "i have 200 pound to last the month" is the plan, so the month
@@ -6394,6 +7444,12 @@ ENTRIES = [
                  # the council refunds an overpaid bill its own way, and a tax rebate is not a
                  # shop return either
                  "council tax", "council", "rebate", "hmrc rebate",
+                 # a deposit is money held, not goods sold: "can i get my money back from a
+                 # deposit scheme" was the shop's 30-day law, and the deposit's answer is the
+                 # itemised deductions and the protection scheme's dispute service.
+                 "deposit scheme", "deposit protection", "tenancy deposit", "holding deposit",
+                 "security deposit", "my deposit", "the deposit", "deposit back",
+                 "deposit returned", "get the deposit",
                  # a person who did work is a service, not a thing bought: "how do i get my
                  # money back from a builder" is the complaint letter and the small claim, and
                  # the shop's 30-day rule is the wrong answer even when it names money back.
@@ -6481,10 +7537,14 @@ ENTRIES = [
           (("cut off", "be cut off", "get cut off", "cut me off", "cut us off", "switch me off",
             "switch off my", "disconnect me", "disconnected", "stop paying", "stopped paying",
             "stop paying my", "not paying", "not paid", "havent paid", "haven't paid",
-            "defaulted", "defaulting", "missed a payment"),
+            "havnt paid", "havent payed", "never paid", "defaulted", "defaulting",
+            "missed a payment"),
            ("paying", "pay", "paid", "payment", "payments", "bill", "bills", "money", "owe",
             "owes", "arrears", "supplier", "direct debit", "account", "monthly")),
           PAID_AND_CUT_OFF_REPLY,
+          # "paid" on its own is not a bill: what has not been paid has to be something a
+          # supplier supplies, or the line has to say the supply stopped.
+          guard=_a_bill_and_not_a_person,
           # Everything below is a bill somebody can stop paying that is not an energy bill, and
           # each one has an answer of its own: a loan, a pension, a phone, the rent, the council.
           avoid=("pension", "savings", "mortgage", "rent", "landlord", "council tax", "tax",
@@ -6596,6 +7656,11 @@ ENTRIES = [
                  "landlord", "rent is late", "rent payment is late", "rents late",
                  "late with my rent", "late with the rent", "late paying rent", "rent day",
                  "housing benefit", "housing payment",
+                 # a benefit the state pays the person is not a payment they can forget to
+                 # make: "my uc payment is late" and "my benefit payment is late" were told to
+                 # set up a direct debit. lifeadmin's benefit-payment-not-arrived has it.
+                 "benefit", "benefits", "universal credit", "uc", "pip", "esa", "tax credits",
+                 "child benefit", "dwp", "jobcentre", "job centre", "hardship payment",
                  # a subscription you forgot about is a cancellation question, not a payment date
                  "subscription", "subscriptions", "streaming", "netflix", "spotify",
                  "gym membership", "cancel", "cancelling", "unsubscribe", "forgot about",
@@ -6603,7 +7668,14 @@ ENTRIES = [
                  # key would otherwise take: "i pay the minimum every month on my store card and
                  # the balance never moves" is nobody forgetting anything
                  "minimum", "balance", "never moves", "not moving", "interest", "apr",
-                 "store card balance", "pay the minimum", "only pay"),
+                 "store card balance", "pay the minimum", "only pay",
+                 # a budget is the planning question, not a forgotten payment: "how do i budget
+                 # when my pay is different every month" was told to set up a direct debit,
+                 # which does not plan anything when the amount keeps changing.
+                 "budget", "budgets", "budgeting", "make a budget", "how do i budget",
+                 "budget when", "pay is different", "pay varies", "pay changes", "variable pay",
+                 "irregular pay", "zero hours", "different every month", "different each month",
+                 "money is different", "different every week", "weekly pay", "four weekly"),
           bias=1),
     entry("standing-order-vs-direct-debit",
           (("direct debit", "direct debits", "standing order", "standing orders"),
@@ -6959,13 +8031,32 @@ ENTRIES = [
     # Switching current accounts is lifeadmin.switch-bank-account: one entry for the switch
     # service, not a second copy here.
     entry("rent-afford", (("rent",), ("afford", "how much", "income", "take home", "wages",
-                                      "salary", "budget", "how much of")),
+                                      "salary", "budget", "how much of",
+                                      # The same question is said with the figure and the payer:
+                                      # "we can pay 250 a week rent" and "our rent budget is 900 a
+                                      # month" reached a punt and a food card, because the only
+                                      # word this row had for the plan was "budget". Anyone
+                                      # naming what they can pay is asking this question.
+                                      "we can pay", "we could pay", "can pay", "could pay",
+                                      "we have", "a week", "per week", "pw", "a month",
+                                      "per month", "pcm")),
           ("Keep rent to about a third of your take-home pay, and add council tax, energy and water "
            "before you commit. Multiply the rent by 12 and check you can also cover a five-week "
            "deposit and the first month up front, because those two land together."),
+          # A food budget that names the rent in passing is the food card's line, not this one:
+          # "my budget is about 250 a week on rent" answered with cheap staples before, and the
+          # rent is the subject of the question.
+          bias=1,
+          # The same split as the debt cards, read the other way: this row answers when there is
+          # no trouble in the line, and stands aside when there is, so that "i have three kids
+          # and cant pay the rent" keeps the arrears card and "how much rent can we afford with
+          # two kids" reaches this one. The bare kids and children used to be avoided here, and
+          # that took the rent question off a family with children as well - a family asking
+          # what a wage will carry is the person this card is written for.
+          guard=_a_plan_and_no_trouble,
           avoid=("deposit", "deposits", "landlord", "behind", "cant afford", "can't afford",
-                 "arrears", "evict", "eviction", "lost my job", "unemployed", "kids", "hungry",
-                 "children", "behind on")),
+                 "arrears", "evict", "eviction", "lost my job", "unemployed", "hungry",
+                 "behind on")),
     # An eviction is not the same question as a rent you cannot pay, and the two were one row:
     # "my landlord is evicting me" was told to sort out arrears it never mentioned, and
     # "what is a section 8 notice" got the same paragraph. The notice row opens on the things
@@ -7040,7 +8131,20 @@ ENTRIES = [
                  "asking me to leave", "wants me out", "wants us out", "arrears", "behind on",
                  "cant pay", "can't pay", "cannot pay", "deposit", "repairs", "repair",
                  "boiler", "damp", "mould", "mold", "increase the rent", "raise the rent",
-                 "rent increase", "hand back the keys", "give the keys back"),
+                 "rent increase", "hand back the keys", "give the keys back",
+                 # The direction of the notice decides, and this row is the landlord's
+                 # notice: "how much notice do i give my landlord" is a tenant ending a
+                 # tenancy, and it was answered "At least 24 hours' notice in writing and a
+                 # reasonable time of day". Every phrase below puts the tenant on the giving
+                 # end, so it stands this row down and leaves "how much notice" to it when
+                 # the landlord is the one giving that notice.
+                 "give notice", "gives notice", "giving notice", "give my notice",
+                 "do i give", "notice do i give", "notice i give", "notice i have to give",
+                 "notice i need to give", "i have to give", "i need to give",
+                 "how much notice do i", "notice to leave", "notice letter",
+                 "im leaving", "i'm leaving", "i am leaving", "moving out", "move out",
+                 "end my tenancy", "ending my tenancy", "end the tenancy",
+                 "ending the tenancy", "end of my tenancy", "surrender the"),
           bias=3),
     entry("rent-arrears", (("rent", "landlord", "arrears"),
                            ("behind", "cant afford", "can't afford", "arrears", "hungry", "kids",
@@ -7051,7 +8155,13 @@ ENTRIES = [
                             "not be able to pay", "cant pay", "can't pay", "cannot pay",
                             "wont be able to pay", "won't be able to pay", "short this month",
                             "late with the rent", "shortfall", "no money", "pay the rent",
-                            "long", "weeks", "months", "pay day", "payday")),
+                            "long", "weeks", "months", "pay day", "payday")
+                           # "i havent paid my rent" is the plainest way this is said and it was
+                           # the one phrasing with no word to pair with the rent. "i owe my
+                           # landlord" is the shortest of all, and rent is the one debt that is
+                           # never owed in a good way.
+                           + NOT_PAID + ("owe", "owes", "owing", "behind with",
+                                         "further behind", "in front")),
           ("Tell the landlord in writing before the next rent day, and ask the council about a "
            "Discretionary Housing Payment and that the Housing Element of Universal Credit is paid "
            "straight to them. Shelter (0808 800 4444) is free and will check what you have been "
@@ -7062,6 +8172,12 @@ ENTRIES = [
                  "renting a room out", "rent out a room", "renting out",
                  # the notice itself is eviction-notice's question
                  "evict", "evicting", "evicted", "eviction", "section 21", "section 8", "s21",
+                 # and the notice a tenant gives is the notice letter, not arrears: "how much
+                 # notice do i give my landlord" is a leaving question and was told to ring
+                 # Shelter about the rent
+                 "give notice", "how much notice", "notice letter", "write a notice",
+                 "notice to leave", "im leaving", "i'm leaving", "i am leaving", "moving out",
+                 "move out", "hand back the keys", "end of the tenancy", "last month",
                  "possession order", "notice to quit", "eviction notice",
                  # a person asking for the words is not a person telling you about arrears:
                  # "can you help me write a text to my landlord" was this answer, on the
@@ -7072,6 +8188,9 @@ ENTRIES = [
                  "how should i word", "write a text", "write a message", "write an email",
                  "write a letter", "word a text", "word a message", "draft a text",
                  "draft an email", "draft a message", "draft a letter", "put it in words"),
+          # A figure somebody is working to is a plan, not a payment that went wrong: see
+          # _a_figure_for_a_plan_is_not_a_debt.
+          guard=_a_figure_for_a_plan_is_not_a_debt,
           bias=2),
     # "my ex partner wont pay the mortgage" is the commonest joint-debt question there is, and
     # the table had no row for it: it fell to the "free money advice" hedge. The lender does not
@@ -7414,6 +8533,21 @@ ENTRIES = [
           # or a takeaway is kept out by its own words instead.
           avoid=("dinner", "restaurant", "meal", "meals", "takeaway", "drinks", "tip", "tips",
                  "pizza", "curry", "who had what", "justgiving",
+                 # a cottage rented for a week is a shared holiday, not the household: "how do i
+                 # split a holiday cottage between 3 couples" and "we have rented a cottage with
+                 # friends" were both told to split the rent by room and by income
+                 "cottage", "cottages", "airbnb", "villa", "caravan", "holiday cottage",
+                 "holiday house", "holiday home", "holiday let", "rented a house",
+                 "house we rented", "place we rented", "holiday place", "week away",
+                 # A bill for one occasion is not the household's: "how do we split the bill
+                 # for the holiday" is what each of them had on the trip, and this row was
+                 # answering it with rent by room and by income once the couple row stood down.
+                 # The household keeps every line that names the home, the rent, the utilities
+                 # or the bills themselves, which is what this row is for.
+                 "the bill for", "bill for the", "bill for a", "the bill on", "bill on the",
+                 "holiday", "holidays", "on holiday", "weekend away", "night out",
+                 "for the weekend", "for the trip", "towards the trip", "eating out",
+                 "the meals", "round of drinks",
                  # "how do i tell my housemate to pay their share" is the ask, not the split:
                  # wording.how-to-tell-them has the sentence to send
                  "how do i tell", "how do i ask", "how do i bring", "how do i raise",
@@ -7710,7 +8844,10 @@ ENTRIES = [
                          "putting up the rent", "putting up my rent", "putting up our rent",
                          "puts up the rent", "put up the rent", "put up my rent",
                          "putting the rent up", "puts the rent up", "rent going up",
-                         "raising the rent", "put up my rent")),
+                         "raising the rent", "put up my rent",
+                         # the rise named as a noun, which is how it is raised in a sentence
+                         # about what to say to the landlord: "about the rent rise"
+                         "rise", "rises", "rising", "rent rise", "rent rises")),
           "Ask for the increase in writing and check the notice: in England and Wales a rent rise "
           "needs a section 13 notice with at least one month's notice and cannot normally happen "
           "more than once a year, and Scotland has its own rules on rent increases in a tenancy. "
@@ -8009,13 +9146,17 @@ ENTRIES = [
           bias=2),
 
     entry("tax-rebate",
-          (("tax rebate", "rebate", "overpaid tax", "overpaid", "tax back", "refund of tax",
+          (("tax rebate", "rebate", "overpaid tax", "overpaid", "paid too much tax",
+            "paid too much in tax", "overpaid on tax", "tax back", "refund of tax",
             "p800", "tax code refund",
             # the everyday way people say it. "how do i claim a tax refund" names HMRC's own
             # refund, and reached the homeworker's flat rate and the 30-day shop law instead.
             "tax refund", "tax refunds", "refund from hmrc", "hmrc refund"),
            ("how", "get", "claim", "much", "when", "why", "owed", "back", "do i", "can i",
             "think", "paid too much",
+            # "i overpaid tax" and "hmrc overpaid me" are the same rebate question stated rather
+            # than asked, and stated is how people say it when the letter has just arrived
+            "tax", "hmrc", "rebate", "p800", "tax code",
             # "am i due a tax refund" is the same question and was a punt
             "due", "am i", "should i", "did i")),
           "If HMRC owes you, the letter is a P800 and the money comes back by itself once you "
@@ -8026,6 +9167,8 @@ ENTRIES = [
           avoid=("emergency", "emergency tax", "emergency code",
                  "working from home", "work from home", "flat rate", "benefits",
                  "universal credit",
+                 # the council's own overpayment is the council's refund, not HMRC's P800
+                 "council tax",
                  # the flat rate for a uniform is its own row, and "tax back" is in this key
                  "uniform", "uniforms", "work uniform", "laundry", "work clothes",
                  "work clothing", "overalls", "protective clothing",
@@ -8036,6 +9179,47 @@ ENTRIES = [
                  # P800 answer tells you to wait for a letter that will never come
                  "at work", "employer", "payroll", "payslip", "paid me twice", "extra in my pay",
                  "my wages", "boss")),
+    # A refund that arrives unasked is the commonest tax scam there is, and it had no row of its
+    # own: `tax-rebate` stands down on "rang me", "text saying" and "by text" on purpose (a call
+    # about a rebate is a scam, not a claim), and `lifeadmin.check-a-scam` stands down on a named
+    # medium, so the line fell through to `wording.ask-for-refund` and a person saying "someone
+    # rang saying im due a tax refund" was given the cracked-lamp complaint letter. The medium is
+    # the point here, not an accident, so this is its own row.
+    entry("tax-refund-scam",
+          (("tax refund", "tax rebate", "refund of tax", "tax back", "hmrc refund",
+            "refund from hmrc", "rebate", "rebate cheque", "owe me tax", "tax owed to me",
+            # a bare "refund" counts only with hmrc or the tax office named beside it, which is
+            # how "i got an email from hmrc saying i have a refund" and "hmrc text asking me to
+            # click a link for my refund" are said; both were reflections before this
+            "refund", "refunds"),
+           ("text", "texts", "texted", "sms", "whatsapp", "email", "emails", "emailed",
+            "message", "messages", "messaged", "rang", "ring", "ringing", "called", "calling",
+            "phoned", "phoning", "link", "click", "clicked", "claim", "saying", "says",
+            "says im", "saying im", "told me", "sent me", "got a", "asking me", "asking for",
+            "hmrc", "tax office", "tax", "inland revenue")),
+          "HMRC does not text, email or ring about a refund, and a real one asks nothing of you: "
+          "it arrives as a P800 letter or appears in your online tax account and is paid "
+          "automatically. Do not use the link or ring the number in the message. Forward the text "
+          "to 7726, send the email to phishing@hmrc.gov.uk, and check your account by typing "
+          "gov.uk into the browser yourself.",
+          # A refund you go and claim is `tax-rebate`'s line, and it says so by asking how, when
+          # or whether: this row is a message that arrived and wants something back.
+          avoid=("how do i claim", "how do i get", "am i due", "how much", "when will",
+                 "did i overpay", "p87", "expenses", "work from home", "uniform",
+                 "mortgage interest", "marriage allowance", "self assessment", "tax return",
+                 # a refund that has not arrived is a claim question, not a message: those
+                 # belong to `tax-rebate` with the P800 and the eight weeks.
+                 "where is my", "where is the", "still waiting", "not had", "havent had",
+                 "have not had", "how long does", "how long will", "chase", "chasing",
+                 "eight weeks", "8 weeks", "overdue",
+                 # a letter is the one medium HMRC does use: a P800 about a refund that has
+                 # arrived is a real letter, and the "does not text, email or ring" answer
+                 # told the person to forward a letter to a phishing address
+                 "letter", "letters", "by post", "in the post", "went to the post office",
+                 "p800"),
+          # a bare "refund" is HMRC's only when no shop or courier is named with it
+          guard=_a_refund_the_tax_office_sent,
+          bias=1),
     # Emergency tax: the code a new starter or a fresh P45 leaves behind, which is the commonest
     # tax shock there is - it is why a first payslip at a new job looks savage. It is its own
     # question (what is this, is it wrong, do I get it back), not the reading of a payslip and
@@ -8437,6 +9621,8 @@ ENTRIES = [
           # second key word here anyway.
           avoid=("tips for", "any tips", "tip for", "tips to", "top tips", "tip of",
                  "rubbish tip", "the tip",
+                 # the place the council runs is not the money for a person: the waste rows have it
+                 "council tip", "council dump", "council recycling", "local tip", "the dump",
                  "abroad", "overseas", "holiday", "on holiday", "while i am away",
                  "spain", "spanish", "italy", "italian", "france", "french", "portugal",
                  "greece", "greek", "germany", "german", "europe", "european", "netherlands",
@@ -8489,6 +9675,9 @@ ENTRIES = [
     # survey worth it" were answered by the house-sale timeline, by the decision card's trade
     # between two lives and by a shrug: nothing named the survey itself. The lender's valuation
     # is the part people get wrong, so it is in the answer.
+    # "what is a survey" asks what the thing is; "do i need a survey" asks whether to have
+    # one. The row answered both with "Yes, have one done -", which is not an
+    # answer to the definition, so the ask chooses between the two below.
     entry("house-survey", (("survey", "surveys", "surveyor", "structural survey",
                             "building survey", "homebuyer report", "homebuyer survey",
                             "condition report", "valuation", "snagging survey", "snagging"),
@@ -8500,12 +9689,7 @@ ENTRIES = [
                             "level", "count as", "instead of", "what level"),
                            ("house", "houses", "flat", "flats", "buying", "buy", "purchase",
                             "purchasing", "mortgage", "offer", "moving", "old", "lender")),
-          ("Yes, have one done - the lender's valuation is not a survey, and it only tells the "
-           "lender the house is worth what it is lending. A RICS level 2 homebuyer report is "
-           "about £400 to £700 and a level 3 building survey £600 to £1,500, which is the one for "
-           "an old or unusual house; level 1 is around £300 to £500 and is the basics only. Read "
-           "the report for the things it says to get checked by a specialist, and get quotes for "
-           "those before you exchange, because that is when you can still renegotiate."),
+          _the_survey,
           bias=1,
           # a car check, a questionnaire, a workplace survey and a survey of a removals firm are
           # not a survey of the house you are buying
@@ -8555,6 +9739,11 @@ ENTRIES = [
                  "netflix", "spotify", "streaming", "app store", "phone bill",
                  # money that is borrowed FROM someone is the family file's too
                  "off me", "off my", "off a friend", "off my mate",
+                 # "redundancy pay for 8 weeks" is the pay a job owes, not a purchase: "pay for"
+                 # is one of the names above, so the money a sacking or a redundancy pays out was
+                 # reaching three rungs of credit rather than the row that holds the figures
+                 "redundancy", "redundant", "severance", "statutory", "laid off",
+                 "notice pay", "final wages",
                  "gym", "gyms", "membership", "memberships", "gym membership", "club",
                  "charity", "sponsor", "sponsored", "sponsorship", "fundraiser", "justgiving",
                  "cake sale", "raffle", "marathon", "10k", "half marathon", "school",
@@ -9071,6 +10260,17 @@ ENTRIES = [
                  # checking your own record is the forecast answer's business, not a scam:
                  # "how do i check my pension forecast" has "check" in it and nothing dubious
                  "forecast", "record", "statement", "projection", "qualifying years",
+                 # "check" alone is the one word that reads in both directions, and the
+                 # check-on-your-own-pot sense is the commoner of the two: "how do i check my
+                 # pension", "how do i check my pension pot" and "what is my pension worth"
+                 # were all told that nobody legitimate cold-calls about a pension, which
+                 # answers a question the person did not ask and leaves theirs unanswered.
+                 # The scam keeps the offer shape - a call, a letter, a firm to look up - and
+                 # the checking phrases go to the statement answer below.
+                 "check my pension", "check my pot", "check my pension pot",
+                 "check what my pension", "check how much", "check what i have",
+                 "my pension worth", "how much is my pension", "is my pension worth",
+                 "how much have i got", "how much is in my pension", "what is my pension worth",
                  # how to do a transfer is a how-to question with an advice answer, and the
                  # scam card in reply reads as a refusal to answer it
                  "how do i transfer", "how to transfer", "how do i move my pension",
@@ -9128,6 +10328,100 @@ ENTRIES = [
           # a will, a pension and probate are their own answers
           avoid=("will", "probate", "funeral", "pension", "writing a will", "power of attorney")),
 ]
+# Paying for an older person's care is one of the questions families ask most, and main answered
+# it with the wrong card twice: "will i have to sell the house to pay for care" and "does the
+# council pay for care" both got the savings-and-credit-card ladder, "what help can i get with
+# care costs" got the frozen-vegetables answer, and both care-assessment lines were the search
+# hedge. The care home's weekly price was already answered, so these two rows are the other half:
+# how the council decides what you pay, and how to ask for the assessment that starts it.
+# "what help can i get with care costs" is not the same question as "will i have to sell the
+# house": one wants what is there to claim, the other wants what the council counts. Both rooms of
+# the answer are here, and which one comes first is the ask's job, so the reply reads the line.
+_CARE_HELP_WORDS = ("what help", "any help", "help with", "help towards", "entitled",
+                    "qualify", "claim", "benefits", "benefit", "support", "contribute",
+                    "pay for it", "afford it", "get any money", "anything available")
+_CARE_COSTS_MEANS = (
+    "The council looks at the person's own income, savings and property, not the family's: in "
+    "England, savings over £23,250 means paying the full cost, under £14,250 the council ignores "
+    "them, and in between it counts £1 a week of income for every £250 - so a house is not sold "
+    "on the first day, and a deferred payment agreement lets the council put a charge on it and "
+    "take the money from the estate instead. The house is ignored completely while a husband, "
+    "wife or civil partner lives there, and it is always ignored for care in your own home. Ask "
+    "for the financial assessment and the care needs assessment in writing, and get the free "
+    "check from Age UK or Citizens Advice before signing anything.")
+_CARE_COSTS_HELP = (
+    "Claim what is paid whatever the savings first, then let the council's assessment do the "
+    "rest: Attendance Allowance if the person needs help day to day and is over State Pension "
+    "age (PIP daily living below it), Pension Credit and the council tax reduction that comes "
+    "with it, and NHS continuing healthcare if the need is mostly health. The council part works "
+    "on the person's own money: in England, savings over £23,250 means paying the full cost, "
+    "under £14,250 the council ignores them, and in between it counts £1 a week for every £250, "
+    "so a house is not sold on the first day and a deferred payment agreement puts a charge on it "
+    "and takes the money from the estate instead. Ask for the financial assessment and the care "
+    "needs assessment in writing, and get the free check from Age UK or Citizens Advice before "
+    "signing anything.")
+
+
+def _care_costs_answer(memory, reading):
+    """What there is to claim, when that is what was asked; what the council counts, otherwise."""
+    said = ""
+    if isinstance(reading, dict):
+        said = str(reading.get("clean") or reading.get("text") or "").lower()
+    if any(word in said for word in _CARE_HELP_WORDS):
+        return _CARE_COSTS_HELP
+    return _CARE_COSTS_MEANS
+
+
+ENTRIES.append(entry(
+    "care-costs-and-the-house",
+    (("pay for care", "paying for care", "care costs", "care cost", "care fees", "care home fees",
+      "nursing home fees", "council pay for care", "council pays for care", "fund the care",
+      "funding for care", "means test", "means tested", "means-tested", "financial assessment",
+      "self funding", "self-funding", "sell the house", "sell my house", "sell the home",
+      "sell the bungalow", "deferred payment",
+      # the "what is there to claim" wording: a bare "claim" would take "can i claim carers
+      # allowance for my mum", so the phrase is written with the care in it
+      "claim for care", "claim towards care", "claim towards her care", "claim towards his care",
+      "claim for her care", "claim for his care", "claim for my mum", "claim for my dad",
+      "claim for my mother", "claim for my father", "money towards care", "money towards her care",
+      "help towards care", "help with care costs", "help paying for care"),
+     ("care", "care home", "nursing home", "home", "help", "pay", "pays", "cost", "costs",
+      "how", "what", "will i", "do i", "does", "can we", "afford", "money", "savings",
+      "pension", "house", "qualify", "entitled", "who pays", "my mum", "my dad", "my nan",
+      "my gran", "my mother", "my father", "mother", "father", "parent")),
+    _care_costs_answer,
+    # the weekly price of a home, the care itself and a will are other answers
+    avoid=("how much", "how much does", "per week", "a week", "weekly", "average cost",
+           "care home", "nursing home", "care assessment", "needs assessment", "will",
+           "probate", "inheritance tax", "power of attorney"),
+    bias=2))
+# The way in: the assessment nobody asks for because nobody has told them it exists.
+# The key says "carer assessment", not "carers assessment": the plural shares its stem with the
+# Carer's Allowance row, and with it in the key "can i get carers allowance for looking after my
+# mum" was pulled off that row onto this one, which is a real loss - the allowance is what that
+# person asked about. The matcher already reads the plural of a key word, so the singular answers
+# "how do i get a carers assessment" and leaves the allowance alone.
+ENTRIES.append(entry(
+    "care-assessment",
+    (("care assessment", "care needs assessment", "needs assessment", "assessment from the "
+      "council", "social services", "adult social care", "care package", "help at home",
+      "home help", "home care", "carer assessment", "reablement"),
+     ("what is", "whats", "how do i", "how to", "how can i", "get", "get one", "ask for",
+      "arrange", "apply", "who do i", "where do i", "qualify", "entitled", "mean", "involves",
+      "start", "request")),
+    "Ring the council's adult social care team and ask for a care needs assessment: it is free, "
+    "anyone can ask for one, and it is the door to everything else - help with washing and "
+    "dressing, a carer coming in, day centres, equipment, a pendant alarm, and the financial "
+    "assessment that decides what is paid. The person has to agree to it, so ask them first and "
+    "go with them, and write down the bad days rather than the good ones: what they cannot do "
+    "without help, and what happens on a day nobody is there. The decision comes in writing, and "
+    "if it says they do not qualify it can be challenged. Ask for a carer's assessment for "
+    "yourself in the same call - it is separate, and it is your own support, not theirs.",
+    # the money side and the care home are the other row, and a medical assessment is not this
+    avoid=("pip", "attendance allowance", "benefit", "benefits", "how much", "means test",
+           "means tested", "financial assessment", "sell the house", "care home", "nursing home",
+           "nhs", "gp", "hospital", "school", "child", "children", "special needs", "ehcp"),
+    bias=2))
 # Borrowing had a row for the card-to-loan comparison and for a loan to clear cards, and nothing
 # for the plainest form of the question: "how do i get a loan with bad credit", "can i get a loan
 # on universal credit" and "how do i get a loan" all reached the "free money advice covers this"
@@ -9164,7 +10458,12 @@ ENTRIES.append(entry(
     # row owns the other sense of "reverse"
     avoid=("cancel", "cancelling", "cancel my", "stop paying", "subscription i", "debt", "wage",
            "salary", "payslip", "mortgage", "loan", "car", "cars", "parking", "park",
-           "diabetes", "hair", "decision", "policy"),
+           "diabetes", "hair", "decision", "policy",
+           # a deposit is money held, not a payment that went wrong: "can i get my money back
+           # from a deposit scheme" is the itemised deductions and the scheme's dispute service,
+           # and a chargeback has nothing to do with it
+           "deposit", "deposits", "deposit scheme", "tenancy deposit", "holding deposit",
+           "security deposit", "damage deposit"),
     bias=1,
     guard=_a_payment_count))
 
@@ -9188,7 +10487,11 @@ ENTRIES.append(entry(
     avoid=("credit card", "cards", "card", "overdraft", "mortgage", "car", "cars", "house",
            "flat", "deposit", "wedding", "holiday", "business", "student",
            "consolidate", "consolidation", "payday", "loan shark", "friend", "friends", "mate",
-           "mum", "dad", "parents", "brother", "sister", "family", "lent me")))
+           "mum", "dad", "parents", "brother", "sister", "family", "lent me",
+           # "should i overpay my loan" is about a loan already taken out, and how to borrow
+           # cheaply answers a question they are past
+           "overpay", "overpaying", "overpayment", "pay off early", "paying off early",
+           "paid off early", "settle early", "settlement figure", "early repayment")))
 
 # A debt between family is the one where people ask how to say it, and nothing answered: "how do i
 # borrow money from my parents" and "should i borrow money from my mum" were both the honest
@@ -9674,6 +10977,15 @@ ENTRIES += [
             "pay into", "put into", "contribution", "contributions", "what percentage",
             "how much does my employer", "how much does the employer", "employer have to pay",
             "percentage", "percent", "pay more in", "increase it", "raise it", "too little",
+            # "is 200 a month enough" and "am i paying enough" are the same rate question as
+            # "how much should i pay in", and this row already holds the rule of thumb. Only the
+            # phrases that carry the paying are here: a bare "enough" is also "enough to live on",
+            # which is the retirement-income row's question, not this one.
+            "enough for a pension", "enough for my pension", "enough for the pension",
+            "enough into my pension", "enough in my pension", "enough going in",
+            "enough going into", "am i paying enough", "paying enough",
+            "putting in enough", "putting enough in", "contributing enough",
+            "should i pay more", "pay more into", "more into my pension",
             # the employer's own share asked on its own: the rate card has the 3% in it, and
             # the line was answered with "that is all I know on it" once the card had been given
             "what does my employer", "what does the employer", "employer have to put in",
@@ -9721,7 +11033,10 @@ ENTRIES += [
                  "universal credit", "tax credit", "tax credits", "claiming",
                  # a definition ask is not a rate question
                  "what is", "whats a", "what is a", "mean", "means",
-                 "defined contribution", "defined benefit", "final salary")),
+                 "defined contribution", "defined benefit", "final salary",
+                 # living on the pot is the retirement-income row's line: what a person should
+                 # be paying in is not the answer to "is my pension enough to live on"
+                 "live on", "live off", "to live", "my pension enough", "pension be enough")),
     entry("pension-pot-size",
           (("pension", "pensions", "pension pot"),
            ("how much should i have", "big enough", "on track", "at 30", "at 35", "at 40",
@@ -9836,9 +11151,22 @@ ENTRIES += [
           avoid=("state pension", "sipp", "mortgage", "lump sum", "25%")),
     entry("pension-statement",
           (("pension statement", "pension statements", "annual statement", "pension paperwork",
-            "pension letter", "statement from my pension", "pension report"),
+            "pension letter", "statement from my pension", "pension report",
+            # seeing what is in the pot is the same question as reading the statement, and it
+            # is asked without ever saying "statement": "how do i check my pension", "what is my
+            # pension worth", "how much is my pension worth". The phrase has to be the whole
+            # ask, not "my pension" with a word beside it: "how much tax do i pay on my
+            # pension" and "is a pension worth it" are other answers, and "worth"/"much" in
+            # both halves made every one of them this card.
+            "check my pension", "check my pension pot", "check my pot",
+            "what my pension is worth", "my pension worth", "pension pot worth",
+            "much is my pension", "much have i got in my pension",
+            "what is in my pension", "whats in my pension", "value of my pension",
+            "check what my pension"),
            ("understand", "means", "read", "says", "confusing", "jargon", "explain",
-            "what does", "numbers", "add up", "get", "getting", "find", "finding", "where")),
+            "what does", "numbers", "add up", "get", "getting", "find", "finding", "where",
+            "check", "checking", "worth", "value", "much", "got", "what is", "whats",
+            "see", "look", "look up", "look at", "find out", "owed")),
           "An annual pension statement has four numbers worth finding: the pot's value now, what "
           "you and your employer paid in during the year, the charges taken out, and the income "
           "the scheme projects at retirement. Check the charge line first, because 1% a year "
@@ -9847,7 +11175,15 @@ ENTRIES += [
           bias=3,
           # "my pension statement says im at risk" is the safety question, not the paperwork one
           avoid=("state pension", "not growing", "isnt growing", "barely moved",
-                 "at risk", "risky", "risk", "safe", "protected", "ppf", "goes bust")),
+                 "at risk", "risky", "risk", "safe", "protected", "ppf", "goes bust",
+                 # and how much to pay in, taking it, and moving it are their own answers: the
+                 # statement card explains the numbers already in the pot
+                 "should i pay", "how much should i", "contribute", "contribution", "pay in",
+                 "opt out", "take", "taking", "transfer", "lump sum", "25%", "sipp",
+                 "on track", "big enough", "should i have", "scam", "fraud", "rang me",
+                 # and the state pension forecast is the record answer's, not the pot
+                 # statement's: "how do i check my pension forecast" is a gov.uk login
+                 "forecast", "record", "qualifying years", "pension age", "gov.uk")),
     entry("pension-not-growing",
           (("pension", "pensions", "pension pot", "pension fund"),
            ("not growing", "isnt growing", "isn't growing", "barely moved", "hasnt grown",
@@ -10100,6 +11436,28 @@ ENTRIES.append(entry(
 # care ("does my mum get anything for needing help"), so the key has both halves and the money
 # words the question always carries. "attendance" alone is school attendance and the work
 # register, so the scheme is named as a phrase and never as one word.
+# The sentence the attendance allowance card owes a whether-line that asks how the benefit is
+# assessed, and the lines that ask something else. "can i claim attendance allowance for my mum" is
+# a whether-line on this row too, and it wants who the benefit is for and how to claim; leading it
+# with the means test answered a question nobody asked. So the row declares a reading and not a
+# shape alone: the sentence leads when the line names the assessment (means testing, savings,
+# income, capital) and every other line is left with the card as it is written. Declared whole, to
+# its full stop - a lead declared as a sentence's first clause cuts the card at the comma.
+_NOT_MEANS_TESTED = ("It is not means-tested, so savings and income do not count, it is tax-free, "
+                     "and nobody has to be paid to help you yet")
+_ASKS_ABOUT_THE_ASSESSMENT = re.compile(
+    r"\bmeans[\s-]?tested?\b|\bnot means\b|\bsavings?\b|\bincome\b|\bcapital\b|"
+    r"\bassets?\b|\bcount(?:s|ed)?\s+(?:against|towards|toward|as\s+(?:income|capital))\b",
+    re.I)
+
+
+def _the_assessment_sentence(understood):
+    """The means-test sentence for a line that asks how the benefit is assessed, else ""."""
+    said = " ".join(str((understood or {}).get("clean")
+                        or (understood or {}).get("text") or "").lower().split())
+    return _NOT_MEANS_TESTED if _ASKS_ABOUT_THE_ASSESSMENT.search(said) else ""
+
+
 ENTRIES.append(entry(
     "attendance-allowance",
     (("attendance allowance", "attendance allowence", "attendence allowance",
@@ -10115,6 +11473,11 @@ ENTRIES.append(entry(
     "means-tested, so savings and income do not count, it is tax-free, and nobody has to be paid "
     "to help you yet. Claim on form AA1 - phone the DWP and they will fill it in with you - and "
     "it also unlocks Pension Credit for some people.",
+    # "is attendance allowance means tested" and "does it count my savings" ask the sentence
+    # about means-testing, which the card holds second because "how much is attendance allowance"
+    # wants the figure first. Declared whole, to its full stop: declared as its first clause the
+    # lead would cut the card at the comma and leave "so savings and income do not count" out.
+    lead=("yesno", _the_assessment_sentence),
     # a bus pass, a blue badge and a Motability car are other schemes, and the school or work
     # register is another "attendance" entirely
     avoid=("bus pass", "blue badge", "motability", "railcard", "school", "schools", "class",
@@ -10230,3 +11593,51 @@ ENTRIES.append(entry(
          "time limit", "too late", "missed", "thing", "how do i", "can i", "should i", "apply",
          "worth", "worth it"),
     bias=2))
+
+# --- a word on a contract -------------------------------------------------------------
+# Two words a person signs past without knowing: an escrow account on a house purchase and a
+# retention on a building job. Both were search hedges on main, and both are definitions with a
+# number in them, so each answer says what it is and what to check before signing.
+ENTRIES.append(entry(
+    "escrow-account",
+    (("escrow", "escrow account", "escrow accounts", "held in escrow", "in escrow",
+      "money in escrow"),
+     ("what is", "whats", "what does", "mean", "means", "how", "why", "safe", "protect",
+      "protects", "release", "released", "who holds", "how long", "house", "buying", "sale",
+      "deposit", "solicitor", "conveyancer", "builder", "building work", "rent")),
+    "An escrow account is a holding account run by a third party - usually a solicitor or a "
+    "specialist escrow firm - that keeps money until the thing it is paying for is done. On a "
+    "house purchase the deposit sits there between exchange and completion, and on a building job "
+    "the payment sits there until the stage is signed off, so neither side can walk off with it. "
+    "Ask who holds it, whose name is on the account, what exactly triggers the release and what "
+    "happens if the two sides disagree, because money held in a client account at a bank is "
+    "protected and money in the firm's own name may not be.",
+    # a deposit scheme for a tenancy, a savings account and a pension are their own questions
+    avoid=("deposit scheme", "deposit protection", "dps", "tenancy deposit", "savings account",
+           "cash isa", "pension", "stocks", "shares", "premium bonds", "interest rate"),
+    bias=1))
+
+ENTRIES.append(entry(
+    "retention",
+    (("retention", "retentions", "retention money", "retention held", "5% retention",
+      "3% retention", "money held back"),
+     ("what is", "whats", "what does", "mean", "means", "how much", "why", "when", "paid",
+      "pay", "release", "released", "building work", "builder", "job", "contract", "invoice",
+      "half", "hold back", "held back")),
+    "Retention is the slice of a building job's price the client keeps back as insurance that the "
+    "snagging gets done - 5% is the usual figure, sometimes 3%. Half of it is released when the "
+    "job is finished to the contract's standard, and the other half after a defects period, "
+    "usually twelve months, once anything that has gone wrong has been put right. It should say "
+    "all of that in the contract, with the date each half is due; if it does not, ask for it in "
+    "writing before you start, because a builder who has not read the term will not expect the "
+    "last payment to wait a year.",
+    # tax retention, a phone retention deal and a customer retention offer are other things
+    avoid=("tax", "hmrc", "student loan", "mobile", "phone", "broadband", "contract renewal",
+           "loyalty", "customer", "employee", "staff", "records", "documents", "data",
+           "bonus", "bonuses", "salary", "pay rise", "job offer", "hiring", "recruit",
+           # "retention" is three everyday words this row must not take: the water the body
+           # holds ("why do i have water retention" was answering about a building job), a
+           # school year ("what is retention in school") and a pond or a drainage basin
+           "water", "fluid", "swollen", "ankles", "salt", "kidney", "bladder", "pond",
+           "drainage", "suds", "school", "pupil", "pupils", "year group", "grade", "exam"),
+    bias=1))

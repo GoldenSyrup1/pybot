@@ -45,6 +45,23 @@ _COST = ("how much", "how many pounds", "cost", "costs", "costing", "charge", "c
          "worth it", "why am i paying", "am i paying", "paying for my", "do i have to pay for",
          "get free", "get them free")
 
+# A trade who puts a figure on the visit itself is asking for that figure to be judged: "the
+# electrician wants 120 just to look at it" and "the plumber wants 90 just to come out" are the
+# call-out price, and both reached a placeholder, because "wants" and a number are not a price
+# word. The "just to" is what keeps the arrival a complaint about money: "when is the plumber
+# going to turn up" is a when, and "the plumber wants to come on friday" stays a date.
+#
+# Only the jobs whose unit of work is the visit get these. A boiler, a kitchen or a bathroom is
+# priced as a whole job, and "the boiler man wants 90 just to look at it" answered with the price
+# of a new boiler would be a wrong answer where a placeholder at least was honest.
+_A_VISIT_FEE = ("just to come out", "just to come round", "just to come over",
+                "just to come and look", "just to look", "just to have a look",
+                "just to turn up", "just to show up", "just to pop round", "just to call out")
+_VISIT_FEE_JOBS = frozenset((
+    "plumber", "electrician", "boiler-service", "washing-machine-repair", "drains", "locksmith",
+    "handyman", "decorator", "gardener", "oven-clean", "carpet-clean", "gutter-clean", "vet",
+    "dentist", "eye-test", "smoke-alarm", "dog-groomer"))
+
 # A repair of a machine in the home is asked as a price, so it needs a price word said outright.
 # "is it worth repairing my dishwasher" and "should i repair or replace it" are the decision, and
 # they have their own answer: the money rule, not the engineer's rate.
@@ -73,6 +90,24 @@ def _not_a_steps_ask(understood):
     """False when the line asks for the steps themselves ("how to unblock a drain")."""
     text = understood.get("clean") or understood.get("text") or ""
     return not _HOW_TO.search(str(text).lower())
+
+
+# "how much does it cost to renew my passport" is a fee question with a how-to verb in it, and
+# "how do i renew my passport" is the how-to. A government fee is a set sum, so those rows cannot
+# drop "renew" and "apply" from their avoid list without taking the price with it - the two need
+# reading apart the way "how much to" and "how to" did above.
+_STEPS_ASK = re.compile(
+    r"\b(how do i|how can i|how to|how 2|what do i need|what do you need|what do i take|"
+    r"do i need|can i renew|can i apply|can i do it|where do i|when should i|what happens if)\b")
+_PRICE_ASK = re.compile(
+    r"\b(how much|how many pounds|cost|costs|costing|price|prices|priced|fee|fees|charge|"
+    r"charges|pays|pay|paid|pence|cheapest|expensive)\b")
+
+
+def _a_steps_ask_with_no_price(understood):
+    """True when the line asks how, or what is needed, and never asks what it costs."""
+    text = str(understood.get("clean") or understood.get("text") or "").lower()
+    return bool(_STEPS_ASK.search(text)) and not bool(_PRICE_ASK.search(text))
 
 
 # What people pay in the UK, in ranges. "typical" is the middle of what people report paying,
@@ -323,6 +358,10 @@ JOBS = {
                   # list fixes. A dry cleaner is a shop, and a steam, vacuum, oven, drain or pool
                   # cleaner is a thing, so those stay.
                   "robot cleaner", "dry cleaner", "dry cleaners",
+                  # Now that window cleaning has its own band - it is priced by the visit, not
+                  # the hour - the word goes out here, so the person on a ladder gets the visit
+                  # price rather than the £12 to £18 an hour of a house cleaner.
+                  "window", "windows", "window cleaner", "window cleaners",
                   # A carpet cleaner is a machine you hire or buy, and the hourly rate of the
                   # person who cleans a house was the answer to both "how much is a carpet
                   # cleaner" and a hire price.
@@ -379,6 +418,134 @@ JOBS = {
                  "the advert says. Ask for the hourly rate, the minimum charge and whether they "
                  "take the rubbish away.",
     },
+    # A carpenter and a joiner are the same trade in most firms, and both were the "two quotes"
+    # fallback on main ("I can't price a job from here") while a plumber, a decorator, a handyman,
+    # a builder and a locksmith all had a band. Fitted work is priced by the job, which is the
+    # point a day rate cannot make on its own.
+    "carpenter": {
+        "names": ("carpenter", "carpenters", "joiner", "joiners", "carpentry", "woodwork",
+                  "cabinet maker", "cabinetmaker", "fitted wardrobes", "fitted furniture"),
+        "thing": "a carpenter",
+        "reply": "A carpenter is usually £150 to £250 a day, or £30 to £50 an hour for small jobs "
+                 "with a one-hour minimum, and a joiner hanging an internal door is £60 to £120 "
+                 "each. Fitted wardrobes and shelving are priced as a whole: £1,000 to £3,000 for "
+                 "a run of built-in wardrobes with the materials in. Ask for the day rate, whether "
+                 "the price is fixed or an estimate, and get the material allowance in writing.",
+    },
+    # Every trade a person rings for a job has a rate band, and eight of them had none: "how much
+    # does a plasterer charge" and "how much does a tiler charge" were the "two quotes" fallback,
+    # "how much does a gas engineer charge" was "there is no list price", a heating engineer and a
+    # glazier were the car-parts "prices move too fast", a surveyor was the advice card with no
+    # figure in it, and "how much does a drain company charge" reached the phone-battery card on
+    # the word "drain". A trade named with a price asked is this table's question.
+    "plasterer": {
+        "names": ("plasterer", "plasterers", "plastering", "skim a wall", "skim a ceiling",
+                  "skimming", "plasterboard"),
+        "thing": "a plasterer",
+        "reply": "A plasterer is usually £150 to £250 a day, or £15 to £25 a square metre for "
+                 "skimming: a whole room's walls and ceiling is £300 to £600, and patching a "
+                 "ceiling after a leak is £80 to £150. Boarding over old plaster adds £200 to "
+                 "£400 a room. Ask whether the price includes the boards and the finishing coat, "
+                 "and how long it takes to dry before paint.",
+    },
+    "tiler": {
+        "names": ("tiler", "tilers", "tiling", "tile a bathroom", "tile a kitchen", "retile",
+                  "re-tile"),
+        "thing": "a tiler",
+        "reply": "A tiler is usually £150 to £250 a day, or £25 to £45 a square metre for labour: "
+                 "a small bathroom's walls and floor is £500 to £900, and a kitchen splashback "
+                 "£150 to £300. Tiles themselves are £15 to £60 a square metre on top. Ask "
+                 "whether the price includes taking the old tiles off, the adhesive and the "
+                 "grouting, because that is where two quotes differ most.",
+    },
+    "gas-engineer": {
+        "names": ("gas engineer", "gas safe", "gas safe engineer", "heating engineer",
+                  "boiler engineer", "boiler service", "service the boiler", "boiler repair",
+                  "gas boiler", "gas fire", "gas hob fitting"),
+        "thing": "a Gas Safe engineer",
+        "reply": "A boiler service is £60 to £120, and a repair is £80 to £250 including the "
+                 "common parts, with the first hour often £50 to £90. Out of hours or a "
+                 "breakdown in winter costs £100 to £150 before parts. Check the engineer is on "
+                 "the Gas Safe register, and ask whether the repair is a fixed price before they "
+                 "start.",
+    },
+    "glazier": {
+        "names": ("glazier", "glaziers", "double glazing repair", "broken window", "new window "
+                  "pane", "replace a window pane", "sealed unit", "window glass", "cracked window"),
+        "thing": "a glazier",
+        "reply": "A single pane of ordinary glass is £60 to £120 fitted, and a sealed double-glazed "
+                 "unit is £100 to £250, with a big or toughened one £250 to £500. A broken window "
+                 "boarded up the same day is £100 to £200. Ask whether the frame is sound, because "
+                 "a rotten frame means a whole new window at £400 to £1,000, and check whether "
+                 "your home insurance covers the glass.",
+    },
+    "window-cleaner": {
+        # gutter clearing has a band of its own in this table, so the windows row names no
+        # gutter: "how much does it cost to clean the gutters" was answered with window prices
+        "names": ("window cleaner", "window cleaners", "clean the windows", "window cleaning",
+                  "fascia cleaning"),
+        "thing": "a window cleaner",
+        "bias": 2,
+        "reply": "A window cleaner is usually £10 to £25 for a small house and £25 to £40 for a "
+                 "larger one, inside usually not included, and a four-weekly round is cheaper "
+                 "than a one-off. Gutter clearing is £60 to £150 for a house, and fascia cleaning "
+                 "£100 to £250. Ask whether they use pure water and a pole or ladders, and "
+                 "whether the price covers the frames and the sills.",
+    },
+    "chimney-sweep": {
+        "names": ("chimney sweep", "chimney sweeps", "sweep the chimney", "sweeping the chimney",
+                  "flue sweep", "sweep the flue"),
+        "thing": "a chimney sweep",
+        "reply": "A chimney sweep is usually £50 to £90 for an ordinary chimney, and £90 to £150 "
+                 "if it is lined, thatched or needs a camera. A wood burner wants sweeping once a "
+                 "year before the season and twice if it is your main heat, and a gas appliance "
+                 "needs a Gas Safe service rather than a sweep. Ask for a certificate, because "
+                 "your insurer may ask for one after a chimney fire.",
+    },
+    "surveyor": {
+        "names": ("surveyor", "surveyors", "survey", "surveys", "house survey", "building survey",
+                  "homebuyer report", "structural survey", "condition survey", "valuation"),
+        "thing": "a surveyor",
+        # "how much does a surveyor charge" and "what does a structural survey cost" came back
+        # as "Yes, have one done - the lender's valuation is not a survey..." from the house
+        # survey card, which does carry the figures, in its second sentence: the card and this
+        # band sat at the same weight, so which one a person got was chance. The band answers
+        # the price with the price, so it takes the price ask; the card keeps "do i need a
+        # surveyor" and "is a structural survey worth it", which name no price at all.
+        "bias": 2,
+        "reply": "A survey is £400 to £700 for a HomeBuyer report and £600 to £1,200 for a full "
+                 "building survey, on a typical house; a flat is at the lower end and a big or old "
+                 "house at the top. The lender's valuation is not a survey and only tells the "
+                 "lender the house is worth the loan. Get the survey before you exchange, and "
+                 "ring the surveyor afterwards to ask what actually matters.",
+        # a decision is the card's: "is a structural survey worth it" wants the yes or no, and
+        # the band's figures are already in the card's own answer.
+        # ... and a survey already in hand is a report to read, not a price to ask.
+        "avoid": ("worth it", "is it worth", "worth", "do i need", "should i", "instead of",
+                  "which level", "what level", "came back", "come back", "found", "flagged",
+                  "says", "damp", "the survey said", "had the survey", "got the survey"),
+    },
+    "pest-control": {
+        "names": ("pest control", "pest controller", "pest control company", "exterminator",
+                  "rat catcher", "get rid of rats", "wasp nest removal", "bed bug treatment",
+                  "mouse treatment"),
+        "thing": "pest control",
+        "reply": "A pest controller is usually £80 to £150 for a wasp nest and £100 to £250 for "
+                 "rats or mice, which usually covers two visits and the bait. Bed bugs are the "
+                 "expensive one at £300 to £800 for a flat, sometimes with a second treatment. "
+                 "Your council may do rats and mice cheaper, so ring them first, and ask whether "
+                 "the price includes the follow-up visit.",
+    },
+    "architect": {
+        "names": ("architect", "architects", "architectural drawings", "planning drawings",
+                  "building regs drawings", "structural engineer"),
+        "thing": "an architect",
+        "reply": "Drawings for an extension are usually £1,000 to £2,500, and a full service is 8 "
+                 "to 15% of the build cost, so a £60,000 extension is £5,000 to £9,000 in fees. A "
+                 "structural engineer's calculations are £400 to £1,000 on top when a wall is "
+                 "coming out. Ask what the fee covers - planning, building regs, and site visits "
+                 "during the build are separate jobs.",
+    },
     "gardener": {
         "names": ("gardener", "gardeners", "landscaper", "lawn care"),
         "thing": "a gardener",
@@ -401,14 +568,21 @@ JOBS = {
                  "repair if you go ahead.",
     },
     "drains": {
-        "names": ("drain", "drains", "blocked drain", "drain unblocking", "sewer"),
+        # "how much does a drain company charge" and "what do drainage companies charge" name the
+        # firm rather than the blockage, and they were the "prices move too fast" fallback.
+        "names": ("drain", "drains", "blocked drain", "drain unblocking", "sewer",
+                  "drain company", "drain companies", "drainage company", "drains company",
+                  "sewer company", "drain clearing", "clear a drain", "clear the drain"),
         # A battery that drains is not a pipe under the house. "how do i stop my phone battery
         # draining so fast" then "i charge it every night" reached this price, because the
         # conversation's subject was written back into the line and "charge" is what a plumber
         # does; there is no plumbing in the chat at all. The device words and the charging
         # phrases stand this entry aside, and a drain in a house still gets its price.
+        # "charging" cannot be in an avoid list: an avoid is read loosely, so it also stood this
+        # row down for the word "charge", and "how much does a drain company charge" - a price
+        # asked with "charge" in it - was left with no answer at all.
         "avoid": ("battery", "batteries", "phone", "iphone", "ipad", "android", "laptop",
-                  "computer", "tablet", "charger", "charging", "charge it", "charge my",
+                  "computer", "tablet", "charger", "charge it", "charge my",
                   "charge the phone", "charge overnight", "battery drain",
                   "draining fast", "drains fast", "drains so fast"),
         "thing": "clearing a drain",
@@ -828,8 +1002,12 @@ JOBS = {
         # A government fee is not a range, so this row says what it is and warns about the
         # middlemen: the fee is the same wherever you apply, and the only part that moves is the
         # post-versus-online difference and the April increase.
-        "avoid": ("renew", "apply", "applying", "how do i", "how to", "expires", "expiry",
-                  "six months", "6 months", "lost", "stolen", "damaged",
+        # "renew" and "apply" are not avoided any more: "how much does it cost to renew my
+        # passport" was answered with the how-to card, because the verb that makes it a how-to
+        # was standing this row down and taking the fee with it. `fence_how_to` reads the two
+        # apart - a how-to with no price in the line stands this row down, a price keeps it.
+        "fence_how_to": True,
+        "avoid": ("expires", "expiry", "six months", "6 months", "lost", "stolen", "damaged",
                   "travel with", "valid", "photo", "track"),
         "reply": "An adult passport is about £95 and a child's about £62, done on gov.uk, and "
                  "about £12 more each if you post the paper form instead. Do it on gov.uk "
@@ -842,9 +1020,11 @@ JOBS = {
         "names": ("driving licence", "driving license", "provisional licence",
                   "provisional license", "photocard licence"),
         "thing": "a driving licence",
-        "avoid": ("renew", "apply", "how do i", "how to", "points", "banned", "revoked",
-                  "medical", "address", "change of address", "lost", "stolen", "photo",
-                  "driving test", "lessons"),
+        # same split as the passport: "how much does it cost to renew my licence" was the
+        # how-to card, and the fee was lost with it
+        "fence_how_to": True,
+        "avoid": ("points", "banned", "revoked", "medical", "address", "change of address",
+                  "lost", "stolen", "photo", "driving test", "lessons"),
         "reply": "A first provisional licence is £34 online, or £43 on the paper form, and "
                  "renewing the photocard is £14 online, or £17 on paper. The tests are separate: "
                  "about £23 for the theory and £62 for the practical, £75 at an evening or "
@@ -939,7 +1119,9 @@ ENTRIES = [
     # "how do i get a prescription prepayment certificate" has no "how much" in it, and the
     # name of the certificate alone was one part short of the row.
     entry("cost-" + key,
-          (data["names"], _COST) + ((data["shapes"],) if data.get("shapes") else ()),
+          (data["names"],
+           _COST + (_A_VISIT_FEE if key in _VISIT_FEE_JOBS else ()))
+          + ((data["shapes"],) if data.get("shapes") else ()),
           data["reply"],
           # the how-to of the job is the DIY answer, and a comparison is the shopping one. A job
           # whose how-to IS the price - a prepayment certificate is bought at a counter for a
@@ -952,8 +1134,9 @@ ENTRIES = [
           # heat pump dryer cost" is a dryer's price, and the appliance's own row answers it
           # names is bound per row: a lambda inside this comprehension that read `data` would see
           # the last job in the table, not its own.
-          guard=lambda understood, names=data["names"]: (
+          guard=lambda understood, names=data["names"], fence=data.get("fence_how_to", False): (
               _not_a_steps_ask(understood)
+              and not (fence and _a_steps_ask_with_no_price(understood))
               and not the_appliance_swallows_the_name(understood, names)),
           bias=data.get("bias", 1))
     for key, data in JOBS.items()
@@ -977,6 +1160,408 @@ ENTRIES.append(entry("cost-plumber-sink",
                     "best buy", "blocked", "blockage", "unblock", "smell", "smells", "clean",
                     "cleaning", "drain", "drains", "tap", "taps"),
       bias=2))
+
+
+# The price of the ordinary food shop. "How much is a pint of milk" and "how much is a block of
+# cheese" are the same question as "how much does a plumber charge", and on their own words they
+# reached a punt ("Prices move too fast for me to know") or a different question entirely: the
+# bread ratio for "how much is a loaf of bread", 75 to 100g a person for "how much is a bag of
+# pasta", 30g a portion for "how much is a block of cheese", the 400mg caffeine limit for "how
+# much is a cup of coffee".
+#
+# The two questions wear the same first words - "how much is a loaf of bread" is a price and "how
+# much bread for four people" is an amount - so the guard is the price shape itself: "how much
+# is/are/does" or the words cost and price, and nothing about portions, grams, calories or people.
+# With that in front, a bare "milk" or "bread" is safe as a name, which is how the whole shop gets
+# covered in one table.
+# "how much is a loaf" is a price, and "how much does a loaf need to rise" is the bread ratio, so
+# the how-much-does shape only counts when it carries the word cost with it.
+_PRICE_SHAPE = re.compile(
+    r"\bhow\s+much\s+(?:is|are|was|were|for|would|will)\b"
+    r"|\b(?:cost|costs|costing|price|prices|priced)\b", re.IGNORECASE)
+_AMOUNT_SHAPE = re.compile(
+    r"\bhow\s+many\b|\bper\s+(?:person|head|serving|portion|adult|child|kg|kilo)\b"
+    r"|\bportions?\b|\bgrams?\b|\bcalories\b|\bprotein\b|\bper\s+day\b|\ba\s+day\b"
+    r"|\bfor\s+(?:\d+|two|three|four|five|six|seven|eight)\b|\bpeople\b|\bserves?\b"
+    r"|\bhow\s+long\b|\bkeep\b|\bfreez(?:e|es|ing)\b|\bleft\s?overs?\b"
+    # an amount is "how much should i use/eat/make"; "how much should i pay for a chicken" is a price
+    r"|\bshould\s+i\s+(?:use|eat|have|drink|cook|add|give|feed|take|put|make|buy)\b"
+    r"|\b(?:should|shall)\s+(?:i|we)\s+(?:use|eat|have|drink|cook|add|give|feed|take|put|make)\b"
+    # An ingredient's name is not a shop line when the line names something to grow or to cook:
+    # "how much is a tomato plant" is a tomato plant and "how much are seed potatoes" is seed
+    # potatoes for planting, while a soup, a pie or a sandwich is a dish, not the price of what
+    # goes in it.
+    r"|\bplant|\bplants|\bseed\b|\bseeds|\bseedlings?|\bgrow|\bgrows|\bgrowing|\bgrew\b"
+    r"|\bgrown\b|\bvariet(?:y|ies)|\bharvest|\bsow\b|\bsow(?:ed|ing)\b|\bplanting\b"
+    r"|\bsoup\b|\bsoups\b|\bpie\b|\bpies\b|\bpuddings?\b|\bsandwich|\btoast\b"
+    r"|\bjacket\b|\bmash\b|\bmashed\b|\bcurry|\bcasseroles?\b|\bstew|\broast\b"
+    r"|\bjar\b|\bjars\b|\bsalad\b|\bbake\b|\bbaked\b|\btopping|\bfilling|\bpizza"
+    r"|\bcake\b|\bbiscuits?\b|\bbread\b|\bpot\b|\bpots\b", re.IGNORECASE)
+
+
+def _a_price_for_the_shop(understood):
+    """True when the line asks what a grocery costs, and not how much of it to use."""
+    if not isinstance(understood, dict):
+        return False
+    line = (understood.get("clean") or understood.get("text") or "").lower()
+    if not line or _AMOUNT_SHAPE.search(line):
+        return False
+    return bool(_PRICE_SHAPE.search(line))
+
+
+# One line of data an item: what people call it and the price. Ranges, never a single figure.
+# The loaf, the eggs and the pint of milk are not here: main's own everyday-price table answers
+# those three already (a supermarket loaf £1.20 to £1.60, six free-range eggs £1.50 to £2.20,
+# milk about 70p a pint), and a second table for the same shopping is the copy the lane forbids.
+# What is here is the rest of an ordinary basket, which was a punt or a portion card.
+GROCERIES = {
+    "water": {
+        "names": ("bottle of water", "bottled water", "pack of water", "case of water",
+                  "water in a shop", "still water", "sparkling water"),
+        "reply": "A 500ml bottle of water is about £1 in a shop and £2 or more at a station, "
+                 "while a 6-pack of 1.5 litre bottles is about £3 to £4 in a supermarket. Tap "
+                 "water is the same stuff and costs nothing, so the bottle is for the day out.",
+    },
+    "cheese": {
+        "names": ("cheese", "block of cheese", "block of cheddar", "cheddar", "400g of cheese",
+                  "packet of cheese"),
+        "reply": "A 400g block of cheddar is about £3.50 to £5, and the same weight of a named "
+                 "farmhouse one £4 to £6. Mature costs a little more than mild, and the deli "
+                 "counter is dearer than the block.",
+    },
+    "butter": {
+        "names": ("butter", "block of butter", "packet of butter", "tub of butter"),
+        "reply": "A 250g block of butter is about £2.20 to £3, and a tub of spread about £1.50. "
+                 "Own-brand butter is the cheapest, and it freezes well, so buy it when it is on "
+                 "offer.",
+    },
+    "pasta": {
+        "names": ("pasta", "bag of pasta", "packet of pasta", "spaghetti", "penne"),
+        "reply": "A 500g bag of dried pasta is about 75p to £1.50, and a fresh one £2 to £3. "
+                 "Dried is a fifth of the price a portion, and the shape does not change the "
+                 "price much.",
+    },
+    "rice": {
+        "names": ("rice", "bag of rice", "kilo of rice", "basmati", "long grain rice"),
+        "reply": "A kilo of long-grain rice is about £1 to £2.50 and a kilo of basmati £2 to "
+                 "£3.50. It keeps for months in a cupboard, so the bigger bag is usually the "
+                 "better buy.",
+    },
+    "bacon": {
+        "names": ("bacon", "pack of bacon", "packet of bacon", "rashers", "smoked bacon"),
+        "reply": "A 300g pack of bacon is about £2.50 to £4. Dry-cured costs more than the kind "
+                 "that is pumped with water, which shrinks in the pan, and the 2-for deals are "
+                 "usually the cheapest way to buy it.",
+    },
+    "salmon": {
+        "names": ("salmon", "salmon fillets", "side of salmon", "piece of salmon"),
+        "reply": "Two salmon fillets are about £5 to £7, and a whole side £15 to £25. The frozen "
+                 "fillets are often half the price of the fresh counter for the same fish.",
+    },
+    "bananas": {
+        "names": ("bananas", "banana", "bunch of bananas"),
+        "reply": "Bananas are about 15p to 25p each, so a bunch of five is roughly £1. Loose ones "
+                 "are cheaper than a pre-packed bag, and the ripe ones on the reduce shelf are "
+                 "the bargain.",
+    },
+    "apples": {
+        "names": ("apples", "apple", "bag of apples"),
+        "reply": "Six apples are about £1.50 to £2.50 and a kilo about £2. Loose ones let you "
+                 "pick the size, and a bag of the smaller ones is usually the cheapest way.",
+    },
+    "tomatoes": {
+        "names": ("tomatoes", "tomato", "pack of tomatoes", "punnet of tomatoes", "cherry tomatoes"),
+        "reply": "A 400g pack of salad tomatoes is about £1 to £2, and a punnet of cherry ones "
+                 "£1.50 to £2.50. Loose ones are usually cheaper than a punnet, and in August "
+                 "they are half the winter price.",
+    },
+    "mince": {
+        "names": ("mince", "beef mince", "pack of mince", "minced beef"),
+        "reply": "500g of beef mince is about £4 to £6, with the 5% fat one a pound or two more "
+                 "than the 20%. Turkey and pork mince are cheaper, and a bigger pack is usually "
+                 "the better price a kilo.",
+    },
+    "sausages": {
+        "names": ("sausages", "sausage", "pack of sausages", "pork sausages"),
+        "reply": "Six to eight sausages are about £2.50 to £4, and a butcher's £4 to £6. The "
+                 "cheapest are mostly rusk and water, so read the meat percentage on the pack.",
+    },
+    "cereal": {
+        "names": ("cereal", "box of cereal", "cornflakes", "box of cornflakes", "muesli"),
+        "reply": "A box of cereal is about £2 to £3.50, and the shop's own version of a branded "
+                 "one about half the price. A big bag of own-brand flakes is the cheapest "
+                 "breakfast there is a bowl.",
+    },
+    "yoghurt": {
+        "names": ("yoghurt", "yogurt", "pot of yoghurt", "tub of yoghurt", "greek yoghurt"),
+        "reply": "A four-pack of yoghurt is about £1.50 to £2.50, and a 1kg tub £2 to £3, which "
+                 "is much cheaper a portion. Greek-style costs more than natural, and the big "
+                 "tub is the one to buy if you eat it every day.",
+    },
+    "peas": {
+        "names": ("peas", "frozen peas", "bag of peas", "kilo of peas"),
+        "reply": "A kilo of frozen peas is about £1.50 to £2 and lasts months. Fresh peas in "
+                 "season are sweeter but cost three or four times as much for a much smaller "
+                 "bag.",
+    },
+}
+
+ENTRIES += [
+    entry("shop-" + key,
+          (data["names"], _PRICE),
+          data["reply"],
+          # a portion, a recipe and a diet question are the other half of these lines
+          avoid=("per person", "per head", "portion", "portions", "recipe", "recipes",
+                 "to make", "to bake", "how to make", "how do i make", "from scratch",
+                 # "how much is too much" carried the milk from the turn before and was answered
+                 # with the price of a pint; "how much is a splash of milk" is a measure
+                 "too much", "splash", "splash of", "a dash", "dash of", "a drop", "drop of",
+                 "glug", "a bit", "how much is left", "left over",
+                 # "and how much for a bigger loaf" came after the bread ratio: same words, and
+                 # the amount is what a bigger loaf needs, not what it costs in a shop
+                 "bigger", "larger", "smaller",
+                 "calories", "protein", "how many", "a day", "substitute", "instead of",
+                 "allergy", "allergic", "baby", "toddler", "freeze", "freezer", "defrost"),
+          ask=("how much", "cost", "costs", "price", "prices", "much does", "much is",
+               "much are", "much for"),
+          bias=2,
+          guard=_a_price_for_the_shop)
+    for key, data in GROCERIES.items()
+]
+
+# --------------------------------------------------------------- the other question about a job
+# A job is asked two ways, and they want different halves of the same knowledge: "how much does an
+# MOT cost" wants the price, "how long does an MOT take" wants the clock. Only the price had a
+# table, so a how-long line either matched nothing and fell to whatever card happened to carry the
+# job's name (the boiler service card answered "how long does a house survey take") or was told
+# what the job covers instead of how long it takes ("how long does an MOT take" listed the test).
+#
+# This is the same table idea as JOBS: a job, the words people use for it, and the duration, so a
+# new job is one line of data. A row needs the job *and* the time it is asked by, which is what
+# keeps "how much does an MOT cost" on the price row and "when is my MOT due" on the row that
+# reads the date. The reply leads with the time, because that is the question.
+#
+# The figures are the usual ones in the UK, said as a range, with the thing that makes them longer.
+# They are not promises: a garage, a surgery and a house are all different, so each says what
+# moves it rather than a single exact number.
+# A length of time, not a wait: "how soon can i see a dentist" asks when the next slot is and
+# "how quickly can i get an mot" asks how booked up they are, and neither is answered by saying
+# the job takes twenty minutes. Those two lines keep the answer they had.
+_TIME = ("how long", "how many hours", "how much time", "long does", "long will",
+         "hours does", "minutes does", "how many days", "how many minutes")
+
+# "How long before I ring the dentist" and "how long should I leave it" ask when to act, not how
+# long the visit runs: "A check-up is about 20 minutes" answered half of a line about a tooth
+# that needed ringing about. The length rows all stand down for a wait, because the wait belongs
+# to the symptom or the slot and none of these jobs can answer it.
+_A_WAIT = ("how long before", "how long after", "how long till", "how long until",
+           "how long should i leave", "how long do i leave", "how long to wait",
+           "how long do i wait", "should i wait", "leave it before", "before should i",
+           # The wait is the queue for the slot, and people put words in between: "how long do i
+           # have to wait", "how long will i have to wait", "how long is the wait", and the list
+           # itself, "how long is the waiting list for a physio". Every one of these was answered
+           # with the length of the visit.
+           "how long do i have to wait", "how long will i have to wait",
+           "how long will we have to wait", "how long do you have to wait",
+           "have to wait", "how long is the wait", "how long the wait", "how long a wait",
+           "the wait for", "wait to see", "waiting list", "how long would i wait",
+           "how long is the waiting")
+
+# "How long have i had the boiler now" is the age of the thing the person already owns, not the
+# length of the job: the boiler-service row answered it with "about an hour", which is the visit,
+# and that line is on the deck. The perfect tense with the person in it turns a how-long into a
+# possession, and a job cannot be owned, so every job row stands down for it.
+# The phrases below are plain substrings, not regexes: the share of a line that makes it a
+# possession is "how long have/has <who>", and the thing owned comes after. So the person is
+# spelled out ("how long have i had", "how long has my", "how long have these") rather than the
+# shape, which is the same trade every other avoid list in this file makes.
+A_AGE_OWNED = ("how long have i had", "how long have i been", "how long have i owned",
+               "how long have i kept", "how long have you had", "how long have you been",
+               "how long have you owned", "how long have you kept", "how long have we had",
+               "how long have we been", "how long have we kept", "how long have they had",
+               "how long have they been", "how long has it been", "how long has he had",
+               "how long has she had", "how long did i have", "how long did you have",
+               "how long has my", "how long has our", "how long has this", "how long has the",
+               "how long has that", "how long has she been", "how long has he been",
+               "how long have my", "how long have our", "how long have these",
+               "how long have those", "how long have the")
+
+# Training for the job is the other length: "how long does vet school take" was five years and is
+# now a fifteen-minute consultation, and "how long does it take to train as a physio" the same.
+# The bare word for a job is what makes it reachable, so the row says which way it is not asked.
+_A_CAREER = ("school", "vet school", "med school", "training", "train", "trained", "degree",
+             "study", "studying", "university", "college", "qualify", "qualified", "qualifying",
+             "become", "becoming", "career", "get into", "to be a", "how do i", "myself")
+
+# The cars domain holds these rows, and its entries all turn a bicycle away: a bike shop services
+# a bike, and the bike domain answers that. A motorbike does need an MOT, and it is the bike
+# domain's MOT question, so the same words stand this table's car rows down.
+_NOT_A_CAR = ("bike", "bikes", "bicycle", "bicycles", "cycling", "cyclist", "motorbike",
+              "motorbikes", "motorcycle", "motorcycles", "scooter", "scooters")
+
+JOB_TIMES = {
+    "dentist": {
+        "names": ("dentist appointment", "dentist appointments", "dental appointment",
+                  "check up at the dentist", "dentist check up", "dentist checkup",
+                  "appointment at the dentist", "dentist", "dentists",
+                  # "how long does a dentist take" went to the register-with-a-practice card,
+                  # which keys the verb "taking": the job and the verb together are this row
+                  "dentist take", "dentist takes", "dentist taking"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("dentist", "dental"),
+        # "how long does a dentist appointment take" was told how to register with a practice.
+        "reply": "A check-up is about 20 minutes. A filling is 30 to 45 minutes, and a crown or a "
+                 "root canal is usually one longer visit or two, so book the morning for one of "
+                 "those and do not plan anything straight after.",
+        "bias": 1,
+        "avoid": ("register", "registering", "find a dentist", "nhs dentist", "emergency",
+                  "pain", "toothache", "tooth hurts", "cost", "costs", "much", "price", "free",
+                  "brace", "braces", "implant", "child", "children", "baby", "become",
+                  "training", "degree", "study", "how do i", "myself"),
+    },
+    "eye-test": {
+        "names": ("eye test", "eye tests", "eye exam", "appointment at the optician",
+                  "optician appointment"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("eye test"),
+        "reply": "An eye test is about 20 to 30 minutes, and longer if you are choosing glasses "
+                 "afterwards. Say at the start if you drive or use a screen all day, because the "
+                 "test and the prescription are read with that in mind.",
+        # a prescription is good for a year or two, and that length is a different answer
+        "avoid": ("cost", "costs", "much", "price", "free", "glasses", "contact lens",
+                  "contacts", "child", "children", "baby", "how do i", "myself", "valid",
+                  "good for", "prescription", "last", "lasts"),
+    },
+    "gp-appointment": {
+        "names": ("gp appointment", "doctor appointment", "doctor's appointment",
+                  "appointment with the doctor", "appointment with a doctor", "see the doctor",
+                  "see a doctor"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("gp", "doctor"),
+        "reply": "A standard GP appointment is 10 minutes, so it is worth naming the one problem "
+                 "that matters most and what you need from it. If there are several things, say "
+                 "so when you book and ask for a double slot rather than trying to fit them in.",
+        "avoid": ("register", "registering", "find a doctor", "out of hours", "emergency",
+                  "urgent", "999", "111", "cost", "costs", "much", "price", "how do i",
+                  "myself", "letter", "fit note", "sick note",
+                  # a referral and a wait for a slot are the other length, and neither is this
+                  "referral", "referred", "refer", "waiting", "wait", "available", "booking",
+                  "book", "to see", "get seen", "appointment come through", "hear back"),
+    },
+    "physio": {
+        "names": ("physio appointment", "physiotherapy appointment", "physio session",
+                  "physiotherapy session", "appointment with the physio",
+                  "appointment with a physio", "see the physio", "see a physio"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("physio", "physiotherapy"),
+        "reply": "A first physiotherapy appointment is usually 30 to 45 minutes, because it "
+                 "starts with the history and an examination, and the follow-ups are 20 to 30. "
+                 "Ask what the plan is and how many sessions they expect before you pay for a "
+                 "block, and whether you need to bring shorts or a vest to move in.",
+        "avoid": ("cost", "costs", "much", "price", "nhs", "refer", "referred", "referral",
+                  "how do i", "myself", "exercises", "worth",
+                  # how long it takes to work is not how long a session runs
+                  "to work", "before it works", "start working", "helps", "help", "recover",
+                  "recovery", "sessions will i need", "how many sessions", "how many"),
+    },
+    "haircut": {
+        "names": ("haircut", "hair cut", "cut my hair", "hairdresser", "hairdressers", "barber",
+                  "hair appointment", "hair appointments", "salon appointment", "highlights",
+                  "colour my hair", "dye my hair"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("haircut"),
+        "reply": "A cut is 30 to 45 minutes; colour, highlights or a restyle is one and a half to "
+                 "two and a half hours. If it is your first colour at a salon they will want a "
+                 "patch test 48 hours before, so ring ahead and get that done.",
+        # "how long does a haircut last" is how long it stays looking right, not how long the
+        # appointment is, and it is asked in weeks rather than minutes.
+        "avoid": ("cost", "costs", "much", "price", "style", "which", "child", "children",
+                  "baby", "myself", "how do i", "last", "lasts", "lasted", "grow out",
+                  "how often"),
+    },
+    "house-survey": {
+        "names": ("house survey", "home survey", "building survey", "homebuyer report",
+                  "homebuyers report", "structural survey", "surveyor", "survey"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("survey"),
+        "reply": "A valuation is 20 to 30 minutes on site, a homebuyer's report two to three "
+                 "hours, and a full building survey four to six. The written report usually "
+                 "follows within a few days, so ask when you will have it before you book, "
+                 "because your lender and your solicitor may both be waiting on it.",
+        "avoid": ("garden", "soil", "land", "cost", "costs", "much", "price", "quote",
+                  "choose", "find a surveyor", "how do i", "myself", "satisfaction"),
+    },
+    "vet": {
+        "names": ("vet appointment", "appointment at the vet", "appointment with the vet",
+                  "vet visit", "see the vet",
+                  # "how long does the vet take" was read as the career: the job and the verb
+                  # together are this row
+                  "vet take", "vet takes", "vet taking"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("vet"),
+        "reply": "A routine consultation is 15 to 20 minutes; a procedure, a scan or a dental is "
+                 "longer and the practice will tell you how long when you book. Ask for an "
+                 "estimate before they start, and for the out-of-hours number on the way out.",
+        "avoid": ("cost", "costs", "much", "price", "quote", "insurance", "put down", "euthan",
+                  "how do i", "myself"),
+    },
+    "tyres": {
+        "names": ("tyre fitting", "fit tyres", "fit a tyre", "fit two tyres", "fitting tyres",
+                  "new tyres", "puncture repair", "puncture", "change a tyre", "change my tyres",
+                  "tyre", "tyres"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("tyre", "tyres"),
+        "reply": "Two tyres take about 30 to 45 minutes, and a puncture repair 20 to 30. Most "
+                 "places take walk-ins, but ring first if you need a particular tyre, and check "
+                 "the pressures again a day or two later.",
+        # "how long do tyres last" is the lifespan card and is right, so the words that make it
+        # that question stand this row down; the fitting time is what is left.
+        "avoid": ("last", "lasts", "lasted", "life", "wear", "worn", "miles", "tread",
+                  "pressure", "which", "winter", "snow", "best", "cheap", "cost", "costs",
+                  "much", "price", "how do i", "myself", "spare") + _NOT_A_CAR,
+    },
+    "car-service": {
+        "names": ("car service", "service my car", "service the car", "car servicing",
+                  "full service", "major service"),
+        # The word people type for this job, with no "appointment" or "session" after it.
+        "bare": ("car service"),
+        "reply": "A car service is usually two to three hours for an interim or a full service, "
+                 "and a major service with plugs and filters can take most of the day. Ask when "
+                 "you book whether they keep the car or you wait, and whether the price includes "
+                 "the MOT if it is due.",
+        "avoid": ("cost", "costs", "much", "price", "quote", "which", "worth", "due",
+                  "how do i", "myself") + _NOT_A_CAR,
+    },
+}
+
+# The row is built where the job is at home, because a domain's entries have to answer the topic
+# the line is read as: the MOT row sits in cars, the boiler rows in home, the dentist's in health.
+# `time_entries` is how each of those domains asks for its slice, with the same `entry` the price
+# rows use, so the matching and the stand-downs are one set of code and a new job is one line of
+# data. The time row and the price row share the job's names and are told apart by the ask: one
+# needs a price word, this one needs a how-long.
+def time_entries(*keys):
+    """The how-long rows for the jobs named, to be appended to a domain's ENTRIES."""
+    rows = []
+    for key in keys:
+        data = JOB_TIMES[key]
+        # The bare word for the job is in the same list as the phrases: "how long does physio
+        # take" and "how long does a gp take" name the job and ask for its length, and the row
+        # was reading past them to a general how-long card because only "physio session" and
+        # "gp appointment" were listed. One word per job, so a new job gets this for free.
+        bare = data.get("bare", ())
+        names = data["names"] + ((bare,) if isinstance(bare, str) else tuple(bare))
+        rows.append(entry("time-" + key,
+                          (names, _TIME),
+                          data["reply"],
+                          avoid=_A_WAIT + _A_CAREER + A_AGE_OWNED + _DIY + data.get("avoid", ()),
+                          # above the job's price row, which is where the other half of the
+                          # question lives: "how long does it take to fit tyres" reached the
+                          # tyre price row because both hold the job's name and the price row
+                          # was read first. The length ask is this row's gate, so the row that
+                          # needs the how-long is the one that answers it.
+                          bias=max(data.get("bias", 0), 3)))
+    return rows
 
 # The cost of a job is asked in the home, in the shops and about money, and the arbiter uses this
 # to know answers is the specialist for those lines.

@@ -162,6 +162,42 @@ def the_next_step(reply):
     return None
 
 
+# A line that says the thing happened once more, said as news rather than as a request to hear the
+# answer again: "my back is sore again", "and the rota changed again this morning", "its dropped
+# again". The recurrence word is what carries it, and a time word may follow it ("again this
+# morning"). The store hands a repeat route its line in a packed form ("dropped again of boiler
+# keep losing pressure"), so a recurrence word just before "of" counts too.
+RECURRENCE = re.compile(
+    r"\b(?:again|still)\b\s*(?:(?:today|tonight|this morning|this afternoon|this evening|"
+    r"this week|already|now|too|though)\b\s*)*(?:[.!]*$|of\b)", re.I)
+# The shapes that ask for the answer back instead: "what was the headache thing again", "remind me
+# again", "what did you call it again". The frame is for these and only these.
+REMIND_ME = re.compile(r"\b(?:remind|refresh my memory|what (?:was|is|were|did))\b", re.I)
+# A line that opens on one of these is asking something, not reporting that the thing is back:
+# "how do i cook rice again" is the same ask a second time and the answer under a lead saying it is
+# the same one is the right reply. A report opens on its subject ("my back is sore again", "and the
+# rota changed again this morning") and never on an ask.
+AN_ASK = re.compile(
+    r"^(?:how|what|when|where|which|who|why|can|could|should|shall|will|would|may|might|"
+    r"do|does|did|is|are|am|was|were|have|has|any|is there|are there)\b", re.I)
+
+
+def says_it_happened_again(text):
+    """True when the line reports the thing happening once more, so a repeat frame is wrong.
+
+    A repeat frame says "same answer as before", and that is a wrong thing to say to news: the
+    person is telling the bot the trouble has come back, not asking it to read the old answer out.
+    Standing down hands the line to the modules that answer a return - which have the next step
+    the first answer could not know about ("Then say it once, plainly, about the next change").
+    """
+    said = " ".join(str(text or "").lower().split())
+    if not said or REMIND_ME.search(said) or AN_ASK.match(said):
+        return False
+    if reads_as_returning(said):
+        return True
+    return bool(RECURRENCE.search(said))
+
+
 def reads_as_a_conditional(text):
     """True when the line asks what happens if the trouble is still there.
 

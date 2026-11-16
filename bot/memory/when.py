@@ -66,6 +66,13 @@ CALENDAR_NOW = re.compile(
 ASK_THROWS = frozenset("""exactly again then just roughly about long before after tonight due
 start starts starting end ends ending say said tell told know""".split())
 
+# "What day do I start" asks for the same date as "when do I start", and the word "day" is the
+# asking, not the thing the line is about: kept as a word the dated line has to match, it made the
+# ask name something no line in the chat says, so "i start monday" then "what day do i start" was
+# a search hedge while "when do i start" answered "On Monday." Only here, and not in ASK_THROWS,
+# because the other readers that throw words away use it for their own shapes.
+WHAT_DAY_SAYS = frozenset(("day", "date"))
+
 # A date said the short way: "i booked a trip to rome for april", "the wedding is september". The
 # store's own future-date reader wants a preposition it knows ("in april", "next month"), and a
 # "for" or a bare month is the same date. Read here, where the date is only ever used to answer a
@@ -85,9 +92,45 @@ SHORT_DATE = re.compile(
     # was a deadline ("by 60"): the saving line became a dated plan, and the follow-up "how many
     # months until i have 1000" counted down to it - "That's about 7 weeks away - Thursday 31
     # December", a confident date for a question about a sum of money. A rate is not a deadline.
-    r"(?:0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?(?:\s+(?:of\s+)?(?:" + MONTH_NAMES + r"))?)\b"
+    # An amount is not a day. "im on 4 thousand" filed the 4th of next month as a date, so "how far
+    # off am i" about a deposit counted down to it - "That's about 3 weeks away - Friday 4
+    # December", an answer to a question about money. A number followed by a scale word or a unit
+    # of money is the amount it is part of, and a number followed by a month is still the day.
+    r"(?:0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?"
+    r"(?!\s*(?:k|grand|thousand|hundred|million|billion|quid|pounds?|dollars?|euros?|"
+    r"cents?|percent|%|per\b|a\s+(?:week|month|year|day)))"
+    r"(?:\s+(?:of\s+)?(?:" + MONTH_NAMES + r"))?)\b"
     r"|\b(?:is|was|it's|its)\s+(?:in\s+|on\s+)?"
     r"(?:" + "|".join(sorted(MONTHS, key=len, reverse=True)) + r")", re.I)
+
+# A day said with nothing joining it to the line it is about: "i start monday", "my new job starts
+# monday", "we fly friday". People drop the "on" far more often than they keep it, and every
+# date reader here wanted a word in front of the day ("on", "for", "in", "next", "is"), so the
+# line carried no date at all: "i start monday" then "when do i start" was answered "No date from
+# you on that one. When is it?" one turn after the person had said it, while "i start work on
+# monday" answered "On Monday." The same line written with "on" works, so the only thing missing
+# was the bare shape.
+#
+# The day has to follow the doing it belongs to, which is what keeps a day used as the subject out
+# ("monday was awful", "friday suits me better"): a verb of the plan comes first, and the day
+# after it is when that plan happens. "is"/"was" are in the list because the copula is how a
+# plan with a name is dated ("the interview is tuesday"), and "due"/"booked" because a date is
+# said through them too. A weekday is nobody else's word, so unlike a month there is no other
+# reading of it to guard against.
+BARE_DAY = re.compile(
+    r"\b(?:start|starts|starting|begin|begins|beginning|finish|finishes|finishing|end|ends|"
+    r"ending|leave|leaves|leaving|go|goes|going|come|comes|coming|return|returns|returning|"
+    r"fly|flies|flying|arrive|arrives|arriving|land|lands|landing|move|moves|moving|"
+    r"open|opens|opening|close|closes|closing|visit|visits|visiting|meet|meets|meeting|"
+    r"submit|submits|hand|hands|deliver|delivers|book|booked|due|held|happens|happen|"
+    r"is|are|was|were|have|has|got)\s+(?:on\s+|this\s+|next\s+)?"
+    # A few words may sit between the doing and the day it is on, because that is how people say
+    # it: "i start my new job monday", "we fly out to lisbon friday". The day still has to come
+    # after the doing and not have a copula behind it, so a day that is the subject of its own
+    # clause ("i start work and monday is a bank holiday") is not read as when the plan is.
+    r"(?:(?!and\b|but\b|because\b|if\b|[.!?])[\w']+\s+){0,3}"
+    r"(" + "|".join(sorted(DAYS, key=len, reverse=True)) + r")\b"
+    r"(?!\s+(?:is|was|are|were)\b)", re.I)
 
 # A date already behind the person: "last september", "back in april", "last winter", "last year".
 # The reader knew "in april" and "next april" but nothing said with "last", so "i moved house last
@@ -242,6 +285,19 @@ def asks_what_today_is(text):
     return bool(CALENDAR_NOW.match(line))
 
 
+def _more_than_one_day(memory):
+    """True when the chat holds two different days, and neither of them is a day put right.
+
+    A correction is them telling us which day to use ("i start monday" / "actually i meant
+    tuesday"), so the two days are one answer and the newest is right. Two days about two things
+    are a choice the line has to make, and a line with no words of its own cannot make it.
+    """
+    dated = _dated(memory)
+    if any(a_date_put_right(said) for said, spans in dated):
+        return False
+    return len({spans[-1][0] for said, spans in dated if spans}) > 1
+
+
 def when_answer(text, memory):
     """The date of the thing the line asks about, or None when no earlier line says it."""
     line = str(text or "")
@@ -251,7 +307,8 @@ def when_answer(text, memory):
         return None
     if BARE_CALENDAR_ASK.match(" ".join(line.split())):
         return None  # "what day is it" asks the calendar: see BARE_CALENDAR_ASK
-    words = [word for word in content(line) if word not in ASK_THROWS]
+    words = [word for word in content(line) if word not in ASK_THROWS
+             and word not in WHAT_DAY_SAYS]
     if NOT_A_DATE_TO_GIVE.search(line):
         return None  # a date asked for over a death is not the thing they want said back
     if words and _points_back(line):
@@ -271,6 +328,22 @@ def when_answer(text, memory):
         return None
     asked = [word for word in words if word not in TRIP_WORDS]
     trip = asked != words
+    if not asked:
+        # Every word in the line is the asking, so nothing is left to match a line on: "when do i
+        # start" names the starting, and "start" is a word that asks in one place and names the
+        # thing in another. A word the ask shares with a line in the chat is that plan, so it is
+        # kept as the binding when there is one - which is what tells "i start monday" from a
+        # later "i meant to ring on wednesday".
+        said_before = {word for said, spans in _dated(memory) for word in content(said)}
+        anchors = [word for word in content(line) if word in said_before]
+        if anchors:
+            asked, trip = anchors, False
+        elif _more_than_one_day(memory):
+            # Nothing to bind the ask to a line and two different days in the chat: the newest one
+            # is a guess. A project due friday and a cooking day said after it answered "On
+            # Saturday" for the volcano - a confident wrong day. No binding means no date given,
+            # and the store quotes what they said.
+            return None
     # A date put right sits directly above the line it corrects, so it is held for that line only:
     # "my test is on the 3rd of may" / "sorry, it's the 4th" / "when is my test" is the 4th, and
     # the correction is dropped again once a line under it turns out not to be the one asked
@@ -363,7 +436,7 @@ def _no_date_yet(asked, line, memory):
         # question about the calendar with "no date from you on that one".
         if _is_an_ask(said):
             continue
-        if list(FUTURE.finditer(said)) or list(SHORT_DATE.finditer(said)):
+        if (list(FUTURE.finditer(said)) or list(SHORT_DATE.finditer(said))):
             return None  # that line is dated; the date was not read, so leave the turn alone
         if asked:
             theirs = [word for word in content(said) if word not in ASK_THROWS]
@@ -592,6 +665,15 @@ def _dated(memory):
                 continue
             spans.append((_lead(found.group(0)), found.start()))
             places.add(found.start())
+        for found in BARE_DAY.finditer(said):
+            # The day is the date, and the verb in front of it only says what the day belongs to:
+            # "i start monday" is Monday, said back with the "on" a date takes, because "Start
+            # Monday." is not a way anybody says it. A day the "on" reader already has, as in
+            # "i start work on monday", is the same date and is not counted twice.
+            if found.start(1) in places:
+                continue
+            spans.append((_lead("on " + found.group(1)), found.start(1)))
+            places.add(found.start(1))
         if not spans and a_date_put_right(said):
             # "sorry, it's the 4th" carries a date and nothing else: it is the date put right,
             # and the space it stands in is where the line it corrects was.
@@ -812,6 +894,8 @@ def _same(word, other):
         return True
     if _root(word) == _root(other):
         return True
+    if _a_plural_stem(word) == other or word == _a_plural_stem(other):
+        return True
     return other in SAME_THING.get(word, ()) or word in SAME_THING.get(other, ())
 
 
@@ -820,6 +904,20 @@ def _root(word):
         if word.endswith(ending) and len(word) - len(ending) >= 2:
             return word[:-len(ending)]
     return word
+
+
+# The ask comes through `content`, which stems its words, and the line comes as it was typed: the
+# ask "when did i get my results" carries "result" and the line "i got my results friday" carries
+# "results", so the day was in the line and the answer said there was no date. Only a plural is
+# taken off, and only where it really is one: "news", "gas", "bus" and "this" keep their "s".
+NOT_A_PLURAL = ("ss", "us", "is", "as", "ws")
+
+
+def _a_plural_stem(word):
+    """The word without a plural "s", or "" when there is none to take off."""
+    if len(word) > 3 and word.endswith("s") and not word.endswith(NOT_A_PLURAL):
+        return word[:-1]
+    return ""
 
 
 # One part of a plan, asked for on its own. "we're off to portugal in august" said back whole
@@ -1007,10 +1105,24 @@ ALREADY_DONE_ASK = re.compile(
     r"been|go|gone|going|did)\b|\b(?:already|yet)\s+(?:go|gone|been|happen(?:ed)?)\b", re.I)
 
 
+# The wrapper "did i say/tell/mention" marks a question about the telling, not about the event.
+SAYS_IT_AGAIN = re.compile(
+    r"\b(?:(?:where|what|when|why|who|how\s+often|how\s+many\s+times)\s+)?"
+    r"did\s+(?:i|we)\s+(?:ever\s+)?(?:say|tell\s+you|mention)\b", re.I)
+# "how often do i go", "how many times have i been": repetition, not a side of today.
+HOW_OFTEN = re.compile(r"\bhow\s+(?:often|many\s+times)\b", re.I)
+
+
 def already_answer(text, memory):
     """Whether the thing the person asks about has happened, from the line that dated it."""
     line = str(text or "")
     if not ALREADY_DONE_ASK.search(line) or WHEN_ASK.search(line):
+        return None
+    # A recall is not a question about whether the thing happened: "where did i say we were going"
+    # and "did i say we were going" are about the telling, and the telling has certainly happened.
+    # A frequency ask is about repetition - "how often do i go" - and "No - that's in February."
+    # answered neither. The store's own recall reader owns both (bot/compose/own_facts.py).
+    if SAYS_IT_AGAIN.search(line) or HOW_OFTEN.search(line):
         return None
     if NOT_A_DATE_TO_GIVE.search(line):
         return None
@@ -1245,8 +1357,15 @@ def _a_bare_unit_ask_wants_a_length(line, dated):
         return True
     if not re.search(r"\bdays?\b", said):
         return False  # a stay is counted in days; weeks and months asked bare are a countdown
-    if _the_day(dated)[0] is not None:
-        return False  # a day of its own is a date to count to, whatever the trip
+    day, kind = _the_day(dated)
+    if day is not None and kind != "month":
+        # A day of its own is a date to count to, whatever the trip: "we fly on the 12th" and
+        # "the end of may" are days, so a bare "how many days" after them is the countdown.
+        # A month on its own is not a day. "im planning a trip to edinburgh in june" reads as
+        # June now that a word in front of a date is stepped over, so the month alone kept the
+        # trip's own length question ("how many days") from being asked, and the countdown took
+        # a turn the travel card had.
+        return False
     return _a_trip_is_named(dated)
 
 
@@ -1419,6 +1538,30 @@ def _the_month_in_play(when, memory):
     return month
 
 
+# Every word the walk below understands, so a word in front of the date that is none of them
+# ("starts", "booked", "is") can be stepped over instead of ending the read.
+A_DATE_WORD = (frozenset(MONTH_NUMBER) | frozenset(WEEKDAY_NUMBER)
+               | frozenset(("early", "mid", "late", "end", "ends", "ending", "next", "this",
+                            "month", "week", "the", "of", "in", "on", "at", "by", "start",
+                            "beginning", "weekend", "a", "an", "for", "from", "to", "until",
+                            "till", "around", "about")))
+DAY_NUMBER = re.compile(r"^\d{1,2}(?:st|nd|rd|th)?$")
+
+# The words that say a date themselves, so the walk can start on one of them and step over the
+# words in front. The function words in `A_DATE_WORD` are left out: "the" and "of" sit inside a
+# date ("the 21st", "ends 12 july") but say nothing on their own, and starting the walk on one of
+# them ended it at the next word ("the baby is due 3 march" read as no date at all).
+A_DATE_ITSELF = (frozenset(MONTH_NUMBER) | frozenset(WEEKDAY_NUMBER)
+                 | frozenset(("early", "mid", "late", "end", "ends", "ending", "next", "this",
+                              "month", "week")))
+FILLER = frozenset(("the", "of", "in", "on", "at", "by", "a", "an", "for", "from", "to",
+                    "until", "till", "around", "about"))
+
+
+def _a_day_number(word):
+    return bool(DAY_NUMBER.match(word))
+
+
 def _the_day(when, today=None):
     """The calendar day a date said the short way falls on, and how it was said.
 
@@ -1430,7 +1573,29 @@ def _the_day(when, today=None):
     words = [word for word in _plain(when).replace(",", " ").split() if word]
     month = day = weekday = None
     early = has_end = has_next = has_this = has_month = has_week = False
-    for word in words:
+    # A word in front of the date belongs to what the thing does, not to the date: "my holiday
+    # starts 3 august" and "the boiler service is booked 21 october" reach this reader as the
+    # slice the store cut out, "starts 3 august", and the walk below gave up on "starts". Words
+    # before the first day, month or weekday are skipped; a word after it still ends the read, so
+    # a second phrase in the same slice is never folded into the first.
+    dated = False
+    # A day number on its own is a date only when there is nothing in front of it to step over:
+    # "21st" and "3 august" are dates, and "my son is 11" is an age. The words in front are the
+    # thing's own verb ("starts", "booked"), so a bare number after them is not a date unless the
+    # slice also names a month or a weekday. Without this the eleventh of November was read out of
+    # "my son is 11" and the store lost the boy.
+    anchored = any(word in MONTH_NUMBER or word in WEEKDAY_NUMBER for word in words)
+    for index, word in enumerate(words):
+        if not dated:
+            started = word in A_DATE_ITSELF
+            if not started and _a_day_number(word):
+                # A bare day number is a date when the slice names a month or a weekday, or when
+                # there is nothing but function words in front of it ("the 21st"). "my son is 11"
+                # is an age: the words in front are the thing's own, so the number is not a date.
+                started = anchored or not [word for word in words[:index] if word not in FILLER]
+            if not started:
+                continue
+        dated = True
         if word in MONTH_NUMBER:
             month = MONTH_NUMBER[word]
         elif word in WEEKDAY_NUMBER:
@@ -1459,7 +1624,9 @@ def _the_day(when, today=None):
         return _add_months(today.replace(day=1), 1), "month"
     if has_month and has_this:
         return today.replace(day=1), "month"
-    if has_end:
+    if has_end and day is None:
+        # "the end of may" is the last day of the month, but "the term ends 12 july" says the day
+        # and "ends" is the verb, not a date: a day number with a month in it wins over the word.
         if month is not None:
             return _last_day(_a_year_for(today, month, 1)), "end"
         if has_next:
@@ -1692,3 +1859,398 @@ def a_plan_moved_to_a_day(text):
     if "ahead of time" not in line:
         return None
     return {"day": " ".join(day.group(0).split()), "line": line}
+
+
+# ---------------------------------------------------------------------------------------------
+# "How long have I been ...?" - the length, counted from the day the chat says it began.
+#
+# The store holds the day a thing began ("i started learning spanish in january") and the length
+# somebody had it at ("i moved to leeds two years ago"), and the ask that wants it back is about
+# that line and not about the world:
+#
+#     i started running in march              / how long have i been at it
+#       before: "20 minutes." (a run-walk entry, read out of the ask's own words)
+#     i moved to leeds two years ago          / how long have i lived here
+#       before: "I don't know enough to answer that honestly."
+#     i started a new job last month          / how long have i been there
+#       before: the search hedge
+#
+# A length is today minus the day the line names, said the way a person says a length, and the day
+# is said beside it so the person can check the arithmetic. The reader answers only a "how long
+# have/has" line: every other "how long" ask - a deadline ("how long have i got"), a duration to
+# do something ("how long do i boil an egg"), a length of a journey - is about something else and
+# is left to the module that owns it.
+HOW_LONG_ASK = re.compile(
+    r"\bhow\s+long\s+(?:have|has|had|did)\b"
+    r"|\bhow\s+(?:many|much)\s+(?:months?|weeks?|years?|days?)\s+(?:has|have|had)\s+it\s+been\b",
+    re.I)
+
+# The "how long" asks that are somebody else's: a deadline left to run, a duration to wait or to
+# do something, and a question about how long ago they said something (a turn, not a day).
+NOT_A_LENGTH_ASK = re.compile(
+    r"\bhow\s+long\s+(?:have|has|had)\s+(?:i|we|you|it|they)\s+"
+    r"(?:got|get|to\s+wait|to\s+go|left|before)\b"
+    r"|\bhow\s+long\s+(?:until|till|before|after)\b"
+    r"|\bhow\s+long\s+(?:do|does|will|would|should|can|could|must)\b"
+    r"|\bhow\s+long\s+(?:ago|is|was)\b"
+    r"|\bhow\s+long\s+(?:have|has|had)\s+(?:i|we|you)\s+(?:got|got\s+to|to|need)\b"
+    r"|\bhow\s+long\s+(?:have|has|had)\s+(?:you|it|that)\s+been\s+"
+    r"(?:like\s+that|this|with\s+you|since|now)\b",
+    re.I)
+
+# A length said as a length: "two years ago", "a couple of weeks ago", "six months ago". The
+# length is the answer, counted from today, so the reader needs no date arithmetic for it.
+AGO_LENGTH = re.compile(
+    r"\b(?P<n>\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|"
+    r"twenty|a\s+couple\s+of|a\s+few|couple\s+of|few)\s+"
+    r"(?P<unit>days?|weeks?|fortnights?|months?|years?)\s+ago\b", re.I)
+
+# A length said as the calendar: "last month", "last year", "last week". Only the ones that are a
+# length; "last summer" and "last tuesday" are a season and a day, which say no length.
+LAST_LENGTH = re.compile(r"\blast\s+(?P<unit>week|fortnight|month|year)\b", re.I)
+
+# A length they are still inside: "i have been working at the cafe for six months", "i have been
+# learning spanish for two years". The length is the answer exactly as they said it, and it is the
+# one shape where the answer needs no arithmetic at all.
+FOR_LENGTH = re.compile(
+    r"\bfor\s+(?P<n>\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"fifteen|twenty|a\s+couple\s+of|a\s+few|couple\s+of)\s+"
+    r"(?P<unit>days?|weeks?|fortnights?|months?|years?)\b", re.I)
+
+# A day of the week said with "on": "i started a new job on monday". A thing that began on a
+# named day began on the most recent one of those, so the length is counted from it.
+WEEKDAY_SAID = re.compile(
+    r"\bon\s+(?P<day>monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
+
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+# A month or a year said with no preposition and no day: "i started learning french in 2019" is
+# a year, and the store's own date reader did not keep it, so the line held no date for a length
+# to be counted from.
+A_YEAR_SAID = re.compile(r"\b(?:19|20)\d\d\b")
+
+# The line that says when a thing began. A "how long have i been ..." ask is about a thing that
+# started, so the line it answers is the newest one of these: a start, a stop, a move, or a length
+# with "ago" or "since" on it.
+BEGAN = re.compile(
+    r"\b(?:started|start|began|begin|kicked\s+off|took\s+up|moved|stopped|quit|gave\s+up|joined|"
+    r"arrived|switched|changed|since|ago|for\s+(?:\d+|a|an|one|two|three|four|five|six|seven|"
+    r"eight|nine|ten|eleven|twelve)\s+(?:days?|weeks?|months?|years?)"
+    r"|got\s+(?:married|engaged|together|a\s+dog|a\s+cat|a\s+puppy|a\s+kitten|the\s+keys)"
+    r"|married|adopted|bought|got"
+    r"|last\s+(?:week|fortnight|month|year))\b", re.I)
+
+# Words an ask uses to say "the thing we were on" rather than to name a thing: "how long have i
+# been doing it", "how long have i been at it", "how long have i lived here", "how long has it
+# been". The ask's own words are these, so it names nothing and the newest line that began is the
+# line it is about.
+ASKED_ABOUT_THE_THING = frozenset("""it this that them there here doing done at it going on
+been am is was long how lived living worked working gone many much month months week weeks year
+years day days time now since already has have had did is are were was being like get got""".split())
+
+NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+                "fifteen": 15, "twenty": 20}
+
+A_UNIT_OF_TIME = {"day": 1, "week": 7, "fortnight": 14, "month": 30, "year": 365}
+
+
+def how_long_answer(text, memory):
+    """The length the chat says it has been, or None.
+
+    Asked only of a line that is the "how long have/has" question and of no other, so every reply
+    it makes is about a day the person gave and nothing else in the bot changes.
+    """
+    line = " ".join(str(text or "").split())
+    if not HOW_LONG_ASK.search(line) or NOT_A_LENGTH_ASK.search(line):
+        return None
+    if CALENDAR_NOW.match(line) or WHEN_SAID.search(line):
+        return None
+    put_right = _a_day_put_right(memory)
+    if put_right:
+        return put_right
+    words = [word for word in content(line) if word not in ASK_THROWS]
+    named = [word for word in words if word not in ASKED_ABOUT_THE_THING]
+    for said, said_words in _the_lines_that_began(memory):
+        if named and not _names_it(named, said):
+            continue
+        answer = _the_length_from(said)
+        if answer:
+            return answer
+    return None
+
+
+# A day said back to the bot to put it right: "no, it was february" after "i started in january",
+# "actually it was 2021" after a year the bot got wrong. The line names no thing that began, so the
+# lines that did begin are read without it and the corrected day is lost.
+DAY_PUT_RIGHT = re.compile(
+    r"\b(?:no,?\s+|actually,?\s+|sorry,?\s+)?(?:it\s+was|it's|it is|i\s+meant|i\s+mean|"
+    r"make\s+that)\b[^.,!?]*\b(?P<day>january|february|march|april|may|june|july|august|"
+    r"september|october|november|december|(?:19|20)\d\d|last\s+(?:week|month|year)|"
+    r"\d+\s+(?:days?|weeks?|months?|years?)\s+ago)\b", re.I)
+
+
+# "february" is a month and takes a preposition; "two years ago" already carries its own.
+A_DAY_FORM = re.compile(r"\b(?:\d+|last\s+(?:week|month|year))\b", re.I)
+
+
+def _a_day_put_right(memory):
+    """The length from a day the person has just put right, or None.
+
+    Only the newest line is read, and only when the line before it is one that began: a correction
+    of the bot's own last answer about something else is not a day of theirs.
+    """
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list) or len(turns) < 2:
+        return None
+    last = turns[-1] if isinstance(turns[-1], dict) else None
+    before = turns[-2] if isinstance(turns[-2], dict) else None
+    if not last or not before:
+        return None
+    said = " ".join(str(last.get("user") or "").split())
+    earlier = " ".join(str(before.get("user") or "").split())
+    if not said or not earlier or not BEGAN.search(earlier):
+        return None
+    found = DAY_PUT_RIGHT.search(said)
+    if not found:
+        return None
+    day = found.group("day")
+    return _the_length_from("it began in " + day if not A_DAY_FORM.search(day) else
+                            "it began " + day)
+
+
+def _the_lines_that_began(memory):
+    """The lines of theirs that say when something began, newest first, with their words.
+
+    A line counts when it says a thing began and when it says how long ago - "i moved to leeds two
+    years ago" has both, and either alone is a line the ask can lean on. A line that asks a
+    question is not one: "how long have you had that cough" is a question of theirs about the bot's
+    last line, not a day of their own.
+    """
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list):
+        return []
+    found = []
+    for turn in reversed(turns):
+        if not isinstance(turn, dict):
+            continue
+        said = " ".join(str(turn.get("user") or "").split())
+        if not said or _is_an_ask(said):
+            continue
+        if not BEGAN.search(said):
+            continue
+        found.append((said, content(said)))
+        if len(found) >= 4:
+            break
+    return found
+
+
+def _names_it(named, said):
+    """True when the ask's own words are in the line the day came from.
+
+    "how long have i been playing the piano" after "i started learning the guitar in january" is a
+    different thing, and a length from the wrong line is worse than no answer. A word matches the
+    way people vary it, so "playing" finds "play" and "learning" finds "learn".
+    """
+    said_words = content(said)
+    for word in named:
+        if not any(_same(word, other) for other in said_words):
+            return False
+    return True
+
+
+def _the_length_from(said):
+    """The length from today back to the day this line names, said as a person says it, or None."""
+    ago = AGO_LENGTH.search(said)
+    if ago:
+        count = _a_count(ago.group("n"))
+        unit = ago.group("unit").lower().rstrip("s")
+        if not count:
+            return None
+        if unit == "couple":
+            return _about("a couple of weeks", "")
+        days = count * A_UNIT_OF_TIME.get(unit, 0)
+        said_length = " ".join(ago.group(0).split()[:-1])
+        when = ""
+        if unit == "year":
+            when = str(datetime.date.today().year - count)
+        return _about(said_length, when) if days else None
+    last = LAST_LENGTH.search(said)
+    if last:
+        unit = last.group("unit").lower()
+        if unit == "week":
+            return _about("a week", "")
+        if unit == "fortnight":
+            return _about("a fortnight", "")
+        if unit == "month":
+            return _about("a month", _the_month_back(1))
+        if unit == "year":
+            return _about("a year", str(datetime.date.today().year - 1))
+    held = FOR_LENGTH.search(said)
+    if held and not AGO_LENGTH.search(said):
+        count = _a_count(held.group("n"))
+        unit = held.group("unit").lower().rstrip("s")
+        if count and unit in A_UNIT_OF_TIME:
+            return _about("%s %s%s" % (_a_count_said(count), unit, "" if count == 1 else "s"), "")
+    for span, _at in _dated(memory_of_one(said)):
+        day = _the_day_a_span_names(span)
+        if not day:
+            continue
+        return _about(_a_length_in_words((datetime.date.today() - day).days), _a_day_said(day))
+    weekday = WEEKDAY_SAID.search(said)
+    if weekday:
+        day = _the_day_a_weekday_names(weekday.group("day"))
+        if day:
+            return _about(_a_length_in_words((datetime.date.today() - day).days),
+                          _the_month_name(day.month) if day.day == 1 else
+                          weekday.group("day").capitalize())
+    # A year with nothing else said - "i started learning french in 2019" - is a date the store's
+    # own reader does not keep, and it is enough to count from when it is the only date in the line.
+    year = A_YEAR_SAID.search(said)
+    if year:
+        day = _the_day_a_span_names(year.group(0))
+        if day:
+            return _about(_a_length_in_words((datetime.date.today() - day).days), year.group(0))
+    return None
+
+
+def memory_of_one(said):
+    """One line of theirs, in the shape the date readers take."""
+    return {"turns": [{"user": said, "bot": ""}]}
+
+
+def _a_count(said):
+    """The number a length is said with, or 0."""
+    word = str(said or "").strip().lower()
+    if word.isdigit():
+        return int(word)
+    return NUMBER_WORDS.get(word, 0)
+
+
+def _the_day_a_span_names(span):
+    """The day a date in a line names, as a date, choosing the one behind us.
+
+    "in january" said in November is this year's January and said in March is last year's: a thing
+    that began began, so the day is the most recent one that has already been.
+    """
+    words = [word for word in re.split(r"[^a-z0-9]+", str(span or "").lower()) if word]
+    month = 0
+    day = 0
+    year = 0
+    for word in words:
+        if word in MONTHS:
+            month = _the_month_number(word)
+        elif re.fullmatch(r"\d{4}", word):
+            year = int(word)
+        elif re.fullmatch(r"\d{1,2}(?:st|nd|rd|th)?", word):
+            day = int(re.sub(r"\D", "", word))
+        elif word in ("early", "mid", "late", "in", "on", "the", "of", "at", "since", "back"):
+            continue
+    today = datetime.date.today()
+    if year:
+        return datetime.date(year, month or 1, day or 1)
+    if not month:
+        return None
+    for back in range(0, 3):
+        try:
+            found = datetime.date(today.year - back, month, day or 1)
+        except ValueError:
+            return None
+        if found <= today:
+            return found
+    return None
+
+
+def _the_day_a_weekday_names(word):
+    """The most recent day with that name - today when today is that day."""
+    try:
+        back = (datetime.date.today().weekday() - WEEKDAYS.index(str(word or "").lower())) % 7
+    except ValueError:
+        return None
+    return datetime.date.today() - datetime.timedelta(days=back)
+
+
+def _the_month_number(word):
+    """The number of a month, 1 to 12."""
+    order = ["january", "february", "march", "april", "may", "june", "july", "august",
+             "september", "october", "november", "december"]
+    try:
+        return order.index(str(word or "").lower()) + 1
+    except ValueError:
+        return 0
+
+
+def _the_month_back(months):
+    """The name of the month this many months ago."""
+    today = datetime.date.today()
+    year, month = today.year, today.month
+    for _ in range(max(1, int(months or 1))):
+        month -= 1
+        if month < 1:
+            month, year = 12, year - 1
+    return _the_month_name(month)
+
+
+def _the_month_name(number):
+    order = ["January", "February", "March", "April", "May", "June", "July", "August",
+             "September", "October", "November", "December"]
+    return order[number - 1] if 1 <= number <= 12 else ""
+
+
+def _a_day_said(day):
+    """A date said the way a person says one in a sentence - "January", "the 4th of May"."""
+    if day.day == 1:
+        return _the_month_name(day.month)
+    return "the %d%s of %s" % (day.day, _an_ordinal_end(day.day), _the_month_name(day.month))
+
+
+def _an_ordinal_end(number):
+    if 10 <= number % 100 <= 20:
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+
+
+# A length under a dozen is said in words, because a reply that opens with a figure reads as a
+# receipt: "10 months - since January" is a line off a form, "Ten months - since January" is what a
+# friend says.
+SPELLED_COUNT = {1: "a", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven",
+                 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
+
+
+def _a_count_said(number):
+    """A small count as a word, a larger one as a figure."""
+    number = int(number or 0)
+    return SPELLED_COUNT.get(number, str(number))
+
+
+def _a_length_in_words(days):
+    """A number of days said the way a person says a length: "about five months", "two years"."""
+    days = max(0, int(days or 0))
+    if days < 1:
+        return "a day"
+    if days < 12:
+        return "%s %s" % (_a_count_said(days), "day" if days == 1 else "days")
+    if days < 60:
+        return "%s weeks" % _a_count_said(int(round(days / 7.0)))
+    if days < 730:
+        return "%s months" % _a_count_said(int(round(days / 30.44)))
+    years = days / 365.25
+    halves = int(years * 2) / 2.0
+    if halves == int(halves):
+        return "%s %s" % (_a_count_said(int(halves)), "year" if halves == 1 else "years")
+    return "%s and a half years" % _a_count_said(int(halves))
+
+
+def _about(length, when):
+    """The reply: the length, and the day it is counted from when the day adds something."""
+    length = " ".join(str(length or "").split())
+    if not length:
+        return None
+    if when:
+        return "%s - since %s." % (_tidy(length), when)
+    return "%s." % _tidy(length)
+
+
+def _tidy(said):
+    said = str(said or "").strip()
+    return said[:1].upper() + said[1:] if said else said

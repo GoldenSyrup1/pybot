@@ -76,8 +76,15 @@ ENTRIES = (
     # the moon is a small bright thing in a dark sky: "get closer" is worse than useless
     entry("photo-moon-stars",
           (("moon", "stars", "starry sky", "milky way"),
-           ("photo", "photos", "picture", "pictures", "take", "shoot", "capture", "how",
-            "camera", "phone")),
+           # The ask is the camera, not the word "how": "how" is the interrogative of every
+           # question in the language, so a key of "moon" plus "how" answered "how old is the
+           # moon", "how much does the moon weigh" and "how many moons does earth have" with a
+           # lesson on shutter speed. What makes a line a photo question is that it asks to
+           # take, shoot, capture or photograph something.
+           ("photo", "photos", "photograph", "photographs", "photographing", "photography",
+            "picture", "pictures", "pic", "pics", "take", "takes", "taking", "shoot", "shoots",
+            "shooting", "capture", "capturing", "snap", "snaps", "snapping", "camera", "phone",
+            "how do i get", "how to get", "get a shot", "get the shot", "in a photo")),
           "A phone will not fill the frame with the moon: zoom to 10x or more, rest the phone on "
           "a wall, a fence or a tripod, turn the flash off, then press and hold on the moon until "
           "the focus locks and drag the little sun slider down until the moon is a white disc and "
@@ -93,7 +100,13 @@ ENTRIES = (
                  "tide", "tides", "crater", "craters", "why does",
                  # how far away the moon is is a science fact, and this entry reads a bare
                  # "how" as a request for a photo, so it was taking "how far is the moon"
-                 "far", "how far", "how far away", "distance", "away", "km", "miles"),
+                 "far", "how far", "how far away", "distance", "away", "km", "miles",
+                 # a question about the moon itself is a fact with a page of its own: the age,
+                 # the size, the weight, the mass, what it is made of
+                 "how old", "age", "how big", "how large", "how heavy", "how much does",
+                 "how much is", "weigh", "weighs", "weight", "mass", "diameter", "size",
+                 "how many", "what is", "whats", "when was", "when did", "who discovered",
+                 "formed", "orbit", "distance from"),
           ),
     # a selfie is its own question: the light is on the front of the face and the phone is in
     # your hand, so "get closer and hold still" is not the advice that helps.

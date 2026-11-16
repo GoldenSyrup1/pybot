@@ -19,8 +19,10 @@ import re
 from .cleaning import not_a_mark_on_a_thing
 from .lookup import not_the_heat_of_an_argument as _not_an_argument
 from .dishes import KIDS_IDEA, a_dish_is_already_the_plan
+from .occasions import BRING_NOT_FOOD
+from ..compose import fit
 from ..understanding import line_as_read
-from .lookup import entry
+from .lookup import entry, says_it_has_gone_off
 
 # The topics this domain answers, for the arbiter's specialist rule (see bot/knowledge).
 ANSWERS = ("cooking", "food-and-drink")
@@ -138,6 +140,12 @@ DISHES = (
          "and lemon and give it 12 minutes more"),
     Dish("a salmon rice bowl", ("salmon", "rice", "cucumber"), 25, "fish",
          "pan-fry the salmon 4 minutes a side and flake it over rice with sliced cucumber and soy"),
+    # The ingredient row below says smoked haddock "wants a fish pie" and there was no fish pie in
+    # the table, so a smoked haddock ask fell through to the smoking row and got the method for
+    # hot-smoking a salmon. It is the fish pie the row promised.
+    Dish("a smoked haddock fish pie", ("smoked haddock", "potato", "milk"), 40, "fish",
+         "poach the haddock in milk for 5 minutes, flake it into a dish with that milk and a spoon "
+         "of flour, top it with mashed potato and bake at 200C for 25 minutes"),
     # Salads are asked for by name ("i want a salad for dinner") and the table had none.
     Dish("a tuna salad", ("tuna", "tomato", "cucumber"), 10, "fish",
          "drain a tin of tuna into a bowl with chopped tomato and cucumber, dress it with oil, "
@@ -502,15 +510,133 @@ USE_UP = (
     (("potato", "potatoes"),
      "Fry cold chopped potatoes with an onion until crisp, or fold them into a frittata and finish "
      "it under the grill; both take about 20 minutes"),
-    (("vegetables", "veg", "greens", "cabbage", "broccoli", "carrots"),
-     "Roast them with oil and salt for 25 minutes, blend them with stock for a soup, or stir them "
-     "through a curry near the end"),
     (("bread", "loaf"),
      "Tear it into a salad with tomatoes, oil and salt, or blitz it into breadcrumbs and freeze "
      "them for topping a bake"),
     (("cheese",),
      "Grate it into a macaroni cheese, or make a toastie with it and a little mustard"),
 )
+
+# A use-up line names something already cooked, or spare in the fridge, so the answer has to be a
+# use for it. The rows above are written for the foods people ask about most; the table below is
+# what any cooked thing of that kind will take, said with the food's own name in it. It was written
+# because "what can i do with leftover cabbage" was answered "Roast them with oil and salt for 25
+# minutes" - a vegetable it never names, cooked from raw - and "leftover beetroot" got "Roast
+# beetroot whole and unpeeled at 200C for an hour", which is an hour's work rather than a use for
+# the beetroot in the fridge. One table, called from here and from cooking.py, so a food with no
+# written idea is still answered as the thing it is.
+UP_GREENS = ("spinach", "cabbage", "kale", "chard", "greens", "collard", "collards", "savoy",
+             "sprout", "sprouts", "broccoli", "broccolini", "cauliflower", "romanesco",
+             "kalettes", "spring green", "spring greens", "lettuce", "rocket", "cress",
+             "watercress", "pea", "peas", "green bean", "green beans", "mangetout", "asparagus")
+UP_ALLIUMS = ("onion", "onions", "leek", "leeks", "shallot", "shallots", "garlic",
+              "spring onion", "spring onions", "red onion", "red onions")
+UP_ROOTS = ("beetroot", "parsnip", "parsnips", "carrot", "carrots", "turnip", "turnips",
+            "swede", "celeriac", "squash", "pumpkin", "sweet potato", "sweet potatoes",
+            "potato", "potatoes", "artichoke", "artichokes", "fennel", "jerusalem artichoke",
+            "jerusalem artichokes")
+UP_SOFT = ("courgette", "courgettes", "zucchini", "aubergine", "aubergines", "pepper",
+           "peppers", "mushroom", "mushrooms", "tomato", "tomatoes", "corn", "sweetcorn",
+           "butternut", "okra", "bean", "beans")
+UP_GRAINS = ("rice", "quinoa", "couscous", "bulgur", "barley", "pasta", "noodle", "noodles",
+             "spaghetti", "macaroni", "lentil", "lentils", "chickpea", "chickpeas", "porridge",
+             "oat", "oats")
+UP_FRUIT = ("cranberry", "cranberries", "apple", "apples", "pear", "pears", "banana",
+            "bananas", "berry", "berries", "raspberry", "raspberries", "strawberry",
+            "strawberries", "rhubarb", "plum", "plums", "peach", "peaches", "nectarine",
+            "nectarines", "mango", "pineapple", "orange", "oranges", "grapes", "cherry",
+            "cherries", "apricot", "apricots", "fig", "figs", "melon")
+UP_MEAT = ("chicken", "beef", "lamb", "pork", "ham", "bacon", "sausage", "sausages", "turkey",
+           "duck", "mince", "steak", "liver", "chorizo", "gammon", "meat", "meatballs")
+UP_FISH = ("salmon", "cod", "haddock", "tuna", "prawn", "prawns", "mackerel", "trout", "fish",
+           "fishcake", "fishcakes", "sardine", "sardines", "crab", "anchovy", "anchovies")
+UP_CLASSES = (
+    # Written in the voice of a recipe rather than with "it": the line may say one beetroot or
+    # three parsnips, and a pronoun that agrees with the wrong one reads worse than no pronoun.
+    (UP_GREENS, "butter or oil in a hot pan for 3 or 4 minutes is enough, or stir through a "
+                "soup, an omelette or a pasta sauce just before you serve. Shred raw into a "
+                "salad with oil and lemon if you would rather have it cold."),
+    (UP_ALLIUMS, "cook slowly in butter until sweet, which takes 15 minutes and is worth it, "
+                 "then stir through a soup, a gravy or a tray of roasted veg. On a pizza, a tart "
+                 "or a piece of toast it is a topping on its own."),
+    (UP_ROOTS, "cut into cubes and fry in a little oil until the edges crisp, or mash with "
+               "potato for a bubble and squeak, or simmer into a soup. Cold in a salad with a "
+               "sharp dressing is just as good."),
+    (UP_SOFT, "fry in a hot pan with garlic and oil until the water is gone, stir into a pasta "
+              "or a sauce, or bake under cheese."),
+    (UP_GRAINS, "fry hard with an onion and whatever veg you have, loosen into a soup or a stew, "
+                "or fold into a salad with oil and lemon. Heat through until piping hot, and bin "
+                "it if it has sat out."),
+    (UP_FRUIT, "simmer 10 minutes with a spoon of sugar and a splash of water for a compote, "
+               "fold into a crumble, or spoon over yoghurt or porridge."),
+    (UP_MEAT, "shred or slice into a sandwich, a salad, a fried rice or a curry, and add at the "
+              "end so it only heats through. Covered in the fridge it keeps 3 days."),
+    (UP_FISH, "flake cold through pasta or a salad with lemon and yoghurt, or mix into a fishcake, "
+              "and don't reheat it hard or it dries out."),
+)
+# Every food this table answers, so the entry that calls it reaches them all.
+UP_FOODS = UP_GREENS + UP_ALLIUMS + UP_ROOTS + UP_SOFT + UP_GRAINS + UP_FRUIT + UP_MEAT + UP_FISH
+_UP_FOOD_SET = frozenset(UP_FOODS)
+
+
+# A dish is a use, and a method is not. The pantry row for a food says one or the other: "Leek and
+# potato soup: sliced leeks softened in butter" is a way to use up the leeks in the fridge, and
+# "Roast beetroot whole and unpeeled at 200C for an hour" is how to cook a beetroot from raw, which
+# is not an answer to what to do with the one already in there. So when the pantry's idea names a
+# dish, it stays the answer, exactly as it was before this table existed; when it only says how to
+# cook the thing, the moves for its kind of food are the better answer. Being generous with this
+# list can only keep the answer the bot gave before, so the words are here rather than a curated
+# table of a hundred and seventy-five rows.
+USE_DISH_WORDS = ("soup", "broth", "stew", "curry", "casserole", "salad", "pasta", "risotto",
+                  "traybake", "pie", "gratin", "mash", "remoulade", "pancake", "fritter",
+                  "dhal", "dal", "sauce", "compote", "crumble", "hummus", "dip", "fajita", "cake",
+                  "bread", "toast", "sandwich", "omelette", "frittata", "pizza", "burger",
+                  "pilaf", "snack", "crisp", "chip", "relish", "chutney", "slaw")
+# "roast", "bake" and "grill" are deliberately not in it: they are the two verbs almost every from-raw row
+# begins with ("Roast beetroot whole and unpeeled for an hour", "Wrap the fish in foil and bake
+# it"), so they would stand this table
+# down for exactly the lines it exists for. A row that offers a bake or a roast as the use says so
+# with a dish word as well ("...then toss them through pasta").
+
+
+def _up_food(words):
+    """The first food in the line this table answers, as the line spells it."""
+    for index, word in enumerate(words):
+        if word in _UP_FOOD_SET:
+            return word
+        if index + 1 < len(words) and " ".join(words[index:index + 2]) in _UP_FOOD_SET:
+            return " ".join(words[index:index + 2])
+    return None
+
+
+def idea_is_a_dish(idea):
+    """True when a pantry idea is a way to use the food up rather than how to cook it raw."""
+    return any(word in str(idea or "").lower() for word in USE_DISH_WORDS)
+
+
+def named_food(words, understood=None):
+    """The food a line names, preferring the kind this table knows, or None."""
+    named = _up_food(words) or _named(understood or {})
+    if isinstance(named, (list, tuple)):
+        named = named[0] if named else None
+    return named or None
+
+
+def use_it_up(name):
+    """How to use up a spare or cooked food, told by the kind of food it is, naming it."""
+    said = str(name or "").strip()
+    folded = said.lower()
+    for words, move in UP_CLASSES:
+        if folded in words:
+            return "Leftover %s: %s" % (said, move)
+    # A name this table knows as the tail of a longer one ("leftover roast chicken" is a chicken).
+    for words, move in UP_CLASSES:
+        if any(folded.endswith(" " + word) or folded.startswith(word + " ") for word in words):
+            return "Leftover %s: %s" % (said, move)
+    return ("Leftover %s: already cooked, so treat it as an ingredient - stir through a soup or "
+            "a curry, fry with an onion and an egg, or eat cold in a salad with oil and vinegar."
+            % said)
+
 
 # The words that ask for something in a hurry.
 QUICK = ("quick", "quicker", "quickly", "fast", "faster")
@@ -1380,14 +1506,46 @@ def _describe(item, understood, memory, without=()):
 
 
 def use_up(memory, understood):
-    """What to do with an ingredient they already have cooked: "leftover roast chicken"."""
-    text = " ".join(understood.get("words") or [])
+    """What to do with an ingredient they already have cooked: "leftover roast chicken".
+
+    The written rows above say the most about the foods people ask about most; every other food
+    the kitchen knows is answered from its kind, with its own name in the first words, because a
+    use-up question that comes back as how to cook the thing from raw is the wrong question
+    answered well ("leftover beetroot" was an hour in the oven).
+    """
+    words = list(understood.get("words") or [])
+    text = " ".join(words)
+    said = None
+    # The food as they said it, so "leftover sweet potatoes" is not the potato row and its answer
+    # is not about potatoes.
+    up = _up_food(words)
     for forms, how in USE_UP:
-        if any(form in text for form in forms):
+        if up is not None and up not in forms:
+            continue
+        hit = [form for form in forms if form in words] or [form for form in forms if form in text]
+        if hit:
+            said = hit[0]
             memory["meal_plan"] = {"turn": len(memory.get("turns") or []), "ingredients": [],
                                    "allowed": None, "without": [], "minutes": None,
-                                   "offered": [forms[0]]}
-            return f"{how[0].upper()}{how[1:]}."
+                                   "offered": [said]}
+            return f"Leftover {said}: {how[0].lower()}{how[1:]}."
+    # The food as they said it: the kitchen's ingredient table is the first reader, and a word
+    # from the class table is the second, so a food the meal table has never heard of (beetroot,
+    # quinoa, cranberries) still gets its own name back in the answer.
+    named = up or _named(understood)
+    if named:
+        said = named[0] if isinstance(named, list) else named
+        # The pantry has an idea for most foods. Where that idea is a dish it is the answer, and
+        # this stands aside for it; where it is only how to cook the food from raw, the moves for
+        # its kind of food answer instead.
+        from . import cooking  # late: cooking.py imports this module as it loads
+        idea = cooking.pantry_idea(said) or ""
+        if any(word in idea.lower() for word in USE_DISH_WORDS):
+            return None
+        memory["meal_plan"] = {"turn": len(memory.get("turns") or []), "ingredients": [],
+                               "allowed": None, "without": [], "minutes": None,
+                               "offered": [said]}
+        return use_it_up(said)
     return None
 
 
@@ -1838,6 +1996,11 @@ def _something_it_has_not_got(understood, allowed, without):
 
 def suggest(memory, understood):
     """A dinner idea for this line: from what they named, within the limits they set."""
+    if says_it_has_gone_off(understood.get("clean")):
+        # "my mince smells a bit is it still ok" named a food, which is all this table needs, and
+        # it answered with a ragù. A dish built on an ingredient the person has just said smells
+        # wrong is the one reply nobody wants: the sniff test in still_ok.py is the answer.
+        return None
     if a_dish_is_already_the_plan(str((understood or {}).get("norm_text")
                                       or (understood or {}).get("clean") or "")):
         # "fancy a spag bol tonight" names the dish it means to cook, and this row answered it
@@ -2050,7 +2213,7 @@ def suggest(memory, understood):
                 opener = "Cheap:"
             else:
                 opener = "Quick:"
-            if (understood.get("wants") or "") == "pick" and not thrifty:
+            if fit.wanted(memory) == "pick" and not thrifty:
                 # The line asked for one dish - "what should i cook tonight", "what can i make" -
                 # and three dishes with no pick among them answered a different question: the
                 # person has to make the choice the bot was asked to make, and the first thing on
@@ -2472,7 +2635,12 @@ ENTRIES = [
     # "date night" is the same request in the words people use for it.
     entry("meal-for-two", (("cooking", "cook", "dinner", "tonight", "meal", "supper", "date night",
                             "date-night", "anniversary", "nice", "fancy", "special", "treat",
-                            "impress"),
+                            "impress",
+                            # an occasion is a dinner for two, in the words people use for it:
+                            # "what should i cook for valentines day" reached the letter, and once
+                            # the letter stood down it was the quick row's tuna pasta. Valentines
+                            # is the occasion this row is for.
+                            "valentines", "valentine", "valentine's", "valentines day"),
                            ("for two", "for 2", "for three", "for 3", "for four", "for 4",
                             "for five", "for 5", "for the two of us", "date night", "date-night",
                             "anniversary", "romantic", "looks nice", "look nice", "to impress",
@@ -2480,7 +2648,14 @@ ENTRIES = [
                             # someone in particular, said without naming any food.
                             "for my girlfriend", "for my boyfriend", "for my partner",
                             "for my wife", "for my husband", "for her", "for him",
-                            "for my mum", "for my mom", "for my dad", "to say sorry")),
+                            "for my mum", "for my mom", "for my dad", "to say sorry",
+                            # the occasion said again in the group that means "make an effort":
+                            # a valentines dinner is not the fifteen-minute row's line.
+                            "valentines", "valentine", "valentine's", "valentines day",
+                            # "whats a nice thing to cook for a date" names a thing, not a dish,
+                            # and the shapes that ask for a thing are this row's ask
+                            "thing to cook", "something to cook", "nice thing to cook",
+                            "something nice to cook", "nice meal", "nice dinner")),
           suggest, bias=-1,
           # A present is not a dinner: "whats a nice present for my dad whos 60" has the "nice"
           # and the "for my dad" this row is keyed on, and a traybake is not an answer to it
@@ -2530,7 +2705,13 @@ ENTRIES = [
                 # pack for a journey. "can i bring my own lunch on a flight" was a frittata in
                 # wedges when the line was asking whether it would be taken off them at the tray.
                 + ("airport", "airports", "security", "hand luggage", "carry on", "carry-on",
-                   "cabin bag", "100ml", "liquids")),
+                   "cabin bag", "100ml", "liquids")
+                # A pet that comes along is the thing being carried, not the food: "can i take my
+                # dog to the beach" was a frittata in wedges because "beach" and "take" were both
+                # here. The pet half of the occasions table is reused rather than written again,
+                # and the people half is left out on purpose - a picnic with the kids is food.
+                + tuple(word for word in BRING_NOT_FOOD
+                        if "dog" in word or "cat" in word)),
     # "and quick" on its own: quicker than the idea they were just given, so no clock and no
     # food word of its own either.
     entry("meal-faster", (("quick", "quicker", "faster", "fast", "soon"),
@@ -2592,7 +2773,18 @@ ENTRIES = [
                  # what to do with the box is the rubbish domain's: "what bin does a pizza box go
                  # in" was answered "one pizza each and a garlic bread to share".
                  "bin", "bins", "recycling", "recycle", "cardboard", "compost", "bin it",
-                 "throw away", "get rid", "box", "boxes")),
+                 "throw away", "get rid", "box", "boxes",
+                 # and the base is the kitchen's, not the counter's: "how do i get a crispy
+                 # pizza base", "how do i get a crispy crust on pizza" and "how do i stop my
+                 # pizza sticking to the tray" were all told "one pizza each and a garlic bread
+                 # to share". The words a base is asked about are named and the asking shapes are
+                 # not: this is a row that honestly answers "how do i order a pizza online", so
+                 # holding out `HOW_TO` here also took the four order and delivery lines to a
+                 # payment card, an oven card and a hedge.
+                 "crispy", "crisp", "crust", "soggy", "dough", "flour", "yeast", "rise",
+                 "prove", "proving", "proofing", "stretch", "stretching", "homemade",
+                 "from scratch", "my pizza", "the base", "sticking", "sticks", "stuck",
+                 "tray", "trays", "thin crust", "thick crust")),
 ]
 
 # A dinner party is a meal, but what to wear to one, or what to take to it, is about the clothes

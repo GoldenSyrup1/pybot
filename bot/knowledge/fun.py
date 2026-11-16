@@ -61,7 +61,7 @@ hey hi hello oi ok okay alright right so and now please go on come on then just
 can could would will do you me us tell say give show share know
 got have has any else
 something anything a an the
-interesting surprising surprise entertain amuse true
+interesting surprising surprise entertain amuse true cool weird mad strange lovely nice
 once most thing
 to hear read listen for is whats what's
 id like want wanna
@@ -213,6 +213,255 @@ QUESTIONS = (
     "Which sea has no coast? (The Sargasso Sea, in the middle of the Atlantic: it is held "
     "together by currents rather than by land.)",
 )
+
+# A fact about the thing that was named. "Tell me facts about dogs" used to be turned down on
+# purpose - the fact pool above has no dog in it, so a random fact there answers a question nobody
+# asked - and the line got the search hedge instead. The fix is the table, not a wider pool: keyed
+# by the subject, one fact answers every way of asking for it ("fun fact about dogs", "tell me
+# something interesting about bees", "did you know anything cool about space"), and a subject the
+# table does not hold still gets its own answer from whatever row does hold it. Each entry is a
+# tuple of the words people use for the subject and a pool of facts, so a second ask about the
+# same subject moves to another fact rather than repeating.
+FACTS_ABOUT = {
+    "dogs": (("dog", "dogs", "puppy", "puppies", "pup", "pups", "doggy", "doggo"), (
+        "A dog has about 300 million smell receptors in its nose, roughly forty times what a "
+        "person has, which is why a walk is mostly reading.",
+        "A dog's nose print is as individual as a fingerprint, and the wetness helps it work out "
+        "which direction a smell came from.",
+    )),
+    "cats": (("cat", "cats", "kitten", "kittens", "kitty", "moggy"), (
+        "A cat has about thirty muscles in each ear and can turn them most of the way round, and "
+        "it spends two thirds of its life asleep - up to sixteen hours a day.",
+        "A cat's purr runs at 25 to 150 vibrations a second, and cats also purr when they are "
+        "hurt or frightened, not only when they are content.",
+    )),
+    "bees": (("bee", "bees", "honeybee", "honeybees", "bumblebee", "bumblebees", "bumble bee",
+              "bumble bees"), (
+        "A honeybee that finds food comes back and dances: a wiggle run straight up the comb "
+        "means fly towards the sun, and how long she wiggles says how far.",
+        "One worker bee makes about a twelfth of a teaspoon of honey in her whole life, which is "
+        "why a jar is a lot of flying.",
+    )),
+    "elephants": (("elephant", "elephants"), (
+        "Elephants talk in rumbles mostly too low for us to hear, and a herd can pick one up "
+        "from several kilometres away through the ground as well as the air.",
+        "An elephant's trunk has around 40,000 muscles in it and no bones at all, which is how it "
+        "can pick up a single blade of grass and then lift a tree.",
+    )),
+    "spiders": (("spider", "spiders", "tarantula", "tarantulas"), (
+        "A spider feels its web rather than sees it: one strand tells it the size of what landed "
+        "and whether it is still struggling.",
+        "Spider silk is stronger than steel for its weight and can stretch about four times its "
+        "length before it breaks.",
+    )),
+    "birds": (("bird", "birds", "sparrow", "sparrows", "robin", "robins"), (
+        "A bird's lungs fill in one direction only, with air sacs behind it, which is how a "
+        "bar-tailed godwit flew 12,000 km without stopping.",
+        "Most small birds weigh less than the batteries in a television remote, and a blue tit "
+        "eats close to its own body weight in food every day in winter.",
+    )),
+    "whales": (("whale", "whales", "dolphin", "dolphins"), (
+        "A blue whale's heart is about the size of a small car and slows to two beats a minute "
+        "when it dives, and its call carries hundreds of kilometres through water.",
+        "Dolphins sleep one half of the brain at a time, keeping the other half and one eye on "
+        "watch so they remember to breathe.",
+    )),
+    "penguins": (("penguin", "penguins"), (
+        "Penguins cannot taste sweetness - the gene for it is broken in them - and they can drink "
+        "sea water because a gland above the eye filters the salt out.",
+        "A penguin's knees and thighs are inside its body, which is why it looks like it has none "
+        "and why it waddles instead of striding.",
+    )),
+    "butterflies": (("butterfly", "butterflies", "moth", "moths"), (
+        "Butterflies taste with their feet, and they cannot fly once their body drops below about "
+        "15C, which is why they sit with their wings open in the sun.",
+        "A caterpillar turns almost all of itself into soup inside the chrysalis and rebuilds from "
+        "the same cells, so the butterfly is not the caterpillar with wings on.",
+    )),
+    "trees": (("tree", "trees", "oak", "oaks", "forest", "forests", "woodland"), (
+        "Trees pass sugar to each other through fungi in the soil: a beech can feed a shaded "
+        "seedling of its own kind through that network.",
+        "A big oak can pull hundreds of litres of water a day up its trunk, and the tallest trees "
+        "are limited by how high water can be lifted, not by how strong the wood is.",
+    )),
+    "rain": (("rain", "raining", "rainy", "weather", "thunder", "thunderstorm", "lightning"), (
+        "The smell after rain is not the rain: it is geosmin, made by soil bacteria, and a human "
+        "nose can pick it out at a few parts per trillion.",
+        "Lightning heats the air around it to about 30,000C, five times the surface of the sun, "
+        "and the bang is that air expanding at once.",
+    )),
+    "sleep": (("sleep", "sleeping", "insomnia", "dream", "dreams", "dreaming"), (
+        "After about seventeen hours awake, people perform about as badly as someone at the "
+        "drink-drive limit, which is why a late night feels like a hangover.",
+        "The brain flushes waste out of itself mostly while you sleep, using a channel that "
+        "opens up in deep sleep and barely runs when you are awake.",
+    )),
+    "coffee": (("coffee", "caffeine", "espresso"), (
+        "Caffeine does not give you energy: it blocks the receptor that tells you you are tired, "
+        "so the tiredness piles up behind it and lands when the coffee wears off.",
+        "Coffee was chewed, not drunk, for centuries before anyone thought to brew it, and the "
+        "plant is a fruit stone: the bean is the seed of a cherry.",
+    )),
+    "chocolate": (("chocolate", "cocoa", "cacao"), (
+        "Chocolate was drunk for most of its history - the Aztecs took it cold, bitter and spiced "
+        "with chilli - and milk chocolate only arrived in 1875.",
+        "Cocoa trees grow in the shade of taller ones, and a tree takes four or five years before "
+        "it makes a pod worth picking.",
+    )),
+    "cheese": (("cheese", "cheddar", "brie"), (
+        "Cheese is the same few ingredients with different bacteria, and much of the flavour is "
+        "made at the rind: a washed rind is wiped with brine so the smellier bacteria win.",
+        "Hard cheese keeps for months because most of the water has been pressed and salted out "
+        "of it, which is what stops the mould that would spoil milk.",
+    )),
+    "brain": (("brain", "brains", "memory", "memories"), (
+        "Your brain is about two per cent of your weight and uses about a fifth of your energy, "
+        "and it has no pain receptors of its own - a headache comes from the layers and vessels "
+        "around it.",
+        "A memory is not stored in one place: remembering something re-runs the same pattern "
+        "across the brain, which is why a memory changes a little each time you recall it.",
+    )),
+    "sun": (("sun", "sunlight", "sunshine"), (
+        "The sunlight on your arm is old: the energy took tens of thousands of years to work its "
+        "way out of the sun's core, and then eight minutes to cross to you.",
+        "The sun is 99.8 per cent of the mass of the solar system - everything else, planets "
+        "included, is the leftover dust.",
+    )),
+    "sea": (("sea", "ocean", "oceans", "seabed", "sea bed"), (
+        "We have better maps of Mars than of the sea floor: about three quarters of it has never "
+        "been surveyed in detail, and the deepest trench would swallow Everest with two "
+        "kilometres to spare.",
+        "The sea is salty because rain has been washing rock into it for billions of years, and "
+        "the water that leaves by evaporation takes none of the salt with it.",
+    )),
+    "space": (("space", "universe", "galaxy", "galaxies", "star", "stars", "planet", "planets"), (
+        "There are more stars in the observable universe than grains of sand on every beach on "
+        "Earth, and the space between them is still stretching.",
+        "A day on the International Space Station is 90 minutes long, because that is how long it "
+        "takes to go round the Earth once.",
+    )),
+    "music": (("music", "song", "songs", "melody"), (
+        "The shiver down your spine at a good bit of music comes before the moment you expect, "
+        "not on it: the brain is rewarding itself for predicting what comes next.",
+        "Music uses the same reward circuits as food and friends, which is why a song can lift a "
+        "mood in seconds and a smell cannot.",
+    )),
+    "money": (("money", "cash", "banknotes", "coins"), (
+        "Most money is not paper: only a small fraction of what is counted as money exists as "
+        "notes and coins, and the rest is numbers in accounts.",
+        "Notes are printed on cotton and linen, not wood pulp, which is why a note survives the "
+        "wash better than a receipt does.",
+    )),
+    "beetles": (("beetle", "beetles", "insect", "insects", "bug", "bugs"), (
+        "One in four of every animal species that has ever been named is a beetle - about "
+        "400,000 of them - so a beetle is the safest guess for any unnamed insect.",
+        "Insects breathe through holes in their sides instead of lungs, which is part of why "
+        "there are no insects the size of a cat.",
+    )),
+    "dinosaurs": (("dinosaur", "dinosaurs", "t rex", "t-rex", "tyrannosaurus"), (
+        "Birds are dinosaurs: the line that survived the asteroid is the one that became birds, "
+        "which is why a chicken's skeleton is closer to a T. rex than a lizard's is.",
+        "Many dinosaurs were feathered and coloured, not scaly and green: the skin we have fossil "
+        "evidence for on several of them is a coat of feathers.",
+    )),
+    "mountains": (("mountain", "mountains", "everest", "himalayas", "alps"), (
+        "Everest is the highest, not the tallest: from its base on the sea floor, Mauna Kea in "
+        "Hawaii is over ten kilometres tall.",
+        "Everest is still going up by a few millimetres a year as India pushes into Asia, and "
+        "the summit is a marine limestone - it was sea floor once.",
+    )),
+    "water": (("water", "ice", "snow"), (
+        "Water is the only common substance that is lighter as a solid, which is why ice floats "
+        "and a pond freezes from the top down instead of from the bottom.",
+        "Hot water can freeze faster than cold in some conditions - it has a name, the Mpemba "
+        "effect - and nobody has a settled explanation for it.",
+    )),
+    "octopus": (("octopus", "octopuses", "octopi"), (
+        "An octopus can change colour and the texture of its skin in under a second, and it is "
+        "colour-blind - nobody knows for certain how it matches colours it cannot see.",
+        "Two thirds of an octopus's neurons are in its arms, so an arm can taste what it touches "
+        "and work on its own while the head does something else.",
+    )),
+    "bananas": (("banana", "bananas"), (
+        "The banana plant is not a tree: it is the largest herb, and what looks like a trunk is "
+        "the bases of the leaves packed together.",
+        "A banana is slightly radioactive because it is rich in potassium, and so is a potato - "
+        "the dose from either is far too small to matter.",
+    )),
+    "body": (("body", "bodies", "human body", "the body"), (
+        "Your body makes about a litre of new bone a year of the two or so kilograms it carries, "
+        "which is why a broken bone heals back stronger at the break.",
+        "You are taller in the morning: the discs between your vertebrae squash flat over a day "
+        "and spring back overnight, up to a centimetre and a half.",
+    )),
+    "chilli": (("chilli", "chilli pepper", "chillies", "chili", "chilies", "jalapeno",
+                "jalapenos", "hot sauce"), (
+        "Chilli heat is not a taste: capsaicin trips the receptor that senses a hot pan, which "
+        "is why your mouth reads it as burning and why milk works where water does not.",
+        "The hottest chillies are measured in Scoville units, and a habanero can be a hundred "
+        "times hotter than a jalapeno that looks the same size.",
+    )),
+}
+
+# The ask half of the row, kept to what a person says when they want to be told something. A bare
+# "tell me" or "about" is not in it: those belong to whatever row holds the subject, so "tell me
+# about my dog's food" and "how do i stop my dog pulling" keep their own answers.
+_FACT_ASKS = ("fun fact", "fun facts", "random fact", "random facts", "interesting fact",
+              "interesting facts", "true fact", "cool fact", "cool facts", "weird fact",
+              "weird facts", "surprising fact", "surprising facts", "amazing fact",
+              "amazing facts", "facts about", "fact about", "facts on", "fact on",
+              "something interesting", "something cool", "something surprising",
+              "something amazing", "did you know", "learn something", "a fact", "fact",
+              "facts")
+
+# A line with a dog in it is not automatically a line about dogs. The subject words here are
+# common ones, so the fact row has to hear the line say it is a question about the animal and not
+# a worry about one: "my dog is sick", "did you know my cat died" and "how do i stop the dog
+# barking" are somebody's problem, and a fact about nose prints is an answer to nothing.
+_FACT_NOT = ("died", "dead", "dying", "passed away", "put down", "euthan", "lost my", "grieving",
+             "buried", "buried", "sick", "ill", "poorly", "vet", "vets", "hurt", "hurting",
+             "allergic", "bite", "bites", "bitten", "sting", "stings", "stung", "attack",
+             "attacked", "afraid", "scared", "phobia", "hate", "hates", "how do i", "how to",
+             "how can i", "why does", "why do", "why is", "my dog", "my cat", "my puppy",
+             "my kitten", "my child", "my son", "my daughter", "is it true", "is that true",
+             "true that", "myth", "fact check", "in fact", "as a fact", "matter of fact",
+             "the fact", "that s a fact", "myth or fact")
+
+
+def _said_here(clean, word):
+    """True when `word` is said in `clean` as a word, not inside a longer one."""
+    return re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", clean) is not None
+
+
+# A line that counts something out is asking for the number, and the row that knows it answers:
+# "did you know octopuses have three hearts" was a fact about the arms, while the octopus rows
+# give the three hearts and what each one pumps. The words are whole words, not `avoid` phrases,
+# because "two" sits inside "towards" and "ten" inside "tenant".
+_COUNTED = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve", "twenty", "hundred", "thousand", "million", "billion",
+            "how many", "how much", "how long", "how old", "how tall", "how big", "how far")
+
+
+def _the_line_does_not_state_the_fact(reading):
+    """False when the line counts something out: that number has its own row."""
+    reading = reading if isinstance(reading, dict) else {}
+    clean = " " + str(reading.get("clean") or reading.get("text") or "").lower() + " "
+    return not any(_said_here(clean, word) for word in _COUNTED)
+
+
+def _a_fact_about(memory, reading):
+    """A fact about the subject the line names, or None when it names none this table holds."""
+    reading = reading if isinstance(reading, dict) else {}
+    clean = " " + str(reading.get("clean") or reading.get("text") or "").lower() + " "
+    if not any(_said_here(clean, ask) for ask in _FACT_ASKS):
+        return None
+    if any(_said_here(clean, word) for word in _FACT_NOT):
+        return None
+    for _subject, (words, facts) in FACTS_ABOUT.items():
+        if any(_said_here(clean, word) for word in words):
+            return pick(facts, memory, clean)
+    return None
+
 
 # The two halves of the ask, because one long phrase is worth the same as a short one and a row
 # keyed on the phrase alone scored 3, under the matcher's minimum. "quiz me", "quiz question",
@@ -486,7 +735,11 @@ SOMETHING_ASKED = ("something interesting", "anything interesting", "something s
                    "surprise me", "entertain me", "amuse me",
                    # "whats the most interesting thing you know" is the same ask with the
                    # superlative in it, and "for once" is how a friendly demand is made
-                   "interesting thing", "surprising thing")
+                   "interesting thing", "surprising thing",
+                   # "tell me something cool" and "got anything cool to tell me" are the same
+                   # ask in the word people use for it when they mean interesting
+                   "something cool", "anything cool", "something mad", "anything mad",
+                   "something weird", "anything weird")
 
 ENTRIES = [
     # not a bare "few words": a parent saying "my 2 year old only says a few words" was given
@@ -517,6 +770,18 @@ ENTRIES = [
                           "bread", "cheese", "avocado", "butter", "toaster", "burnt",
                           "burn", "burned", "sandwich", "breakfast", "marmite", "beans",
                           "slice", "slices", "loaf", "egg on", "cinnamon",
+                          # What the person eats with it, and when: "i usually have cereal and
+                          # toast" reached this row through "have" and "toast" and was answered
+                          # with a wedding toast to read out. The list above held the bread and
+                          # the meal, so the words left out were the ones people say around it -
+                          # the cereal, the jam, the time of day.
+                          "cereal", "cereals", "cornflakes", "porridge", "granola", "weetabix",
+                          "jam", "marmalade", "peanut butter", "honey", "banana", "yoghurt",
+                          "yogurt", "fruit", "eggs", "scrambled", "poached", "fry up",
+                          "every morning", "each morning", "in the morning", "for breakfast",
+                          "usually have", "have toast", "had toast", "has toast", "eats toast",
+                          "eating toast", "toast and", "and toast", "toast with", "toast on",
+                          "plain toast", "dry toast", "piece of toast", "bit of toast",
                           "draft", "speech", "script"),
           bias=2),
     # "How do i raise a toast at a wedding" is the speech, and on main it was the pay-rise
@@ -561,6 +826,15 @@ ENTRIES = [
           # and "why do tongue twisters work" is a science question
           avoid=SOLVE + ABOUT + ("why do", "why does", "practice", "practising", "practicing",
                                  "write", "writing", "made up", "meaning", "mean")),
+    # A fact about the thing the person named. The pool above answers "give me a fun fact" and
+    # turns down anything with "about" in it, because a random fact is not a fact about dogs; with
+    # the table keyed by the subject, the same row can hold both. It is a point of bias in front
+    # of the random pool so "dogs fun fact" lands here and not on the pool.
+    entry("fact-about-a-thing",
+          (tuple(word for words, _facts in FACTS_ABOUT.values() for word in words),
+           _FACT_ASKS),
+          _a_fact_about, avoid=_FACT_NOT, bias=1,
+          guard=_the_line_does_not_state_the_fact),
     entry("fun-fact", (("fun fact", "fun facts", "random fact", "random facts",
                         "interesting fact", "interesting facts", "a fact", "true fact"),
                        # "whats a fun fact" and "what is a random fact" name the thing and ask it
@@ -662,6 +936,9 @@ ENTRIES = [
                           # people, not a party game: the two-player row names the boxes.
                           "two player", "two-player", "2 player", "2-player", "for two",
                           "the two of us", "just us", "partner", "couple",
+                          # "what games can two people play" reached this row on "games" and
+                          # "play", and a party game for a room of people is not a table of two
+                          "two people", "2 people", "two of you", "the pair of you",
                           "scam", "gamble", "gambling", "bet", "betting", "rigged",
                           # "what should i play" is also a record, a sport or an instrument
                           "music", "guitar", "piano", "song", "songs", "album", "playlist",

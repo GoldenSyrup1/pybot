@@ -616,6 +616,31 @@ def _a_pet_turned_down(clean, memory):
     return False
 
 
+# A recommendation is a list of things of a kind, and "not a horror" after one is a person asking
+# for the same list without that kind - not saying the list failed them. This module's line ("that
+# one never mentions a horror at all, so nothing changes") is true and useless: the answer named
+# *Groundhog Day* and *Knives Out*, and the thing wanted is something else. A pair of titles in the
+# answer is the sign the list can be swapped, so that is what stands the module down and lets the
+# entertainment rows answer with the list they already know how to narrow.
+TITLES_IN_ANSWER = re.compile(r"\*[^*]{2,60}\*")
+# The kinds a list can be narrowed by. Each one here is a kind the pick actually answers with a
+# list of its own: ruling it out is a fresh pick, so this module stands down and the entertainment
+# rows hand back the list without it. A kind the pick has nothing for ("cartoon", "drama",
+# "fantasy") is not in here - standing down would leave the turn to a shrug, and the true-but-plain
+# line this module writes is the better answer. `tests.test_a_kind_ruled_out_is_swapped` runs every
+# kind below through the pick, so a kind that stops answering takes itself out of this tuple.
+KINDS_A_LIST_CAN_SWAP = ("horror", "scary", "frightening", "creepy", "comedy", "comedies",
+                         "funny", "romance", "romantic", "sad", "documentary", "gory")
+
+
+def _a_list_that_can_be_swapped(answer, thing):
+    """True when the answer is a list of picks and the thing ruled out is the kind in it."""
+    words = RULED_OUT_KEEPS.sub("", " ".join(str(thing or "").split())).split()
+    if not any(word in KINDS_A_LIST_CAN_SWAP for word in words):
+        return False
+    return len(TITLES_IN_ANSWER.findall(answer)) >= 2
+
+
 def _rules_out_what_i_never_said(text, memory):
     """The thing ruled out, whether it kept its "a"/"the", and the part that still stands."""
     clean = " ".join(str(text or "").lower().replace("\u2019", "'").split())
@@ -626,6 +651,8 @@ def _rules_out_what_i_never_said(text, memory):
         return "", False, ""
     answer = _the_whole_answer(memory)
     if not answer or _names_it(answer, thing):
+        return "", False, ""
+    if _a_list_that_can_be_swapped(answer, thing):
         return "", False, ""
     if _an_answer_of_that_class(answer, thing):
         return "", False, ""

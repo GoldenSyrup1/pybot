@@ -67,6 +67,41 @@ _LEAVE = re.compile(
     # would match first and leave "to head off" behind.
     r"|(?:i'?m|im|i\s+am|we'?re|we\s+are|i'?ll|ill)\s+(?:gonna|going\s+to)\s+"
     r"(?:go|be\s+off|head\s+off|shoot(?:\s+off)?|get\s+off)\b"
+    # The last errands before bed, said as the errand rather than as the going: "im turning
+    # in", "im going to turn in", "right, bed o'clock", "sleep time", "im gonna get some
+    # kip", "im going up to bed", "im signing off". Each was answered with the stock nod
+    # ("Got it. Is there anything you'd like a hand with?"), with "I'm listening - say more if
+    # it helps", or with the store asking a follow-up - "Turn, lovely. When is it?" of
+    # somebody turning in for the night. These go before the shorter forms above, because "im
+    # going" would match first and leave "to turn in" behind. The first person has to be in
+    # it, so "she went up to bed" and "turn in your homework" keep their own reading, and the
+    # leftover check keeps "the sleep time on my phone" out.
+    r"|(?:i'?m|im|i\s+am|we'?re|we\s+are)\s+(?:just\s+)?(?:gonna\s+|going\s+to\s+)?"
+    r"(?:turn(?:ing)?\s+in|going\s+up\s+to\s+bed|signing\s+off|up\s+to\s+bed)\b"
+    r"|(?:i'?m|im|i\s+am)\s+(?:gonna\s+|going\s+to\s+|just\s+)?"
+    r"(?:get|getting)\s+(?:some\s+)?(?:kip|kips|shut\s?eye|shuteye|sleep)\b"
+    # The early night and the head on the pillow, said as the thing rather than as the going:
+    # "im having an early night", "early night for me", "im getting my head down", "im heading
+    # up to bed", "im going to try and sleep". Each of them was answered with the stock nod
+    # ("Got it. Is there anything you'd like a hand with?"), with "I'm listening - say more if
+    # it helps", with the plan pool ("Worth doing. What would you like help with first?"), or -
+    # for "im getting my head down" - with the low-mood card ("Sorry to hear that. A walk and
+    # somebody to talk to usually helps"), which is the bot reading a bed as a bad week. The
+    # first person has to be in it, so "she had an early night" and "i had an early night last
+    # night" keep their own reading.
+    r"|(?:i'?m|im|i\s+am|we'?re|we\s+are)\s+(?:just\s+|probably\s+)?"
+    r"(?:having|going\s+to\s+have|off\s+for|going\s+for)\s+an\s+early\s+(?:night|one)\b"
+    r"|(?:(?:an\s+)?early\s+night)\b"
+    r"|(?:time\s+for\s+an\s+early\s+night)\b"
+    r"|(?:^just\s+having\s+an\s+early\s+(?:night|one))\b"
+    r"|(?:i'?m|im|i\s+am|we'?re|we\s+are)\s+(?:just\s+)?(?:going\s+to\s+|gonna\s+)?"
+    r"(?:get|getting)\s+my\s+head\s+down\b"
+    r"|(?:i'?m|im|i\s+am)\s+(?:just\s+)?(?:heading|going)\s+up\s+to\s+(?:my\s+)?bed\b"
+    r"|(?:i'?m|im|i\s+am)\s+(?:just\s+)?(?:going\s+to\s+|gonna\s+)?try\s+(?:and\s+|to\s+)"
+    r"(?:sleep|get\s+some\s+sleep)\b"
+    r"|(?:time\s+to\s+turn\s+in)\b"
+    r"|(?:bed\s*o'?\s*clock)\b"
+    r"|(?:(?:it'?s|its)\s+)?sleep\s*time\b"
     r"|(?:i'?m|im|i\s+am|we'?re|we\s+are|i'?ll|ill)\s+"
     r"(?:be\s+)?(?:off|going|head(?:ing)?\s+off|shoot(?:ing)?\s+off|out\s+of\s+here"
     r"|get\s+(?:off|going))\b"
@@ -75,7 +110,34 @@ _LEAVE = re.compile(
     # after it have to be the run-up or the little words - "im away next week" and "im out of
     # ideas" are not goodbyes.
     r"|(?:i'?m|im|i\s+am|we'?re|we\s+are)\s+(?:away|out)\b"
-    r"|(?:off\s+to\s+(?:bed|sleep|work|school|the\s+shop))\b"
+    r"|(?:off\s+to\s+(?:bed|sleep|kip|nap|work|school|the\s+shop))\b"
+    # The bed said as the thing rather than as the verb: "bed for me", "bed time",
+    # "im hitting the hay", "going for a kip", "im calling it a night". Each of them was
+    # answered with "I'm listening - say more if it helps", with the store asking "Kip -
+    # nice. When are you going?" of somebody who had just said goodnight, or with the
+    # idiom card for "calling it a night" ("It means stopping for today").
+    r"|(?:going\s+for\s+a\s+(?:kip|nap|lie\s+down))\b"
+    r"|(?:hitting\s+the\s+hay)\b"
+    r"|(?:(?:bed|bed\s*time)\s+for\s+(?:me|us))\b"
+    r"|(?:bed\s*time)\b"
+    r"|(?:call(?:ing)?\s+it\s+a\s+night)\b"
+    # The bed named without the verb of going, which is how it is typed when the bed is the whole
+    # point of the line: "right, going up to bed", "nite nite, going up to bed". The clause has to
+    # start with it, so "she was going up to bed" and "the cat keeps going up to bed" keep their
+    # own reading, and `_KEEPS` keeps "im not going up to bed yet" out.
+    r"|(?:^going\s+up\s+to\s+(?:my\s+)?bed)\b"
+    r"|(?:^just\s+going\s+up\s+to\s+(?:my\s+)?bed)\b"
+    # A bare "night" or "goodnight" in the clause, with nothing but the run-up and a name
+    # around it: "goodnight love", "ok night then hun", "night night". The leftover check
+    # below is what keeps "i slept badly last night" and "the night bus was late" out.
+    r"|(?:\bgood\s?night\b|\bgood\s?nite\b|\bnite\b|\bnight\b)"
+    # Out of somebody's way rather than out of the room: "i'll get out of your hair".
+    r"|(?:get(?:ting)?\s+out\s+of\s+your\s+hair)\b"
+    # The leave said as the time for it, with the verb of going in it: "time for me to head
+    # off" was "Thanks for telling me - I'm here if you want to dig into any of that".
+    r"|(?:time\s+(?:for\s+me\s+)?to\s+(?:go|head\s+off|be\s+off|shoot(?:\s+off)?))\b"
+    # "that's me away", "thats me off then": the same leave said as the person's own state.
+    r"|(?:(?:that'?s|thats)\s+me\s+(?:away|off|out|done))\b"
     r"|(?:let\s+you\s+go|leave\s+you\s+to\s+it|leave\s+you\s+be|let\s+you\s+get\s+on"
     r"|let\s+you\s+get\s+back|stop\s+bothering\s+you)\b"
     r"|(?:talk|speak|chat)(?:ing)?\s+(?:to\s+you\s+)?(?:later|soon|tomorrow)\b"
@@ -182,12 +244,21 @@ _ALLOWED = frozenset((
     "and", "but", "sorry", "thanks", "thank", "ta", "hi", "hey", "listen", "look", "mm", "mhm",
     "i", "im", "ill", "id", "we", "us", "me", "you", "my", "the", "a", "an", "to", "for", "bit",
     "little", "while", "second", "minute", "sec", "now", "then", "soon", "later", "tonight",
-    "today", "tomorrow", "morning", "night", "bed", "sleep", "work", "shop", "it", "home",
+    "today", "tomorrow", "morning", "night", "nite", "bed", "sleep", "work", "shop", "it",
+    "home", "early", "one", "think",
     "day", "the", "that", "should", "gonna",
     # The same little words with the apostrophe people actually type. "id better go" was read as
     # a leave and "i'd better go" was not, because the leftover token was "i'd" and the set had
     # only "id": the same goodbye, sent to the search hedge for a missing apostrophe.
     "i'd", "i'll", "i'm", "i've", "we'd", "we'll", "we're", "it's", "that's",
+    # Who the goodbye is said to, which is what people put on the end of one: "im off to bed,
+    # love you", "ok night then hun".
+    "love", "luv", "hun", "honey", "sweetheart", "mate", "folks", "xx", "x", "xxx",
+    # Where the leave is going, when the verb is the one before it: "im off to kip".
+    "kip", "nap", "let",
+    # The little words that sit inside a leave said as the errand: "im just turning in",
+    # "ok so sleep time then".
+    "just", "about", "off",
 ))
 
 # A line that opens like a question is a question: "can i go out tonight", "should i let my
@@ -234,6 +305,26 @@ POOL = (
     # talk soon" was answering "see you at 8" with a line about a thing nobody had named.
     "All the best — talk soon.",
 )
+# The same leave with a night in it. "goodnight love" and "im having an early night" were answered
+# with "Go well, and see you when you're back", which is the right goodbye for the afternoon: a
+# person going to bed is owed the night half of it, and the chat card that says "Night then. Sleep
+# well." is not reached from here - this module answers the lines the chat card does not.
+NIGHT_GOODBYE_POOL = (
+    "Night then. Sleep well.",
+    "Goodnight - sleep well.",
+    "Night night. Sleep well.",
+    "Right - goodnight, and sleep well.",
+    "Night. Sleep well, and I'll be here tomorrow.",
+)
+# A night that is not a bedtime: the night shift, the night bus, a night out, a night feed. A
+# person off to one of those is not owed "sleep well" at the door.
+_NOT_A_BEDTIME = re.compile(r"\b(?:shift|shifts|bus|buses|duty|class|classes|out|club|feeds?|"
+                            r"mare|terrors?|nurse|nursing|porter|stock)\b")
+# The ways a bedtime is named without the word "night": the kip, the hay, the sleep, the
+# head on the pillow, turning in. Any of them in the leave clause and the reply is the
+# night one.
+_NITE = re.compile(r"\b(?:good\s?night|good\s?nite|nite|night|bed|bedtime|kip|hay|"
+                   r"sleep|sleeping|turn(?:ing)?\s+in|head\s+down|shut\s?eye|\blie\s+down)\b")
 # The leave with a reason behind it: the reason comes first, so the reply goes to the reason
 # and then lets them go.
 REASON_POOL = (
@@ -265,15 +356,54 @@ _RUN_UP = _ALLOWED | _THANKS_WORDS | frozenset(("ok", "okay", "right", "then", "
 # is the same wish as "have a good day", and reading "bye" as the person's own subject sent it back
 # to the sign-off pool. `_SIGN_OFF` above is the reply reading and cannot be reused here.
 _SIGN_OFF_WORDS = frozenset((
-    "bye", "byebye", "goodbye", "later", "laters", "laterz", "night", "goodnight", "cheers",
+    "bye", "byebye", "goodbye", "later", "laters", "laterz", "night", "goodnight", "nite",
+    "cheers", "ttfn", "ttyl", "cheerio", "tara", "adios", "nighty", "nites",
     "ok", "okay", "right", "well", "thanks", "thank", "you", "ta", "so", "and", "now", "then",
     "anyway", "anyways", "alright"))
 
 
+# Who a sign-off is said to, which is what people put after the sign-off word rather than before
+# it: "night all", "bye everyone", "night then love". Without these, "im going up to bed, night
+# all" read "night all" as a reason to go and see to something and answered "Fair enough, that
+# matters more. Look after yourself."
+_SIGN_OFF_VOCATIVE = frozenset((
+    "all", "everyone", "everybody", "folks", "guys", "love", "luv", "hun", "honey",
+    "sweetheart", "mate", "xx", "x", "xxx", "too", "bella", "pet", "duck", "chick", "pal",
+))
+
+
 def _is_sign_off(clause):
-    """True when a clause is only a sign-off word or two."""
-    words = re.findall(r"[a-z']+", clause)
+    """True when a clause is only a sign-off word or two, with who it is said to."""
+    words = [word for word in re.findall(r"[a-z']+", clause)
+             if word not in _SIGN_OFF_VOCATIVE]
     return bool(words) and all(word in _SIGN_OFF_WORDS for word in words)
+
+
+# A sign-off word on the end of the clause is the goodbye, whatever is in front of it: "ok love
+# you bye", "goodnight love", "right then, night". The words before it have to be the run-up, a
+# term of endearment or another sign-off, so "i slept badly last night" and "we had a takeaway last
+# night" stay a report of a night rather than a leave: "night" is a time there, not a goodbye.
+_END_SIGN_OFF = re.compile(r"\b(?:bye|byebye|goodbye|cheerio|tara|night|goodnight|nite|laters"
+                           r"|night\s+night|nite\s+nite|ttfn|ttyl|adios|nighty|nites)\b\s*"
+                           r"(?:all|everyone|everybody|folks|guys|too|love|hun|mate|bella|pet"
+                           r"|duck|chick|pal)?\s*$")
+_END_SIGN_OFF_KEEP = frozenset((
+    "ok", "okay", "right", "well", "so", "and", "then", "now", "for", "all", "everyone",
+    "love", "luv", "hun", "honey", "sweetheart", "mate", "guys", "folks", "xx", "x", "xxx",
+    "night", "nite", "good", "bye", "byebye", "goodbye", "cheerio", "tara", "laters", "you",
+    "your",
+    "i", "im", "we", "us", "me", "my", "the", "a", "an", "is", "be", "to", "have", "had",
+))
+
+
+def _ends_in_a_sign_off(clause):
+    """True when the clause finishes on a sign-off word and nothing of its own before it."""
+    match = _END_SIGN_OFF.search(clause)
+    if not match:
+        return False
+    head = clause[:match.start()].strip()
+    words = re.findall(r"[a-z']+", head)
+    return all(word in _END_SIGN_OFF_KEEP for word in words)
 
 
 def _is_thanks_clause(clause):
@@ -443,14 +573,24 @@ def _is_leave_clause(clause):
     """True when this clause is a leave and nothing else."""
     if _is_wish_clause(clause):
         return True
+    if _ends_in_a_sign_off(clause):
+        return True
     if not _LEAVE.search(clause):
         return False
     # Going away somewhere later is a plan, not a goodbye: "im away next week", "im out tonight"
     # and "im away for the weekend in june" say when, and the person is still here talking.
     if _AWAY_OUT.search(clause) and _AWAY_PLAN.search(clause):
         return False
+    # A night named for another day is somebody arranging one, not tonight's goodbye: "im having
+    # an early night tomorrow" is a plan and the plan pool answers it. "Tonight" is not in this
+    # list, because "im having an early night tonight" is the goodbye itself.
+    if _BED_LEAVE.search(clause) and _NEXT_DAY.search(clause):
+        return False
     rest = _LEAVE.sub(" ", clause)
-    downs = _ALLOWED | _SIGN_OFF_WORDS | _LEAVE_SHORTHAND
+    # Who the goodbye is said to is part of saying it, so a term of address is not a reason to
+    # stay: "night then pet", "bye duck" and "night pal" are the goodbye that "night then love"
+    # already was.
+    downs = _ALLOWED | _SIGN_OFF_WORDS | _LEAVE_SHORTHAND | _SIGN_OFF_VOCATIVE
     if all(word in downs for word in re.findall(r"[a-z']+", rest)):
         return True
     # A time is part of a sign-off, not of every leave: "see you at 5" and "talk to you after
@@ -555,6 +695,18 @@ _AWAY_PLAN = re.compile(
     r"|tonight|tomorrow|on\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
     r"|at\s+the\s+weekend|for\s+the\s+weekend|in\s+(?:june|july|august|september|october"
     r"|november|december|january|february|march|april|may))\b")
+
+
+# The bed said as the thing the line is about, and the day that makes it a plan rather than a
+# goodbye. "im having an early night" is a goodbye and "im having an early night tomorrow" is a
+# diary entry; "im getting my head down" is a goodbye and "im getting my head down tomorrow" is
+# not a thing anybody says, but "im going to try and sleep tomorrow" would be a plan.
+_BED_LEAVE = re.compile(r"\b(?:early\s+(?:night|one)|head\s+down|heading\s+up\s+to\s+bed"
+                        r"|try\s+(?:and\s+|to\s+)sleep)\b")
+
+_NEXT_DAY = re.compile(
+    r"\b(?:tomorrow|tomorra|tmrw|tmoz|next\s+(?:week|month|year|weekend)"
+    r"|on\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b")
 
 
 # The person going away is a leave even when the leave verb is "off" or "away" and not "go":
@@ -754,23 +906,87 @@ def pool(clean, words=None, unwell_blocks=True, memory=None, trouble_blocks=True
     for index, clause in enumerate(clauses):
         if not _is_leave_clause(clause):
             continue
+        # The leave found is the one the reply answers, so a night clause gets the night reply
+        # and a daytime one keeps the day reply.
+        leave_pool = NIGHT_GOODBYE_POOL if _is_a_bedtime(clause) else POOL
         after = " ".join(clauses[index + 1:])
+        rest = clauses[index + 1:]
         # A sign-off on the end is not a reason to go and see to anything ("ok im out, night",
         # "got to go, night then"): the reason pool answers it with "Of course. Go and see to it,
-        # and mind yourself", which reads as though there were a job waiting. Only a thanks and a
-        # sign-off are set aside; anything else after the leave is the reason.
-        if after and not (_is_thanks_clause(after) or _is_sign_off(after)):
+        # and mind yourself", which reads as though there were a job waiting. Only a thanks, a
+        # sign-off, a wish or the leave said a second time are set aside; anything else after the
+        # leave is the reason.
+        #
+        # The leave said twice is the one the order of the clause hides: "night then, off to bed"
+        # is a sign-off first and the leave after it, so the first clause is the leave here and
+        # the second is what the reason pool would answer with "Go on then - that comes before
+        # me. Take care.", which reads as a person being asked to choose the bot over their bed.
+        if rest and any(not (_is_thanks_clause(part) or _is_sign_off(part)
+                             or _is_wish_clause(part) or _is_leave_clause(part))
+                        for part in rest):
             # "see you at 5 tomorrow, i have a meeting": the day on the goodbye makes the meeting
             # the plan for that day, not the reason for going now.
             if _A_DAY_AHEAD.search(clause):
-                return POOL
+                return leave_pool
+            if _a_state_not_an_errand(rest):
+                return leave_pool
             return REASON_POOL
-        return POOL
-    return POOL
+        return leave_pool
+    return NIGHT_GOODBYE_POOL if _is_a_bedtime(" ".join(clauses)) else POOL
+
+
+# A reason that is the person's own state, or their own day ahead, is not a thing to go and see
+# to. `REASON_POOL` says "Of course. Go and see to it, and mind yourself." and it is right for a
+# reason with something in it - the dinner burning, the bus, the kids up, a taxi at the door - but
+# "goodnight, im shattered" has nothing to see to, and the state is the reason the person is going
+# to bed at all. Main answered those with the tiredness itself ("Call it early tonight if you
+# can"); the leave is still the leave, so the plain goodbye is the reply and the reason is left
+# where it is. An animal or another person in trouble is not this: "got to go, the dog is being
+# sick" stays the reason.
+_OWN_STATE = re.compile(
+    r"\b(?:tired|shattered|knackered|exhausted|worn\s+out|done\s+in|wrecked|cream\s+crackered|"
+    r"dead\s+on\s+my\s+feet|sleepy|drowsy|sleepless|no\s+sleep|broken\s+night|up\s+since|"
+    r"early\s+start|up\s+early|early\s+shift|work\s+in\s+the\s+morning|work\s+tomorrow|"
+    r"on\s+early|long\s+day|long\s+shift|busy\s+day\s+tomorrow|school\s+run|"
+    r"need\s+my\s+sleep|need\s+an\s+early\s+night)\b")
+# Who or what a reason is about, when it is not the person: the thing waiting to be seen to. A
+# state said of one of these is their trouble and not the leaver's own ("my son is exhausted" is
+# a parent with something to do), so the reason pool keeps it.
+_ANOTHER = re.compile(r"\b(?:he|she|they|him|her|them|his|hers|their|theirs|my\s+(?:son|daughter|"
+                      r"boy|girl|kids?|child|children|mum|mom|dad|husband|wife|partner|nan|"
+                      r"grandma|grandad|dog|cat|baby|mate|friend|boss)|our\s+\w+)\b")
+
+
+def _a_state_not_an_errand(clauses):
+    """True when the reasons after the leave are the person's own state or their own day.
+
+    "goodnight, im shattered", "im off to bed, im worn out", "night, im up early", "im off, ive
+    got work in the morning" are the leave with the state behind it, not a job waiting: the
+    reason pool answered them "Of course. Go and see to it, and mind yourself." and there is
+    nothing to see to.
+    """
+    said = [clause for clause in clauses if not (_is_thanks_clause(clause)
+                                                 or _is_sign_off(clause)
+                                                 or _is_wish_clause(clause)
+                                                 or _is_leave_clause(clause))]
+    if not said:
+        return False
+    for clause in said:
+        if not _OWN_STATE.search(clause) or _ANOTHER.search(clause):
+            return False
+    return True
+
+
+def _is_a_bedtime(clause):
+    """True when the leave itself is a bedtime: the bed or the night is what they are going to."""
+    if not clause or _NOT_A_BEDTIME.search(clause):
+        return False
+    return bool(_NITE.search(clause))
 
 
 def lines():
     """Every goodbye this module can say, for the arbiter's "is this the sign-off" test."""
-    return (frozenset(POOL) | frozenset(REASON_POOL) | frozenset(WISH_POOL)
+    return (frozenset(POOL) | frozenset(NIGHT_GOODBYE_POOL) | frozenset(REASON_POOL)
+            | frozenset(WISH_POOL)
             | frozenset(WELL_POOL) | frozenset(KINDER_POOL) | frozenset(NIGHT_POOL)
             | frozenset(CRISIS_POOL) | frozenset(OWN_NEWS_POOL))

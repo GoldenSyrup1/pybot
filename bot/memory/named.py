@@ -20,6 +20,7 @@ previous line made. The rule is narrow on purpose:
 """
 import re
 
+from . import holds as earlier
 from .topics import carried_topic as the_carried_topic, is_ack, subject as the_subject
 from ..compose import trouble
 from ..compose.badnews import reads_as_bad_news
@@ -148,6 +149,90 @@ def takes_back(text):
         return False
     first = re.split(r"[\s,]+", rest, 1)[0].strip(".,;:!?")
     return first in TAKES_BACK
+
+
+# The frames an ask about one thing is said with. They carry nothing of their own: what is left
+# after them is the thing the line is about. One list rather than one pattern per wording, because
+# "who is emma" and "tell me about emma" are the same question - the chat holds Emma, and the
+# person wants what it holds - and main answered the first and punted on the second, the third and
+# the fourth ("what about emma", "do you remember emma", "remind me who emma is").
+THE_ASKING = (
+    re.compile(r"^\s*(?:and|also|so|ok|okay|but|then|well|oh)\b[\s,]*", re.I),
+    re.compile(r"^\s*(?:can|could|would)\s+you\s+(?:please\s+)?", re.I),
+    re.compile(r"^\s*(?:please\s+)?(?:tell|remind|show)\s+me\s+(?:again\s+)?"
+               r"(?:about|of|who|what)\s+", re.I),
+    re.compile(r"^\s*(?:tell|remind)\s+me\s+", re.I),
+    re.compile(r"^\s*(?:anything|something|more|a\s+bit)\s+about\s+", re.I),
+    re.compile(r"^\s*(?:what|how)\s+about\s+", re.I),
+    # "same for my daughter", "same as my son": a person named as the next one of the same kind,
+    # which the store already answered by saying the noun back ("Noted: your daughter.").
+    re.compile(r"^\s*same\s+(?:for|as)\s+", re.I),
+    re.compile(r"^\s*what\s+of\s+", re.I),
+    re.compile(r"^\s*(?:do|did)\s+you\s+(?:remember|know|recall)\s+(?:about\s+|the\s+)?", re.I),
+    re.compile(r"^\s*(?:what\s+is|what's|whats|what)\s+", re.I),
+    re.compile(r"^\s*who(?:'s|s| is| was)\s+", re.I),
+)
+# The words a question is ended with, which say nothing about the thing asked about.
+THE_ASKING_TAIL = re.compile(
+    r"\s+(?:again|then|though|please|now|too|already|anyway|honestly|is|was|are|were)\s*$", re.I)
+# The same ask with the verb at the end: "remind me who emma is", "who my sister is". The
+# "who" frame below only knows the other order ("who is emma"), and with the verb last the
+# whole line stayed in one piece and named nothing.
+WHO_X_IS = re.compile(r"^(?:(?:and|also|so|ok|okay|then)\s+)?who\s+(?P<thing>.+?)\s+(?:is|was)\s*$",
+                      re.I)
+# The longest a thing asked about can be: a name, or a relation and its article ("my sister").
+MOST_WORDS_ASKED_ABOUT = 3
+# A person pointed at rather than named. "him" and "her" and "them" are not things, so the checks
+# below threw them away and the line that says only one of them named nobody: "what about him"
+# after "my son jack is 6" reached the search hedge.
+POINTED_AT = frozenset(("him", "her", "them", "they", "that one", "this one", "those two",
+                        "the two of them", "both of them", "the pair of them"))
+
+
+# A word that makes what is left a sentence rather than a thing: "what is pasta" leaves "is
+# pasta" and "i like pasta" was never framed at all, and neither is a thing asked about.
+THE_ASKING_VERB = re.compile(
+    r"^\s*(?:is|are|was|were|am|be|been|being|do|does|did|should|could|would|will|shall|can|may|"
+    r"might|must|have|has|had)\b", re.I)
+
+
+def the_one_asked_about(text):
+    """The one thing a framed line asks about: "tell me about emma" -> "emma".
+
+    The asking is taken off the front, one frame at a time, and what is left has to be a thing
+    and nothing else: "who is meg on eastenders" leaves "meg on eastenders", which is a programme
+    and not a name the chat holds, so it is not handed back. This only says what the line is
+    about; whether the chat holds it is for the caller to check.
+    """
+    said = " ".join(str(text or "").replace("\u2019", "'").split()).strip(" ?!.,;:")
+    if not said:
+        return ""
+    last_verb = WHO_X_IS.match(said)
+    if last_verb:
+        said = last_verb.group("thing").strip(" ?!.,;:")
+    changed = True
+    while changed:
+        changed = False
+        for frame in THE_ASKING:
+            new = frame.sub("", said, count=1).strip(" ?!.,;:")
+            if new and new != said:
+                said = new
+                changed = True
+        trimmed = THE_ASKING_TAIL.sub("", said).strip(" ?!.,;:")
+        if trimmed and trimmed != said:
+            said = trimmed
+            changed = True
+    if said.lower() in POINTED_AT:
+        return said
+    if len(said.split()) > MOST_WORDS_ASKED_ABOUT:
+        return ""
+    if THE_ASKING_VERB.match(said):
+        return ""
+    if any(word.lower() in VERBS for word in said.split()):
+        return ""
+    if not _looks_like_a_thing(said):
+        return ""
+    return said
 
 
 def thing(text):
@@ -389,8 +474,7 @@ def _said_the_food(memory, food):
 
 def _last_reply(memory):
     """What the bot said on the turn before this one, or ""."""
-    turns = [t for t in (memory or {}).get("turns") or [] if isinstance(t, dict)]
-    return str(turns[-1].get("bot") or "") if turns else ""
+    return earlier.last_reply(memory)
 # A follow-up can name a part of the subject instead of a new thing: "and its population",
 # "what about the food", "and the weather there". The subject is what the chat is on ("im going
 # to spain"), so the line asks about a part of it, and nothing on its own answers a line that
@@ -1078,7 +1162,15 @@ def about_it(text, memory):
     # thing, because those lines carry a subject of their own.
     if _only_how_they_feel(text, memory):
         return ""
-    said = thing(text)
+    # A correction says the last thing again with an opener in front of it ("sorry, four
+    # brothers" after "i have three brothers"), and the thing is the value, not the opener: with
+    # the opener still in the line, the thing asked about was "sorry four brothers", which the
+    # apology row answers - the person putting a fact right was told how to apologise. Only the
+    # opener a person punctuated goes, so "sorry i snapped at her" keeps every word (see
+    # `facts.without_the_correction_opener`).
+    from . import facts
+    corrected = facts.without_the_correction_opener(text) or text
+    said = thing(corrected)
     if not said:
         return ""
     turns = [turn for turn in (memory or {}).get("turns") or [] if isinstance(turn, dict)]
@@ -2497,8 +2589,22 @@ A_TRIP_PART = (
     # question instead picked the rail card filed under "rome" - a worse answer to a line that
     # was already answered. The parts above are the ones main gets wrong, not the ones it gets
     # right.
-    (re.compile(r"\b(?:when|month|season|weather|climate|temperature)\b"),
+    # The month is the whole of a common follow-up ("is it expensive" then "and in august"), and
+    # the guide's when-to-go card answers it for the city on the screen: it names every month and
+    # says which are good. "may" and "march" are left out because each is an ordinary word too
+    # ("it may be expensive"), and a month named on its own is never a hedge in their case.
+    (re.compile(r"\b(?:when|month|months|season|weather|climate|temperature|"
+                r"january|february|april|june|july|august|september|october|november|december|"
+                r"spring|summer|autumn|winter)\b"),
      "when should i go to {place}"),
+    # What the trip costs, and nothing more specific: "whats lisbon like" / "and the food like
+    # there" / "is it expensive" left the cost question without a city, and the household
+    # shopping plan answered it. Last in the list, because a line that names a part of the trip
+    # asks about that part: "how much is a coffee" is about coffee, which the eating card knows,
+    # and it only becomes a money question when nothing else in the line fits.
+    (re.compile(r"\b(?:expensive|pricey|cost|costs|costing|afford|budget|spend|"
+                r"how much)\b"),
+     "is {place} expensive"),
 )
 
 # The words an elliptical ask is made of. Anything else in the line is a thing of its own.
@@ -2510,6 +2616,9 @@ some anywhere somewhere place places area areas neighbourhood neighborhood part 
 nice pleasant decent good best spot
 what where which how when why who whats like tell me info advice recommend recommends
 recommendation recommendations suggest suggestion suggestions
+need needs needed want wants wanted enough require required take takes give gives
+one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen
+sixteen seventeen eighteen nineteen twenty couple few several
 """.split())
 
 # The line that named the place has to be a trip: "i live in leeds" puts a place in the chat and
@@ -2527,17 +2636,115 @@ def _the_trip_place(memory):
         return ""
     places = [str(place).strip() for place in (known.get("places") or []) if str(place).strip()]
     if not places:
-        return ""
+        return _the_place_the_bot_just_named(memory)
     place = places[-1]
     said = place.lower()
-    for turn in reversed([turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)]):
-        line = " ".join(str(turn.get("user") or "").lower().split())
+    turns = [turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)]
+    named_at = -1
+    for index in range(len(turns) - 1, -1, -1):
+        line = " ".join(str(turns[index].get("user") or "").lower().split())
         if not re.search(r"(?<![a-z])" + re.escape(said) + r"(?![a-z])", line):
             continue
         # The newest line that named it decides: a later "i live in rome" is a home, not a trip.
-        return place if _GOING_AWAY.search(line) else ""
-    plan = " ".join(str(known.get("plan") or "").lower().split())
-    return place if said in plan and _GOING_AWAY.search(plan) else ""
+        if not _GOING_AWAY.search(line):
+            return ""
+        named_at = index
+        break
+    if named_at < 0:
+        plan = " ".join(str(known.get("plan") or "").lower().split())
+        if not (said in plan and _GOING_AWAY.search(plan)):
+            return ""
+    # A card the bot gave after that line is the place the chat is on now: "we're going to italy in
+    # june" makes Italy the trip, then the answer to "rome and florence probably" is the Florence
+    # card, so "how many days would we need" is the days of Florence and not of the country.
+    card, card_at = _the_opening_place_at(memory)
+    if card and card_at > named_at:
+        return card
+    return place
+    # No line called it a trip, but the bot's last answer is a card about that place: "tell me
+    # about lisbon" is answered by the Lisbon card, which opens "In Lisbon:". The chat is on the
+    # city all the same, so the part ask after it ("is it expensive", "where should i eat") is
+    # about Lisbon. A place the person lives in is not that chat, and the words for a home keep
+    # this from turning "i live in rome" into a holiday.
+    card = _the_place_the_bot_just_named(memory)
+    if card and said in card.lower():
+        return place
+    return ""
+
+
+# A home is not a place you are going to: "i live in rome" followed by "is it expensive" is a
+# question about living there, and the holiday day rate is the wrong answer.
+_LIVING_THERE = re.compile(
+    r"\b(?:live|lives|lived|living|moved|moves|moving|relocate|relocated|relocating|grew up|"
+    r"born|home|hometown|my flat|my house)\b", re.I)
+
+
+_A_TIME_WORD = frozenset((
+    "january", "february", "march", "april", "may", "june", "july", "august", "september",
+    "october", "november", "december", "spring", "summer", "autumn", "winter", "the morning",
+    "the evening", "the afternoon", "the end", "the meantime", "general", "fact", "short",
+    "total", "terms", "the", "a", "an", "its", "their", "addition", "practice", "reality",
+))
+
+
+def _the_opening_place(memory):
+    """The place a card on the screen opens on, or "".
+
+    A card about one place says so in its first words: "In Lisbon: Alfama on foot...", "In Rome
+    the cheap meal is pizza al taglio...". That is the bot naming the place the whole answer is
+    about, which is as good as the person naming it for reading the next line.
+    """
+    return _the_opening_place_at(memory)[0]
+
+
+def _the_opening_place_at(memory):
+    """(the place a card on the screen opens on, the turn it came on), or ("", -1)."""
+    turns = (memory or {}).get("turns")
+    if not isinstance(turns, list) or not turns:
+        return "", -1
+    # The newest card wins, and a card is not always the last thing said: "whats lisbon like" is
+    # the guide, then "is it expensive" is the day rate, then "and in august" is still Lisbon.
+    for back, turn in enumerate(reversed(turns)):
+        if not isinstance(turn, dict):
+            continue
+        opening = re.match(r"\s*in\s+(.{2,40}?)(?=[,:.!?]|\s(?:the|a|an|is|it|you|we)\b)",
+                           str(turn.get("bot") or ""), re.I)
+        if not opening:
+            continue
+        place = opening.group(1).strip()
+        # A time word is not a place: "In May, Lisbon is warm" opens on the month.
+        if place.lower() in _A_TIME_WORD:
+            continue
+        # Neither is a thing the card happens to start with: a card can open "In the fridge,
+        # on a plate on the bottom shelf: ..." or "In a hot pan, ..." and mean an object. A place
+        # is a name, so it is written without an article in front of it and with its capital:
+        # "how should i thaw mince" then "is it expensive" was answered "A fridge freezer is
+        # about 25p a day", a price for the appliance, where the question was about the mince.
+        if re.match(r"(?i)(?:the|a|an|your|my|his|her|their|our|this|that)\b", place):
+            continue
+        if not place[:1].isupper():
+            continue
+        return place, len(turns) - 1 - back
+    return "", -1
+
+
+def _the_place_the_bot_just_named(memory):
+    """The place on the card the bot just gave, when no line in the chat named one.
+
+    "tell me about lisbon" names no trip - there is no going, no week, no booking - so the store
+    files no place and the food-and-cost follow-ups after the card lost the city: "and the food
+    like there" / "is it expensive" got the household shopping plan. The card itself says which
+    city the chat is on. A line that puts the person at home keeps this out: "i live in rome"
+    followed by "is it expensive" is not a holiday, and the card is what answers "what's it like
+    there" anyway.
+    """
+    place = _the_opening_place(memory)
+    if not place:
+        return ""
+    for turn in (memory or {}).get("turns") or []:
+        if isinstance(turn, dict) and _LIVING_THERE.search(str(turn.get("user") or "")):
+            return ""
+    return place
 
 
 def a_part_of_the_trip(text, memory):
@@ -2554,14 +2761,28 @@ def a_part_of_the_trip(text, memory):
         return ""
     part = ""
     words = set()
+    earliest = None
     for pattern, asked in A_TRIP_PART:
         found = set(pattern.findall(said))
-        if found:
+        if not found:
+            continue
+        # The part the line leads with is the part it asks about: "how many days should i stay" is
+        # the number of days, and the "stay" in it comes after the days; "where should i stay for
+        # three days" is where, and the days come after the stay. The first pattern that matches
+        # would read the first as a where-to-stay ask and leave "days" as a word of its own.
+        at = min(found_.start() for found_ in pattern.finditer(said))
+        if earliest is None or at < earliest:
             part = asked
+            earliest = at
             words = set(re.split(r"[^a-z]+", " ".join(found))) | found
-            break
     if not part:
         return ""
+    for matched in words:
+        # "i want to stay in a hostel" names the kind of place they have already picked, so it is
+        # not asking where to stay in this city: the article in front of the part word makes the
+        # word a thing rather than a category ("somewhere to stay" and "any hotels" have none).
+        if re.search(r"\b(?:a|an)\s+" + re.escape(matched) + r"\b", said):
+            return ""
     for word in re.split(r"[^a-z']+", said):
         if len(word) < 3 or word in _ASK_FILLER or word in words:
             continue
@@ -2569,6 +2790,25 @@ def a_part_of_the_trip(text, memory):
             continue
         return ""
     return part.format(place=place.lower() if place.isupper() else place)
+
+def asks_a_part_of_the_trip(text, memory):
+    """True when the line asks about a part of the trip, whether it names the place or not.
+
+    "how many days do i need" after the card for a city is the days question for that city, and
+    the trip reader writes it out ("how many days in berlin") for the entry that answers it. The
+    same question with the city already in it - "how many days in berlin" as the person first
+    typed it, or as the reader wrote it - is the same ask, so the place can also come out of the
+    line before the rest is read as the part.
+    """
+    if a_part_of_the_trip(text, memory):
+        return True
+    place = _the_trip_place(memory)
+    said = " ".join(str(text or "").lower().split())
+    name = place.lower()
+    if not name or name not in said:
+        return False
+    return bool(a_part_of_the_trip(said.replace(name, " "), memory))
+
 
 # A line that rules a food out of the dish being made is not a move to that food: "i have no
 # eggs" after a cake is the cake without eggs, and "no butter left" is the butter the cake is

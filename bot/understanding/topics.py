@@ -213,6 +213,7 @@ benefit declare hmrc""",
     "sport": """sport sports football footy footie soccer rugby cricket tennis golf match
         matches team
         league cup goal goals offside wicket wickets innings coach coaching training
+        bowling yorker googly bouncer crease stumps batsman batsmen wicketkeeper keeper
         olympics tennis badminton swimming race racing formula tennis wimbledon
  player players referee darts snooker hockey netball volleyball athletics
         basketball baseball softball handball squash boxing marathon marathons triathlon
@@ -258,6 +259,23 @@ benefit declare hmrc""",
  remember yourself yourself
         version chatgpt soul""",
 }
+
+# The parts of a home and the things kept in it that these lists did not carry, so a line that
+# named only one of them named no thing at all and the line after it had nothing to lean on:
+# "my mum is hanging pictures" / "she wants them level" got the echo "Got it - she wants them
+# level" instead of the fixing advice, and "i want to hang a picture" / "how high" carried nothing
+# but the ask. Named as things, these words reach the cards already keyed on them.
+# Kept to what people ask about as a thing and out of the words with a life of their own: "chest"
+# is part of the body, "landing" is what a plane does, "bath" is a city - and "shed" is what
+# hair does, so that one is left out: naming it pulled a shed-delivery chat onto the hair-loss
+# card, because "shedding" is a key of that card. Note that words in these vocabularies are also
+# the everyday things a line can name (`THINGS` below), so prose written inside a string here is
+# read as vocabulary. The list is added in a statement of its own so that an edit here cannot
+# collide with the words other lanes add to the literal above.
+STRONG["home-and-diy"] += """
+        attic cellar mirror mirrors picture pictures frame frames lamp lamps
+        socket sockets plug plugs wiring hook hooks armchair armchairs"""
+
 
 # Ordinary words that only point at a topic together with something else.
 WEAK = {
@@ -953,7 +971,9 @@ CONDITIONS = frozenset("""cystitis uti thrush dandruff eczema asthma verruca ver
     endometriosis ibs crohns colitis prolapse bunion bunions whitlow ringworm scabies nits
     headlice hypo hypos coldsore coldsores abscess quinsy phlebitis dvt cataract cataracts
     glaucoma gingivitis hiccup hiccups thyroid constipated
-    boil boils lump lumps spot spots cyst cysts filling fillings""".split())
+    boil boils lump lumps spot spots cyst cysts filling fillings
+    pcos copd lupus fibromyalgia hashimotos hypothyroid hyperthyroid epilepsy diabetes
+    anorexia bulimia cfs ibd""".split())
 # A few of those have a second life so ordinary that the word alone is not the condition: a
 # kettle boils, a lump of coal, a spot on the wall, a filling in a sandwich, and a thrush that
 # sings in the garden. One table says the word counts only beside the part it is on; the other
@@ -1383,6 +1403,15 @@ SENSE_PAIRS = {
         (SENSE_NEAR, frozenset("""missed miss catch catching missed leaves leaving departs
             departing arrives arrival""".split())),
     )),
+    # "run" is the exercise and the service: a bus runs, a train runs, and "how often does the
+    # bus run" and "does the tram run late" are a timetable question that read as fitness and
+    # got "Three sessions a week is the number to aim for." The service noun has to sit right
+    # beside the word, because "running for the bus" and "i run to catch the train" are the
+    # exercise with a bus in them, and there the noun is three or more words away.
+    "run": (("run", "runs", "running", "ran"), "geography-and-travel", (
+        (SENSE_NEAR, frozenset("""bus buses train trains tram trams coach coaches tube
+            ferry ferries flight flights timetable""".split())),
+    )),
     # "match" is a game and a thing struck to make fire. Only a fire has a flame, kindling or
     # firelighters. "Light", "lit" and "strike" are ordinary words, but a football line does not
     # put one within three words of the match ("the floodlights lit the pitch", "a candle lit
@@ -1457,6 +1486,109 @@ def the_bin_is_on_a_machine(understood):
     if words & MACHINE_BIN_WORDS:
         return True
     return "technology" in ((understood or {}).get("topics") or ())
+
+
+# Some words have two ordinary lives and the rest of the sentence is what says which. A bank is
+# a place that keeps money and the ground beside a river; a seal is an animal and the rubber edge
+# of a lid. With a cue in the line the word is read; with none, the word is the only subject and
+# guessing gives a confident card for the wrong thing ("the bank was closed" was answered with
+# how to close an account). The cue sets are deliberately small and only hold words that fit one
+# life: "closed", "broken" and "looks" are not cues, because both lives have them.
+TWO_LIVES = {
+    "bank": (("bank", "banks"), (
+        (frozenset("""account accounts money cash card cards overdraft loan loans mortgage
+            mortgages payment payments paid pay savings branch branches switch switches
+            statement statements balance balances deposit deposits withdraw withdrawal
+            transfer transfers debit credit cheque cheques interest debt debts atm cashpoint
+            salary salaries wages building society current holiday holidays food blood
+            england sperm said says told rang ring called phoned robbed robbery robber cashier teller
+            vault charge charges charged charging fee fees refund refunds claim claims useless
+            overdrawn locked blocked phone app online free pending shut shuts empty sunday
+            sundays saturday saturdays weekday weekdays hours opening opens""".split()),
+         frozenset(("money", "shopping", "life-admin", "work-and-money"))),
+        (frozenset("""river rivers water fish swim swimming path paths walk walked walking boat
+            boats flood flooded muddy grass trees reeds ducks swans fishing current currents
+            flow steep bridge bridges canal canals lake lakes stream streams shore bankside""".split()),
+         frozenset(("nature-and-weather", "geography-and-travel", "fitness", "home-and-diy"))),
+    )),
+    "seal": (("seal", "seals"), (
+        (frozenset("""zoo sea beach ocean shore rocks ice swimming fish pup pups rescue wildlife
+            aquarium flipper flippers colony warden vet injured entangled plastic cute cuddly
+            adorable""".split()),
+         frozenset(("pets", "nature-and-weather", "geography-and-travel"))),
+        (frozenset("""jar jars lid lids door doors window windows freezer fridge container
+            containers bottle bottles cap caps rubber gasket airtight vacuum preserve jam
+            pickle filter filters oven washing machine drum black mould mold leak leaks
+            leaking leaked dripping split torn worn perished hardened stiff sticky crumpled
+            shut shuts""".split()),
+         frozenset(("home-and-diy", "cooking", "cleaning", "food-and-drink"))),
+    )),
+}
+TWO_LIVES_FORMS = {form: tiers for _forms, tiers in TWO_LIVES.values() for form in _forms}
+# The cue may come well after the thing it explains ("the bank was full of fish", "the seal is
+# fine, i mean the little round filter"), so it gets the whole sentence rather than the few words
+# beside the word that SENSE_PAIRS uses. A cue anywhere in the line is part of what the line is
+# about, which is what the person meant by reading the whole sentence.
+TWO_LIVES_REACH = 99
+# What has to follow the word for it to be the subject of the line: "the bank was closed" and
+# "the seal is broken" are states of that thing. A word that is only somewhere the person went
+# past ("we walked past the bank") is not the subject of anything, and is left alone. The money
+# verbs a bank does are in the money cues, so "the bank said no" still reads as the bank.
+_A_STATE_VERB = frozenset("""is are was were has have had looks seems seemed becomes became
+    sounds feels closed shut broke broken breaks split splits tore torn worn wears""".split())
+# A possessive settles the one word whose two lives cannot be owned: "my bank" is the money
+# bank, because nobody says "my bank" about the ground beside a river. The word still has its
+# two lives with an article ("the bank was closed"), so this is not a cue for the line; it is a
+# rule about what the owner says. "my seal is broken" is left alone: a person can own a seal.
+_THE_OWNER_SETTLES = frozenset(("bank",))
+_POSSESSIVE = frozenset("my our your his her their".split())
+# What a first word can be without being the subject: the articles and the speaker.
+_NOT_THE_SUBJECT = frozenset("""a an the my our your his her their this that these those i we
+    you he she they it there old new local main high street current former usual regular
+    well so but and oh hmm actually honestly anyway right now then also just only even
+    hi hello hey good morning afternoon evening please thanks thank perhaps maybe""".split())
+
+
+def unclear_subject(norm, inherited=None, previous=None):
+    """The two-life word the line leaves unsettled, or None.
+
+    Only the first thing the line names, only when it is the subject of a state ("the bank was
+    closed", "the seal is broken"), and only when no word in the line fits one of its lives and
+    the conversation has not already settled on a subject. A line with a cue ("my bank account",
+    "the seal on the fridge door") is not unclear, and neither is a line that only passes the
+    word by ("we walked past the bank").
+    """
+    content = [at for at, word in enumerate(norm) if word not in _NOT_THE_SUBJECT]
+    if not content:
+        return None
+    first = content[0]
+    word = norm[first]
+    tiers = TWO_LIVES_FORMS.get(word)
+    if not tiers:
+        return None
+    if word in _THE_OWNER_SETTLES and first and norm[first - 1] in _POSSESSIVE:
+        # "my bank is closed" is the money bank; the owner settled it without a cue word.
+        return None
+    if inherited and any(inherited in sense_topics for _cues, sense_topics in tiers):
+        # The chat is already on one of this word's lives: "my mortgage..." then "the bank said
+        # no" is the money bank, and asking which one now would be asking them to repeat what the
+        # conversation is about. A chat that is on some other topic does not settle this word,
+        # so "my bank account is closed" then "the seal is broken" still says it is not sure.
+        return None
+    if previous:
+        # The line before it can settle the word without naming it again: "how do i set up apple
+        # pay" then "my bank isnt in the list" is the money bank, and the cue "pay" is what says
+        # so. Only the last line is used, because an older cue can be a different subject.
+        before = set(previous.get("norm") or ())
+        if any(before & cues for cues, _sense_topics in tiers):
+            return None
+    after = [norm[at] for at in content[1:9]]
+    if not any(other in _A_STATE_VERB for other in after):
+        return None
+    if any(_sense_cue(norm, [first], ((TWO_LIVES_REACH, cues),))
+           for cues, _sense_topics in tiers):
+        return None
+    return word
 
 
 # A word can name a dish and a thing of another kind, and then the words around it say which:
@@ -1778,6 +1910,8 @@ def _index():
         for word in words.split():
             if word not in GENERIC:
                 add(word, topic, 1)
+    for name in CAR_NAMES:
+        add(name, "cars", 2)
     for topic, phrases in PHRASES.items():
         for phrase in phrases:
             key = " ".join(_BREAKS.sub(" ", phrase).split())
@@ -1785,6 +1919,27 @@ def _index():
                 ordinary = all(word in ORDINARY_VERBS for word in key.split())
                 add(key, topic, 1 if key in ASK_PHRASES or ordinary else 3)
     return table
+
+
+# The make and the model a car is called by. "my punto makes a clicking noise when i turn" named
+# a car as plainly as "my car" does, but the word is not in the list above and the line read as
+# naming nothing at all: the topic came out None, the follow-up "is it safe to drive" then took
+# `drive` for travel, and "what will it cost roughly" answered with the cost of driving lessons
+# rather than a garage bill. `my audi needs a service`, `my corsa wont start` and `i drive a
+# punto` all read the same way. A make is the car in every sentence it appears in, so it points
+# at the topic the way `car` does.
+#
+# Only the names that mean nothing else are here. A model that is also an ordinary word or an
+# animal is left out and read by the words round it: golf, polo, beetle, mustang, jaguar, mini,
+# seat, rover, smart, focus, fiesta, escort, transit, discovery, defender, galaxy, yeti, superb,
+# note, leaf, rio. `mg` is left out as too short to tell from a typo of "me".
+CAR_NAMES = frozenset("""audi fords ford vauxhall toyota honda nissan renault peugeot citroen
+    skoda hyundai kia mazda volvo suzuki bmw mercedes volkswagen vw fiat tesla dacia chevrolet
+    chrysler dodge subaru mitsubishi lexus saab alfa jeep bentley porsche ferrari lamborghini
+    aston lada daewoo infiniti acura punto corsa clio astra mondeo passat micra yaris fabia
+    octavia ibiza qashqai juke captur kadjar sandero duster sprinter picanto zafira insignia
+    vectra laguna megane berlingo picasso cupra leon toledo kamiq karoq kodiaq tucson sportage
+    camaro impreza forester hilux auris avensis prius celica supra aygo navara""".split())
 
 
 TABLE = _index()
@@ -1864,9 +2019,30 @@ def _is_run_out(norm, position):
             and norm[position + 1] == "out")
 
 
+# "watch for" is not watching something. "what should i watch for" after "my dad had a stroke"
+# was read as a request for something to watch - the entertainment phrase "what should i watch"
+# matched, the line named a topic of its own, and the signs to look out for after a stroke became
+# a shrug about telly. The phrase is the same words either way; what comes after the verb is what
+# says which verb it is, and only a `for` or an `out` can turn watching something into watching
+# out for something.
+WATCH_OUT_AFTER = frozenset("for out".split())
+WATCHING = frozenset("watch watches watching watched".split())
+
+
+def _watches_out_for(words, norm, end):
+    """True when the watching in this phrase is followed by the for or out of "watch for"."""
+    return (words[-1:] and words[-1] in WATCHING
+            and end < len(norm) and norm[end] in WATCH_OUT_AFTER)
+
+
+
 def _says_nothing_here(topic, words, norm, start, study):
     """True when this word or phrase cannot name `topic` in this line: the same words are an
     ordinary verb here, and the line does not say what they act on."""
+    if _watches_out_for(words, norm, start + len(words)):
+        # The verb is "watch for", so the line is about what to look out for, not about a
+        # programme: "what should i watch for" is the signs after a stroke or a medicine.
+        return True
     if topic == "family-and-parenting" and "health visitor" in " ".join(words):
         # The health visitor is who a parent rings about the baby, and she is also the person
         # a line about a rash, a weight or a medicine names. A line that names something wrong
@@ -2133,6 +2309,72 @@ def _is_a_complaint(norm, position):
     return position + 1 < len(norm) and norm[position + 1] in COMPLAINT_OF_NEXT
 
 
+# The vocabulary is written once, by hand, and a line says the same word in another form: the
+# list has "pregnancy" and the line says "pregnant", the list has "tired" and the line says
+# "tiredness", the list has "cheap" and the line says "cheaper". One word family is one word, and
+# a member of the family the list happens not to hold was read as no word at all: "im pregnant and
+# my back aches" was read by the back ache alone, and "i think im pregnant" reached no topic, so
+# the reply was a note of congratulation instead of the test. These are the endings a word takes
+# on, read both ways: taken off the line's word ("tiredness" is "tired") and added to it to reach
+# the form the list holds ("wash" is "washing").
+DERIVED_ENDINGS = ("ness", "ment", "tion", "sion", "ity", "ance", "ence", "ancy", "ency",
+                   "ism", "ist", "ful", "less", "ing", "ers", "ant", "ent", "er", "ed",
+                   "cy", "ic", "al", "ly", "th", "y", "s")
+# Two members of a family change more than the ending: "pregnant" and "pregnancy" share "pregn",
+# "patient" and "patience" share "pati". These are the pairs a list may hold either end of.
+FAMILY_PAIRS = (("ant", "ancy"), ("ent", "ency"), ("ate", "ation"), ("ate", "acy"),
+                ("ive", "ion"), ("ible", "ibility"), ("able", "ability"))
+# A stem shorter than this is not a family, it is a coincidence: "car" is not "care" and "art" is
+# not "artist". Five letters is where a stem means something on its own.
+FAMILY_STEM = 5
+# The same bar for the line's word before an ending is added to it. Four letters was measured and
+# refused: "part" became "party" and "meet" became "meeting", and every "part of the uk" line and
+# "nice to meet you" line moved topic on the strength of it.
+FAMILY_WORD = 5
+
+_FUNCTION_WORDS = None
+
+
+def _function_words():
+    """The words that are only grammar: they are never another word with an ending on."""
+    global _FUNCTION_WORDS
+    if _FUNCTION_WORDS is None:
+        try:
+            from . import STOPWORDS     # a local import: the package holds it and imports this
+            _FUNCTION_WORDS = frozenset(STOPWORDS)
+        except Exception:
+            _FUNCTION_WORDS = frozenset()
+    return _FUNCTION_WORDS
+
+
+def _family(word):
+    """The table entries for another form of this word, if the list holds that form."""
+    for ending in DERIVED_ENDINGS:
+        if word.endswith(ending):
+            stem = word[:-len(ending)]
+            if len(stem) >= FAMILY_STEM:
+                hit = TABLE.get(stem) or TABLE.get(stem + "e")
+                if hit:
+                    return hit
+        # The line's word may be the shorter member: "cheap" is "cheaper". Never a word that is
+        # only grammar: "should" is not "shoulder", and every "should i ..." line in the deck was
+        # being handed to the health topic by that one ending.
+        if len(word) >= FAMILY_WORD and word not in _function_words():
+            hit = TABLE.get(word + ending)
+            if hit:
+                return hit
+    for here, there in FAMILY_PAIRS:
+        if word.endswith(here):
+            hit = TABLE.get(word[:-len(here)] + there)
+            if hit:
+                return hit
+        if word.endswith(there):
+            hit = TABLE.get(word[:-len(there)] + here)
+            if hit:
+                return hit
+    return ()
+
+
 def _lookup(word):
     """The table entries for a word, also trying its singular and verb stem."""
     hit = TABLE.get(word)
@@ -2144,6 +2386,11 @@ def _lookup(word):
             hit = TABLE.get(word[:-len(suffix)] + replacement)
             if hit:
                 return hit
+    family = _family(word)
+    if family:
+        # The bot's own topic is what a line claims about the bot, not a word's other form:
+        # "personal" is "person" with an ending on, and "personal alarm" is an alarm.
+        return tuple((topic, weight) for topic, weight in family if topic != "about-the-bot")
     return ()
 
 
@@ -2343,6 +2590,116 @@ def score_topics(line, inherited=None):
     return [(topic, score if own.get(topic) else min(score, 1),
              top if own.get(topic) else min(top, 1))
             for topic, (score, top, _first) in ranked]
+
+
+# A word that names a thing in two parts of life, where the two are different things and not two
+# corners of one: a `tablet` is a pill and a screen, `stock` is what is in the freezer and what is
+# in an ISA, a `fish` is a dinner and a pet, `draughts` are a game and the cold air under a door,
+# a `tomato` is the seed packet and the dinner, a `virus` is the one going round the office and
+# the one on the laptop, a `team` is the one you play for and the one you work in. Cooking and
+# food-and-drink are one kitchen, so `milk`, `bread` and `cheese` are not here: a card from either
+# is about the thing the person named.
+#
+# A word like this says nothing about the line on its own - only the rest of the sentence can say
+# which of the two it is - so when the line gives nothing else to go on, the reading names it in
+# `memory["understood"]["unsure"]` instead of letting the one word stand as the subject.
+TWO_HOMES = frozenset("""
+    tablet stock fish draughts tomato tomatoes basil virus team
+""".split())
+
+
+# The words that belong to each of the two lives, so the line can say which one it means without
+# naming the thing twice: "the freezer is full" settles `stock` (the freezer is the kitchen's),
+# "the screen is cracked" settles `tablet` (a pill has no screen). Only words of one life count,
+# and a word that is in both lists settles nothing: "cream" is in the cook's kitchen and the
+# chemist's, so it leaves a `tablet` in doubt.
+#
+# This is the whole of the settling test, and it is deliberately the two lives rather than "some
+# other word of the area". The area a line is read as is picked from the doubtful word itself, so
+# counting other words of that area settles the doubt with words that are no cue at all: the carer
+# line "i need to tell my team im applying elsewhere" was called settled by `applying`, and
+# "it was a woman from another team" by `woman`, while "how do i stock the freezer" stayed in
+# doubt although "freezer" says the kitchen plainly, because the cue tables file a freezer under
+# home-and-diy and the line had been read as cooking.
+LIVES = {
+    "tablet": (
+        frozenset("""pill pills dose dosage swallow swallowed blister pack pharmacy
+            prescription headache headachey painkiller painkillers ibuprofen paracetamol
+            antibiotic antibiotics chemist gp food meal meals stomach empty water milk
+            coffee breakfast with""".split()),
+        frozenset("""screen screens battery charge charging charger charged app apps keypad
+            keyboard wifi update downloading cracked ipad android""".split()),
+    ),
+    "stock": (
+        frozenset("""cube cubes gravy soup broth pot saucepan freezer shelf cupboard kitchen
+            chicken vegetable vegetables veg boil simmer bone bones""".split()),
+        frozenset("""shares share market markets invest investing investment portfolio dividend
+            dividends trading trader isa pension ftse broker buy sell buying selling worth
+            price prices""".split()),
+    ),
+    "fish": (
+        frozenset("""dinner tea supper lunch cook cooked frying fried grill grilled baked
+            fillet fillets bones chips salmon tuna cod haddock mackerel monger fingers rice
+            lemon batter""".split()),
+        frozenset("""tank tanks pond pond bowl aquarium goldfish swim swimming died dying filter
+            feeder feeding feed water""".split()),
+    ),
+    "draughts": (
+        frozenset("""board pieces checkers play playing game games opponent win won lose""".split()),
+        frozenset("""door doors window windows draught gap gaps under cold blow blowing seal""".split()),
+    ),
+    "tomato": (
+        frozenset("""sauce sauces salad ketchup slice sliced soup tinned canned ripe puree
+            passata sandwich make making cook cooking dinner meal""".split()),
+        frozenset("""plant plants grow growing grew seed seeds seedling seedlings garden
+            greenhouse blight water watering stake""".split()),
+    ),
+    "basil": (
+        frozenset("""pesto pasta sauce leaves leaf fresh cook cooked make making recipe salad
+            sprinkle dish dinner meal pizza""".split()),
+        frozenset("""plant plants grow growing grew died dying wilted wilt pot soil water
+            watering repot seed seeds""".split()),
+    ),
+    "virus": (
+        frozenset("""laptop computer pc file files email software antivirus malware download
+            downloaded popup popups password browser update""".split()),
+        frozenset("""cold flu round caught fever cough symptoms sick ill bug bugs tummy
+            throwing headache""".split()),
+    ),
+    "team": (
+        frozenset("""rota shift shifts manager boss job work project colleagues colleague
+            meeting employer office""".split()),
+        frozenset("""match game win won lost lose score scored goal goals player players coach
+            league season fans football rugby cricket kit""".split()),
+    ),
+}
+LIVES["tomatoes"] = LIVES["tomato"]
+
+
+def unsure_words(norm, topic):
+    """The words whose second life is still in play, when the line said nothing to settle it.
+
+    "my tablet has gone missing" names a thing that is a pill and a screen, and the rest of the
+    line does not say which, so the area the reader picked from it is a guess. "should i take a
+    tablet with food" says which in another word (`food` is the pill's life), and "the freezer is
+    full, how do i stock it" (`freezer` is the kitchen's). Those lines have said what they are
+    about, and nothing is in doubt.
+
+    The line is asked which of the two lives it named (LIVES), and only that. A word of neither
+    life, however well it scores for the area the line was read as, leaves the doubt standing:
+    the area came from the doubtful word in the first place.
+    """
+    if not topic:
+        return []
+    words = set(norm)
+    in_doubt = []
+    for word in words:
+        if word not in TWO_HOMES:
+            continue
+        if any(words & home for home in LIVES.get(word, ())):
+            continue                     # the line said which life it means
+        in_doubt.append(word)
+    return sorted(in_doubt)
 
 
 # A topic the line itself scores this strongly is what the line is about; a place in it is
@@ -2639,7 +2996,10 @@ MONEY_TIGHT_MAX = 10
 # friday", "broke till payday", "im broke this week", "im broke again". Every word in front has
 # to be the person or an intensifier, so "the car broke" and "i broke my phone" never match, and
 # every word after has to be a time or a turn of phrase, so "i broke a glass" never matches.
-BROKE_AS_SUBJECT = frozenset("""i im am we are he she hes shes they theyre you youre u it is
+# A copula stays: "he is broke" and "she was broke" are the money, not a machine of its own. The
+# one word that has to go is "it", because "it" is the only word here that stands for a thing
+# rather than a person, and "its broke" / "it was broke" are the thing.
+BROKE_AS_SUBJECT = frozenset("""i im am we are he she hes shes they theyre you youre u is
     was were been be being totally completely so officially proper flat dead stone absolutely
     very pretty quite really just still honestly yeah ok okay and but now""".split())
 BROKE_AS_TIME = frozenset("""till until by for this week month payday weekend end today
@@ -3383,7 +3743,17 @@ def _places_a_name(norm, index):
 # put the turkey in" is a bird, "a weekend in Turkey" is the country. The vocabulary does not
 # know every one of them ("turkey" was not in it), so they are listed here and need a capital
 # letter, or a place word in front of them ("in turkey"), before they count as a place.
-PLACE_HOMOGRAPHS = frozenset("""turkey china brazil bath reading""".split())
+#
+# The list is of words that really are ordinary words, not of places the reader's word list
+# happens to hold. It held "leeds", "france", "spain", "lisbon", "rome", "tokyo", "sydney",
+# "kyoto" and "australia" as names, and asking the word list whether a place name is also a
+# word meant that "we are moving to leeds", "is leeds a good place to live" and "how far is it
+# to rome" named no place at all, so nothing in the chat could be about it.
+#
+# "new" is the same case the other way round: it is a word the deck uses every day ("a new
+# sofa"), and it is also the first half of "new york" and "new zealand", so it still needs
+# the capital.
+PLACE_HOMOGRAPHS = frozenset("""turkey china brazil bath reading new""".split())
 # The ones that are also countries, where the other reading is the bird or the cup.
 COUNTRY_HOMOGRAPHS = frozenset("""turkey china brazil""".split())
 
@@ -3490,7 +3860,7 @@ def person_names(line):
 def _names_a_place(word, text, asked=False):
     """Some place names are also ordinary words ("bath", "reading", "turkey"): those only name
     a place when the line writes them as one, or asks about the country."""
-    if word not in COMMON_WORDS and word not in PLACE_HOMOGRAPHS:
+    if word not in PLACE_HOMOGRAPHS:
         return True
     if asked and word in COUNTRY_HOMOGRAPHS:
         return True

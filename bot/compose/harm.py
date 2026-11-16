@@ -43,6 +43,10 @@ _HURT = re.compile(
     r"thump|thumping|whack|whacking|slap|slapping|kick|kicking|drown|drowning|deck|decking|"
     r"bash|bashing|batter|battering|gouge|gouging|clobber|clobbering|pummel|pummelling|"
     r"headbutt|headbutting|garrotte|garrote|hurt|hurting|smash|smashing|"
+    # "i want to shake my baby" was answered "Shake your baby - fair enough." and "i feel like
+    # shaking the baby" with "Got it.": the verb a parent at the end of their rope reaches for
+    # was not one of these, so the card written for exactly that never came up.
+    r"shake|shaking|shook|shaken|"
     r"beat\s+up|beat\s+(?:the\s+)?(?:living\s+)?daylights\s+out\s+of|"
     r"do\s+(?:him|her|them)\s+in|knock\s+(?:him|her|them)\s+out|run\s+(?:him|her|them)\s+over|"
     r"set\s+fire\s+to|burn\s+down|get\s+(?:him|her|them)\s+back|get\s+my\s+own\s+back\s+on)\b")
@@ -79,6 +83,8 @@ _IDIOM = re.compile(
     r"\b(?:kill\s+(?:time|the\s+(?:lights?|mood|music|engine|conversation))"
     r"|kill\s+two\s+birds|kill\s+it|killed\s+it|killing\s+(?:time|the\s+time)|"
     r"(?:could|can)\s+murder\s+a\b|murder\s+(?:a\s+)?(?:song|tune|curry|pint|coffee|brew)|"
+    r"shake\s+it\s+off|shake\s+a\s+leg|shake\s+hands?|shake\s+(?:the\s+)?dust|"
+    r"shake\s+up|shake\s+(?:some\s+)?sense\s+into|shake\s+a\s+fist|no\s+great\s+shakes|"
     r"hit\s+the\s+(?:road|sack|hay|shops?|gym|bottle|roof|ground|deck|bar|pub|town)"
     r"|hit\s+the\s+nail|hit\s+a\s+wall|hit\s+it\s+off|"
     r"beat\s+(?:the\s+traffic|the\s+queue|the\s+rush|the\s+clock|a\s+retreat|the\s+heat)"

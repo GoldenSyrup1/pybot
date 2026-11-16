@@ -112,7 +112,23 @@ def _the_period_of_the_answer(answer):
     return None
 
 
-def _periods_disagree(mine, theirs):
+def _the_periods_the_answer_says(answer):
+    """Every period an answer is written on: {'a day', 'a week'} for a guideline that says both.
+
+    A month is kept as a month: "give it six weeks before you judge it" and "in a month" are not
+    the person's day, and reading one as a day let a weekly answer slide past the period check -
+    "20 mins a day" against "Three half-hour sessions a week is enough ... a walk for ten minutes
+    to warm up" was answered "20 mins is past the ten minutes that answer named".
+    """
+    out = set()
+    for match in re.finditer(r"(?:a|an|per|each|every)\s+(day|week|night|month|year)\b",
+                             answer or "", re.I):
+        word = match.group(1).lower()
+        out.add({"week": _WEEKLY, "day": "a day", "night": "a day"}.get(word, "a " + word))
+    return out
+
+
+def _periods_disagree(mine, theirs, also=()):
     """True when the two figures are said on periods that cannot be read against each other.
 
     A weekly figure and a daily one are not the same amount, and a weekly total against a figure
@@ -120,6 +136,10 @@ def _periods_disagree(mine, theirs):
     stated. A figure said per night is a figure said per day for every count in this module.
     """
     if mine is None:
+        return False
+    # A guideline often gives the same aim in two periods - "150 minutes a week, which is around
+    # 20 minutes a day" - and the person's own period is then one of them, not a disagreement.
+    if mine in also:
         return False
     if theirs is None:
         return mine == _WEEKLY
@@ -175,13 +195,18 @@ def _amounts(text):
     return found
 
 
-def _target(answer, family, mine=None, bare_ok=False):
+def _target(answer, family, mine=None, bare_ok=False, period=None):
     """The figure the last answer named in the same family: (low, high, as it was said).
 
     A guideline often opens by saying the person's own figure back - "Five hours is on the short
     side: most adults need seven to nine" - and that opening is not the figure to aim at, it is
     the answer measuring them against it. When the first figure in the answer is the number they
     gave, the range the answer names is the target, unit or no unit.
+
+    `period` is the period the person's own figure is said on ("a week" for "two and a half hours
+    a week"). An answer often says the same aim twice in two periods - "Aim for about 150 minutes
+    a week, which is around 20 minutes a day" - and read as one family that is two figures, which
+    is no figure to aim at, so the ones said on the person's own period are the ones to read.
     """
     answer = _spoken_as_numbers(answer)
     units = "|".join(p for _, p in _AMOUNTS)
@@ -260,6 +285,20 @@ def _target(answer, family, mine=None, bare_ok=False):
     # ten-minute walks") is not naming one figure to aim at, so which of them is the target would
     # be a guess - and a guess is answered as though the person had reached a number the answer
     # never set. Nothing is read from it.
+    if period and len({figure[:2] for figure in figures}) > 1:
+        # Only two figures said on two different periods are a thing the period settles: two aims
+        # on the same one ("Aim for 30 minutes a day, and 60 if you can manage it") are still two
+        # aims, and picking one of them would be the guess this rule is here to stop. Every list a
+        # figure is read from is narrowed, not only the count: "Aim for about 150 minutes a week,
+        # which is around 20 minutes a day" is one aim for somebody doing half an hour a day.
+        ranges_on = _the_periods_of(answer, ranges)
+        useful_on = _the_periods_of(answer, useful)
+        said_on = ranges_on + useful_on
+        if (any(each == period for each in said_on)
+                and any(each and each != period for each in said_on)):
+            ranges = [pair for pair, each in zip(ranges, ranges_on) if each == period]
+            useful = [pair for pair, each in zip(useful, useful_on) if each == period]
+            figures = [figure for _, figure in ranges] + [figure for _, figure in useful]
     if len({figure[:2] for figure in figures}) > 1:
         # Unless the answer named a range at all: a guideline is written as a range ("seven to
         # nine hours"), and a lone figure beside it is usually the answer giving an example
@@ -268,11 +307,11 @@ def _target(answer, family, mine=None, bare_ok=False):
         if len({figure[:2] for figure in ranges}) == 1:
             best = ranges[0][1]
             if not is_their_number(best):
-                return best
+                return _with_its_period(answer, best, period)
         return None
     best = ranges[0][1] if ranges else (useful[0][1] if useful else None)
     if best is not None and not is_their_number(best):
-        return best
+        return _with_its_period(answer, best, period)
     # An answer can name its range without repeating the unit ("most adults need seven to nine"),
     # and an answer that opens with the person's own number back - "Five hours is on the short
     # side" - is measuring them against that range rather than aiming at the number.
@@ -280,7 +319,86 @@ def _target(answer, family, mine=None, bare_ok=False):
     # range in another family, reached through the conversion below, is a guess with nothing
     # behind it ("7,000 to 8,000 steps" for someone asking about 30 minutes).
     bare = _near_bare_range(answer, mine, family) if bare_ok else None
-    return bare or best
+    if bare is not None:
+        return bare
+    return _with_its_period(answer, best, period) if best is not None else None
+
+
+# The words an answer uses when it is naming a figure to aim at rather than saying theirs back.
+# "Aim for about 150 minutes a week" is the figure; "Got it - you have 150 minutes a week" is the
+# store handing their own number back, and answering that with "you are there already" is the echo
+# this module exists to stop. Only the words that make a figure an aim, never a hedge: "about 150
+# minutes" is as likely a rough figure as an aim, and reading one as the other tells somebody they
+# have already hit a number the answer never set.
+_AIM_CUE = re.compile(r"\b(?:aim (?:for|at)|aims? (?:for|at)|target(?:s|ing)?\b|guideline|"
+                      r"should (?:be|get|do|have)|try (?:for|to)|recommended|the idea is)\b", re.I)
+
+
+def _the_aim_that_is_their_number(answer, family, mine):
+    """The figure the answer aims at when it is the number they gave: (low, high, said) or None.
+
+    A guideline is often written as the figure they already do - "Aim for about 150 minutes a
+    week" to somebody who has just said "i do two and a half hours a week" - and `_target` passes
+    over it, because a short answer that repeats their number is a receipt. Read as an aim, the
+    same figure is the answer: their 150 minutes a week is the 150 minutes a week it named.
+    """
+    if not mine:
+        return None
+    units = "|".join(p for _, p in _AMOUNTS)
+    for match in re.finditer(r"(" + _COUNT_WORD + r")\s*(?:-\s*)?(" + units + r")", answer or "",
+                             re.I):
+        if _amount_family(match.group(2)) != family:
+            continue
+        if _a_value(match.group(1)) != mine:
+            continue
+        before = (answer or "")[max(0, match.start() - 40):match.start()]
+        if not _AIM_CUE.search(before):
+            continue
+        said = match.group(0).strip(" .,!?")
+        # The period is part of the figure: "the 150 minutes a week that answer named" is what a
+        # weekly guideline says, and "150 minutes" alone leaves out the thing it is per.
+        period = _period_after(answer or "", match.end())
+        if period:
+            said += " " + ("a week" if period == _WEEKLY else "a day")
+        return (mine, mine, said)
+    return None
+
+
+def _with_its_period(answer, figure, period):
+    """The figure with the period it is said on, when the answer says it on the person's own.
+
+    "150 minutes" is read off "Aim for about 150 minutes a week", and said back without the "a
+    week" it leaves out what the figure is per: "2.5 hours is at the 150 minutes that answer
+    named" against "at the 150 minutes a week that answer named".
+    """
+    if not (period and figure):
+        return figure
+    at = (answer or "").find(figure[2])
+    if at < 0:
+        return figure
+    match = _A_PERIOD.match(answer, at + len(figure[2]))
+    if not match:
+        return figure
+    said = _WEEKLY if match.group(1).lower() == "week" else "a day"
+    if said != period:
+        return figure
+    return (figure[0], figure[1], figure[2] + " " + match.group(0).strip(" .,!?"))
+
+
+def _the_periods_of(answer, figures):
+    """The period each figure in `figures` (start, (low, high, said)) is said on, or None.
+
+    The period is written right after the figure - "150 minutes **a week**" - and a figure with
+    none is a figure on no stated period, which is not the same as one said on another.
+    """
+    out = []
+    for at, figure in figures:
+        match = _A_PERIOD.search(answer or "", at)
+        if not match or match.start() > at + len(figure[2]) + 12:
+            out.append(None)
+            continue
+        out.append(_WEEKLY if match.group(1).lower() == "week" else "a day")
+    return out
 
 
 def _aims_named(answer, mine, family):
@@ -320,9 +438,50 @@ def _aims_named(answer, mine, family):
         if any(start <= match.start() and match.end() <= end for start, end in spans):
             continue
         value = _a_value(match.group(1))
-        if value and mine and mine / 3 <= value <= mine * 3:
-            found.add((value, value))
+        if not value or not (mine and mine / 3 <= value <= mine * 3):
+            continue
+        # Unless it counts things: "five half-hours, or three twenty-minute sessions and some
+        # walking, plus two short strength sessions" is one guideline with its examples, and
+        # counted as figures it made three "aims" of an answer that names one - which then read as
+        # a list and was answered with nothing at all.
+        if _counts_things(answer, match.end()):
+            continue
+        found.add((value, value))
     return found
+
+
+# A period is what an amount is per, not the things a count counts: "twice a week".
+_PERIOD_WORDS = {"day", "days", "week", "weeks", "night", "nights", "month", "months", "year",
+                 "years", "time", "times"}
+
+# The words a count is a count of ("three sessions", "two walks"), which are not units of amount.
+# A number in front of one of these is how many of something, not how much of it, and the thing
+# counted can have a shape word in front of it: "three twenty-minute sessions".
+_A_WORD_AFTER = re.compile(r"(?:\s+[a-z]+(?:-[a-z]+)?){1,4}")
+
+
+def _counts_things(answer, at):
+    """True when the number ending at `at` counts things rather than measuring an amount.
+
+    A count of things is an example in a list ("three twenty-minute sessions") and not an aim,
+    unless it is said as a rate: "Three half-hour sessions a week is enough to feel different in a
+    month" is the answer's aim, and read past it the store answered "20 mins is past the ten
+    minutes that answer named" from the warm-up in the sentence after it.
+    """
+    match = _A_WORD_AFTER.match(answer or "", at)
+    if not match:
+        return False
+    words = match.group(0).split()
+    for at_word, word in enumerate(words):
+        # A unit of amount ("20 minutes", "1.5 litres") and a period ("twice a week") are the
+        # amount itself, whatever the word looks like, so the count stops there.
+        if _amount_family(word) is not None or word in _PERIOD_WORDS:
+            return False
+        if len(word) > 3 and word.endswith("s"):
+            # Said per something, this count is a rate and so an aim of the answer's own kind.
+            return not any(other in _PERIOD_WORDS or _amount_family(other) == "a week"
+                           for other in words[at_word + 1:] + [""])
+    return False
 
 
 def _figures_in(answer):
@@ -562,34 +721,72 @@ def _candidate_answers(turns, mine_values):
     return out
 
 
-def _enough_against(answers, given, mine_values, said, more, too_much):
+def _enough_against(answers, given, mine_values, said, more, too_much, quoted_ok=False):
     """The reply for the best of `answers`, or None when none of them names a figure to aim at."""
+    quoted = None
     for answer in answers:
         for value, family, spoken in given:
             if not family:
                 continue
-            if len(_aims_named(answer, value, family)) > 2:
-                continue
             if _periods_disagree(_a_period_near(said, spoken),
-                                 _the_period_of_the_answer(answer)):
+                                 _the_period_of_the_answer(answer),
+                                 _the_periods_the_answer_says(answer)):
                 continue
             if family in ("minutes", "hours") and _A_TEMPERATURE.search(answer):
                 continue
             if _A_DOCTOR.search(answer):
                 continue
-            target = _target(answer, family, value, bare_ok=True)
+            period = _a_period_near(said, spoken)
+            # The family the figure is read in, which is the answer's own when it counts the same
+            # thing in another unit: the "names a list" rule below is asked of that family.
+            read_family, read_value = family, value
+            target = _target(answer, family, value, bare_ok=True, period=period)
+            if not target:
+                # The answer may name their own number as the figure to aim at: "Aim for about
+                # 150 minutes a week" for somebody doing exactly that.
+                target = _the_aim_that_is_their_number(answer, family, value)
             if not target:
                 # The answer may count the same thing in another unit: "20 minutes a day" against
                 # "two hours of study a day".
                 for (mine, theirs), factor in _CONVERT.items():
                     if mine != family:
                         continue
-                    other = _target(answer, theirs)
+                    # The list rule is about the kind of amount being read, so it is asked again
+                    # in the answer's own unit: an answer counting things in hours ("five
+                    # half-hours, three twenty-minute sessions") names one figure in minutes.
+                    other = _target(answer, theirs, period=period)
+                    if not other:
+                        # Or name their own figure in the other unit as the aim: "150 minutes a
+                        # week" is the guideline for somebody who says "i do 2.5 hours a week".
+                        other = _the_aim_that_is_their_number(
+                            answer, theirs, round(value / factor, 4))
                     if other:
                         # The factor turns their unit into the person's: two hours is 120 minutes.
                         target = (other[0] * factor, other[1] * factor, other[2])
+                        read_family, read_value = theirs, round(value / factor, 4)
                         break
             if not target:
+                continue
+            # The answer may be the bot reading their own figure back - "2.5 hours is at the 150
+            # minutes a week that answer named" - and the figure at the front of that line is
+            # theirs, not a figure to aim at. Their own number counts as an aim only when the
+            # answer says it as one ("Aim for about 150 minutes a week"), which is read above, so
+            # a reply that quotes them is stepped over for the answer before it.
+            if (not quoted_ok and spoken and spoken.lower() in (target[2] or "").lower()
+                    and abs(target[0] - value) < 1e-9 and abs(target[1] - value) < 1e-9
+                    and not _AIM_CUE.search(answer)):
+                # Their own number read as the aim, from an answer that quotes it back is the last
+                # thing tried: an answer that names a real aim is the better reading, and when
+                # there is none this is still better than no reply at all.
+                if quoted is None:
+                    quoted = (answer, [(value, family, spoken)])
+                continue
+            # An answer that names more than two figures of the kind being read ("add a daily
+            # twenty minutes", "two ten-minute walks") is not naming one figure to aim at, so
+            # which of them is the target would be a guess. Asked of the kind the figure was read
+            # in, not of the person's own kind: "five half-hours, or three twenty-minute sessions"
+            # is three counts of things in hours and one figure in minutes.
+            if len(_aims_named(answer, read_value, read_family)) > 2:
                 continue
             # A short answer often just says their own figure back ("You run 5k twice a week."), and
             # reading that as the figure to aim at would answer the person with what they had just
@@ -663,4 +860,7 @@ def _enough_against(answers, given, mine_values, said, more, too_much):
                     spoken[0].upper() + spoken[1:], aim)
             return "%s is short of the %s that answer named." % (
                 spoken[0].upper() + spoken[1:], aim)
+    if quoted:
+        return _enough_against([quoted[0]], quoted[1], mine_values, said, more, too_much,
+                               quoted_ok=True)
     return None

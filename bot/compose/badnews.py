@@ -23,6 +23,10 @@ something about a person or an animal are written that way: the person or the an
 there in the line.
 """
 import re
+try:  # the reading of a dream, so a dream of a death is not a death
+    from ..memory import dream as _dream
+except Exception:  # noqa: BLE001 - a reading that cannot be imported just adds no rule
+    _dream = None
 
 from ..understanding.normalize import LEXICON, without_the_figure_of_speech  # noqa: F401
 
@@ -140,6 +144,23 @@ LEFT_ME = (r"(?:\b(?:he|she|they|my (?:wife|husband|partner|boyfriend|girlfriend
 
 LEFT_ME_RE = re.compile(LEFT_ME, re.I)
 
+# The same leaving in the past tense without the "me": "my husband has left", "my wife left last
+# week", "my girlfriend has left". Every one of them was answered "Noted: your husband has left."
+# - the store reading a marriage ending back as a fact - because "left" is not one of the tenses
+# of "leave" the readers knew: "left me" was covered, "is leaving" was covered, "has left" was
+# not. What can follow it and still be a leaving is the time it happened, or the end of the line;
+# a place or a thing after it means the verb went somewhere or handed something over ("left for
+# work", "left the house", "left his keys"), which is not this.
+PARTNER_LEFT = (
+    r"\b(?:my (?:wife|husband|partner|boyfriend|girlfriend|fianc\w*|ex)|my marriage)\b"
+    r"[^.!?]{0,30}?\b(?:has|have|had|just|recently|already|suddenly|now|then|finally)?\s*\bleft\b"
+    r"(?=\s*(?:$|[.!?,;]|\b(?:me|us|and|but|because|so|now|already|again|too|last|this|"
+    r"yesterday|today|tonight|morning|evening|week|month|year|night|day|suddenly|recently|"
+    r"at\s+(?:christmas|new\s+year|the\s+weekend|easter)|in\s+\w+|"
+    r"after\s+\w+|before\s+\w+|since\s+\w+)\b))")
+
+PARTNER_LEFT_RE = re.compile(PARTNER_LEFT, re.I)
+
 
 # The same leaving said about the partner without the "me": "my wife is leaving", "my partner is
 # leaving and i dont know what to do", "i think my partner wants to leave". The verb on its own is
@@ -153,7 +174,13 @@ PARTNER_LEAVING = (
     r"tells me|wants?|wanted|might|may|will|would|thinks?|thinking)\b[^.!?]{0,26}?"
     r"\bleav(?:e|es|ing)\b"
     r"(?!\s+(?:me\b|for\b|to\b|on\b|at\b|in\b|early\b|home\b|work\b|school\b|the\b|"
-    r"her\b|his\b|their\b|a\b|an\b|this\b|that\b))")
+    r"her\b|his\b|their\b|a\b|an\b|this\b|that\b"
+    # Time off is the same word and is not a leaving: the word after it is what tells them
+    # apart, the way the place after "leaving for work" does. "my husband has leave booked for
+    # july" was answered with the pool for being left.
+    r"|approved\b|booked\b|due\b|owing\b|remaining\b|allowance\b|entitlement\b|days?\b|"
+    r"pay\b|request\b|year\b|starts?\b|begins?\b|ends?\b|cancell?ed\b|denied\b|"
+    r"refused\b|pending\b|confirmed\b|carried\b|unused\b|balance\b))")
 
 PARTNER_LEAVING_RE = re.compile(PARTNER_LEAVING, re.I)
 
@@ -249,11 +276,26 @@ NOT_THEIRS = re.compile(
     r"parents?|family|in[-\s]?laws?|step\w+|grand\w+|landlord)\b")
 PARTNER = re.compile(r"\b(?:wife|husband|partner|boyfriend|girlfriend|fianc\w*|ex)\b")
 
+# "Leave" is a noun as often as a verb, and the noun is time off, which is usually good news:
+# "my husband got his leave approved" and "my husband has leave booked for july" were met with
+# "That's a hard thing to hear. Where are you with it" - a condolence for a holiday. A
+# determiner or a possessive in front of it is what makes it the noun, and the leaving readers
+# read the line with those taken out, so no pattern here has to know the difference.
+_LEAVE_THE_NOUN = re.compile(
+    r"\b(?:his|her|their|my|our|your|its|the|some|any|no|annual|maternity|paternity|parental|"
+    r"shared|sick|paid|unpaid|compassionate|study|garden|special|sabbatical|holiday)\s+leave\b")
+
+
+def _without_the_noun_leave(said):
+    """The line with "his leave" and "annual leave" taken out: time off is not a leaving."""
+    return " ".join(_LEAVE_THE_NOUN.sub(" ", said).split())
+
 
 def _a_leaving_at_all(said):
     """The leaving in any of its wordings: left me, is leaving, or the marriage ending said plain."""
+    said = _without_the_noun_leave(said)
     if not (LEFT_ME_RE.search(said) or PARTNER_LEAVING_RE.search(said)
-            or MARRIAGE_ENDED_RE.search(said)):
+            or PARTNER_LEFT_RE.search(said) or MARRIAGE_ENDED_RE.search(said)):
         # A leaving reported rather than announced is the person's own when nobody else is named
         # in it: "my sister said shes leaving her husband" is a question about the sister, and it
         # has its own answer, so the report stands aside for anybody the line puts beside them.
@@ -281,7 +323,7 @@ def reads_as_a_reported_leaving(clean):
     `compose.step_when_low` can stand down for it without losing the carve-out the partner
     leaving needs.
     """
-    said = " ".join(str(clean or "").lower().split())
+    said = _without_the_noun_leave(" ".join(str(clean or "").lower().split()))
     if not REPORTED_LEAVING_RE.search(said) or NOT_THEIRS.search(said):
         return False
     return not (LEFT_ME_RE.search(said) or PARTNER_LEAVING_RE.search(said)
@@ -423,7 +465,11 @@ BAD_NEWS_ITSELF = tuple(re.compile(pattern) for pattern in (
     # "my girlfriend had a miscarriage last month" must never be noted back at her.
     r"\bmiscarriage(?:s)?\b(?! of justice)|\bmiscarried\b",
     r"\bstill ?born\b|\bstill ?birth\b",
-    r"\b(?:lost|losing|we lost) (?:the|our|her|his|their) baby\b",
+    # What follows the baby decides: "losing the baby weight" and "losing the baby belly" are a
+    # body, and "losing the baby" or "losing our baby clothes" are not the news this pool answers.
+    r"\b(?:lost|losing|we lost) (?:the|our|her|his|their) baby\b"
+    r"(?!\s+(?:weight|belly|tummy|fat|pounds?|stones?|kilos?|inches|clothes|things|stuff|"
+    r"room|pram|toys?|seat|carrier|monitor|name|bag|book)\b)",
     # A suicide among the people a person knows: "my friend killed himself". The person has to
     # be there, so "he killed it at the gig" stays praise, and a laugh right after it stays a
     # joke ("he killed himself laughing").
@@ -777,6 +823,21 @@ BODY = (r"(?:head|throat|ear|ears|eye|eyes|tooth|teeth|back|knee|shoulder|arm|le
         r"scalp|spine|ribs?|shins?|calf|calves|thighs?|groin|kidneys?|bladder|nails?|heels?|"
         r"palms?|soles?|thumbs?|")
 BODY = BODY[:-1] + ")"
+
+# The parts a body's trouble is said of - a joint, a limb, a bone. "my wife has a bad back" is a
+# back that has been giving trouble, and the carer's answer is the gentle one: keep them moving,
+# ask how it is slowing them up. The parts below are the ones the word "bad" cannot mean an
+# illness with, which is what makes them a separate list.
+HURTS = (r"(?:back|knee|knees|hip|hips|shoulder|shoulders|arm|arms|leg|legs|foot|feet|ankle|"
+         r"ankles|wrist|wrists|elbow|elbows|neck|hand|hands|rib|ribs|shin|shins|calf|calves|"
+         r"thigh|thighs|spine|jaw|heel|heels|thumb|thumbs|toe|toes|finger|fingers|"
+         r"hip|knees|joints?)")
+# And the parts where "bad" means the illness that part catches, not a hurt: a bad chest is a
+# chest infection, a bad throat a sore throat, a bad ear an ear infection. British usage, and the
+# one that matters - "is anything helping at all, heat, a cushion, taking it gently" is advice for
+# a joint and nonsense for a chest.
+ILL_PART = (r"(?:chest|throat|stomach|tummy|head|ear|ears|earache|tooth|teeth|toothache|nose|"
+            r"sinus|eye|eyes|gums?|mouth|cheek|cheeks)")
 SICK = (r"(?:sore|cough|coughing|headache|migraine|toothache|earache|rash|itchy|itching|"
         r"infection|infected|cramps?|nauseous|nausea|dizzy|swollen|swelling|aching|aches?|"
         r"throw up|throws up|threw up|throwing up|vomit\w*|constipated|bloated|diarrhoea|"
@@ -955,7 +1016,7 @@ PET_NAMED_CONDITION = (
 
 
 def _someone_elses_symptoms(who, sick=CARED_SICK, owner=r"my|our", named=None,
-                            generic=True, body_only=False):
+                            generic=True, body_only=False, part=None):
     """The shapes a line about somebody else being unwell takes, for the names in `who`.
 
     A person and an animal are described the same way ("my son has a cough", "my dog has a
@@ -987,9 +1048,14 @@ def _someone_elses_symptoms(who, sick=CARED_SICK, owner=r"my|our", named=None,
                    r"(?:" + HURT + r"|infected|playing up)\b", re.I),
         # "my wife has a bad back", "my dad has a gammy knee": the qualifier is what makes the
         # body part the trouble rather than a replacement, a brace or an appointment about it.
-        re.compile(rf"\b(?:{owner})\s+{who}\s+(?:has|have|had|got)\s+(?:a|an)?\s*"
+        # "has got" is the same shape said the long way, and it is the shape the reading hands
+        # on: a hurried "me mums got a bad chest" is repaired to "my mum has got a bad chest",
+        # which matched neither "has a bad" nor "got a bad" - the possessive was already fixed
+        # and the verb was still in the way, so the person's own body took a line about their
+        # mother. The possessive tolerates the plural for the same reason ("my mums got ...").
+        re.compile(rf"\b(?:{owner})\s+{who}(?:'s|s)?\s+(?:has|have|had|got)(?:\s+got)?\s+(?:a|an)?\s*"
                    r"(?:bad|sore|dodgy|gammy|weak|dicky|knackered|broken|cracked|twisted|swollen|"
-                   rf"stiff|aching)\s+{BODY}\b", re.I),
+                   rf"stiff|aching)\s+{part or BODY}\b", re.I),
         ])
     if named:
         # The animal is named or called something, or the condition is said with a possessive:
@@ -1020,12 +1086,17 @@ CHILD_BY_AGE = re.compile(
 
 # The people a person looks after: "my child has a rash" is a parent worried at nine in the
 # evening, and the reply is for the carer.
-CARER_SYMPTOM = _someone_elses_symptoms(KIN) + (CHILD_BY_AGE,)
+# The parts a body's "bad" is spoken of - a chest, a throat, an ear - are the illness a part
+# catches, so they are the carer's illness lines; `CARER_BODY` below is the joints. Appended to
+# the shapes main already reads rather than replacing them, so a child named by age still counts
+# as the carer's. See `_someone_elses_symptoms`'s `part=`.
+CARER_SYMPTOM = (_someone_elses_symptoms(KIN) + (CHILD_BY_AGE,)
+                 + _someone_elses_symptoms(KIN, generic=False, body_only=True, part=ILL_PART))
 # The same lines when what is wrong is a body rather than an illness: "my wife has a bad back" is
 # not a cough, and the carer's illness lines ("plenty to drink and let them rest", "ring 111 if
 # that changes") are written for a child with a temperature. A hurt that has been there a while
 # wants a gentler answer, one that asks about them and keeps them moving, so it gets its own pool.
-CARER_BODY = _someone_elses_symptoms(KIN, body_only=True)
+CARER_BODY = _someone_elses_symptoms(KIN, body_only=True, part=HURTS)
 # The animals they look after: the same shapes, and the vet's line.
 PET_SYMPTOM = _someone_elses_symptoms(PETS, CARED_SICK + "|" + PET_NAMED_CONDITION,
                                        owner=r"my|our|the", named=PET_NAMED_CONDITION)
@@ -1155,7 +1226,11 @@ SUICIDE = re.compile(
 SUDDEN_LOSS = tuple(re.compile(pattern) for pattern in (
     r"\bmiscarriage(?:s)?\b(?! of justice)|\bmiscarried\b",
     r"\bstill ?born\b|\bstill ?birth\b",
-    r"\b(?:lost|losing|we lost) (?:the|our|her|his|their) baby\b",
+    # What follows the baby decides, here as in the hard-week list above: "losing the baby
+    # weight" and "losing the baby belly" are a body, not a bereavement.
+    r"\b(?:lost|losing|we lost) (?:the|our|her|his|their) baby\b"
+    r"(?!\s+(?:weight|belly|tummy|fat|pounds?|stones?|kilos?|inches|clothes|things|stuff|"
+    r"room|pram|toys?|seat|carrier|monitor|name|bag|book)\b)",
     rf"\b{LIVING}\b[^.!?]{{0,24}}\bkilled (?:him|her|them)sel(?:f|ves)\b"
     r"(?!\s+(?:laughing|giggling))",
     r"\b(?:took|taken|taking) (?:his|her|their) own life\b|\bcommitted suicide\b",
@@ -1169,6 +1244,13 @@ PREGNANCY_BLEEDING = tuple(re.compile(pattern) for pattern in (
 def reads_as_sudden_loss(clean):
     """Whether a line is a pregnancy that has ended or someone who took their own life."""
     text = " ".join(str(clean or "").lower().split())
+    # A dream of a death is not a death, and this reading takes the turn as it comes: "i dreamt my
+    # dad died" was answered with the condolence for a death that had not happened, over the top
+    # of the dream module's own answer. A death said *before* the dream ("my dad died and i dreamt
+    # about him") is in the waking life and keeps this reading.
+    if _dream is not None and _dream.a_dream_is_not_happening(text) \
+            and not _dream.a_death_came_first(text):
+        return False
     return (any(pattern.search(text) for pattern in SUDDEN_LOSS) or bool(SUICIDE.search(text))
             or reads_as_someones_death(text))
 

@@ -88,6 +88,16 @@ LEADS = (
     "This one works without {thing}: {step}",
     "Then skip {thing} - the rest of it stands: {step}",
 )
+# A thing the person cannot use is a limit, not a dislike, and the plan has nothing to hand back
+# without it: "gyms" is not something they hate - it is not open to them. The reply names the limit
+# and asks for the alternative, which is the one question that decides the plan. Every frame dodges
+# the copula, because the thing may be plural ("gyms") or carry its determiner ("the gym") and
+# "Gyms is out" is not something anybody says.
+CANNOT_USE_ASKS = (
+    "No {bare}, then - what could you do instead?",
+    "So {thing} won't work - what else is there?",
+    "Okay, so not {thing}: what could you do instead?",
+)
 # The refusal of a move, said as the thing they will not do: "i dont want to kill it" after the
 # mouse answer, "i dont want to take anything" after the sleep one. Nothing is disliked here - no
 # thing is named to leave out of the plan - so `the_thing` does not read it, and the answer's own
@@ -222,6 +232,64 @@ def the_thing(text):
             continue
         thing = found.group("thing").strip(" .!,;:")
         if not thing or thing.lower() in NOT_A_THING:
+            return None
+        return thing
+    return None
+
+# The verbs a limit is said with: "i cant do gyms", "i cant afford a bike", "i cant eat dairy".
+# The verb is what keeps an idiom out - "i cant believe it", "i cant wait", "i cant sleep", "i
+# cant cope" are not a part of the plan being ruled out, and none of those words is here. The
+# thing after the verb is still checked against NOT_A_THING, so "i cant do it" stays the
+# composer's. A dislike has its own verbs and its own reader (`the_thing`), so "i cant stand the
+# gym" is a grumble about the gym rather than a limit on it.
+UNABLE_VERB = (r"do|use|afford|eat|have|get\s+to|go\s+to|join|manage|handle|attend|access|"
+               r"buy|pay\s+for|reach|keep\s+up")
+CANNOT_USE = (
+    re.compile(r"^\W*(?:(?:and|but|so|oh|also|well|yeah|yep|ok|okay|right|alright)\W+)*"
+               r"(?:the\s+problem\s+is\s+|its\s+just\s+that\s+)?"
+               r"i\s+(?:(?:just|really|actually|properly|kind\s+of|sort\s+of)\s+)*"
+               r"(?:cant|cannot|can\s*not|can'?t)\s+(?:" + UNABLE_VERB + r")\s+"
+               r"(?P<thing>.+)$", re.I),
+    # "i dont have a car", "we havent got an oven", "i dont own a car": a lack said with a thing of
+    # its own. The determiner is what keeps it from reading "i dont have time" as the plan's own
+    # word: "time" and the rest of the abstract ones are not things a step can be built without,
+    # so they are left to the composer.
+    re.compile(r"^\W*(?:(?:and|but|so|oh|also|well|yeah|yep|ok|okay|right|alright)\W+)*"
+               r"(?:the\s+problem\s+is\s+|its\s+just\s+that\s+)?"
+               r"(?:i|we)\s+(?:(?:just|really|actually)\s+)*"
+               r"(?:dont|do\s*not|don'?t|havent|have\s*not|haven'?t)\s+(?:got\s+)?"
+               r"(?:have\s+|own\s+)?(?P<thing>(?:a|an|any|the|my|our)\s+[a-z][a-z' ]{0,24})$",
+               re.I),
+)
+# A limit of these is not a part of a plan: "i dont have time" and "i cant afford it" are about the
+# chat as a whole, not about one step that can be done another way.
+NOT_A_LIMIT = frozenset("""time clue idea choice chance point reason way word answer option
+    money cash budget it that this them those these""".split())
+
+
+def the_thing_they_cannot_use(text):
+    """The thing the person has just said they cannot do or have not got, or None.
+
+    "i cant do gyms" after the plan for losing a stone is the same shape as "i hate exercise": one
+    part of the plan is out - except that nothing in it can be handed back without the thing, so
+    the answer has to ask what is left. The line has to be short and to name the thing itself, so
+    "i cant do it" and "i cant believe it" are not this.
+    """
+    said = _flat(text)
+    if not said or "?" in said or len(said.split()) > MOST_WORDS:
+        return None
+    for pattern in CANNOT_USE:
+        found = pattern.match(said)
+        if not found:
+            continue
+        thing = found.group("thing").strip(" .!,;:")
+        core = " ".join(word for word in _words(thing) if word not in STOP)
+        if not thing or not core or core in NOT_A_THING or core in NOT_A_LIMIT:
+            return None
+        # A limit with a reason or a second half ("i cant do gyms because of my knee") is not a
+        # thing the plan can be built around: the reason is what the person is telling them, and
+        # the composer's reply to that is the one to keep.
+        if re.search(r"\b(?:because|since|as|though|although|but|unless|if|when)\b", thing.lower()):
             return None
         return thing
     return None
@@ -584,13 +652,8 @@ def _before_this_turn(memory, text):
     return dict(memory, turns=turns)
 
 
-def answer_for(text, memory):
-    """The reply for a stated dislike of something the last answer leaned on, or None."""
-    if not isinstance(memory, dict):
-        return None
-    thing = the_thing(text)
-    if not thing:
-        return None
+def _the_reply_for(text, memory, thing, limited):
+    """The reply for a thing the line rules out of the answer above it, or None."""
     # The line's own subject, not the chat's: the reading in memory carries the chat's topic, and
     # a line that moves the chat on would then look like it is still on the old one.
     about = (understand(_flat(text), {}) or {}).get("topic_own")
@@ -599,14 +662,20 @@ def answer_for(text, memory):
             continue
         if back > 1 and not repeat._about_the_same_thing(asked, said, memory):
             continue
-        # The answer being objected to has to be about the same thing the line is about. A line
-        # that moves the chat on ("how do i fix the tap" then "i hate exercise") is not an
-        # objection to the tap answer, and handing over the tap's step would be nonsense.
-        there = (understand(_flat(asked), {}) or {}).get("topic_own")
-        if about and there and about != there:
-            continue
-        if not _leans_on_it(said, thing, asked):
-            continue
+        # A stated dislike has to be of a thing the answer leaned on, or every grumble in a chat
+        # is answered as part of the plan. A limit is a different claim: it is a fact about the
+        # person, and it stands whatever the answer above said. "i want to lose a bit of weight
+        # before summer" then "i cant do gyms" got nothing back at all, because the plan's own
+        # words are about food and the line's are about the season it is for.
+        if not limited:
+            # The answer being objected to has to be about the same thing the line is about. A
+            # line that moves the chat on ("how do i fix the tap" then "i hate exercise") is not
+            # an objection to the tap answer, and handing over the tap's step would be nonsense.
+            there = (understand(_flat(asked), {}) or {}).get("topic_own")
+            if about and there and about != there:
+                continue
+            if not _leans_on_it(said, thing, asked):
+                continue
         step = None
         sentence = ""
         framed = False
@@ -616,6 +685,14 @@ def answer_for(text, memory):
                 framed = under
                 break
         if not step:
+            # Nothing in the answer can be handed back as a step that does not need the thing. For
+            # a stated dislike that is the composer's turn; for a limit it is the one turn this
+            # module can still take, because the person has told it what will not work and the
+            # alternative is what decides the plan.
+            if limited:
+                ask = repeat.pick(CANNOT_USE_ASKS, memory, text).format(
+                    thing=thing, bare=THE_NOUN.sub("", thing))
+                return repeat._handed_back(memory, ask)  # noqa: SLF001 - said, if not in so many words
             continue
         if repeat._already_repeated(step, memory):  # noqa: SLF001 - said once already
             step = detail._first_clause(step)  # noqa: SLF001 - the shorter form is the repeat
@@ -642,3 +719,29 @@ def answer_for(text, memory):
             repeat._handed_back(memory, sentence)  # noqa: SLF001 - said, if not in so many words
         return repeat._handed_back(memory, reply)  # noqa: SLF001 - the next ask counts it said
     return None
+
+
+def answer_for(text, memory):
+    """The reply for a stated dislike of something the last answer leaned on, or None."""
+    if not isinstance(memory, dict):
+        return None
+    thing = the_thing(text)
+    if not thing:
+        return None
+    return _the_reply_for(text, memory, thing, False)
+
+
+def answer_for_a_thing_they_cannot_use(text, memory):
+    """The reply for a thing the person cannot use, or None.
+
+    Asked only where the composer has answered with nothing - the nod that fits any message
+    ("Thanks for telling me - I'm here if you want to dig into any of that") - because an answer
+    that adapts to a thing they have not got ("Skip the cheese: a frittata: whisk 6 eggs...")
+    already does better than any question this module could ask about it.
+    """
+    if not isinstance(memory, dict):
+        return None
+    thing = the_thing_they_cannot_use(text)
+    if not thing:
+        return None
+    return _the_reply_for(text, memory, thing, True)

@@ -23,6 +23,9 @@ ANSWERS = ("nature-and-weather", "science")
 ANIMALS = (
     {"names": ("elephant", "elephants", "african elephant", "african elephants"),
      "life": "Elephants live 60 to 70 years in the wild, and a big bull can reach 70.",
+     "gestation": "An elephant carries her calf for about 22 months, the longest of any land "
+                  "animal - one calf, about 100 kg at birth, and the herd stands round her while "
+                  "she gives birth.",
      "size": "An African elephant is the biggest land animal: a big bull is about 3 metres at "
              "the shoulder and 6 tonnes, and a newborn calf is around 100 kg.",
      "speed": "An elephant can charge at about 40 km/h, which is faster than a person can run."},
@@ -44,6 +47,8 @@ ANIMALS = (
              "by creeping close first."},
     {"names": ("giraffe", "giraffes"),
      "life": "Giraffes live about 25 years in the wild.",
+     "gestation": "A giraffe carries her calf for about 15 months, and the calf drops nearly two "
+                  "metres to the ground when it is born, then stands within the hour.",
      "size": "The giraffe is the tallest animal: males reach about 5.5 metres, and more than a "
              "third of that is neck. The neck has seven bones, the same number as yours.",
      "speed": "A giraffe can run at about 50 km/h, and its legs are long enough that a kick can "
@@ -54,6 +59,8 @@ ANIMALS = (
              "to follow than a straight sprint."},
     {"names": ("rhino", "rhinos", "rhinoceros"),
      "life": "Rhinos live 40 to 50 years.",
+     "gestation": "A rhino carries her calf for about 16 months, so well over a year, and a "
+                  "single calf every two to four years is normal.",
      "size": "A white rhino is the second biggest land animal, at about 2,300 kg; a black rhino "
              "is smaller, around 1,000 kg, and has the longer horn.",
      "speed": "A rhino can run at about 50 km/h, and it turns faster than you would expect for "
@@ -87,15 +94,21 @@ ANIMALS = (
      "speed": "A red kangaroo can reach about 70 km/h in a burst, and it is faster over distance "
              "than a horse."},
     {"names": ("whale", "whales"),
-     "life": "Whales are long-lived: a blue whale lives 80 to 90 years, a humpback about 45 to 50."},
+     "life": "Whales are long-lived: a blue whale lives 80 to 90 years, a humpback about 45 to 50.",
+     "gestation": "A whale carries for 10 to 12 months, and the calf is born tail first and "
+                  "swims up for its first breath within seconds."},
     {"names": ("blue whale", "blue whales"),
      "life": "Blue whales live 80 to 90 years, and some live past 100.",
+     "gestation": "A blue whale carries her calf for 10 to 12 months, and it is about 7 metres "
+                  "long and 2.5 tonnes when it is born.",
      "size": "The blue whale is the biggest animal alive, and the biggest that has ever lived: "
              "up to 30 metres and around 150 tonnes, with a heart the size of a small car.",
      "speed": "A blue whale cruises at about 8 km/h and can burst to around 30 km/h when it is "
              "frightened."},
     {"names": ("dolphin", "dolphins", "bottlenose dolphin", "bottlenose dolphins"),
      "life": "Bottlenose dolphins live 40 to 50 years.",
+     "gestation": "A bottlenose dolphin carries her calf for about 12 months, and she feeds it "
+                  "milk for a year and a half to two years after that.",
      "size": "A bottlenose dolphin is about 2.5 to 3 metres and 200 to 300 kg."},
     {"names": ("shark", "sharks"),
      "life": "Most sharks live 20 to 30 years, and the Greenland shark can live about 400, "
@@ -158,14 +171,74 @@ ANIMALS = (
      "life": "A wild mouse usually lives under a year, and a pet one two to three years."},
     {"names": ("rat", "rats"),
      "life": "A wild rat usually lives about a year, and a pet rat two to three years."},
-    # Farm animals, for the food question alone: "what does a cow eat" is a child's question, and
-    # a row with names and no other fact answers it from the EATS table below.
-    {"names": ("cow", "cows", "cattle", "dairy cow", "dairy cows")},
-    {"names": ("sheep", "sheeps")},
-    {"names": ("pig", "pigs", "piglet", "piglets", "sow", "sows", "boar", "boars")},
-    {"names": ("chicken", "chickens", "hen", "hens", "cockerel", "cockerels")},
-    {"names": ("goat", "goats", "billy goat", "nanny goat")},
-    {"names": ("pony", "ponies")},
+    # Farm animals, for the food question and the due date: "what does a cow eat" is a child's
+    # question, and a row with names and no food fact answers it from the EATS table below. The
+    # `gestation` line is the answer to "how long is a cow pregnant", which reached the human
+    # fertility card on main - a year of trying and folic acid, for a cow.
+    {"names": ("cow", "cows", "cattle", "dairy cow", "dairy cows"),
+     "gestation": "A cow carries her calf for about 283 days, so nine months and a week - the "
+                  "vet can narrow it down, and a heifer with a first calf often goes a few days "
+                  "over. Signs she is close: a bagged-up udder, a slack tail end and restlessness "
+                  "the day before."},
+    {"names": ("sheep", "sheeps", "ewe", "ewes", "lamb", "lambs"),
+     "gestation": "A sheep carries her lambs for about 147 days, so five months, and a ewe with "
+                  "twins or triplets often goes a few days early. The last week she wants "
+                  "watching twice a day, because a ewe in trouble at lambing goes downhill fast."},
+    {"names": ("pig", "pigs", "piglet", "piglets", "sow", "sows", "boar", "boars"),
+     "gestation": "A pig carries her litter for 115 days - three months, three weeks and three "
+                  "days, which is the rule pig keepers use - and a litter is 8 to 12 piglets."},
+    # A hen does not carry at all, so the due-date question is really the hatching one: 21 days
+    # under a broody hen, and the same in an incubator.
+    {"names": ("chicken", "chickens", "hen", "hens", "cockerel", "cockerels"),
+     "gestation": "A hen is never pregnant: she lays an egg a day or so and the chick grows "
+                  "outside her. An egg takes 21 days to hatch, under a broody hen or in an "
+                  "incubator at 37.5C, turned an odd number of times a day."},
+    {"names": ("goat", "goats", "billy goat", "nanny goat", "doe goat"),
+     "gestation": "A goat carries her kids for about 150 days, so five months, and twins are the "
+                  "common litter. Her udder fills in the last two weeks and she will look for a "
+                  "corner to be alone in - that is the day to leave her quiet."},
+    # A pony first, because the row is read for its names in order and "what do horses eat"
+    # has to reach the horse's own food line: a row whose names begin with "pony" answers it
+    # with a pony's ration instead.
+    {"names": ("pony", "ponies"),
+     "gestation": "A horse or pony carries her foal for about 340 days, so eleven months, and "
+                  "anything from 320 to 370 is normal - which is why the vet dates it from the "
+                  "covering rather than guessing. A mare foals fast, usually at night, and the "
+                  "foal should be up and feeding within two hours."},
+    {"names": ("horse", "horses", "mare", "mares", "foal", "foals"),
+     "gestation": "A horse carries her foal for about 340 days, so eleven months, and anything "
+                  "from 320 to 370 is normal - which is why the vet dates it from the covering "
+                  "rather than guessing. A mare foals fast, usually at night, and the foal "
+                  "should be up and feeding within two hours."},
+    # Animals with a due date and no other row of their own. A dog was going to the human
+    # fertility card on main, and so was a rabbit.
+    {"names": ("dog", "dogs", "bitch", "bitches", "puppy", "puppies", "labrador", "spaniel"),
+     "gestation": "A dog is pregnant for about 63 days, so nine weeks, and anything from 58 to 68 "
+                  "is normal - the date is a window, not a day. She is usually scanned or x-rayed "
+                  "around 55 days to count the pups, and she will want a quiet box a week before."},
+    # no bare "doe" or "does" among the names: `_work_out_forms` stems "does" to "doe", so
+    # "how long does pregnancy last" was read as a rabbit
+    {"names": ("rabbit", "rabbits", "bunny", "bunnies"),
+     "gestation": "A rabbit kindles about 31 days after mating, so a month - which is why a "
+                  "rabbit you thought was alone can produce a litter before you have noticed she "
+                  "was pregnant. Leave her alone with a nest box and do not tidy it for a few "
+                  "days after the kits arrive."},
+    {"names": ("guinea pig", "guinea pigs", "cavy", "cavies"),
+     "gestation": "A guinea pig carries her pups for 63 to 70 days, so about nine to ten weeks, "
+                  "and the litter is usually two to four - born furred, eyes open and eating "
+                  "within hours."},
+    {"names": ("hamster", "hamsters"),
+     "gestation": "A hamster is pregnant for only 16 days, so barely over two weeks, and litters "
+                  "are five to nine. The father has to come out before she gives birth, because "
+                  "he will be chased and bitten once the pups are there."},
+    {"names": ("ferret", "ferrets"),
+     "gestation": "A ferret is pregnant for about 42 days, so six weeks, and a jill can be "
+                  "delayed: if she was mated late in the year the litter waits until the spring."},
+    # The zoo questions came to the human fertility card, because these animals had rows about
+    # how long they live and what they eat but no due date at all. An orca had no row.
+    {"names": ("orca", "orcas", "killer whale", "killer whales"),
+     "gestation": "An orca carries her calf for 15 to 18 months, the longest of the dolphins, "
+                  "and a calf stays with its mother for years."},
     {"names": ("donkey", "donkeys")},
     # a lizard in a tank and a polar bear on the telly are the same question: what does it eat
     {"names": ("lizard", "lizards", "bearded dragon", "leopard gecko")},
@@ -849,6 +922,53 @@ ENTRIES = [
            ("live", "lives", "lived", "lifespan", "life span", "life expectancy",
             "how old do", "how old can", "how many years")),
           _fact("life")),
+    # How long it is pregnant. The names are only the animals with a `gestation` line, so a line
+    # about an animal with no due date passes on rather than reaching a card about something
+    # else, and a human pregnancy is not this row at all.
+    entry("animal-gestation",
+          (_names_with("gestation"),
+           ("pregnant", "pregnancy", "gestation", "how long is a", "how long are", "how long is my",
+            "how long do", "how many days", "how many weeks", "how many months", "due date",
+            "when is she due", "when will she", "how far along", "give birth", "in pup",
+            "is due", "due date", "due any day", "due next week", "due in", "due soon",
+            "when is my", "when will my",
+            "in lamb", "in foal", "in kid", "expecting", "kindle", "farrow", "whelp", "foal")),
+          _fact("gestation"),
+          # a line about cooking the animal, or about the food in the fridge, is the kitchen's
+          # question: "how long do i roast a whole chicken" was answered "A hen is never
+          # pregnant", and so were the cooking weights on the memory tests
+          avoid=("cook", "cooking", "cooked", "roast", "roasted", "roasting", "bake", "baked",
+                 "boil", "boiled", "poach", "poached", "fry", "fried", "grill", "grilled",
+                 "oven", "air fryer", "slow cooker", "barbecue", "bbq", "thaw", "thawed",
+                 "defrost", "defrosted", "reheat", "reheated", "stuffing", "carve", "carving",
+                 "leftovers", "per kg", "per 500g", "per kilo", "joint", "recipe", "sausage",
+                 "mince", "minced", "fillet", "breast", "thigh", "brisket", "steak", "chop",
+                 "chops",
+                 # the bird as dinner with no cooking verb at all: "how long do i need for the
+                 # chicken", "chicken legs in a curry, how long do they simmer" and "how long do
+                 # the wings take" were all "A hen is never pregnant". A cut of meat, a pot and a
+                 # time are the kitchen's words, so they stand the due date down.
+                 "leg", "legs", "wing", "wings", "drumstick", "drumsticks", "simmer",
+                 "simmering", "stew", "stewed", "soup", "stock", "curry", "casserole", "pie",
+                 "dinner", "supper", "sandwich", "how long do i need for", "time for the",
+                 # a person asking about their own pregnancy, a couple trying, or a symptom in a pet is
+                 # the health row or the vet question, not a due date
+                 "i am pregnant", "im pregnant", "i'm pregnant", "my wife", "my girlfriend",
+                 "my partner", "my husband", "human", "trying for a baby", "ivf", "period",
+                 "my period", "sick", "vomiting", "not eating", "losing weight", "bleeding",
+                 "water broke", "waters broke", "contractions",
+                 # the life span row and the size row key "how long" as well, and this row's
+                 # bias would otherwise take "how long do rabbits live" from them
+                 "live", "lives", "lived", "lifespan", "life span", "life expectancy",
+                 "how old", "weigh", "weighs", "weight", "big", "large", "size", "tall",
+                 # nor is a puppy's first walk a due date
+                 "go out", "walks", "walk", "jabs", "vaccine", "vaccinated", "vaccinations",
+                 "training", "lead", "recall",
+                 # and a bitch coming into season is not a pregnancy: "when will my bitch come
+                 # into season" was told she was due in 63 days, which is a confident wrong answer
+                 "season", "seasons", "in season", "into season", "come into", "came into",
+                 "on heat", "in heat", "heat", "split heat", "silent heat"),
+          bias=2),
     # How big it is, or how much it weighs.
     entry("animal-size",
           (_names_with("size"),

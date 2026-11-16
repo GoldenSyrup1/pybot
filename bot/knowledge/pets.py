@@ -6,7 +6,7 @@ a vet rather than guess.
 """
 import re
 
-from .lookup import PRESENT_ASK, about_them, a_weight, entry
+from .lookup import PRESENT_ASK, about_them, a_weight, entry, not_keeping_an_eye_on_it
 
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
 # "what can a hamster eat" and "can guinea pigs eat bananas" are read as food-and-drink, because the
@@ -47,6 +47,22 @@ ANIMAL_NOUNS = ("dog", "dogs", "puppy", "puppies", "pup", "bitch", "doggy", "cat
 # the wrong cat. A reaction word is therefore a way of asking for both rows, and the key of each
 # still has to name the two animals, so "my dog hates the car" and "my cat hates being picked up"
 # are not introduction questions.
+# An animal's claw in a person is what the cat-scratch card is written for, so the line has to
+# name the animal. The row keys on the shape the wound comes in, and one of those shapes is
+# "scratching my", which the loose forms also read as "scratched my" - so "i scratched my arm"
+# carries two signals (that shape and "my arm") and gets "Wash a cat scratch under running water"
+# with no animal in the line while the person has scratched themselves. The shapes that do name
+# the animal ("cat scratch", "scratched by a cat") still carry it, so the card stands aside only
+# when nothing in the line is an animal.
+_THE_CLAW_ANIMALS = frozenset(word for word in ANIMAL_NOUNS if word not in ("vet", "vets"))
+
+
+def _an_animal_did_it(understood):
+    """True only when the line names the animal whose claw the wound came from."""
+    words = " " + " ".join((understood or {}).get("words") or ()) + " "
+    return any(f" {word} " in words for word in _THE_CLAW_ANIMALS)
+
+
 _NEW_ANIMAL_REACTION = (
     "hates", "hate", "hated", "hates the", "hates him", "hates her", "hates it",
     "doesnt like", "doesn't like", "does not like", "not happy about", "not happy with",
@@ -325,6 +341,40 @@ def _an_eaten_creature(understood):
     return bool(line and _A_CREATURE.search(line))
 
 
+# A mushroom is not a creature but it is the same kind of line - something has already gone down
+# and the question is what to do now - and it needs the vet rather than a training tip. "my dog
+# ate a mushroom in the garden" was answered with "teach 'leave it'" once the lungworm card was
+# fenced off it, because the scatter for "dog" plus "ate" was all that was left.
+_A_FUNGUS = re.compile(
+    r"\b(?:mushrooms?|toadstools?|fungus|fungi|shrooms?|field mushrooms?|death ?caps?)\b")
+
+
+# Something has already gone down, or is going down now: "ate", "has eaten", "is eating",
+# "swallowed", "chewed", "licked", "nibbled", "got hold of", "keeps eating". The bare present is
+# not on the list on purpose. "Can dogs eat mushrooms", "is it ok if my dog eats mushrooms" and
+# "are mushrooms bad for dogs" ask whether a mushroom is safe, and nothing has happened yet:
+# telling a person to ring the vet before any symptoms is the ordinary question treated as an
+# emergency, which is the worst thing this card can do. The same verb, in the past, is the
+# emergency and keeps it.
+_A_FUNGUS_HAS_GONE_DOWN = re.compile(
+    r"\b(?:ate|eaten|eating|swallowed|swallowing|licked|licking|chewed|chewing|nibbled|"
+    r"nibbling|tasted|tasting|got hold of|got a|got one|got into|has had|had a|just had|"
+    r"keeps? eating|kept eating|been eating)\b")
+
+
+def _an_eaten_fungus(understood):
+    """True only when the line names the fungus AND something has already gone down.
+
+    The key can be earned with the present tense ("can dogs eat mushrooms" holds an animal, a
+    fungus and "eat"), so the guard has to read the tense as well as the subject: a question
+    about whether mushrooms are safe for a dog is not a dog that has eaten one, and it must not
+    get "ring the vet now, before any symptoms".
+    """
+    reading = understood or {}
+    line = str(reading.get("clean") or reading.get("text") or "").lower()
+    return bool(line and _A_FUNGUS.search(line) and _A_FUNGUS_HAS_GONE_DOWN.search(line))
+
+
 _PREGNANT_SELF = ("pregnant", "pregnancy", "expecting a baby", "expecting our", "due in",
                   "trimester", "weeks to go", "having a baby", "baby due")
 
@@ -502,6 +552,211 @@ def _kitten_kit(memory, understood):
             "toys save a lot of trouble, and nothing stringy or small enough to swallow.")
 
 
+# A rabbit and a guinea pig are the same question in the same words - "what do i need for a
+# rabbit", "how do i look after a guinea pig" - and the answer is not the same animal. The card
+# named rabbits and answered for both, so "what do i need for a guinea pig" was told to buy a
+# hutch for a rabbit, and "what do i need for a rabbit" reached the cooking row for rabbit meat,
+# because "need" is an asking-frame word: it is read as the frame and the animal was left as the
+# only word of the key. One handler, keyed on the animal the line names, and an `ask` so the
+# buying shape counts for the row.
+_SMALL_PET_KIT = {
+    # main's own guinea-pig text, kept word for word: this table exists so the card can answer
+    # the other half of its question (the cleaning), not to reword the set-up
+    "guinea pig": (
+        "A guinea pig needs a hutch with a big run attached, or a shed with floor space, hay "
+        "all day and a handful of nuggets with vitamin C in them, since they cannot make "
+        "their own. Keep two rather than one - a guinea pig on its own is a lonely animal - "
+        "and skip the small cage."),
+}
+_SMALL_PET_KIT["rabbit"] = (
+    "A rabbit needs a hutch with a run attached, or a big shed, plus hay all day, a water bottle, "
+    "a litter tray, bedding, a carrier for the vet and a friend of its own kind. A small cage "
+    "with an hour out is not enough for a rabbit, and hay is most of what it eats: it wears the "
+    "teeth down and keeps the gut moving.")
+# The buying shape: "what do i need for a rabbit", "what should i get before we get a guinea
+# pig", "what do i need to buy for one". A line that asks what to get *for* the animal is the
+# set-up question, and this is what says so once "need" has been read as the asking frame.
+_BUYING_FOR = re.compile(r"\b(?:need|needs|needed|want|wants|get|gets|buy|buys|getting|buying)"
+                         r"\b[\w\s,']{0,24}\b(?:for|before)\b")
+
+
+def _the_buying_shape(text):
+    return bool(_BUYING_FOR.search(str(text or "").lower()))
+
+
+_GUINEA_PIG_RE = re.compile(r"\b(guinea ?pigs?|guineas?|cav(?:y|ies))\b")
+_RABBIT_RE = re.compile(r"\b(rabbits?|bunn(?:y|ies))\b")
+_HAMSTER_RE = re.compile(r"\b(hamsters?|syrian|dwarf hamster)\b")
+
+# Every husbandry card has the same two faults: it answers for the animal it was written for
+# whatever animal the line names, and it answers the half of the card the writer had in mind
+# rather than the half that was asked. So the animal is read once, here, and each question
+# (the set-up, the cleaning, the yearly visit, the litter tray) is one table keyed by animal.
+# A card that has a table asks it instead of keeping its own copy of the answer.
+_PET_NAMES = (
+    ("guinea pig", _GUINEA_PIG_RE),
+    ("rabbit", _RABBIT_RE),
+    ("hamster", _HAMSTER_RE),
+    ("tortoise", re.compile(r"\b(tortoises?|tort|terrapins?)\b")),
+    ("bird", re.compile(r"\b(budgies?|parrots?|cockatiels?|canar(?:y|ies)|parakeets?)\b")),
+    ("fish", re.compile(r"\b(goldfish|fish|koi|betta|gupp(?:y|ies))\b")),
+    ("cat", re.compile(r"\b(cats?|kittens?)\b")),
+    ("dog", re.compile(r"\b(dogs?|pupp(?:y|ies))\b")),
+)
+
+
+def _the_pet_named(memory, understood, default=None):
+    """The animal the line names, else the one the chat was last about, else `default`.
+
+    A new owner says "we are getting a guinea pig" and then "can i keep just one": the second
+    line names no animal at all, and answering it with the rabbit card is how the set-up answer
+    and the companion answer both went to the wrong animal. `default` is None at the call site
+    that must not guess: a dog line is not a rabbit line because a rabbit came up earlier.
+    """
+    said = [_said(understood)]
+    if isinstance(memory, dict):
+        said += [str((turn or {}).get("user") or "").lower()
+                 for turn in (memory.get("turns") or [])[-3:]][::-1]
+    for line in said:
+        for name, pattern in _PET_NAMES:
+            if pattern.search(line):
+                return name
+    return default
+
+
+def _the_small_pet(memory, understood):
+    """The small animal this card is about: the one named, or the one the chat was about."""
+    return _the_pet_named(memory, understood, default="rabbit")
+
+
+# How often the hutch is cleaned is the same card's other question, and the set-up list answered
+# it: "how often should i clean the rabbit hutch" came back as things to buy.
+_CLEANING_ASK = re.compile(r"\b(?:clean|cleans|cleaning|clean out|clean it out|cleaned|scrub|"
+                           r"disinfect|smell|smells|smelly|stinks|wash|washing)\b")
+_PET_CLEANING = {
+    "rabbit": (
+        "Spot-clean the wet corner and the litter tray every day, change the bedding once a week "
+        "and give the hutch a deep clean once a month: rabbit urine soaks into wood and the "
+        "ammonia it gives off damages their lungs. Use a pet-safe disinfectant or a 1:10 white "
+        "vinegar solution, rinse and dry it before the rabbit goes back in, and skip the phenolic "
+        "ones like Jeyes fluid - they are toxic to small animals. Vinegar is also what takes the "
+        "chalky white urine marks off the floor."),
+    "guinea pig": (
+        "Spot-clean the wet corner and the litter tray every day, change the bedding once a week "
+        "and give the cage a deep clean once a month: guinea-pig urine soaks into wood and the "
+        "ammonia it gives off damages their lungs. Use a pet-safe disinfectant or a 1:10 white "
+        "vinegar solution, rinse and dry it before the guinea pigs go back in, and skip phenolic "
+        "ones like Jeyes fluid. Keep a handful of the old bedding to put back, because a cage "
+        "that smells completely new makes them nervous."),
+    "hamster": (
+        "Spot-clean the wet corner every day and change the bedding every few weeks, with a full "
+        "scrub of the cage once a month: hamster urine is concentrated and the ammonia builds up "
+        "fast in a small cage. Hot soapy water or a pet-safe cleaner, rinsed and dried right "
+        "through before the bedding goes back, because a damp cage gives a hamster a chill and a "
+        "chest infection. Put a handful of the old bedding back in the nest so the cage still "
+        "smells of home."),
+}
+
+
+# The set-up of each small animal, so a caretaker card can answer the cleaning question without
+# answering it with a shopping list.
+_PET_SETUP = dict(_SMALL_PET_KIT)
+_PET_SETUP["hamster"] = (
+    "A hamster needs a deep bed of paper or wood-shaving bedding, a solid wheel and a sand bath, "
+    "in a cage at least 80cm by 40cm on one level rather than tubes. Spot clean the wet corner "
+    "daily, change the bedding every few weeks, and give a water bottle rather than a bowl. They "
+    "are awake at night, so keep the cage out of the bedroom.")
+
+
+def _small_pet_setup(memory, understood):
+    """The set-up for the small animal the line actually names, not the one the card was written
+    for: a guinea pig is not a rabbit and is not fed like one. Cleaning is this card's other
+    question, and a list of things to buy is no answer to "how often should i clean the hutch".
+    """
+    animal = _the_small_pet(memory, understood)
+    if _CLEANING_ASK.search(_said(understood)):
+        return _PET_CLEANING[animal]
+    return _PET_SETUP[animal]
+
+
+def _the_hamster_basics(memory, understood):
+    """The hamster card holds the same two questions, so it answers the one that was asked."""
+    if _CLEANING_ASK.search(_said(understood)):
+        return _PET_CLEANING["hamster"]
+    return _PET_SETUP["hamster"]
+
+
+# A rabbit's yearly jab is not a puppy's: myxomatosis and two strains of RHD are what kill
+# rabbits, the jabs are yearly for life, and a rabbit that has never had one starts at any age.
+# The check-up card answered every animal with the puppy and kitten course, so "do rabbits need
+# vaccinations" came back as a puppy's first jabs.
+_PET_CHECKUP = {
+    "rabbit": (
+        "Rabbits need a yearly jab and it is the one people forget: myxomatosis and rabbit "
+        "haemorrhagic disease (RHD, both strains), usually as one combined injection, once a "
+        "year for life, and a rabbit that has never had one can start at any age - including an "
+        "older rescue. The same visit is the yearly check: teeth, weight and claws, because a "
+        "rabbit's teeth grow all its life. Ask the practice to text the reminder."),
+    "guinea pig": (
+        "Guinea pigs need no routine jabs, but they do need the yearly check: teeth, weight and "
+        "claws, and a look at the skin, because a guinea pig that stops eating goes downhill in "
+        "a day. Ask the practice to text the reminder, and weigh at home once a week in between."),
+    "hamster": (
+        "Hamsters need no routine jabs, but they do need a vet who sees small animals: register "
+        "with one that does exotics before anything goes wrong, because a hamster goes downhill "
+        "in a day. The yearly visit is a weight, teeth and lump check - they get tumours "
+        "easily and early ones are fixable. Weigh at home weekly, since a hamster losing weight "
+        "is the first sign of most of it."),
+    "other": (
+        "Once a year for a health check, and the yearly booster goes in at the same visit. "
+        "Puppies and kittens: a course of two or three jabs two to four weeks apart, then the "
+        "yearly one. Past about eight years old, twice a year is worth it. A rabbit needs its "
+        "teeth checked once a year. The practice usually texts the reminder, so ask them to set "
+        "one."),
+}
+
+
+def _the_pet_checkup(memory, understood):
+    """The yearly visit, in the animal the line names: a rabbit's jabs are not a puppy's."""
+    animal = _the_pet_named(memory, understood, default="other")
+    return _PET_CHECKUP.get(animal, _PET_CHECKUP["other"])
+
+
+# The tray is the same question for every animal that uses one, and the cat's answer is the
+# wrong one for a rabbit: clumping cat litter sets hard in a gut, and a rabbit will eat it.
+_PET_LITTER = {
+    "cat": (
+        "Scoop the solids out twice a day and change the whole tray of clumping litter once a "
+        "week - a tray that is cleaned that often does not need disinfecting every time, just hot "
+        "water and a drop of unscented washing-up liquid. More trays than cats (three for two "
+        "cats) is what stops accidents, and an unwashed tray is the commonest reason a cat starts "
+        "going elsewhere. Never mix bleach with cat urine: it gives off a gas that hurts their "
+        "lungs and yours."),
+    "rabbit": (
+        "A rabbit litter-trains easily: a tray in the corner it already uses, lined with paper or "
+        "wood pellets - never clumping cat litter, which sets hard if a rabbit eats it. Lift the "
+        "wet litter out every day, change the whole tray once or twice a week, and give a pair two "
+        "trays, because a rabbit likes to eat hay and go in the same spot. Under a hay rack is "
+        "where it will use it most."),
+    "guinea pig": (
+        "A guinea pig picks a corner of the cage to use, so a tray there lined with paper or wood "
+        "pellets catches most of it - never clumping cat litter, which sets hard if it is eaten. "
+        "Lift the wet litter out every day and change the tray twice a week, and put the hay rack "
+        "over it, because a guinea pig toilets where it eats."),
+    "hamster": (
+        "A hamster picks one corner of the cage to pee in, so a small tray there with sand or "
+        "paper pellets catches it: empty it every day or two and rinse it with hot water. Change "
+        "the whole cage bedding every few weeks, not every week, because a hamster needs its nest "
+        "to keep smelling of itself."),
+}
+
+
+def _the_litter_routine(memory, understood):
+    """The tray question, in the animal the line names: a rabbit's tray is not a cat's."""
+    animal = _the_pet_named(memory, understood, default="cat")
+    return _PET_LITTER.get(animal, _PET_LITTER["cat"])
+
+
 # A mouth that has gone pale, white, grey or blue is the fastest sign a pet is in trouble, and the
 # brushing answer was taking those lines - "my dog has pale gums" sent a person to look for a
 # toothbrush. Red or swollen gums are the gum-disease answer, so they keep the brushing text.
@@ -577,6 +832,39 @@ SICK_OR_HURT = (
     "collapsed", "collapse", "fitting", "seizure", "seizures",
 )
 
+# A pet's tea or dinner is its food. The not-eating rows were written for the word "food" alone,
+# so "the cat is a bit off her dinner today" reached nothing, "my dog is off his dinner" the
+# dog-friendly pubs and "my dog has gone off his tea" the shelf life of tea. The phrases carry the
+# meal, so the refusal is the same question whichever word the person uses for the bowl.
+PET_OFF_MEAL = (
+    "off his dinner", "off her dinner", "off their dinner",
+    "off his tea", "off her tea", "off their tea",
+    "gone off his dinner", "gone off her dinner", "gone off their dinner",
+    "gone off his tea", "gone off her tea", "gone off their tea",
+    "not eating his dinner", "not eating her dinner", "not eating his tea", "not eating her tea",
+    "wont eat his dinner", "wont eat her dinner", "wont eat his tea", "wont eat her tea",
+    "won't eat his dinner", "won't eat her dinner", "won't eat his tea", "won't eat her tea",
+    # the same refusal without the word "eat" in it: a dog that will not touch his tea, leaves
+    # his dinner, or has not eaten it all day was answered with the pub list, the walk clock or
+    # a shrug, and "wont touch his food" alone was the only one written down.
+    "wont touch his dinner", "wont touch her dinner", "wont touch their dinner",
+    "wont touch his tea", "wont touch her tea", "wont touch their tea",
+    "won't touch his dinner", "won't touch her dinner", "won't touch their dinner",
+    "won't touch his tea", "won't touch her tea", "won't touch their tea",
+    "leaves his dinner", "leaves her dinner", "leaves their dinner",
+    "leaves his tea", "leaves her tea", "leaves their tea",
+    "hasnt eaten his dinner", "hasnt eaten her dinner", "hasnt eaten his tea", "hasnt eaten her tea",
+    "hasn't eaten his dinner", "hasn't eaten her dinner", "hasn't eaten his tea",
+    "hasn't eaten her tea",
+    "has not eaten his dinner", "has not eaten her dinner", "has not eaten his tea",
+    "has not eaten her tea", "not eaten his dinner", "not eaten her dinner", "not eaten his tea",
+    "not eaten her tea", "not eaten his food", "not eaten her food",
+    # the same refusal said the other way round: "my dog turned his nose up at his dinner" was the
+    # wound answer, because "nose" is a thing a vet looks at.
+    "turned his nose up", "turned her nose up", "turns his nose up", "turns her nose up",
+    "turning his nose up", "turning her nose up", "nose up at his", "nose up at her",
+    "nose up at the", "turned its nose up", "turns its nose up",
+)
 # A dog word, or a pronoun that can only mean the dog once the line is about feeding him.
 PET = {"dog", "dogs", "puppy", "pup", "him", "his", "her", "she", "he"}
 
@@ -927,6 +1215,15 @@ def _cat_urine(memory, understood):
     if _SPRAY.search(text) and not _BLOOD.search(text):
         # A cat spraying up a wall is marking, not cystitis: the answer was "blood or discomfort
         # when a cat wees is usually cystitis", which sends a person to the vet for a behaviour.
+        if _the_neuter_is_done(understood):
+            # the person has already said the tom is done, so "an unneutered tom does it most" is
+            # the wrong half of the answer: in a cat that has been done, spraying is stress
+            return ("A cat who is already done and still sprays is not doing it for the hormones: "
+                    "in a neutered tom it is usually stress - a new animal in the house, a tray "
+                    "moved, a cat outside the window - or a habit left from being done late. Put "
+                    "a tray on each floor, plug in a pheromone diffuser, clean the spot with an "
+                    "enzyme cleaner rather than bleach, and never shout at him for it. Spraying "
+                    "with straining, blood or a tray he has stopped using is a vet check instead.")
         return ("Spraying up a wall or the back of the sofa is marking, and an unneutered tom does "
                 "it most: neutering stops most of it, and the smell with it, though a tom done "
                 "late may keep the habit. In a neutered cat new spraying is usually stress - a "
@@ -952,6 +1249,40 @@ def _cat_urine(memory, understood):
 # is 14 and yowling at night" -> "she's eating fine and uses the litter tray"), not asking how to
 # clean it: the tray hygiene answer here would be a lecture about the wrong thing.
 # Each phrase is the whole reassurance, not the plain act: `uses the litter tray` alone blocked
+# A clear result from the vet is the answer a cat-urine chat is waiting on, and it changes the
+# answer: with cystitis and stones ruled out, what is left is behaviour. The line that says it
+# names no cat - "i did take her to the vet, they said no infection" - so this reads the chat for
+# the animal, and stands down when the chat is about a person's own test.
+NO_INFECTION_TEXT = (
+    "That is the big one ruled out, then: a clear result means it is not illness, so it is "
+    "behaviour - stress, a tray she has gone off, another cat in the garden she can smell through "
+    "the window, or marking after a change in the house. Scoop twice a day, put a tray in every "
+    "room she uses, and wash the places she has been with a biological detergent rather than "
+    "bleach, which smells like urine to a cat and calls her back. A plug-in diffuser can settle "
+    "things for a few weeks while she gets used to whatever changed.")
+# "no infection", "came back clear", "said there was nothing there": the result, said plainly.
+_A_CLEAR_RESULT = re.compile(
+    r"\b(?:no|not an|isnt an|isn't an|wasnt an|wasn't an|without an?) infection\b|"
+    r"\b(?:came|come|came back|comes back|got).{0,12}\bclear\b|"
+    r"\b(?:nothing (?:wrong|there|found)|all clear|clear of)\b", re.I)
+_A_CAT_NAMED = re.compile(r"\b(cat|cats|kitten|kittens|tom|tomcat|queen|litter)\b", re.I)
+
+
+def _after_a_clear_urine_result(memory, understood):
+    """The vet's clear result in a cat chat, which is the behaviour answer, not a shrug.
+
+    The animal is named a turn or two back and not in the line that reports the result, so the
+    chat decides. A person's own blood test is not this card: nothing here names a cat.
+    """
+    said = [str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()]
+    said += [(turn.get("user") or "").lower() for turn in ((memory or {}).get("turns") or [])[-3:]]
+    if not any(_A_CAT_NAMED.search(line) for line in said):
+        return None
+    if not _A_CLEAR_RESULT.search(said[0]):
+        return None
+    return NO_INFECTION_TEXT
+
+
 # "my kitten wont use the litter tray", which is the question, not the reassurance.
 LITTER_FINE = ("eating fine", "eating well", "eats fine", "still eating", "litter tray fine",
                "litter tray is fine", "no trouble with the tray", "uses it fine",
@@ -1397,8 +1728,181 @@ def _pet_wound(memory, understood):
     return PET_WOUND_REPLY.format(**_pet_words(understood))
 
 
+# "He's neutered" is a fact about the animal, not a question about when to have it done. The
+# row's avoid list catches the written "is neutered", but people type "hes neutered" and
+# "shes spayed", and in a chat about a cat weeing on the bed that line was answered with the age
+# to neuter a kitten - the wrong half of the subject, and in the female for a male cat. The
+# marker is read off the normalised line, which is where "hes" has become "he is".
+_NEUTER_ALREADY_DONE = re.compile(
+    r"\b(?:he|she|it|they|both|is|are|was|were|has|have|had|been|already|got|now)\b"
+    r"[^.?!]{0,30}?\b(?:neutered|spayed|castrated|snipped|done)\b")
+# The same shape with a "not" in it says the opposite: "my kitten isnt neutered yet" was read as a
+# done animal and answered with the six weeks of hormones settling, which is the answer for the
+# animal that has had it. The negation is read on the words just before the operation word, so a
+# "not" about something else ("my cat is neutered, not eating") is not this.
+_NEUTER_NOT_DONE = re.compile(
+    r"\b(?:not|never|isnt|isn'?t|wasnt|wasn'?t|hasnt|hasn'?t|havent|haven'?t|wont|won'?t)\b"
+    r"[^.?!]{0,25}?\b(?:neutered|spayed|castrated|snipped|done)\b")
+# The same words are the question when a person asks whether or when, and those keep the age,
+# the price and the days after the operation.
+_NEUTER_STILL_ASKED = re.compile(
+    r"\b(should|shall|when|what age|how old|how long|how much|cost|costs|price|worth|why|if|whether|"
+    r"whether|know|check|confirm|tell|recover|recovery|heal|after the (?:op|operation))\b")
+# The day of the operation is not the fact of it: a cat done yesterday, or one not eating after
+# it, is the aftercare card's line and this one stands down with None.
+_NEUTER_THE_DAY_OR_AFTER = re.compile(
+    r"\b(yesterday|today|tonight|tomorrow|this morning|last night|just had|just been|stitches|"
+    r"stitch|cones?|wound|licking|not eating|wont eat|won't eat|sleepy|lethargic|sick|vomiting|"
+    r"recovering|recovery|dropping him off|dropping her off|picking him up|picking her up|"
+    r"how long does it take to recover|the op|the operation)\b")
+# "How do I know if he has been done" is a real question and had no card at all: the answer is
+# what a vet looks at, and where the record is.
+_NEUTER_HOW_TO_TELL = re.compile(
+    r"\b(how (?:do|can|would) i (?:know|tell)|how to tell|whether (?:he|she|it|they|my \w+) "
+    r"(?:has|have|had|is|are|was|were)|if (?:he|she|it|they|my \w+) (?:has|have|had) been|"
+    # the question asked flat out: "is my cat neutered" was read as a statement of fact and told
+    # the hormones had settled, which is the one thing the person is trying to find out
+    r"^(?:is|are|was|were) (?:my|our|the|your|his|her|he|she|it|they) (?:\w+ )?"
+    r"(?:already )?(?:neutered|spayed|castrated|snipped|done)\b)")
+# What a person does with the fact once they have said it: a cat or dog that is already done and
+# still wees, sprays, marks or mounts is the behaviour question, not the operation.
+_NEUTER_BEHAVIOUR = re.compile(
+    r"\b(wee|wees|weeing|weed|peed?|peeing|wee'd|spray|sprays|spraying|sprayed|mark|marks|"
+    r"marking|marked|hump|humps|humping|humped|mount|mounts|mounting|mounted|litter|tray|"
+    r"outside|bed|sofa|carpet|rug|furniture|scratching|running off|roaming|fighting|pregnant|"
+    r"pregnancy|in season|on heat|season)\b")
+# The operation still to come is not a fact about an animal that has had it: "my cat is booked in to
+# be spayed next week" asks what to do before then, so the done reply stands down and the timing
+# card answers, as it did before.
+_NEUTER_NOT_YET = re.compile(
+    r"\b(booked|booking|next week|next month|next year|next monday|next tuesday|next friday|"
+    r"going to be|will be|is being|having him|having her|havent yet|haven't yet|not yet|"
+    r"due to be|planned|planning|should i get)\b")
+# A line that says the animal is done and then goes on about its weight, coat or teeth asks about
+# that other thing: the row says nothing and the card for the other thing answers.
+_NEUTER_ALSO_ABOUT = re.compile(
+    r"\b(fat|fatter|overweight|underweight|weight|diet|food|feed|feeding|eating|eats|kilos?|kg|"
+    r"coat|fur|skin|itch|itchy|scratchy|bald|hair|teeth|breath|ear|ears|eye|eyes|limp|vomit|"
+    r"sick|diarrh|worm|worms|flea|fleas|tick|microchip|vaccin|jab|insurance|travel|pet passport|"
+    r"holiday|landlord|meow|noise|crying|sleeps|sleeping|groom)\b")
+
+
+def _the_neuter_is_done(understood):
+    """True when the line states the animal has already been neutered, and asks nothing."""
+    read = understood or {}
+    said = " ".join(str(read.get(key) or "") for key in ("norm_text", "clean")).lower()
+    if not _NEUTER_ALREADY_DONE.search(said) or _NEUTER_NOT_DONE.search(said):
+        return False
+    return not _NEUTER_STILL_ASKED.search(said)
+
+
+def _the_sex_words(understood):
+    """The line's own words, for reading the sex of the animal it is about."""
+    read = understood or {}
+    return " ".join(str(read.get(key) or "")
+                    for key in ("clean", "text", "animal_in_hand")).lower()
+
+
+def _the_neuter_sex(memory, understood):
+    """Whether the animal the line is about is male, female, or not said.
+
+    The operation word carries it as well as the pronouns: a person says a cat was spayed, not
+    castrated, and the reply used to call a spayed queen "he" and her hormones "his".
+    """
+    said = _the_sex_words(understood)
+    for turn in (memory.get("turns") or [])[-2:]:
+        said += " " + (turn.get("user") or "").lower()
+    if re.search(r"\b(spay|spays|spayed|spaying|queen|bitch|doe|she|shes|she's|her|hers|"
+                 r"girl|female)\b", said):
+        return "female"
+    if re.search(r"\b(tom|castrat\w*|buck|he|hes|he's|him|his|boy|male|sire)\b", said):
+        return "male"
+    return ""
+
+
+def _the_neuter_is_done_reply(memory, understood):
+    """What being neutered does and does not change, for the animal and the behaviour in hand."""
+    said = " " + ((understood or {}).get("clean") or "").lower() + " "
+    for turn in (memory.get("turns") or [])[-3:]:
+        said += (turn.get("user") or "").lower() + " "
+    animal = _the_animal(understood)["kind"]
+    if animal == "animal":
+        # the animal named a turn ago is the one the person said it about
+        for kind, words in _ANI_KIND:
+            if any(re.search(r"\b%s\b" % re.escape(word), said) for word in words):
+                animal = kind
+                break
+    sex = _the_neuter_sex(memory, understood)
+    # a spayed queen is not "he": the pronouns come from the line, and a line that does not say
+    # gets the neutral wording rather than the male one
+    subj = {"female": "she", "male": "he"}.get(sex, "they")
+    poss = {"female": "her", "male": "his"}.get(sex, "their")
+    them = {"female": "her", "male": "him"}.get(sex, "them")
+    # "they uses" is not English: where the line does not say, the noun keeps the verb right
+    who = {"female": "she", "male": "he"}.get(sex, "the cat")
+    behaviour = bool(_NEUTER_BEHAVIOUR.search(said))
+    if animal == "cat" and behaviour:
+        return ("Then it is not the hormones: a neutered cat that sprays or wees outside the tray "
+                "is usually stressed or has a urine infection. Put a tray on every floor %s uses "
+                "and scoop it daily, plug in a pheromone diffuser, clean the spot with an enzyme "
+                "cleaner rather than bleach, and see the vet first if it started suddenly or %s "
+                "strains and passes little. The other sprayers are new cats outside the window, "
+                "a moved tray and building work." % (who, who))
+    if animal == "cat":
+        return ("Then the spraying, roaming and fighting that the operation stops are already "
+                "handled: %s hormones settle about six weeks after it, so anything that starts "
+                "after that is stress or habit rather than hormones. Neutering does not make a "
+                "cat lazy or change its character, only the urge to roam, spray and fight."
+                % poss)
+    if animal == "dog" and behaviour:
+        return ("A neutered dog can still mount, mark and pull towards a bitch, because the "
+                "hormones take about six weeks to settle after the operation, and a dog done "
+                "later can keep the habit for longer. Interrupt it and reward the alternative - "
+                "send %s to the same spot outside and praise it - and wash an indoor mark with "
+                "an enzyme cleaner so the smell does not call %s back." % (them, them))
+    if animal == "dog":
+        return ("Then the roaming, mounting and marking that the operation changes settle about "
+                "six weeks after it as the hormones drop, and they are the main thing it changes. "
+                "Anything left after that is training rather than hormones, and a neutered dog "
+                "does not need to put on weight - feed the same portions unless the vet says "
+                "otherwise.")
+    if animal == "rabbit":
+        # a spayed rabbit's reason is the womb cancer, not the spraying: the generic answer read
+        # "spray and fight" to a person who had just said their rabbit was spayed
+        return ("For a doe the operation is the protection that matters: unspayed does get cancer "
+                "of the womb young, and most have it by four, so being done is the right state to "
+                "be in. It does not change a rabbit's character or make it put on weight on its "
+                "own, and a buck is done mostly for the spraying and the mounting - keep the hay "
+                "and the portions as they were and watch the weight over the winter.")
+    return ("The urge to roam, spray and fight fades over about six weeks after the operation as "
+            "the hormones drop, so behaviour that starts later is habit or stress rather than "
+            "hormones. Being neutered does not change an animal's character, and it does not make "
+            "one put on weight on its own - keep the food and exercise as they were.")
+
+
 def _pet_neuter(memory, understood):
     """When to have an animal neutered, about the animal the line named."""
+    said = " ".join(str((understood or {}).get(key) or "")
+                     for key in ("clean", "norm_text")).lower()
+    if _NEUTER_THE_DAY_OR_AFTER.search(said) and not re.search(
+            r"\b(should|when|what age|how old)\b", said):
+        # the operation was yesterday, or the animal is not right after it: that is the aftercare
+        # card's, and this row says nothing rather than the date
+        return None
+    if (_NEUTER_HOW_TO_TELL.search(said)
+            and re.search(r"\b(neutered|spayed|castrated|the snip|done)\b", said)
+            and not _NEUTER_BEHAVIOUR.search(said)):
+        return ("Ask the vet to look, because most of it is a hands-on check: a male done a while "
+                "ago has an empty scrotum, and a spayed female usually has no scar you can see. "
+                "Rescue cats are often ear-tipped or tattooed, and the practice that did the "
+                "operation has it on the record - so ring them, or the vet who has the animal's "
+                "history, rather than guessing from behaviour alone.")
+    if _the_neuter_is_done(understood) and not _NEUTER_NOT_YET.search(said):
+        if _NEUTER_ALSO_ABOUT.search(said) and not _NEUTER_BEHAVIOUR.search(said):
+            # it is done, and the line asks about something else: let that card answer
+            return None
+        # "hes neutered" in a chat about a cat weeing is a fact, not a question about the age
+        return _the_neuter_is_done_reply(memory, understood)
     text = (understood or {}).get("clean") or ""
     # a price question wants the price, for whatever animal the line names, so this comes before
     # the age: "how much does it cost to spay a rabbit" was getting the rabbit's age (a reviewer
@@ -1432,11 +1936,27 @@ def _pet_neuter(memory, understood):
                 "a day or two; a female takes the longer end, about a week, with the stitches out "
                 "at ten days.").format(**pet)
     if re.search(r"\b(cat|cats|kitten|kittens|moggy)\b", text):
+        # the animal's own sex, because a male cat is not "she": "my tom is not done yet, when
+        # should i have him neutered" was answered in the female every time
+        if _the_neuter_sex(memory, understood) == "male":
+            return ("Cats are usually done from four to six months, and a male is done at the the "
+                    "same age as a female: the reason for a tom is the spraying, the roaming and "
+                    "the fights, and those calm down about six weeks after the operation as his "
+                    "hormones settle. Book it once he is his normal self after his vaccinations, "
+                    "keep him in for a day or two after, and ring the vet if he is not eating by "
+                    "the next morning.")
+        if _the_neuter_sex(memory, understood) == "female":
+            return ("Cats are usually done from four to six months, before the first season: a "
+                    "queen can get pregnant at four months. Book it once she is her normal self "
+                    "after her vaccinations, keep her in for a day or two after and give the vet "
+                    "a call if she is not eating by the next morning. A male cat is done the same "
+                    "age and calms down from the spraying once his hormones settle, about six "
+                    "weeks later.")
         return ("Cats are usually done from four to six months, before the first season: a queen "
-                "can get pregnant at four months. Book it once she is her normal self after her "
-                "vaccinations, keep her in for a day or two after and give the vet a call if she "
-                "is not eating by the next morning. A male cat is done the same age and calms down "
-                "from the spraying once his hormones settle, about six weeks later.")
+                "can get pregnant at four months, and a tom is done at the same age, which stops "
+                "most of the spraying and roaming about six weeks later as the hormones settle. "
+                "Book it once the cat is its normal self after the vaccinations, keep it in for "
+                "a day or two after, and ring the vet if it is not eating by the next morning.")
     return ("Dogs are usually done from six months, and puppies of the big breeds wait until nine "
             "to twelve months so their joints finish growing - your vet will say which for your "
             "breed. Book it in once he is well and his vaccinations are done, and expect him to be "
@@ -2235,6 +2755,27 @@ def _a_cat_in_the_line(understood):
     return _A_CAT_IN_THE_LINE.search(text) is not None
 
 
+# "how do i look after a kitten" and "how do i care for a kitten" are the ordinary care question
+# about one cat, and this row answered them with the first week in the nest, because "look after"
+# and "care for" are two of its keys. Those two phrases are only this row's when there is a litter
+# in the line - a newborn word, a birth, an orphan or a mother that will not feed them - so the
+# reading decides, not the phrase: a general care question is the kitten-care row's, and a litter
+# is still this one's.
+_A_NEWBORN_WORD = re.compile(
+    r"\b(?:newborns?|had kittens|had a litter|had her kittens|gave birth|giving birth|"
+    r"just had|litter of|orphans?|orphaned|hand rear\w*|bottle feed\w*|rejected|wont feed\w*|"
+    r"won't feed\w*|will not feed|eight weeks|leave their mother|abandoned)\b")
+_A_CARE_PHRASE = re.compile(r"\b(?:look after|looking after|care for|caring for)\b")
+
+
+def _a_litter_is_what_is_asked_about(understood):
+    """False for a care question about one cat, which the kitten-care row answers."""
+    text = str((understood or {}).get("clean") or "").lower().replace("\u2019", "'")
+    if _A_NEWBORN_WORD.search(text):
+        return True
+    return not _A_CARE_PHRASE.search(text)
+
+
 # The condolence says a pet has died, so the line in front of it has to be the one that says so.
 # A follow-up borrows the earlier line's words, and "put" is a form of the key word "putting":
 # after "put the kettle on", the harmless "she likes gin and cats" reached this entry on "cat"
@@ -2958,6 +3499,71 @@ LEFT_OVERS_EATEN_PHRASES = ("got into", "has had", "just had", "already had", "a
                             "kept eating")
 
 
+# A plate of leftovers is not a named food, so the small-animal table cannot answer it: it is keyed
+# by one food at a time. "My rabbit ate the leftovers" was answered "Nice one. How did the rest of
+# it go?", and the rabbit is the pet where a mixed plate is riskiest - its gut has to keep moving
+# and a rabbit that stops passing droppings goes downhill within a day. One card per kind of small
+# pet, because the danger is a different organ: the gut for a rabbit or a guinea pig, the pouches
+# and the runs for a hamster, the whole bird for a budgie.
+_SMALL_PET_ATE_LEFTOVERS = {
+    "rabbit": ("Hay and water are the whole job now: leave both within reach and watch the "
+               "droppings. A bit of bread, fruit or something off a plate is usually fine, but a "
+               "rabbit's gut has to keep moving - soft or no droppings within twelve hours, or a "
+               "rabbit that sits hunched and will not eat, is the vet today. Do not starve it and "
+               "do not wait for it to pick up, because a rabbit that stops eating goes downhill "
+               "inside a day."),
+    "guinea pig": ("Hay, water and the nuggets are the whole job now, and watch the droppings. A "
+                   "bit of something off a plate is usually fine, but a guinea pig's gut has to "
+                   "keep moving - soft or no droppings within twelve hours, or one that sits "
+                   "hunched and will not eat, is the vet today. It cannot make its own vitamin C, "
+                   "so do not let a plate of scraps replace the nuggets."),
+    "hamster": ("Clear out what is left and keep its own food and water going, and watch it: a "
+                "hamster that is still busy, eating and hoarding is fine, because a scrap of most "
+                "human food is a treat rather than a poison. The trouble is what a mixed plate "
+                "carries - salt, sugar, cheese and fried food - so expect a loose back end, and "
+                "ring the vet if it is hunched, cold, not eating or has diarrhoea for more than a "
+                "day."),
+    "gerbil": ("Clear out what is left and keep its own food and water going, and watch it: a "
+               "gerbil that is still busy, eating and digging is fine, because a scrap of most "
+               "human food is a treat rather than a poison. Salt, sugar and fried food are what a "
+               "mixed plate carries, so expect a loose back end, and ring the vet if it is "
+               "hunched, cold, not eating or loose for more than a day."),
+    "chinchilla": ("Clear out what is left and keep the hay, pellets and water going: a chinchilla "
+                   "is the least able of the small pets to cope with sugar and fat, so a plate of "
+                   "scraps is the one to avoid rather than a treat. Watch the droppings and ring "
+                   "the vet if it is hunched, not eating, or loose for more than a day."),
+    "bird": ("Clear the plate away and give it its own food and water, then watch it: a budgie or "
+             "a parrot that has had plain bread or veg is usually fine, but anything salty, "
+             "sugary, fatty or fried, and anything with avocado, chocolate, onion or caffeine in "
+             "it, is a vet call today. A bird that sits fluffed up, stops eating or has loose "
+             "droppings needs the vet rather than a wait-and-see, because a bird hides illness "
+             "until it is very ill."),
+}
+
+
+# The rabbit has no row in SMALL_PET_DIET - its diet is the `rabbit-food` entry - so the plate
+# answer for a rabbit is the same facts kept in one line, and the rest come from the table.
+_SMALL_PET_DIET_OR_PLATE = dict(SMALL_PET_DIET)
+_SMALL_PET_DIET_OR_PLATE["rabbit"] = (
+    "Leftovers are not a rabbit's food: hay is the diet, a pile the size of the rabbit every day, "
+    "with a handful of greens and a measured scoop of nuggets, and a rabbit that fills up on bread "
+    "or scraps stops eating the hay it needs. Nothing off a plate at all is the simple rule, "
+    "because sugar and starchy food upset the gut that keeps a rabbit alive.")
+
+
+# A dog or a cat that got into the bin already has a card of its own, and it is the better one: it
+# asks what was in there and names the poisons, which a plate-of-leftovers answer cannot, because
+# the bin is not a known plate. So this row stands down for that pair and only that pair - a rabbit
+# or a guinea pig in the bin has no card of its own, and the gut risk is the same either way.
+_A_BIN = re.compile(r"\b(?:bin|bins|rubbish|trash|landfill|compost)\b")
+_A_DOG_OR_CAT = re.compile(r"\b(?:dog|dogs|puppy|pup|pups|cat|cats|kitten|kittens)\b")
+
+
+def _the_bin_is_the_dogs_question(understood):
+    text = ((understood or {}).get("clean") or "").lower()
+    return bool(_A_BIN.search(text) and _A_DOG_OR_CAT.search(text))
+
+
 def _leftovers_answer(memory, understood):
     """The plate answer, or the what-to-do-now answer when the animal has already eaten."""
     pet = _pet_words(understood)
@@ -2965,6 +3571,14 @@ def _leftovers_answer(memory, understood):
     words = set(re.findall(r"[a-z']+", text))
     eaten = bool(words & set(LEFT_OVERS_EATEN)) or any(
         phrase in text for phrase in LEFT_OVERS_EATEN_PHRASES)
+    # `_small_pet_kind` has no rabbit branch (the rabbit's food answers live in their own entry),
+    # so the rabbit is read here rather than drawn into every table that function feeds.
+    kind = ("rabbit" if re.search(r"\b(?:rabbit|rabbits|bunny|bunnies)\b", text)
+            else _small_pet_kind(text))
+    if kind in _SMALL_PET_ATE_LEFTOVERS:
+        if not eaten:
+            return _SMALL_PET_DIET_OR_PLATE[kind]
+        return _SMALL_PET_ATE_LEFTOVERS[kind]
     if not eaten:
         return PLATE_LEFTOVERS_TEXT
     return ATE_LEFTOVERS_TEXT.format(kind=pet["kind"], they=pet["they"])
@@ -3594,6 +4208,71 @@ def _where_the_pet_sleeps(memory, understood):
         return _WHERE_THE_CAT_SLEEPS
     return _WHERE_EITHER_SLEEPS
 
+# A small pet that has eaten the wrong thing is a diet question, not a dose one: "my rabbit ate
+# some carrot tops" is answered by the rabbit's own food, and it was the poisoning card once the
+# small animals joined the ask on `pet-ate-some`. A rabbit, a hamster or a bird only reaches that
+# card when the line names something that is not food at all - a spray, a bait, a cleaner, a
+# medicine - and then the vet call in it is the right answer, whatever the animal.
+_SMALL_ANIMAL = re.compile(r"\b(rabbit|rabbits|bunny|bunnies|hamster|hamsters|guinea|gerbil|"
+                           r"gerbils|ferret|ferrets|tortoise|bird|birds|parrot|parrots|budgie|"
+                           r"budgies|cockatiel|canary)\b")
+_NOT_FOOD = re.compile(r"\b(spray|sprays|sprayed|weedkiller|weed killer|bait|baits|pellet|"
+                       r"pellets|powder|powders|poison|poisoned|bleach|antifreeze|cleaner|cleaners|chemical|"
+                       r"chemicals|disinfectant|medicine|medicines|tablet|tablets|pill|pills|"
+                       r"paracetamol|ibuprofen|medicine cabinet|paint|glue|oil)\b")
+
+
+def _eaten_thing_is_not_food(understood):
+    """False only for a small animal whose mouthful was something other than food."""
+    text = (understood or {}).get("clean") or (understood or {}).get("text") or ""
+    if not _SMALL_ANIMAL.search(text):
+        return True
+    return bool(_NOT_FOOD.search(text))
+
+
+# "we got a kitten" is news, and the bot's answer to news is to ask for the name or how old it
+# is - the memory store's turn, which is what the deck's kitten chats open with. A care list in
+# its place talks over the person and loses the thread: the chat that says "we got a kitten" and
+# then "how old is he" was left with a shrug. So the care card only answers a line that asks
+# something, a question or a want ("any advice" is read as `recommend`).
+_CARE_OF_A_NEW_PET = re.compile(
+    r"\b(?:look after|looking after|care for|caring for|care of|bring home|bringing home|"
+    r"brought home|just got|we got|we've got|ive got|i've got|settle|settling|get used to|"
+    r"advice|tips|what do i need to know|first few days|first week|what do i do)\b")
+
+
+# "i just got a kitten what do i need" is the shopping list, and the first-days card answered
+# it with the feeding-and-vet paragraph: the list is what a person wants on the day they bring
+# the kitten home, and it is a card of its own (`kitten-kit`). The words cannot go in `avoid=`
+# - an avoid word is read loosely, and "what do i need" would put "need" in a list that stands
+# the row down for "what do i need to know about a kitten", which is this card's own question -
+# so the reading is here.
+_A_SHOPPING_ASK = re.compile(
+    r"\b(?:what|which)\b[^?]{0,24}\b(?:do|should|shall|would)\s+i\s+(?:need|buy|get)\b"
+    r"|\bneed(?:s|ed)?\s+to\s+(?:buy|get|pick up)\b|\bshopping list\b|\bstarter kit\b",
+    re.I)
+
+
+def _it_asks_what_to_do(understood):
+    """False for a line that only says what happened, or that leans on the turn before.
+
+    The question has to be in this line: "how old is he" after "we got a kitten" is a follow-up
+    about the age, and reading the kitten off the turn before made the care card answer it.
+    """
+    if (understood or {}).get("leans_on"):
+        # "how old is he" after "we got a kitten" is a question about the age, and the card is
+        # read with the turn before it in its words; the memory store owns that line.
+        return False
+    said = str((understood or {}).get("text") or (understood or {}).get("clean") or "").lower()
+    said = said.replace("\u2019", "'")
+    if not _CARE_OF_A_NEW_PET.search(said):
+        return False
+    if _A_SHOPPING_ASK.search(said):
+        # the supplies list is `kitten-kit`, and it is the better answer on the first day
+        return False
+    return bool((understood or {}).get("asks"))
+
+
 ENTRIES = [
     entry("small-pet-fur-loss",
           (("rabbit", "rabbits", "bunny", "bunnies", "guinea pig", "guinea pigs", "guineapig",
@@ -3938,20 +4617,36 @@ ENTRIES = [
     entry("dog-leftovers",
           # the animal is the first group on purpose: "is leftover pizza still ok to eat" has
           # the word leftovers in it too, and a person's own lunch is the keeping answer
-          (("dog", "dogs", "puppy", "pup", "cat", "cats", "kitten", "pet", "pets"),
+          # a small pet is in the first group for the same reason a dog is: the plate is what the
+          # line is about, and "my rabbit ate the leftovers" has no food word in it for the table.
+          (("dog", "dogs", "puppy", "pup", "cat", "cats", "kitten", "pet", "pets",
+            "rabbit", "rabbits", "bunny", "bunnies", "guinea pig", "guinea pigs", "guineapig",
+            "hamster", "hamsters", "gerbil", "gerbils", "chinchilla", "chinchillas",
+            "budgie", "budgies", "parrot", "parrots", "bird", "birds"),
            ("leftover", "leftovers", "left over", "left overs", "scraps", "table scraps",
             "the remains", "off the plate", "from my plate", "the plate", "dinner scraps",
-            "food scraps")),
+            "food scraps", "my dinner", "my lunch", "my tea", "my breakfast", "my food",
+            # the bare meal words beside the phrases: a key word matches a line word, and "ate
+            # some of my dinner" carries "dinner" and nothing else this row can hold on to
+            "dinner", "lunch", "breakfast", "supper", "takeaway", "take-away",
+            "our dinner", "our tea", "the bin", "the rubbish", "the trash", "dog food",
+            "cat food", "human food", "people food")),
           _leftovers_answer,
           # a person's own leftovers, the fridge rule and the dog-bone entry are three other
           # answers: the animal and the giving have to be in the line for this one
+          # the ask words include the plate by name, because "my hamster ate my dinner" carries no
+          # "leftovers" at all and the meal is the mixed plate in that line
           ask=("leftover", "leftovers", "left over", "left overs", "scraps", "table scraps",
-               "from my plate", "off the plate", "dinner scraps", "food scraps"),
+               "from my plate", "off the plate", "dinner scraps", "food scraps",
+               "my dinner", "my lunch", "my tea", "my breakfast", "my food", "our dinner",
+               "the bin", "the rubbish", "the trash", "dog food", "cat food", "human food",
+               "people food", "dinner", "lunch", "breakfast", "supper", "takeaway", "take-away"),
           avoid=("how long", "fridge", "freezer", "reheat", "reheating", "microwave",
                  "poisoning", "my own", "human", "i eat", "is it safe to eat",
                  # a named food is the named-food answer, which knows the amount and the risk:
                  # "is it safe to give my cat tuna leftovers" is tuna, not a mixed plate
                  ) + tuple(SAFE_FOODS) + tuple(CAUTION_FOODS),
+          guard=lambda understood: not _the_bin_is_the_dogs_question(understood),
           bias=2),
     # Grapes and raisins shut down a dog's kidneys, and the amount is not something to guess at, so
     # this one is a vet call even when the dog seems fine.
@@ -4264,7 +4959,13 @@ ENTRIES = [
                  ) + SICK_OR_HURT
                  # and a cat crying when it is stroked is the over-stimulation answer, not the
                  # leaving-alone one: "she cries when i stroke her back" was this card
-                 + ("stroke", "strokes", "stroked", "stroking", "patted", "patting")),
+                 + ("stroke", "strokes", "stroked", "stroking", "patted", "patting")
+                 # a cat that cries when it is picked up is in pain, not carrying anything:
+                 # "my cat carries her toy around and cries" is the other question, so only the
+                 # handled-and-crying half is fenced here
+                 + ("cries when i pick", "cries when i lift", "cries when i touch",
+                    "cries when i stroke", "cries when i hold", "yelps when i",
+                    "in pain", "in agony")),
     # "should i get a dog if i work all day" was "That's your call, not mine" and "is it fair to
     # get a dog if i work full time" a shrug. It is the first thing a would-be owner asks.
     entry("dog-work-all-day",
@@ -4406,7 +5107,9 @@ ENTRIES = [
            "pawing at it or a cloudy eye needs the vet today - an ulcer gets worse fast and "
            "drops made for a human eye can make it worse still."),
           ask=("eye", "eyes", "runny", "weeping", "weepy", "discharge", "gunky", "crusty",
-               "squinting", "squints", "red", "cloudy", "shut"), bias=1),
+               "squinting", "squints", "red", "cloudy", "shut"),
+          # "keep an eye on the dog" is watching him, not a sore eye
+          guard=not_keeping_an_eye_on_it, bias=1),
     # An animal losing its sight is mostly a house question, and it is asked as a statement
     # ("my dog is going blind") as often as a question. Every one of these lines was either the
     # search hedge or, worse, the lump answer above, because a blind animal bumps into things.
@@ -4622,6 +5325,13 @@ ENTRIES = [
                "baby", "toddler", "husband", "wife", "partner", "son", "daughter", "family",
                "everyone", "anyone", "guests", "guest", "stop", "stopping", "biting", "bites"),
           avoid=("chew", "chews", "chewing", "chew toy", "teeth", "teething", "mouthing",
+                 # "bit" is also the noun of an amount: "my dog seems a bit down since we lost
+                 # our other dog" was answered with the training plan for a biter, and "a bit of
+                 # chicken is fine for the dog" with it too. The phrases are what carry the
+                 # noun, so a line with one of them and no other bite word is not this row;
+                 # a real bite is left alone - "my dog bit my hand a bit" still says "bit my".
+                 "a bit", "quite a bit", "a little bit", "bit of", "bits of", "bit more",
+                 "bit less", "bit longer",
                  "stay", "lead", "recall", "furniture", "sofa", "shoe", "shoes", "slipper",
                  # a dog the person does not own is the dangerous-neighbour-dog letter, and the
                  # advice here is written for the owner
@@ -4678,7 +5388,15 @@ ENTRIES = [
                  "bites his paws", "bites her paws", "chewing his paws", "chewing her paws",
                  # "how do i clean my dogs paws" is the washing answer: a paw named in the line
                  # is not a wound, and this entry holds "paws" in its key, so it says so
-                 "clean", "cleaning", "wash", "washing", "wipe", "wiping", "muddy", "dirty"),
+                 "clean", "cleaning", "wash", "washing", "wipe", "wiping", "muddy", "dirty",
+                 # a nose turned up at a bowl is a refusal to eat, not a cut: "my dog turned his
+                 # nose up at his dinner" was bathed by this row. The not-eating rows read these
+                 # phrases, so the wound stands down and leaves them the line.
+                 "nose up", "turned his nose", "turned her nose", "turned its nose",
+                 "turns his nose", "turns her nose", "turning his nose", "turning her nose",
+                 "off his food", "off her food", "off his dinner", "off her dinner",
+                 "off his tea", "off her tea", "gone off his food", "gone off her food",
+                 "appetite", "not eating", "wont eat", "won't eat", "stopped eating"),
           ask=("paw", "paws", "pad", "pads", "nose", "leg", "foot", "tail", "skin",
                "belly", "cut", "gash", "wound", "bleeding", "bleeds", "thorn",
                "glass", "splinter")),
@@ -4933,6 +5651,10 @@ ENTRIES = [
                  # walking in the heat is its own question, and the generic rule is wrong advice
                  # for it: "how long do i walk my dog in the heat" takes dog-walks on main
                  "in the heat", "when its hot", "hot", "heatwave",
+                 # the same question in the words people actually type: "should i run with my dog
+                 # in this heat" is a heat question, and the distance answer even says so
+                 "in this heat", "this heat", "in the sun", "hot weather", "hot day", "hot days",
+                 "when it is hot", "when it's hot", "boiling", "scorching", "heat",
                  # a dog that runs off, runs at another dog or runs to the door is a recall or a
                  # behaviour question, and the running words above would take those lines
                  "runs off", "running off", "runs away", "running away", "runs at",
@@ -5527,9 +6249,39 @@ ENTRIES = [
                  "banana", "apple", "carrot", "peanut butter", "nuts",
                  # and a dog eating grass is not a dog to take out for dinner
                  "grass", "lawn", "poo")),
-    # One entry, not two: this used to exist twice in this very file, and the lenient copy
-    # (bias=2) beat the vet-first copy on "my dog wont eat", so a puppy could be told to wait
-    # a meal when the puppy rule is to ring the vet the same day.
+    # The beach is the one day out a dog comes to, so it is the dog's question and not the
+    # picnic's: "can i take my dog to the beach" was answered with a frittata cut in wedges, and
+    # "are dogs allowed on the beach" with the leaving-him-alone card, because no row claimed the
+    # beach for a dog. What settles it is the council's seasonal ban, and that is on the sign.
+    entry("dog-beach", (("dog", "dogs", "puppy", "pup", "puppies"),
+                        ("beach", "beaches", "seaside", "the coast", "sand", "sands", "shore",
+                         "seafront", "sea front", "promenade", "dunes", "sand dunes",
+                         "on the sand", "dog friendly beach", "dog friendly beaches")),
+          ("Most beaches allow dogs, but plenty of councils ban them on the main stretch from "
+           "about May to September, so read the sign where you walk on: it names the beach and "
+           "the months, and the council's own page lists the rest. Take fresh water, because sea "
+           "water gives a dog the runs, and go early or late on a hot day as sand and pebbles "
+           "burn pads. Keep the lead on where birds nest or lifeguards are working, check the "
+           "tide before he swims, and bag it and bin it."), bias=1,
+          # "my dog is at the beach" is news, and it was told the council's rules: the line has
+          # to ask whether the dog may be there, or how to take him.
+          ask=("allowed", "can i", "can we", "could i", "should i", "is it", "is the", "are the",
+               "are they", "is there", "ok", "okay", "fine", "friendly", "take", "taking",
+               "bring", "bringing", "let", "off the lead", "off lead", "lead", "safe",
+               "which", "where", "near me", "nearby"),
+          # A dog that has drunk the sea, or eaten something on the sand, is the vet question and
+          # those rows carry their own bias; a dog that ran off is the search; and the place to
+          # eat afterwards is the pub row's.
+          avoid=("sea water", "salt water", "saltwater", "seawater", "drank", "drink", "drinking",
+                 "swallowed", "ate", "eaten", "eating", "poison", "poisonous", "toxic",
+                 "lost", "missing", "gone missing", "ran off", "run off", "escaped", "bolted",
+                 "pub", "pubs", "restaurant", "cafe", "somewhere to eat", "place to eat",
+                 "ferry", "plane", "flight", "train", "abroad", "pet passport", "travel",
+                 "food", "picnic", "lunch", "sandwich", "sandwiches", "cool box")),
+    # A pet's dinner or tea is its food, and only "food" was written down: "the cat is a bit off
+    # her dinner today" reached no answer at all, "my dog is off his dinner" the dog-friendly pubs
+    # and "my dog has gone off his tea" the shelf life of tea. The meal words are the same refusal
+    # in the words people use for the bowl, so both not-eating rows read them.
     entry("dog-not-eating", (("dog", "puppy", "pup"),
                              ("not eating", "wont eat", "won't eat", "isnt eating", "isn't eating",
                               "doesnt eat", "doesn't eat", "will not eat", "stopped eating",
@@ -5546,7 +6298,8 @@ ENTRIES = [
                               "refused his dinner", "refused her dinner", "refused the food",
                               "refused his meal", "refused her meal", "refused to eat",
                               "refuses his dinner", "refuses her dinner", "refusing food",
-                              "hasnt eaten", "hasn't eaten", "not eaten")),
+                              "hasnt eaten", "hasn't eaten", "not eaten")
+                             + PET_OFF_MEAL),
           ("Ring the vet today if it has been more than 24 hours, and straight away for a puppy "
            "under six months, or if there is vomiting, diarrhoea or he seems dull. A dog that "
            "refuses food is usually feeling sick or in pain rather than being fussy; if he is "
@@ -5576,7 +6329,8 @@ ENTRIES = [
                                      "nose up at his food", "no interest in her food",
                                      "no interest in his food", "interested in her food",
                                      "interested in his food", "fussy with her food",
-                                     "fussy with his food", "fussy eater", "fussy about food")),
+                                     "fussy with his food", "fussy eater", "fussy about food")
+                                    + PET_OFF_MEAL),
           ("A cat that stops eating for more than 24 hours needs a vet, especially an older one: "
            "cats can get dangerously ill quickly from not eating. Offer warm strong-smelling food "
            "and a quiet place, and ring the vet today if she is 12 and off her food."),
@@ -5737,7 +6491,13 @@ ENTRIES = [
           # journey and a lead are their own questions: this row is only about the lift.
           avoid=("stroke", "strokes", "stroking", "patted", "patting", "tummy", "belly",
                  "carrier", "carriers", "car journey", "in the car", "travelling", "travel",
-                 "vet", "vaccination", "harness", "lead", "scratching", "scratch")),
+                 "vet", "vaccination", "harness", "lead", "scratching", "scratch",
+                 # a cat that cries or yelps when it is handled is the pain row's, not this
+                 # one's: the lift is how a sore cat says where it hurts, and this answer is for
+                 # the cat that only dislikes being picked up
+                 "cries when i pick", "crying when i pick", "cries when i lift",
+                 "cries when i touch", "cries when i stroke", "yelps", "yowls when i",
+                 "hisses when i", "in pain", "in agony", "sore", "hurts when", "aches when")),
     # Getting a cat into its carrier is the other half of handling one, and it was nothing at
     # all: "my cat hates the carrier" was a plain ack and "how do i get my cat in a carrier" was
     # a shrug. The answer is the carrier as furniture, not a fight in the hall.
@@ -5956,6 +6716,8 @@ ENTRIES = [
                  "biting my fingers", "bites my ankles", "bites my feet", "play biting",
                  "play bites", "when i stroke", "when i pet", "when i pick him up",
                  "when i pick her up"),
+          # The person's own scratching is not a claw: see _an_animal_did_it above.
+          guard=_an_animal_did_it,
           # "i got scratched by a cat" is two ordinary words and tied with the furniture row,
           # which reads the same cat and the same verb: a wound is the one with a person in it.
           # The tie is real on main, which raised the furniture row to 4 for its own reasons, so
@@ -6010,10 +6772,37 @@ ENTRIES = [
           _cat_urine, bias=2,
           # how to clean a smelly tray, a cat drinking or weeing "a lot" (the thirst entry) and a
           # cat that will not use the tray at all are three other answers
+          # "spraying" is the marking sense, and its forms reach a can of fly spray: "is the spray
+          # safe with a cat" was answered with cystitis, because spray reads as spraying. The
+          # product is the household-chemical answer's line, so the shapes that mean a spray can
+          # are stood down here and the marking ones are not.
           avoid=("smell", "smelly", "stinks", "stink", "odor", "odour", "clean", "wash",
                  "weeing more", "peeing more", "weeing a lot", "peeing a lot", "urinating a lot",
                  "drinking more", "drinking a lot", "drinks a lot", "thirsty",
-                 "wont use", "won't use", "not using the litter", "litter tray")),
+                 "wont use", "won't use", "not using the litter", "litter tray",
+                 "the spray", "a spray", "fly spray", "insect spray", "ant spray", "wasp spray",
+                 "flea spray", "bug spray", "mosquito spray", "air freshener", "aerosol",
+                 "spray safe", "safe with", "safe around", "i sprayed", "after spraying")),
+
+    # The turn after the vet's clear result. "i did take her to the vet, they said no infection"
+    # was answered by the litter card's own last sentence - "a vet check comes first, because it
+    # is often a urine infection" - which tells a person who has just had the check done to go
+    # and have it done. The result is the question, and it moves the answer to behaviour.
+    entry("after-a-clear-urine-result",
+          (("vet", "vets", "vet's", "the vets", "test", "tests", "results", "sample", "checkup",
+            "check up", "check-up"),
+           ("no infection", "not an infection", "isnt an infection", "isn't an infection",
+            "wasnt an infection", "wasn't an infection", "quiet on infection",
+            "came back clear", "come back clear", "comes back clear", "got the all clear",
+            "all clear", "nothing wrong", "nothing there", "nothing found",
+            "clear of infection", "no crystals", "no stones")),
+          _after_a_clear_urine_result, bias=2,
+          # a person's own result is the health card's, and a question about what a result means
+          # is not a result that came back
+          avoid=("my own", "my blood", "my results", "my test", "my urine", "my sample",
+                 "myself", "my son", "my daughter", "my mum", "my dad", "my wife", "my husband",
+                 "my partner", "my baby", "my child", "will it be", "would it be", "could it be",
+                 "might it be", "should i", "do i need", "when will")),
 
     # Where the tray goes is not how the tray is cleaned, and it had no row of its own: "where
     # should i put the litter tray" was a shrug, with the placement answer nowhere in the file.
@@ -6063,7 +6852,11 @@ ENTRIES = [
           # a pregnant person is not a pregnant cat, and a cat that is being sick, not eating or
           # losing weight is the vet question, not a due date
           avoid=("i am", "im pregnant", "i'm pregnant", "my wife", "my girlfriend", "my partner",
-                 "my daughter", "my son", "human", "trying for a baby", "ivf", "period",
+                 # a person's period is named by the phrases below; the bare word stood this row
+                 # down for a cat's own "gestation period", which is the ordinary way of asking,
+                 # and the human cycle card answered a question about a cat with 21 to 35 days
+                 "my daughter", "my son", "human", "trying for a baby", "ivf",
+                 "my period", "period pain", "period cramps", "late period",
                  "my rabbits", "rabbit", "guinea pig", "dog", "bitch", "sick", "vomiting",
                  "not eating", "losing weight", "bleeding", "litter tray", "weeing",
                  # "my cat is 14 and has started yowling at night" is an old cat, and the answer
@@ -6104,7 +6897,8 @@ ENTRIES = [
           # was told to leave the kittens with her and weigh them on a kitchen scale. The line has
           # to name a cat or a litter for this row to answer it, and then the family rows have
           # their line back.
-          guard=_a_cat_in_the_line,
+          guard=lambda understood: (_a_cat_in_the_line(understood)
+                                    and _a_litter_is_what_is_asked_about(understood)),
           # a cat and a new baby is a different answer, and so is a cat left alone all day. A
           # kitten that bites hands is the play answer, and a kitten-kit shopping line is the
           # list of things to buy: "my new kitten is biting me" was "leave them with her" here
@@ -7075,7 +7869,10 @@ ENTRIES = [
                  "borders", "digging", "pooing", "poo", "poos", "messing", "fence"
                  # "my cat vomits first thing" reached this entry on the word "thing", and a cat
                  # being sick in the morning is a body problem, not a paw on a worktop
-                 ) + SICK_OR_HURT,
+                 ) + SICK_OR_HURT
+                 # and the retching and the blood are the sickness rows' words too
+                 + ("sick", "vomit", "vomits", "vomited", "vomiting", "threw up", "throwing up",
+                    "retching", "blood", "diarrhoea", "diarrhea"),
           bias=1),
     entry("cat-purring", (("purr", "purrs", "purring", "purred"),
                           ("cat", "cats", "kitten", "mean", "means", "why", "happy", "content",
@@ -7371,6 +8168,12 @@ ENTRIES = [
                  # its own key word (the same trap `fish-tank` records)
                  "go fishing", "gone fishing", "pond", "batter", "sauce", "smoked", "kipper", "allergy",
                  "allergic", "shellfish",
+                 # a fish being served is a dinner, and this row's "have" took the pairing ask:
+                 # "what can i have with fish" was told how to cycle a new tank. The serving
+                 # frames carry no "fish" of their own, so they cannot fold onto this key.
+                 "have with", "have it with", "eat with", "goes with", "go with", "serve with",
+                 "serving with", "pairs with", "alongside", "on the side", "as a side",
+                 "side dish", "sides",
                  # a tank being cleaned is the tank row's question, not the new-fish one: this
                  # key carries "my"/"our", so "how do i clean my fish tank", "my fish tank needs
                  # cleaning" and "how often should i clean my fish tank" were the new-fish card.
@@ -7478,6 +8281,48 @@ ENTRIES = [
                  "kilos", "kilogram", "kilograms", "lbs", "healthy weight", "ideal weight",
                  "target weight", "body condition"),
           bias=1),
+    # The first days with a kitten are the most asked line in this domain and the least
+    # answered: "how do i look after a kitten" was a shrug, and "how do i care for a kitten" was
+    # the houseplant watering card, because "care for" is the plant owner's word too. The four
+    # things a new kitten needs are the answer, and they lead in the order people need them. A
+    # kitten that is already ill, or not eating, has a card of its own above, so those words keep
+    # this one out; so does everything else this domain already answers - the supplies list, the
+    # feeding amounts, the introduction to another cat, and the opening to the outside.
+    entry("new-kitten",
+          (("kitten", "kittens", "new kitten", "new cat", "kitty"),
+           ("look after", "care for", "care of", "caring for", "keep", "looking after",
+            "bring home", "brought home", "bringing home", "just got", "we got", "ive got",
+            "getting a", "first", "new", "advice", "what do i need to know", "what do i do",
+            "how do i start", "settle in", "settling in", "settle", "settling",
+            "get used to", "used to us", "used to me", "first few days", "first week")),
+          ("Food first: kitten food, not cat food, four small meals a day until about six months, "
+           "and water in a wide bowl. Keep her in one warm room to start with a litter tray, a bed "
+           "and something to hide under, and let her come to you rather than picking her up all "
+           "the time. Book the vet in the first week: the first jab is due at eight to nine weeks "
+           "and the second three to four weeks later, worming runs every two weeks until twelve "
+           "weeks, and a microchip and neutering at about four months. Play with a wand toy "
+           "rather than your hands, so hands stay boring, and no cow's milk - it gives kittens "
+           "the runs."),
+          bias=1,
+          # A kitten that is ill, hurt, off its food or in trouble is the cards above, and this
+          # one only knows the happy first days.
+          avoid=("sick", "ill", "poorly", "unwell", "dying", "died", "wont eat", "won't eat",
+                 "not eating", "stopped eating", "hiding", "limp", "cut", "wound", "vomiting",
+                 "vomit", "sick on", "diarrhoea", "worms", "worming", "fleas", "jabs",
+                 "vaccination", "vaccinations", "vaccinate", "microchip", "neuter", "neutered",
+                 "spay", "spayed", "cost", "how much is", "price", "cheap", "name", "named",
+                 "naming", "call it", "call him", "call her", "call my", "buy", "supplies",
+                 "kit", "what do i need for", "introduce", "introducing", "second cat",
+                 "another cat", "our old cat", "older cat", "existing cat", "litter tray",
+                 "wont use the tray", "outside", "outdoors", "scratch", "scratches", "biting",
+                 "bites", "night", "sleep", "crying", "cries", "meowing", "left alone",
+                 "allergic", "lost", "missing", "how much food", "how often feed", "how much to feed",
+                 "what should i feed", "what do kittens eat", "what can kittens eat"),
+          ask=("look after", "care for", "care of", "caring for", "looking after", "keep",
+               "bring home", "brought home", "just got", "we got", "ive got", "advice",
+               "what do i need to know", "what do i do", "settle in", "settling in", "settle",
+               "settling", "first few days", "first week", "how do i start"),
+          guard=_it_asks_what_to_do),
     entry("kitten-feeding", (("kitten", "kittens"),
                              ("feed", "food", "how much", "diet", "give", "eat"),
                              # "how often should i feed a kitten" was the brush routine too, for
@@ -7583,11 +8428,24 @@ ENTRIES = [
                  "won't eat", "off his food", "off her food", "vet", "lump", "abscess",
                  "died", "dead", "bury", "burying", "cremat", "dig", "digging"),
           bias=2),
-    entry("rabbit-hutch", (("rabbit", "rabbits", "guinea pig", "guinea pigs"),
+    # A guinea pig has its own card (main's `guinea-pig-basics`), so the rabbit key names the
+    # rabbit alone: the animal the line names is read by the card's own table, not by widening
+    # one animal's key to hold another.
+    entry("rabbit-hutch", (("rabbit", "rabbits", "bunny", "bunnies"),
                            ("hutch", "bedding", "care", "need", "look after", "looking after",
-                            "keep", "keeping", "own", "new", "starter", "setup", "set up")),
-          ("Rabbits need a hutch with a run attached, or a big shed, plus hay all day and a friend "
-           "of their own kind. A small cage with an hour out is not enough for a rabbit."),
+                            "keep", "keeping", "own", "new", "starter", "setup", "set up",
+                            # "how do i clean out the guinea pig cage" named the animal and the
+                            # cage and reached nothing: the cleaning question is this card's.
+                            "cage", "cages", "clean", "cleaning", "clean out", "hutches")),
+          _small_pet_setup,
+          # "what do i need for a rabbit" is the shape a new owner writes and "need" is read as
+          # the asking frame, so the animal was left alone in the key and the row scored nothing;
+          # the cooking row for rabbit meat took the line. The buying shape is a signal here.
+          # The buying shape is a signal of its own: "what do i need for a rabbit" reads "need"
+          # as the asking frame, so it is blanked before the key is scored and the animal was left
+          # as the only word of the line, which is not enough to answer. The shape puts the second
+          # signal back without weakening the frame rule for every other row.
+          shape=(_the_buying_shape,),
           # "need" is the trigger, so "my rabbit died, do we need to bury it deep" used to be
           # answered with housing advice. The composer now stands aside for a pet's burial or
           # cremation (it has no card of its own for that), so a care entry has to stay out of a
@@ -7606,11 +8464,18 @@ ENTRIES = [
                              ("cage", "care", "bedding", "need", "look after", "looking after",
                               "keep", "keeping", "own", "having", "get", "new", "starter",
                               "basic", "basics", "setup", "set up")),
-          ("A hamster needs a deep bed of paper or wood-shaving bedding, a solid wheel and a "
-           "sand bath, in a cage at least 80cm by 40cm on one level rather than tubes. Spot "
-           "clean the wet corner daily, change the bedding every few weeks, and give a water "
-           "bottle rather than a bowl. They are awake at night, so keep the cage out of the "
-           "bedroom.")),
+          # the hamster card holds the set-up and the cleaning, and it answers the half asked
+          _the_hamster_basics),
+    # A guinea pig is not a small rabbit: it has its own card on main, and this change keeps
+    # that card's text word for word while letting it answer the half that was asked (the
+    # cleaning of the cage is not a list of things to buy).
+    entry("guinea-pig-basics", (("guinea pig", "guinea pigs", "cavy", "cavies"),
+                                ("cage", "hutch", "run", "care", "bedding", "need", "needs",
+                                 "look after", "looking after", "keep", "keeping", "own",
+                                 "having", "get", "getting", "new", "starter", "basic",
+                                 "basics", "setup", "set up", "want", "wants", "wanted",
+                                 "ask", "asks", "asking", "buy", "buying", "thinking")),
+          _small_pet_setup),
 
     # --- the everyday care of the animal itself --------------------------------
     # Heat, nails, a bath and the brush are the four things a new owner asks in the first week,
@@ -7771,7 +8636,10 @@ ENTRIES = [
           # the weather answer is what "too cold for a walk", "out in the cold" and "keep him
           # warm" are asking, and "cold" on its own is a word dogs and walks share
           avoid=("outside", "out in", "walk", "walks", "walking", "weather", "winter", "snow",
-                 "frost", "icy", "warm", "coat", "car", "garden", "night", "bed")),
+                 "frost", "icy", "warm", "coat", "car", "garden", "night", "bed",
+                 # a sneeze the day after the room was sprayed is the spray, not a cold
+                 "spray", "sprays", "sprayed", "spraying", "aerosol", "air freshener",
+                 "plug in", "diffuser")),
     entry("pet-ear", (("dog", "dogs", "puppy", "pup", "cat", "cats", "kitten", "pet", "pets"),
                       ("ear", "ears", "ear infection", "ear infections", "smelly ear",
                        "smelly ears", "shaking his head", "shaking her head", "shakes his head",
@@ -7800,16 +8668,12 @@ ENTRIES = [
            "reach, because a few licks of it are fatal."),
           # a dog that is cold and shaking indoors is a vet question if it keeps happening
           avoid=("shivering", "shivers", "shaking", "temperature", "fever")),
-    entry("litter-tray-routine", (("litter", "litter tray", "litter box", "cat litter"),
+    entry("litter-tray-routine", (("litter", "litter tray", "litter box", "cat litter",
+                                   "toilet corner", "pee corner", "toilet area"),
                                   ("how often", "often", "clean", "cleaning", "change",
                                    "changing", "scoop", "scooping", "empty", "emptying",
                                    "replace", "replacing", "wash", "washing", "daily", "weekly")),
-          ("Scoop the solids out twice a day and change the whole tray of clumping litter once a "
-           "week - a tray that is cleaned that often does not need disinfecting every time, just "
-           "hot water and a drop of unscented washing-up liquid. More trays than cats (three for "
-           "two cats) is what stops accidents, and an unwashed tray is the commonest reason a cat "
-           "starts going elsewhere. Never mix bleach with cat urine: it gives off a gas that hurts "
-           "their lungs and yours."),
+          _the_litter_routine,
           # a cat that has stopped using the tray is a problem, not a cleaning schedule
           # bias=1: main's `older-cat-checks` also keys cat + "how often", and on
           # "how often should i change the cat litter" the two tie, so the schedule has to be
@@ -7843,7 +8707,16 @@ ENTRIES = [
                         "cries when lifted", "cry when lifted", "cries when touched",
                         "cries when i touch", "cries if i touch", "screams when",
                         "cries out when",
-                        "cries when i hold", "cries when i lift", "cries when carried")),
+                        "cries when i hold", "cries when i lift", "cries when carried",
+                        # a sore cat shows it as a shape before it says it, and plain people
+                        # describe the shape: "my cat is hunched up" was a greeting
+                        "hunched", "hunched up", "hunched over", "sitting hunched",
+                        "walking hunched", "hunched in a corner", "curled up and hunched",
+                        # not "head low" or "head down": both read as frames to this matcher and
+                        # took "my cat yelps when i touch her tummy" with them, which was in
+                        # this row before the change
+                        "not putting weight",
+                        "not weight bearing", "reluctant to move")),
           ("Look for what has changed rather than for crying: hiding, sitting hunched with her "
            "head low, no longer jumping up where she used to, over-grooming one spot, eating less, "
            "or going outside the tray. Cats purr when they are in pain as well as when they are "
@@ -7852,9 +8725,9 @@ ENTRIES = [
            "stops eating, is urgent: ring the vet today."),
           # a cat that cries when it is touched is this row's, and the crying words sit in the
           # leaving-alone key as well ("crying at the door" is boredom): the nudge settles it
-          bias=1,
+          bias=2,
           avoid=("put down", "to sleep", "died", "dying", "dead", "passed away", "euthanised",
-                  "euthanized", "euthanasia")),
+                 "euthanized", "euthanasia")),
     entry("cat-bathing", (("cat", "cats", "kitten", "kittens"),
                           ("bath", "bathe", "bathing", "wash", "washing", "shampoo")),
           ("Most cats never need a bath, because they keep themselves clean, so do it only for "
@@ -7890,7 +8763,11 @@ ENTRIES = [
                              "insurance for a puppy", "insurance for a dog", "insurance for a cat",
                              "puppy insurance", "dog insurance", "cat insurance",
                              "kitten insurance", "insure my dog", "insure my cat",
-                             "insure the dog", "insure the cat", "insure my puppy", "insure a puppy"),
+                             "insure the dog", "insure the cat", "insure my puppy", "insure a puppy",
+                             # "how much does a dog cost to insure" is the cover's price, not the
+                             # puppy's: the verb alone is the insurance and never the animal, so
+                             # it opens this row and closes the buying-price row
+                             "insure", "insured", "insuring", "insures"),
                             # "how much does puppy insurance cost" was answered with the walking
                             # rule and then with buildings insurance: the cost of the cover is
                             # this row's question, and £20 to £40 a month is in the reply.
@@ -7971,14 +8848,26 @@ ENTRIES = [
     # the useful answer asks which, and says which ones cannot wait.
     entry("pet-ate-some", (("ate", "eaten", "swallowed", "licked", "stole", "got into"),
                            ("handful", "some", "piece", "bit", "few", "slice", "table",
-                            "counter", "floor", "bin", "bins", "wrapper", "packet", "tub")),
+                            "counter", "floor", "bin", "bins", "wrapper", "packet", "tub",
+                            # a household poison is eaten in the same way as a joint of meat,
+                            # and the answer is the same three questions: what, how much, how
+                            # long ago. "my rabbit ate some fly spray" was a chat nod, and
+                            # "my cat licked weedkiller" was the fumes card.
+                            "spray", "fly spray", "insect spray", "weedkiller", "weed killer",
+                            "ant powder", "slug pellets", "bait", "bleach", "antifreeze",
+                            "cleaner", "chemicals")),
           ("What was it, and roughly how much, and how long ago? If it was grapes, raisins, "
            "onion, garlic, chocolate, anything with xylitol in it or any of your medicine, ring "
            "the vet now rather than watching him - most of those are treatable and much easier "
            "early. If it was a bit of plain meat or bread off the table, no harm done."),
           avoid=("grass", "dinner", "breakfast", "lunch", "kibble", "meal", "biscuit", "treat"),
+          # small pets eat the wrong thing too, and the vet call is the same: a rabbit or a bird
+          # that has had a mouthful of spray is not a dog question with a different animal in it
           ask=("him", "her", "he", "she", "dog", "dogs", "puppy", "pup", "cat", "cats",
-               "kitten", "pet"), bias=1),
+               "kitten", "pet", "pets", "rabbit", "rabbits", "bunny", "bunnies", "hamster",
+               "hamsters", "gerbil", "gerbils", "guinea", "bird", "birds", "parrot", "budgie",
+               "ferret", "tortoise"), bias=1,
+          guard=_eaten_thing_is_not_food),
     # The follow-up to "can he eat this" is "he ate some", and then "should I make him sick".
     # Making a pet sick at home is the one thing not to do, so that line has its own answer.
     entry("pet-dont-induce", (("make him sick", "make her sick", "make him vomit",
@@ -8511,6 +9400,28 @@ ENTRIES = [
            "with water, let him have a drink of clean water after and expect drooling for an "
            "hour. A beetle, a spider or a woodlouse is usually nothing at all."),
           guard=_an_eaten_creature),
+    # The other half of that card, and the one that needs the vet rather than the garden: some
+    # garden mushrooms are poisonous to a dog and a few kill, they come up in the same lawn the
+    # dog is walked on, and waiting to see how he goes is the mistake the advice is against. The
+    # sample is what lets the vet identify it, so that comes with the phone call.
+    entry("dog-ate-a-mushroom",
+          (("dog", "dogs", "puppy", "pup", "cat", "cats", "kitten", "pet", "pets"),
+           ("ate", "eaten", "eat", "eats", "eating", "swallowed", "swallow", "licked",
+            "licking", "chewed", "chewing", "nibbled", "nibbling", "got"),
+           ("mushroom", "mushrooms", "toadstool", "toadstools", "fungus", "fungi",
+            "shroom", "shrooms")),
+          ("Ring the vet now, before any symptoms: some garden mushrooms are poisonous to dogs "
+           "and cats, a few of them deadly, and the dangerous ones look much like the harmless "
+           "ones. Take a photo of where it was growing and whatever is left of it in a paper bag "
+           "or a bit of damp kitchen roll, so the vet can identify it, and do not make him sick "
+           "yourself. If he is already drooling, being sick, shaky or wobbly, say that on the "
+           "phone, because it makes it urgent."),
+          # the cat and the dog both eat what they find, so both are in the key; a person's own
+          # mushroom is a cooking question and has no animal in it
+          avoid=("recipe", "cook", "cooking", "fry", "fried", "risotto", "soup", "pasta",
+                 "picking mushrooms", "pick mushrooms", "forage", "foraging", "baby",
+                 "toddler", "my son", "my daughter"),
+          guard=_an_eaten_fungus),
     entry("dog-scavenging", (("dog", "puppy"),
                              ("eat", "eating", "eats", "ate", "picks up", "picking up", "street",
                               "pavement", "rubbish", "junk", "litter", "scavenge",
@@ -8535,6 +9446,9 @@ ENTRIES = [
                  "too quickly", "so quickly", "really quickly", "gulps", "gulp", "slow feeder",
                  "slowly",
                  "can dogs eat", "can my dog eat", "can a dog eat", "can i give", "is it safe",
+                 # what has already gone down is the vet's, not a training tip: a mushroom off
+                 # the lawn is `dog-ate-a-mushroom`, which is a phone call rather than a lead
+                 "mushroom", "mushrooms", "toadstool", "toadstools", "fungus", "fungi",
                  "safe for dogs", "safe to give", "cheese", "milk", "dairy", "grapes", "grape",
                  "raisins", "raisin", "onion", "onions", "garlic", "chocolate", "xylitol",
                  "sugar free", "sugar-free", "macadamia", "avocado", "lilies", "alcohol",
@@ -8790,11 +9704,7 @@ ENTRIES = [
             "booster jab", "vaccinations", "vaccination", "vaccine", "vaccines", "jabs", "jab",
             "vaccinate", "vaccinated", "vaccinating", "jabbed", "inoculation",
             "vet", "vets", "see the vet", "go to the vet", "visit the vet", "yearly check")),
-          "Once a year for a health check, and the yearly booster goes in at the same visit. "
-          "Puppies and kittens: a course of two or three jabs two to four weeks apart, then the "
-          "yearly one. Past about eight years old, twice a year is worth it. A rabbit needs its "
-          "teeth checked once a year. The practice usually texts the reminder, so ask them to set "
-          "one.",
+          _the_pet_checkup,
           ask=("how often", "how many times", "how regularly", "when", "yearly", "annual",
                "annually", "once a year", "every year", "should", "need", "does", "do i"),
           # a frightened animal at the vet, a price, an insurance bill and a sick pet are other
@@ -9017,7 +9927,8 @@ ENTRIES = [
           avoid=("feed", "feeds", "feeding", "food", "eat", "eats", "eating", "exercise", "walk",
                  "walks", "walking", "run", "sleep", "sleeps", "settle", "settling", "alone",
                  "leave", "hours", "toilet", "train", "training", "bite", "biting", "bark",
-                 "insurance", "vacccin", "vaccine", "vaccination", "jabs cost", "vet bill",
+                 "insurance", "insure", "insured", "insures", "insuring", "insurance quote",
+                 "vacccin", "vaccine", "vaccination", "jabs cost", "vet bill",
                  "vet fees", "consultation", "put to sleep",
                  # "how much to groom a dog" is the groomer's price and "how much water should a
                  # dog drink" is the water rule: neither is what the animal costs to buy, and
@@ -9378,6 +10289,10 @@ ENTRIES = [
           # "beds" in a garden entry is a flower bed, so a cat's own bed needs the nudge
           bias=1),
 ]
+
+from .costs import time_entries
+# A consultation at the vet is asked how long it takes, and the duration is what is missing.
+ENTRIES += time_entries("vet")
 
 
 # --- a bored pet, and whether a pet knows its name -------------------------------------------
@@ -9840,21 +10755,48 @@ ENTRIES.append(entry(
 _RABBIT_ALONE_ASK = ("lonely", "alone", "on its own", "on her own", "on his own", "company",
                      "companion", "a friend", "friend for", "needs a friend", "need a friend",
                      "another rabbit", "second rabbit", "two rabbits", "bond", "bonding",
-                     "bonded", "pair", "pairing", "single rabbit", "keep it with")
+                     "bonded", "pair", "pairing", "single rabbit", "keep it with",
+                     # "can i keep one guinea pig" is the same question as "is it lonely", and
+                     # the housing answer it used to get says nothing about the second animal.
+                     "keep one", "keep a single", "just one", "only one", "one on its own",
+                     "single guinea pig", "alone all day", "left on its own")
+
+# A rabbit and a guinea pig are the same question in the same words - "is my rabbit lonely",
+# "do guinea pigs need a friend", "can i keep one" - and the answer is the same rule with a
+# different animal in it. The row named rabbits only, so a guinea pig on its own was answered
+# with the rabbit card or with nothing at all, and the guinea pig is the pet most often kept
+# alone by mistake.
+_SMALL_PET_ALONE = {
+    "rabbit": (
+        "Rabbits are herd animals, so one on its own is the exception: the best setup is a "
+        "neutered pair in a hutch with a run attached, and a lone rabbit gets withdrawn, "
+        "over-grooms and chews the bars. A few hours alone in the day is fine, a whole day and "
+        "night with nobody in is not. Bonding needs neutral ground, two of everything - bowls, "
+        "trays, hidey holes - and short meetings that build over a week or two, never one rabbit "
+        "dropped into the other's hutch. Neuter both first, or they will fight and then breed."),
+    "guinea pig": (
+        "Guinea pigs are herd animals, so a single one is the exception: two sows, or a neutered "
+        "boar with a sow, in a big cage or a hutch with a run, is the normal setup, and a guinea "
+        "pig kept alone gets withdrawn and can stop eating. A few hours alone in the day is fine, "
+        "a whole day and night with nobody in is not. Bond on neutral ground with two of "
+        "everything and short meetings, and never drop a new one into the other's cage. A rabbit "
+        "is not a substitute: they eat different food and a rabbit can injure a guinea pig."),
+}
+
+
+def _small_pet_alone(memory, understood):
+    """The companion answer, in the animal the line names or the chat was last about."""
+    return _SMALL_PET_ALONE[_the_small_pet(memory, understood)]
+
 
 ENTRIES.append(entry(
-    "rabbit-alone",
-    (("rabbit", "rabbits", "bunny", "bunnies"), _RABBIT_ALONE_ASK),
-    ("Rabbits are herd animals, so one on its own is the exception: the best setup is a neutered "
-     "pair in a hutch with a run attached, and a lone rabbit gets withdrawn, over-grooms and "
-     "chews the bars. Bonding needs "
-     "neutral ground, two of everything - bowls, trays, hidey holes - and short meetings that "
-     "build over a week or two, never one rabbit dropped into the other's hutch. Neuter both "
-     "first, or they will fight and then breed."),
-    # A rabbit that has died is pet-loss, and food, hay and housing are their own answers.
+    "small-pet-alone",
+    (("rabbit", "rabbits", "bunny", "bunnies", "guinea pig", "guinea pigs"), _RABBIT_ALONE_ASK),
+    _small_pet_alone,
+    # A pet that has died is pet-loss, and food, hay and housing are their own answers.
     avoid=("died", "dead", "dying", "passed away", "put down", "euthanised", "euthanized",
            "eat", "eats", "ate", "eating", "food", "hay", "hutch size", "how big", "run size",
-           "guinea pig", "guinea pigs", "hamster", "cat", "dog")))
+           "hamster", "hamsters", "cat", "dog")))
 
 # Hamsters chew bars in almost every cage people buy, so the question is the commonest thing
 # said about them and it had nothing behind it: "my hamster is biting the bars" was read back as
@@ -10139,13 +11081,12 @@ ENTRIES.extend([
                             "castration", "the snip", "get him done", "get her done"),
           # "when should i get my dog done" is the neutering line; "when should i walk my dog" is
           # not, so the operation words in ask= do that work. A person's own operation is not this.
-          # "my cat is spayed" is a statement, not a question about when to do it
+          # The statement forms - "my cat is spayed", "hes neutered" - used to be avoided here,
+          # because the card answers the date of the operation. They are answered by the card's
+          # own "already done" reply now, which reads the normalised line, so a typo'd "hes
+          # neutered" and a written "he is neutered" reach the same answer.
           avoid=("myself", "me", "i am having", "i'm having", "hysterectomy", "vasectomy",
-                 "my son", "my daughter", "my husband", "my wife", "my partner",
-                 "is spayed", "is neutered", "is castrated", "already spayed",
-                 "already neutered", "already done", "was spayed", "was neutered",
-                 "has been spayed", "has been neutered", "got spayed", "got neutered",
-                 "got done"),
+                 "my son", "my daughter", "my husband", "my wife", "my partner"),
           # a small pet's neutering price is asked with the same words as its buying price, and
           # the buying-price row has a bias, so this row has to win the tie: "how much does it
           # cost to spay a rabbit" was getting a dog and cat price with no rabbit in it
@@ -10729,6 +11670,19 @@ _A_SOAKING = re.compile(
     r"dry (?:him|her|it|them)|drying (?:him|her|it|them))\b")
 
 
+# A machine, a sink or a bin is also just *where* a pet is, and a dog that shakes when the washing
+# machine goes on has not been in it. The card is about drying a soaked animal, so the line has to
+# say the animal got wet or went in.
+_AN_ANIMAL_IN_THE_WATER = re.compile(
+    r"\b(?:fell|fallen|jumped|jumps|dropped|went through|gone through|in the|inside the"
+    r"|soaked|soaking|sopping|drenched|wet through|got wet|swam|swim)\b")
+
+
+def _the_animal_got_wet(understood):
+    said = _said(understood)
+    return bool(_AN_ANIMAL_IN_THE_WATER.search(said) or _A_SOAKING.search(said))
+
+
 def _a_soaking_is_not_a_smell_or_a_hair(understood):
     """True unless the line is a smell of an animal, or a coat the machine is full of.
 
@@ -10758,8 +11712,9 @@ ENTRIES.append(entry(
       "soaked", "soaking", "sopping", "drenched", "wet through", "got wet", "fell in the",
       "in the washing machine", "in the sink", "in the toilet", "in the bin")),
     ("Towel him dry right through, not just the top, then keep him somewhere warm for an hour: a "
-     "rabbit, guinea pig or hamster loses heat fast once its coat is soaked, and a cage that got "
-     "wet needs the bedding changed too. If the water had soap, detergent or bleach in it, rinse "
+     "soaked coat loses heat fast, and a small pet suffers most of all - a rabbit, guinea pig or "
+     "hamster chills quickly, and a hutch or cage that got wet needs the bedding changed too. If "
+     "the water had soap, detergent or bleach in it, rinse "
      "it off with clean water before you dry him, because a cat or a small pet that licks its "
      "coat clean will swallow it. A pet that went through a wash or a dry cycle needs the vet "
      "even if it looks fine, and so does one that keeps shivering, goes quiet and floppy, or is "
@@ -10774,7 +11729,10 @@ ENTRIES.append(entry(
     ask=("sink", "toilet", "bin", "bucket", "washing machine", "dishwasher", "tumble dryer",
          "soaked", "soaking", "wet", "fell", "drenched"),
     # the machine that smells of wet dog is the laundry card's question, not this one
-    guard=_a_soaking_is_not_a_smell_or_a_hair,
+    # a machine, a sink or a bin is where an animal can be and get soaked: the drying card needs
+    # the line to say the animal got wet, or "the dog shakes when the washing machine goes on"
+    # is told to towel a pet that is dry
+    guard=_a_soaking_is_not_a_smell_or_a_hair and _the_animal_got_wet,
     bias=2))
 
 ENTRIES.append(entry("pet-sick-again", _PET_SICK_AGAIN, _pet_sick_again, bias=6,
@@ -11212,6 +12170,146 @@ ENTRIES.append(entry("horse-sweating",
                             "under my arms", "underarms")))
 
 
+# An animal's symptom is the animal's, not a person's. From the deck census in #answers thread
+# 111660: "my cat is dragging her back legs" was the hem of a skirt, "my horse is wobbly on his
+# feet" was falls in older people, "my dog cant walk properly" was the daily dog walk and "my
+# guinea pig is not moving much" was the stroke card. The animal is the subject of the sentence,
+# so the animal's symptom is the question, and the rows below answer it for every animal the
+# line can name rather than for a dog read out to a rabbit's owner.
+_ANI = ("cat", "cats", "kitten", "kittens", "dog", "dogs", "puppy", "pup", "rabbit", "rabbits",
+        "bunny", "bunnies", "guinea pig", "guinea pigs", "guinea", "hamster", "hamsters",
+        "gerbil", "gerbils", "ferret", "ferrets", "rat", "rats", "horse", "horses", "pony",
+        "ponies", "pet", "pets")
+
+# The animal named, as words a reply can use. A horse and a guinea pig are not "a dog", which is
+# what _pet_words falls back to, so they are read first and named properly.
+_ANI_KIND = (("guinea pig", ("guinea pig", "guinea pigs", "guinea")),
+             ("horse", ("horse", "horses", "pony", "ponies")),
+             ("hamster", ("hamster", "hamsters")),
+             ("rabbit", ("rabbit", "rabbits", "bunny", "bunnies")),
+             ("cat", ("cat", "cats", "kitten", "kittens")),
+             ("dog", ("dog", "dogs", "puppy", "puppies", "pup")))
+
+
+def _the_animal(understood):
+    """The animal the line names, as {one, they, kind}, or the dog these answers default to."""
+    text = " " + str((understood or {}).get("clean") or "").lower() + " "
+    pointed_at = str((understood or {}).get("animal_in_hand") or "").lower()
+    for kind, words in _ANI_KIND:
+        for word in words:
+            if " " + word + " " in text or (pointed_at and pointed_at.startswith(word)):
+                if kind == "guinea pig":
+                    return {"one": "a guinea pig", "One": "A guinea pig",
+                            "they": "guinea pigs", "them": "it", "kind": kind}
+                if kind == "horse":
+                    return {"one": "a horse", "One": "A horse", "they": "horses",
+                            "them": "it", "kind": kind}
+                return {"one": "a " + kind, "One": "A " + kind, "they": kind + "s",
+                        "them": "it", "kind": kind}
+    return {"one": "an animal", "One": "An animal", "they": "animals", "them": "it",
+            "kind": "animal"}
+
+
+_BACK_LEGS = ("dragging his back legs", "dragging her back legs", "dragging its back legs",
+              "dragging his back leg", "dragging her back leg", "dragging back legs",
+              "dragging his back end", "dragging her back end", "dragging its back end",
+              "dragged his back legs", "dragged her back legs",
+              "cant use his back legs", "cant use her back legs", "cant use its back legs",
+              "can't use his back legs", "can't use her back legs", "can't use its back legs",
+              "back legs are paralysed", "back legs are paralyzed", "back legs have gone",
+              "back legs gave way", "back end is paralysed", "back end is paralyzed",
+              "cant move his back legs", "cant move her back legs",
+              "cant move its back legs", "sudden paralysis", "suddenly paralysed",
+              "suddenly paralyzed", "dragging his hind legs", "dragging her hind legs",
+              "gone off his back legs", "gone off her back legs", "gone off its back legs",
+              "off his back legs", "off her back legs", "off its back legs",
+              "back legs are gone", "back legs have gone", "cant feel his back legs",
+              "cant feel her back legs", "back legs wont work", "back legs dont work",
+              "hind legs are paralysed", "hind legs are paralyzed", "cant stand up")
+
+
+def _pet_back_legs(memory, understood):
+    pet = _the_animal(understood)
+    if pet["kind"] == "horse":
+        return ("That is an emergency - ring the vet now. A horse that cannot use its back legs "
+                "may have a fracture, a spinal injury or a poisoning, and it must not be walked "
+                "or moved far: keep it still on level ground, do not try to get it up by pulling "
+                "the head or the tail, and keep other horses away while you wait for the vet.")
+    return ("Ring the vet now if this came on today: {one} that suddenly cannot use its back legs "
+            "usually has a blood clot at the back of the aorta or a spinal injury, and the first "
+            "hours decide how much comes back. Keep {them} warm and quiet on a towel, carry "
+            "{them} to the car rather than letting {them} walk, and note the time it started. A "
+            "slow drag that has built up over months is a different, less urgent question - but "
+            "a change today is not one to watch.").format(**pet)
+
+
+_WOBBLY = ("wobbly on his feet", "wobbly on her feet", "wobbly on its feet", "wobbly",
+           "swaying", "sways", "swaying about", "swaying side to side",
+           "unsteady on his feet", "unsteady on her feet", "unsteady",
+           "cant walk properly", "can't walk properly", "cant walk straight",
+           "cant walk in a straight line", "staggering", "staggers", "staggered",
+           "keeps falling over", "falling over", "keeps falling down", "off his legs",
+           "off her legs", "off its legs", "weak in the back legs", "wobbling")
+
+
+def _pet_wobbly(memory, understood):
+    pet = _the_animal(understood)
+    if pet["kind"] == "horse":
+        return ("A horse that is wobbly or unsteady wants the vet out today, not a day's rest: "
+                "it can be the neck or spine, a poisoning, or the balance centre, and a horse "
+                "that goes down is hard to get up again. Keep {them} on level ground with food "
+                "and water within reach, do not ride or lunge {them}, and note when it started "
+                "and whether it is worse on one side.").format(**pet)
+    return ("A wobbly animal is a vet visit today, not a wait and see: in a dog or cat it is often "
+            "the inner ear, a poisoning or something pressing on the spine. Keep {them} off "
+            "stairs and off the furniture, with food and water within reach, and note whether "
+            "{they} is falling to one side, tilting its head or crossing its legs - a vet reads "
+            "that off the note better than off a memory.").format(**pet)
+
+
+_NOT_MOVING = ("not moving much", "not moving", "isnt moving", "isn't moving", "wont move",
+               "will not move", "not moving about", "not moving around", "lying flat",
+               "lying still", "just lying there", "flopped out", "not himself at all",
+               "not herself at all", "very quiet and not moving")
+
+
+def _pet_not_moving(memory, understood):
+    pet = _the_animal(understood)
+    return ("{One} that has stopped moving about is ill, and small animals hide it until they are "
+            "very sick - a rabbit, guinea pig or hamster sitting still and fluffed up is a vet "
+            "call today, tonight if it is also off its food. Keep {them} warm and quiet, put "
+            "water and hay or its usual food within reach so it need not move for them, and do "
+            "not bath or handle it more than you have to.").format(**pet)
+
+
+_DIRTY_BOTTOM = ("dirty bottom", "mucky bottom", "dirty bum", "mucky bum", "soiled bottom",
+                 "matted bottom", "dirty back end", "messy bottom", "smelly bottom",
+                 "cant clean himself", "cant clean herself", "not cleaning himself",
+                 "not cleaning herself", "flies around", "fly strike", "flystrike")
+
+
+def _pet_dirty_bottom(memory, understood):
+    return ("Wash and dry it today and ring the vet: a rabbit or guinea pig with a dirty bottom is "
+            "at risk of flystrike, where flies lay eggs in the soiled fur and maggots hatch within "
+            "hours in warm weather. Check the bottom twice a day in summer and keep the hutch "
+            "clean; an animal that cannot keep itself clean needs a vet for the cause, which is "
+            "usually teeth or a sore back.")
+
+ENTRIES.append(entry("pet-back-legs", (_BACK_LEGS, _ANI), _pet_back_legs, bias=3))
+ENTRIES.append(entry("pet-wobbly", (_WOBBLY, _ANI), _pet_wobbly, bias=3,
+                     # a wobbly table and a wobbly tooth are not animals: this row needs the
+                     # animal, and these say the line is about something else
+                     avoid=("my tooth", "a tooth", "tooth is", "teeth", "table", "chair",
+                            "shelf", "i feel", "i am", "im ", "my legs", "i keep",
+                            "my knee", "my ankle", "my hand")))
+ENTRIES.append(entry("pet-not-moving", (_NOT_MOVING, _ANI), _pet_not_moving, bias=2))
+ENTRIES.append(entry("pet-dirty-bottom",
+                     (_DIRTY_BOTTOM, ("rabbit", "rabbits", "bunny", "bunnies", "guinea pig",
+                                      "guinea pigs", "guinea", "hamster", "hamsters")),
+                     _pet_dirty_bottom, bias=3))
+
+
 # The row, by name, for a follow-up answered from the same words. It is looked up after the list
 # is built so the row keeps its place in the order the entries were written in.
 DOG_FEED_AMOUNT_ENTRY = next(_entry for _entry in ENTRIES if _entry.id == "dog-feed-amount")
+

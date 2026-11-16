@@ -232,6 +232,12 @@ def _measured_the_same(value, before):
     family = _the_unit(value)
     if not family:
         return True
+    if any(_date_said(str(value or "").lower())):
+        # A day is not measured in a unit, even though "21st" ends in the letters of "stone".
+        # The unit reader took the ordinal suffix for a unit and dropped the correction before
+        # the date reader could move the plan: "the party is on the 14th" / "sorry i meant the
+        # 21st" kept the 14th. A date is the date reader's business, so it is not stopped here.
+        return True
     return family in _stated_families(before)
 
 NAMING_VERB = re.compile(r"^(?:(?:called|named)\s+"
@@ -388,6 +394,59 @@ def _the_person_the_plan_is_about(memory, correction, before=None):
             moved += 1
     return moved
 
+def _a_correction_is_not_a_plan(memory, text):
+    """A line that put a value right is not also a plan of its own.
+
+    "im going to spain in june" then "actually we fly in july now": the line says which month the
+    trip moved to, and the trip it moved is the one already in the store. Read as a plan of its
+    own as well, the list held "Spain in July" and "we fly in july now", and the reply said the
+    second one back - "Got it - July." where the person had named the trip, not a month on its
+    own. The words the line corrects with are not part of what it says, so the plan to drop is
+    the line without them.
+    """
+    said = " ".join(str(text or "").lower().split())
+    if not said:
+        return
+    body = " ".join(extract.CORRECTION_LEAD_RE.sub("", said).split())
+    known = user(memory)
+    plans = known.get("plans")
+    if not isinstance(plans, list):
+        return
+    kept = [one for one in plans
+            if " ".join(str(one).lower().split()) not in (said, body)]
+    if len(kept) != len(plans):
+        known["plans"] = kept
+
+
+def _a_value_already_the_plans(memory, target, text=""):
+    """Whether the value a line corrects to is already what the person's own plan says.
+
+    A correction is applied once per turn but the store is written two or three times, and each
+    later pass found the old month still in a twin of the plan: "im booking a trip to croatia in
+    july" / "my mums birthday is 2 april" / "actually we fly out in october" moved "Croatia in
+    july" to October and then moved "A trip to croatia in july" as well, and the value the answer
+    reads the place from became the twin - so "whats the food like" lost Croatia and answered the
+    birthday as a party. The line's own words do not count: the store files the correction as a
+    plan on the way in ("we fly out in october"), and that is not a second thing to move.
+    """
+    said = str(target or "").strip().lower()
+    if not said:
+        return False
+    line = " ".join(str(text or "").lower().split())
+    known = user(memory)
+    plans = [p for p in (known.get("plans") or []) if isinstance(p, str) and p.strip()]
+    latest = known.get("plan")
+    if isinstance(latest, str) and latest.strip():
+        plans.append(latest)
+    for one in plans:
+        held = " ".join(one.lower().split())
+        if line and (held in line or line in held):
+            continue
+        if re.search(r"\b" + re.escape(said) + r"\b", held):
+            return True
+    return False
+
+
 def _apply_correction(memory, correction, text=""):
     """'Sorry, I meant Florence, not Rome' replaces Rome in the topic it corrects."""
     target = correction.get("to") if isinstance(correction, dict) else None
@@ -396,6 +455,12 @@ def _apply_correction(memory, correction, text=""):
         correction["to"] = target
     wrong = correction.get("from") if isinstance(correction, dict) else None
     if not target:
+        return
+    if isinstance(correction, dict) and correction.get("applied"):
+        return
+    if _a_value_already_the_plans(memory, target, text):
+        # A correction is one event, however many times the line is read in the turn: once the
+        # value is in a plan, there is nothing left of it to move.
         return
     if not wrong and not _measured_the_same(target, last_user(memory) or ""):
         # "no 2 weeks" after "my budget is 400" is not a budget: a unit the fact on the table does
@@ -437,16 +502,19 @@ def _apply_correction(memory, correction, text=""):
     other = None if fixed else _correct_other(memory, target, text)
     if other:
         other["said"] = said
+        other["applied"] = True
         memory["correction"] = other
     if fixed:
         if fixed.get("key") == "plan":
             # The plan a person's own fact was stated in carries the fact with it: a date put
             # right moved the plan and left the person's entry at the date they took back.
             _the_person_the_plan_is_about(memory, fixed, plan_on_the_table)
+            _a_correction_is_not_a_plan(memory, text)
         # The correction is the news of this turn: the old value is already replaced, so say
         # which one the bot is going with instead of leaving the user to wonder. The line is
         # kept so a later turn does not repeat the same note.
         fixed["said"] = said
+        fixed["applied"] = True
         memory["correction"] = fixed
     if not fixed and not wrong:
         # Nothing was corrected, so nothing is rewritten. "make that" is an ordinary phrase
@@ -458,7 +526,28 @@ def _apply_correction(memory, correction, text=""):
     if not record:
         return
     text = record["text"]
-    if other:
+    moved_off_the_topic = bool(
+        fixed and fixed.get("key") == "plan" and fixed.get("from")
+        and not re.search(r"\b" + re.escape(str(fixed["from"])) + r"\b", text, flags=re.I))
+    if moved_off_the_topic:
+        # The date moved a plan the person is not speaking of: "my mums birthday is 2 april" was
+        # the subject on the table and "actually we fly out in october" moves the trip. Rewritten,
+        # the birthday read "(mean October)" and the next turn ("whats the food like") was
+        # answered against the birthday, with Croatia gone from the topics the answer reads a
+        # place from - so the older record is left whole and the line is this turn's own subject,
+        # filed here because the store stops once a correction is applied.
+        line = " ".join(str(said or text).split())
+        if line:
+            fresh = {"turn": len(memory.get("turns") or []), "text": line,
+                     "words": keywords(line)}
+            memory["topic"] = fresh
+            topics = memory.get("topics")
+            if not isinstance(topics, list):
+                topics = memory["topics"] = []
+            if not topics or topics[-1].get("text") != line:
+                topics.append(fresh)
+        return
+    elif other:
         # The sentence the correction was said in is the one to hold, so a later "what did I
         # say?" answers with the value they meant.
         text = other.get("line") or text
@@ -866,6 +955,12 @@ def _correct_number(memory, target, text=""):
     digits = _number_in(new)
     if not digits:
         return None
+    if _names_a_date(new):
+        # A value that states a date is a date, and the date reader has already had it: the 5 in
+        # "the 5th of june" is not a figure that took the place of another one. Read as one it
+        # moved the hour of "the dentist is on tuesday at 9" to 5, and the recall said "your
+        # dentist is at 5 on Tuesday" over a line that said nine.
+        return None
     said = " ".join(str(last_user(memory) or "").split())
     if not said or _a_birthday_on_the_last_line(memory):
         # A birthday is the one fact kept as a date, and the number in it is a day of the month,
@@ -1001,10 +1096,10 @@ BARE_NEW_COUNT = re.compile(
     # hedge sits where the number should start, so the shape stopped and the store kept the old
     # count: "i have two kids" then "actually just one" still said two children. Only a number
     # may follow the hedge, so "no just checking" stays the shrug it was.
-    r"(?:(?:just|only|about|around|roughly|nearly|exactly)\s+)?"
+    r"(?:(?:just|only|about|around|roughly|nearly|exactly)\s+(?:the\s+)?)?"
     r"(?:(?:it'?s|its|that'?s|thats)\s+)?"
     r"(?P<count>\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\w+teen)\b"
-    r"\s*[.!]?$", re.I)
+    r"\s*(?:now\b)?\s*[.!]?$", re.I)
 
 def _correct_the_count_on_the_table(memory, target, text=""):
     """Put a corrected count on what the line before it counted.
@@ -1035,6 +1130,49 @@ def _correct_the_count_on_the_table(memory, target, text=""):
     remember(memory, "kids", new, text)
     return {"key": "kids", "value": _a_count(new, "kid"), "from": _a_count(old, "kid")}
 
+# The going a line says with the date names what kind of thing moved, so it is also what the move
+# must land on. "im booking a trip to croatia in july" / "my mums birthday is 2 april" / "actually
+# we fly out in october" moved the birthday to 2 October, because the birthday was the newest date
+# in the store and every date held looked the same to the reader: the person's fact came back
+# wrong ("when is my mums birthday" -> "2 October"), and once a fact is put wrong a later turn
+# hands it back with a confident frame. A going of flying or travelling is about a journey, and a
+# date kept for somebody else is never the journey on the table.
+A_JOURNEY_GOING = re.compile(
+    r"\b(?:fly|flies|flying|flight|flights|travel|travels|travelling|traveling|trip|trips"
+    r"|holiday|holidays|booking|booked|visit|visiting|journey|outing)\b", re.I)
+
+
+def _a_fact_of_somebody_else(memory, plan):
+    """Whether a plan is a date kept for another person ("mums birthday on 2 april"), not a plan.
+
+    The store says whose it is in `others`, so the person's own word for them ("mum", "son") in
+    the plan is what marks it: their birthday is a fact about them, and a trip of the person's own
+    is not.
+    """
+    said = " ".join(str(plan or "").lower().split())
+    if not said:
+        return False
+    for entry in (memory or {}).get("others") or []:
+        who = str((entry or {}).get("who") or "").strip().lower()
+        if not who:
+            continue
+        word = who.split()[0]
+        if re.search(r"\b" + re.escape(word) + r"(?:'?s)?\b", said):
+            return True
+    return False
+
+
+def _the_plans_a_journey_moves(memory, plans, text):
+    """The plans a line about a journey can move, or None when the line names no journey.
+
+    None means the line names no going of that kind, so every date held is a candidate the way it
+    always was ("make it july", "no, in august").
+    """
+    if not A_JOURNEY_GOING.search(str(text or "")):
+        return None
+    return [one for one in plans if not _a_fact_of_somebody_else(memory, one)]
+
+
 def _correct_when(memory, target, text=""):
     """A month or a day is not a fact of its own: it lives inside the plan the line before it
     stated, so "my holiday is in june" then "make that july" moves the holiday to July. The
@@ -1049,6 +1187,14 @@ def _correct_when(memory, target, text=""):
     if isinstance(latest, str) and latest.strip() and latest not in plans:
         plans.append(latest)
     group = extract.MONTHS if low in extract.MONTHS else extract.DAYS
+    journeys = _the_plans_a_journey_moves(memory, plans, text)
+    if journeys is not None:
+        # A journey was named, so a person's fact is not one of the things it can move. With no
+        # journey in the store the move is left alone rather than landing on the nearest date
+        # held: a fact put wrong cannot be taken back by a later turn.
+        if not journeys:
+            return None
+        plans = journeys
     for plan in reversed(plans):
         for word in re.findall(r"[a-z]+", plan.lower()):
             if word in group and word != low:
@@ -1056,14 +1202,22 @@ def _correct_when(memory, target, text=""):
                 # The line the plan came from is the line they stated it in, not the correction:
                 # "we're going to spain in july" then "make it august" is said back as "You're
                 # going to spain in August", and never as the change ("You moved it to august").
-                remember(memory, "plan", fixed, _plan_told_line(memory, plan, fixed, text))
+                told = _plan_told_line(memory, plan, fixed, text)
+                remember(memory, "plan", fixed, told)
                 plans_list = known.get("plans")
                 if isinstance(plans_list, list):
                     # The corrected plan replaces the old one, so "when do I start?" has one
                     # answer, the new one.
                     known["plans"] = [fixed if str(p).lower() == plan.lower() else p
                                       for p in plans_list]
-                return {"key": "plan", "value": target, "from": word[:1].upper() + word[1:]}
+                # The move is said as the plan it now stands, never as the month on its own: "im
+                # going to spain in june" then "actually we fly in july now" was answered "Got it
+                # - July.", which is the same month with the trip taken out of it.
+                read_back = plan_sentence(fixed, told)
+                if read_back.lower().startswith("you're planning "):
+                    read_back = ""
+                return {"key": "plan", "value": fixed.rstrip(" ."),
+                        "from": word[:1].upper() + word[1:], "sentence": read_back}
     return None
 
 DATE_DAY = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)\b", re.I)
@@ -1114,6 +1268,19 @@ def _date_word_case(value):
 def _date_in_plan(plan):
     """The day and the month the plan already says, either of them None."""
     return _date_said(str(plan or "").lower())
+
+WEEKDAY_IN_PLAN = re.compile(
+    r"\b(?:(?:this|next|last|coming|the)\s+)?(?:" +
+    "|".join(sorted(extract.DAYS - {"weekend"}, key=len, reverse=True)) + r")\b", re.I)
+
+def _the_weekday_in(plan):
+    """The weekday a plan says its day as, or None ("the dentist is on tuesday at 9")."""
+    return WEEKDAY_IN_PLAN.search(str(plan or ""))
+
+def _names_a_date(value):
+    """True when a value states a date: a month, or a day of the month ("5 june", "the 5th")."""
+    day, month = _date_said(str(value or "").lower())
+    return bool(day or month)
 
 RELATIVE_MONTH = re.compile(r"\b(?:next|this|that|the\s+following|the\s+coming|the\s+next)\s+month\b",
                             re.I)
@@ -1204,11 +1371,24 @@ def _correct_date(memory, target, text="", wrong=""):
         # was going into the plan's place instead ("you're going to In july next month").
         # Only a whole month moves this way: a day on its own ("no, the 12th") has no month
         # to sit in, so it is left to the readers that know what it belongs to.
-        relative = _a_relative_month(plan, day, month)
-        if relative is None:
-            return None
-        fixed, was, said = relative
-        moved.append(was)
+        weekday = _the_weekday_in(plan)
+        if day and month and weekday:
+            # A plan that says its day as a weekday is moved to the date they name: "the dentist
+            # is on tuesday at 9" put right by "the 5th of june" is the dentist on the 5th of
+            # June at 9. Nothing was moved here before - no reader thought a weekday was a date
+            # a date could replace - so the weekday stood, the number reader moved the hour
+            # instead, and the recall said "at 5 on Tuesday".
+            said = "the {day} of {month}".format(day=_date_word_case(day),
+                                                 month=_date_word_case(month))
+            fixed = " ".join((plan[:weekday.start()] + said + plan[weekday.end():]).split())
+            was = weekday.group(0).lower()
+            moved.append(was)
+        else:
+            relative = _a_relative_month(plan, day, month)
+            if relative is None:
+                return None
+            fixed, was, said = relative
+            moved.append(was)
         # The line they said it in is the one the plan is said back with, and it still carries
         # the relative words, so the date moves in that line too: "You're going to rome in
         # July". Without it the correction had no sentence to say, and the when answer went

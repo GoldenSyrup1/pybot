@@ -15,8 +15,9 @@ calories, sugar, salt, fibre, fat, alcohol, caffeine, and the habits that people
 name. Numbers are UK guidance for an ordinary adult (a 2,000 kcal a day reference intake),
 said plainly, with the "see your GP" line only where a diet question is really a health one.
 """
+from .cooking import COOKING_VERBS
 from .lookup import (DAY_WORDS, PACK_DATE, a_food_is_being_kept, entry as _raw_entry,
-                     food_has_gone_off)
+                     food_has_gone_off, not_a_count_for_the_box_or_the_dish)
 from .shopping import not_a_present
 
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
@@ -109,6 +110,31 @@ _NOT_A_PERSON_OR_PET = (
     "diabetes", "kidney", "kidneys", "warfarin", "medication", "on tablets",
 )
 
+# The thing being timed is the subject, not the timing words. This row answers "should i eat
+# before or after X" for a *session* - energy before, repair after - so a line that times a dose is
+# a different question with its own row: "should i take my vitamins before or after food" was told
+# "something small and mostly carbohydrate one to two hours before gives you the energy for the
+# session". Read the other way the same test keeps this row where it belongs: "before or after
+# food" and "before or after a meal" time the eating itself, and those are a person asking how to
+# eat, which is this row's subject. So the row stands down for a dose, not for every line that has
+# no session in it.
+_A_DOSE = re.compile(
+    r"\b(?:vitamins?|multivitamins?|supplements?|probiotics?|iron|folic\s+acid|calcium"
+    r"|tablets?|pills?|capsules?|creatine|magnesium|omega\s?3|collagen|melatonin|electrolytes?"
+    r"|ibuprofen|paracetamol|aspirin|naproxen|painkillers?|medicines?|medication"
+    r"|antibiotics?|steroids?)\b")
+
+
+def not_a_dose(understood):
+    """True unless the line times a dose rather than a session or a meal.
+
+    Public because the same shape reaches other timing rows: the subject of "before or after what"
+    is the session, the dose or the journey, and a row answers only its own subject.
+    """
+    said = str(understood.get("clean") or understood.get("plain") or "").lower()
+    return not _A_DOSE.search(said)
+
+
 # A statement about the user's own diet ("im vegetarian and i dont eat dairy", "i dont eat dairy
 # though") is something to remember and plan around, not a question about a food: the memory lane
 # answers it, and a nutrition entry that grabbed it answered a question nobody asked.
@@ -129,23 +155,180 @@ _DISLIKE = ("dont eat veg", "don't eat veg", "dont eat vegetables", "don't eat v
             "dont like vegetables", "don't like vegetables")
 
 
-def _veg_reply(memory, understood):
-    """Five a day for the person asking, and a different answer for a parent: the adult advice
-    (add a handful to what you cook) is not what helps with a child who refuses the stuff."""
-    line = " " + (understood.get("clean") or "") + " "
-    if any(word in line for word in (" kid", " child", " son", " daughter", " toddler",
-                                     " fussy", " picky", " wont eat", " refuses", " weaning")):
-        return ("A child refusing veg is normal and nearly all of them grow out of it. Keep "
+# Who refuses the veg decides the answer, and "wont eat" does not say who: an adult partner who
+# will not eat vegetables was handed "A child refusing veg is normal and nearly all of them grow
+# out of it", and "my husband refuses to eat greens" was handed nothing at all. So the person is
+# read from the words for the person, in three places: the speaker, a grown-up they name, and a
+# child they name.
+_ME_ASKING = (" i wont eat", " i won't eat", " i refuse", " i dont eat", " i don't eat",
+              " i never eat", " i hate veg", " i hate vegetables", " i hate vegtables",
+              " i cant eat", " i can't eat", " i cant stand", " i can't stand",
+              # the speaker's own wish rather than a refusal: "i want to like them" and "i wish
+              # i liked them" are the person asking for themselves, and they were answered as a
+              # child because the line names nobody at all
+              " i want to like", " i want to eat", " i want to start eating", " i wish i liked",
+              " i wish i could eat", " i'd like to like", " id like to like",
+              " im a fussy", " i am a fussy", " im picky", " i am picky",
+              " help me like", " for myself", " myself")
+# A child the line names: a son, a daughter, a year old. These are words for a child and nothing
+# else, so they beat a grown-up word in the same line ("my son's friend wont eat veg" is still
+# about the son's age, not the friend's).
+_A_CHILD = (" kid", " kids", " child", " children", " son", " sons", " daughter", " daughters",
+            " lad", " lads", " lass", " wee one", " toddler", " baby",
+            " year old", " years old", " year-old", " nursery", " my boy ", " my girl ",
+            " teenager", " weaning", " grandson", " granddaughter", " grandchild", " stepson",
+            " stepdaughter", " niece", " nephew",
+            # the everyday names a child is given instead of "child": "my little boy is 4 and he
+            # wont eat veg" was asked who it was about, because none of these was a child word
+            " boy", " girl", " little one", " lil un", " lil one", " our kid",
+            " youngster", " nipper", " infant", " preschool", " pre school", " school age")
+# "fussy" and "picky" are said of a grown-up as often as of a child - "my husband is a fussy
+# eater" was answered as a child because the word alone was read as one - so they are only the
+# child once the line has not named an adult.
+_FUSSY = (" fussy", " fussy eater", " picky", " picky eater", " faddy")
+_A_GROWN_UP = (" husband", " wife", " partner", " boyfriend", " girlfriend", " fiance",
+               " fiancee", " fiancé", " fiancée", " other half", " my man", " my fella",
+               " mate", " mates", " friend", " flatmate", " housemate", " brother", " sister",
+               " mum", " mom", " mother", " dad", " father", " adult", " grown up", " grownup",
+               " colleague", " lodger", " in laws", " mother in law", " father in law")
+
+_VEG_FIVE_A_DAY = ("Five a day is 400g, and a portion is a handful - about 80g - so one carrot, "
+                   "one apple, three heaped tablespoons of peas or a cereal bowl of salad each "
+                   "count. The easy version is to add rather than swap: a handful of frozen peas "
+                   "or spinach into whatever you are cooking anyway, and fruit where you can see "
+                   "it.")
+_VEG_A_CHILD = ("A child refusing veg is normal and nearly all of them grow out of it. Keep "
                 "putting a small amount on the plate with no pressure and no pudding bribe, keep "
                 "serving the two or three they do eat (peas, sweetcorn, raw carrot), and grate or "
                 "blend the rest into what they already like - carrot and courgette into a "
                 "bolognese, spinach into soup, cauliflower into mash. Eat the same food yourself "
                 "at the same table, and expect eight or ten tries before a new one is accepted: a "
                 "refused spoon today is not a lost cause.")
-    return ("Five a day is 400g, and a portion is a handful - about 80g - so one carrot, one "
-            "apple, three heaped tablespoons of peas or a cereal bowl of salad each count. The "
-            "easy version is to add rather than swap: a handful of frozen peas or spinach into "
-            "whatever you are cooking anyway, and fruit where you can see it.")
+# A grown-up is not a child with a bigger plate: nobody grows out of it, there is no pudding to
+# bribe, and the thing that helps is taking the argument off the plate.
+_VEG_A_GROWN_UP = ("Cook one meal and serve it in parts, keeping the vegetables separate so a "
+                   "portion can be taken or left without it becoming a scene, and put a new one "
+                   "beside something they already like rather than on its own. Policing the plate "
+                   "makes it worse at any age - a handful of dinners eaten happily beats a row "
+                   "twice a week - and hiding it is fair too: grate carrot or courgette into a "
+                   "bolognese, spinach into soup, cauliflower into mash. A refused vegetable "
+                   "usually needs eight or ten calm tries before it is accepted, so one refusal "
+                   "is not a verdict.")
+
+
+def _a_word_in(line, words):
+    """Whole words only: " my boy " would otherwise be found inside " my boyfriend ", and a
+    partner would be answered as a child."""
+    for word in words:
+        if word.startswith(" ") and word.endswith(" "):
+            if word in line:
+                return True
+        else:
+            if re.search(r"\b" + re.escape(word.strip()) + r"\b", line):
+                return True
+    return False
+
+
+_VEG_WHO_IS_IT = ("Who is it who won't eat them - you, a partner, or a child? What helps is "
+                   "different for each: five a day is a plate to add to, a grown-up gets a "
+                   "portion they can take or leave, and a child gets no pressure and eight or "
+                   "ten tries.")
+
+# A third-person pronoun is somebody else, never the speaker: "he wont touch veg" after "i hate
+# vegetables" is about him, and reading the person back would answer the wrong one.
+# "them" is not on this list: it is the veg far more often than a person ("i want to like them").
+_SOMEONE_ELSE = (" he ", " she ", " him ", " her ", " his ", " hers ", " the kids ",
+                 " the children ")
+
+
+# "my 40 year old husband wont eat veg" is a year old in the line and a grown-up in the kitchen:
+# an age of 18 or more is not a child's age, so it must not beat the word "husband".
+_CHILD_AGE = re.compile(r"\b(\d{1,3})\s*(?:year|yr)s?[\s-]*old\b")
+_AGE_WORDS = (" year old", " years old", " year-old")
+
+
+def _a_child_in(line):
+    """A child the line names: a son or a 4 year old, but not a 40 year old husband."""
+    for word in _A_CHILD:
+        if word in _AGE_WORDS:
+            continue
+        if _a_word_in(line, (word,)):
+            return True
+    for match in _CHILD_AGE.finditer(line):
+        if int(match.group(1)) < 18:
+            return True
+    return False
+
+
+def _who_in_line(line):
+    """Who a line says the refusal is about: "me", "grown-up", "child", or None.
+
+    The order is the whole job. The speaker first, because "i wont eat them" is a person asking
+    about their own plate. Then an adult the line names, but only when the line has not named a
+    child in the same breath. Only then a child, and "fussy"/"picky" count as a child only
+    because an adult was not named: "my husband is a fussy eater" is a grown-up.
+    """
+    if _a_word_in(line, _ME_ASKING):
+        return "me"
+    a_child = _a_child_in(line)
+    if _a_word_in(line, _A_GROWN_UP) and not a_child:
+        return "grown-up"
+    if a_child or _a_word_in(line, _FUSSY):
+        return "child"
+    return None
+
+
+def _who_this_is_about(memory, understood):
+    """Who the refusal is about, reading back through the conversation when the line says nobody.
+
+    "i want to like them" and "what can i do" name no person at all, so they were answered as a
+    child on the strength of the word "veg"; the person was in the turn before, and that is where
+    they are read from: "i wont eat vegetables" / "i want to like them" is the speaker, and
+    "my husband is a fussy eater" / "he wont touch veg" is the husband. A pronoun for somebody
+    else stops the read-back, because then the line is about them and the earlier speaker is the
+    wrong answer. With nothing to go on the answer is None and the caller asks rather than
+    assuming a child.
+    """
+    line = " " + str(understood.get("clean") or "").lower() + " "
+    who = _who_in_line(line)
+    if who:
+        return who
+    somebody_else = _a_word_in(line, _SOMEONE_ELSE)
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list):
+        return None
+    said_now = line.strip()
+    for turn in reversed(turns):
+        if not isinstance(turn, dict):
+            continue
+        text = " " + str(turn.get("user") or "").strip().lower() + " "
+        if not text.strip() or text.strip() == said_now:
+            continue
+        who = _who_in_line(text)
+        if who == "me" and somebody_else:
+            return None
+        if who:
+            return who
+    return None
+
+
+def _veg_reply(memory, understood):
+    """Five a day for the person asking, and a different answer for the person they name: the
+    adult advice (add a handful to what you cook) is not what helps a child who refuses the
+    stuff, and a grown-up who refuses it is not a child either.
+
+    The person is read from the line first and from the conversation after it, and a line that
+    says a pronoun and nothing anywhere else gets asked who it is: a child is named ("my son",
+    "my 4 year old") and an adult is named, so "he" on its own is nobody to guess at.
+    """
+    who = _who_this_is_about(memory, understood)
+    if who == "me":
+        return _VEG_FIVE_A_DAY
+    if who == "grown-up":
+        return _VEG_A_GROWN_UP
+    if who == "child":
+        return _VEG_A_CHILD
+    return _VEG_WHO_IS_IT
 
 
 # The ways people ask to change their whole diet at once, rather than about one food.
@@ -490,10 +673,17 @@ MORE_OF = (
 
 # The words that say the line is asking where a nutrient comes from, not how much of it to have
 # (that is nutrient-a-day) and not what is in one named food (that is the food table).
+# The sources of a nutrient are asked for with the meal, not the nutrient: "what should i eat
+# for iron" and "what can i eat for calcium" are where the iron and the calcium come from, and
+# they were the dinner table's question - "Here's my pick: tuna pasta in 15 minutes" - while
+# "what should i have for iron" and "what foods are high in iron" both got the sources. The
+# word "eat" is what the two families were split on, so the eating shapes are ask words here.
 _MORE_OF_ASK = ("more", "get more", "getting more", "increase", "boost", "add", "sources",
                 "source", "foods", "which foods", "what foods", "high in", "rich in", "best way",
                 "best ways", "how do i get", "how can i get", "want more", "need more",
-                "plenty of", "top up", "up my", "deficient", "deficiency", "enough")
+                "plenty of", "top up", "up my", "deficient", "deficiency", "enough",
+                "eat for", "have for", "should i eat", "can i eat for", "could i eat for",
+                "do i eat", "what to eat", "should i have")
 
 
 def _more_of(memory, understood):
@@ -594,6 +784,167 @@ def _nutrient_role(memory, understood):
     return None
 
 
+# A carton that is not milk is answered as itself. The row's key has named "oat milk" and
+# "almond milk" since it was written, and the reply was the cow's paragraph: "is oat milk
+# healthy" was told that a 200ml glass has 7g of protein, which is true of the cow and not of the
+# oat, and "oat milk or almond milk" was the porridge recipe. The numbers below are a 200ml glass
+# of the unsweetened, fortified carton, because that is the one that replaces milk; a sweetened
+# one carries two or three teaspoons of sugar on top of what is listed.
+_PLANT_MILKS = (
+    (("soy milk", "soya milk", "soy bean milk", "soybean milk", "soy", "soya"),
+     "Soya is the closest to milk: about 7g of protein in 200ml, the same as semi-skimmed, and it "
+     "is the one to take if protein is what you are replacing. Check the carton says calcium and "
+     "B12 added - those come from the fortification, not from the bean - and buy it unsweetened, "
+     "because the sweetened soya is nearer a pudding."),
+    (("oat milk", "oat drink", "oatly", "oat"),
+     "Oat is the creamiest and the best in coffee and porridge: about 2g of protein in 200ml, and "
+     "7 to 8g of sugar that comes from the oats themselves rather than from a spoon. Buy the "
+     "barista or no-added-sugar carton, and check it is fortified with calcium and B12, because "
+     "unsweetened oat is thin on both."),
+    (("almond milk", "almond drink", "almond"),
+     "Almond is the lightest: about 1g of protein and 50 calories in 200ml, and thin in coffee. "
+     "It is worth having only if the carton is fortified, since almonds are a small part of it, "
+     "and it is no good at all for a nut allergy."),
+    (("coconut milk drink", "coconut drink", "coconut milk"),
+     "The coconut drink in a carton has almost no protein - about 0.5g in 200ml - and around 40 "
+     "calories, and it tastes of coconut, so it is for a smoothie or a curry rather than a cup of "
+     "tea. The tin of coconut milk is a cooking ingredient with 20g of fat a serving, not a milk "
+     "to drink."),
+    (("rice milk", "rice drink", "rice"),
+     "Rice milk is sweet without added sugar and has about 1g of protein in 200ml, the least of "
+     "them. It is not the drink for a child under five, because of the arsenic rice takes up; a "
+     "fortified soya or oat carton is what a toddler should have instead."),
+    (("hemp milk", "hemp drink", "hemp"),
+     "Hemp has about 3g of protein in 200ml, a nutty taste and it does not split in hot coffee. "
+     "It is the one to take if soya and nut milks are both out."),
+    (("pea milk", "pea protein milk", "pea"),
+     "Pea milk has about 6g of protein in 200ml, close to soya, and it froths well. It tastes of "
+     "pea on its own, so it is better in coffee than in a glass."),
+)
+
+# Which milk for what, for the line that asks for a ranking rather than about one carton.
+_THE_MILK_RANKING = (
+    "For protein, soya or pea: about 6 to 7g in 200ml, against 1 to 2g for oat, almond and rice. "
+    "For coffee and porridge, oat, because it is creamy and does not split. For the fewest "
+    "calories, almond or the coconut drink, at about 40 to 50 a glass. Whichever you pick, take "
+    "the unsweetened one and check the carton says calcium and B12 added: calcium, iodine and B12 "
+    "are the three milk supplies and a plant carton does not unless it says so.")
+
+# The environment is its own question about the carton, and it is the one a plant milk is usually
+# asked about: "is oat milk better for the environment" was answered with the oat's protein and
+# sugar, which is a confident answer to a different question. These are the per-litre figures from
+# the standard life-cycle comparison (Poore and Nemecek, 2018): dairy about 3 kg of CO2e a litre,
+# oat and soya about 1, rice about 1.2 and almond about 0.7, with a small fraction of dairy's land.
+# Almond is the thirstiest - several hundred litres of water a litre of milk - and rice the highest
+# of the plant milks after that, so the swap helps on carbon whichever carton it is.
+_MILK_AND_THE_PLANET = (
+    # The whole comparison is in the first sentence on purpose: a follow-up turn repeats only the
+    # opening sentence of an answer it has given before, and "is almond milk bad for the
+    # environment" cut to "plant milks beat dairy" would not have said anything about the almond.
+    "Yes, on carbon every plant milk is far below dairy: a litre of oat or soya is about a third "
+    "of dairy milk's emissions and a fraction of its land, rice is a little higher because paddy "
+    "fields make methane, and almond is the lowest of them but the thirstiest, at several hundred "
+    "litres of water a litre. So take oat or soya if it is water you are counting as well as "
+    "carbon, and remember the carton matters much less than the swap: the milk nobody drinks is "
+    "the worst of the lot.")
+
+# The words that ask about the planet rather than about the body. "water" on its own is not one of
+# them, because half the milk questions in the deck are about a watery pint.
+_THE_PLANET = ("environment", "environmental", "environmentally", "emissions", "carbon", "co2", "co 2", "planet",
+               "climate", "sustainable", "sustainability", "land use", "water use", "footprint",
+               "greenhouse", "methane", "eco friendly", "eco-friendly", "greener", "greenest",
+               "global warming", "greenhouse gas", "how much water", "litres of water",
+               "liters of water", "water footprint", "gallons of water")
+
+# A child's milk is the child's question: "can my toddler have oat milk" is about what a small
+# child may drink all day, and the family domain answers it with the amounts and the age.
+_MILK_FOR_A_CHILD = ("baby", "babies", "toddler", "toddlers", "weaning", "weaned", "wean",
+                     "breastfed", "formula", "one year old", "1 year old", "two year old",
+                     "2 year old", "under 5", "under five", "under two", "under 2",
+                     "my kid", "my child", "my son", "my daughter")
+
+
+# Plain milk, and dairy itself, keeps the answer it had: the plant paragraph is for a carton that
+# is not milk, and for the line that asks which to take.
+_COW_MILK_REPLY = (
+    "Milk is good for you: a 200ml glass has about 7g of protein and a third of an adult's daily "
+    "calcium, and it is one of the cheapest ways to get both. Semi-skimmed is the sensible default "
+    "for most adults - the same protein and calcium as whole milk with about half the fat. Whole "
+    "milk is the right one for a child under two, and a fortified plant milk is the swap if you do "
+    "not do dairy.")
+
+# "is milk ok" is two questions in three words: whether milk is all right to drink, and whether
+# the bottle in the fridge is still all right. The ask is the same one this row now answers, and a
+# bare "ok" or "safe" with no word of goodness in the line is as likely the carton, so the answer
+# covers it in one sentence rather than picking one reading.
+_THE_FRIDGE_CHECK = (
+    "If the question was about the bottle in your fridge rather than about milk itself, smell it: "
+    "sour or lumpy and it goes, whatever the date says.")
+_A_BARE_OK_ASK = ("ok", "okay", "alright", "fine", "safe", "any good", "worth it")
+
+
+def _a_bare_word(said, words):
+    """True when one of `words` is said on its own, at either end of the line as well as inside.
+
+    `" ok "` alone missed the commonest way this is asked: "is milk ok" ends with the word, and
+    an "ok" at the very front is the same filler ("ok is milk fine"). Matching the ends is what
+    keeps that line's fridge check; without it the row answered the bare "is milk ok" with the
+    paragraph about milk being good for you, which does not answer it.
+    """
+    said = " " + said.strip() + " "
+    for word in words:
+        if f" {word} " in said or said.startswith(f" {word} ") or said.rstrip() == f" {word}":
+            return True
+        if said.rstrip().endswith(f" {word}"):
+            return True
+    return False
+_NOURISHING = ("good", "healthy", "fattening", "bad", "calcium", "protein", "vitamin", "vitamins",
+               "nutrient", "nutrients", "diet", "fatten", "health", "benefit", "benefits", "need",
+               "better", "worse", "calorie", "calories", "strong", "stronger")
+
+# The words that ask for a ranking rather than for one carton.
+_WHICH_MILK = ("which milk", "which is best", "what milk", "best milk", "best alternative",
+               "plant milk", "plant milks", "plant based", "plant-based", "dairy alternative",
+               "dairy alternatives", "milk alternative", "milk alternatives", "non dairy",
+               "non-dairy", "instead of milk", "replace milk", "switch from milk", "switch to",
+               "milk is best", "healthiest milk")
+
+
+def _a_plant_milk(memory, understood):
+    """The carton the line named, or the ranking when it asks which milk to take."""
+    said = " " + (understood.get("clean") or understood.get("norm_text") or "").lower() + " "
+    if any(" " + word in said for word in _MILK_FOR_A_CHILD):
+        return None
+    # The planet comes before the carton: the line names a milk to ask about emissions, and the
+    # protein and sugar of that one carton is not the answer to it.
+    if any(" " + word + " " in said or said.rstrip().endswith(" " + word)
+           or (" " + word + "s ") in said for word in _THE_PLANET):
+        return _MILK_AND_THE_PLANET
+    named = []
+    for words, said_about_it in _PLANT_MILKS:
+        if any(" " + word + " " in said or said.rstrip().endswith(" " + word)
+               or (" " + word + "s ") in said for word in words):
+            named.append((words[0], said_about_it))
+    # A longer name wins over its own short form: "coconut milk drink" is not "coconut" twice.
+    kept = []
+    for name, text in named:
+        if not any(name != other and name in other for other, _ in named):
+            kept.append((name, text))
+    if len(kept) == 1:
+        return kept[0][1]
+    if len(kept) > 1:
+        # Two cartons in one line is the comparison, and each gets its own sentence.
+        return " ".join(text for _, text in kept[:2]) + " " + (
+            "If it is protein you are after, take the one with more of it; if it is the cup of "
+            "tea or the coffee, take the one that does not split.")
+    if any(word in said for word in _WHICH_MILK):
+        return _THE_MILK_RANKING
+    if (_a_bare_word(said, _A_BARE_OK_ASK)
+            and not any(word in said for word in _NOURISHING)):
+        return _COW_MILK_REPLY + " " + _THE_FRIDGE_CHECK
+    return _COW_MILK_REPLY
+
+
 def _coffee_or_tea(memory, understood):
     """A verdict on the drink the line named. "is tea good for you" was the coffee answer, word
     for word, because one row covers both drinks and the reply opened "Coffee is not the
@@ -643,6 +994,70 @@ def _wholegrain(memory, understood):
             "white pasta. " + rest)
 
 
+# The rule that keeps a policy row out of the kitchen lives in cooking.py, beside the verbs it
+# reads, because every row about an amount of food needs it: `not_a_cooking_question` is shared, so
+# "what temperature should i cook pork at" stands the allowance down by the same test that any other
+# amount row would use, instead of by a list of wordings on this one row.
+
+# A line about how a piece of meat is cooked is not a line about how much of it is allowed. The
+# red meat row is the only row that has to stand down for this, and it reads the cooking verbs the
+# rest of the knowledge base already uses, so the test lives here rather than as an avoid list of
+# wordings somebody thought of: written as an avoid list it only ever covered what was on it, and
+# "what temperature should i cook pork at" was answered with "no more than 70g of red meat a day".
+_A_THERMOMETER = re.compile(
+    r"\b(?:temperature|temperatures|temp|temps|thermometer|internal|oven|gas mark|how long|"
+    r"minutes|mins|done|doneness|medium|rare|medium-rare|well done)\b")
+
+
+def not_a_cooking_question(understood):
+    """True when the line is about a food rather than about how it is cooked.
+
+    False as soon as the line says how hot, how long, or how it is done - "what temperature should
+    i cook pork at", "what gas mark for a leg of lamb", "when is the turkey done", "what temp for a
+    medium rare steak" - whatever the food is called and however the question is worded. True for
+    the questions the allowance answers: "is red meat bad for you", "how much red meat should i
+    eat", "how often can i eat steak".
+    """
+    if not isinstance(understood, dict):
+        return True
+    clean = understood.get("clean") or ""
+    if not isinstance(clean, str):
+        clean = " ".join(str(part) for part in clean)
+    said = " ".join(("%s %s" % (understood.get("text") or "", clean)).lower().split())
+    if COOKING_VERBS.search(said):
+        return False
+    return not _A_THERMOMETER.search(said)
+
+
+# The sugary-drink verdict names its own drink: "is squash bad for you" was answered with the
+# figures of a can of cola, which is the right answer to a question nobody asked. The words are
+# the drinks people say by name; anything else falls through to the cola figures, which is the
+# figure the range is set by.
+_SWEET_DRINKS = ("lemonade", "squash", "cordial", "irn bru", "lucozade", "sprite", "fanta",
+                 "7up", "cherryade", "tonic water", "ginger beer", "cream soda", "soda", "pop",
+                 "fizzy drink", "soft drink")
+
+
+def _sugary_drink_reply(memory, understood):
+    text = " " + ((understood.get("text") or understood.get("clean") or "").lower()) + " "
+    named = ""
+    for word in _SWEET_DRINKS:
+        if " %s " % word in text:
+            named = word
+            break
+    tail = ("The sugar is the whole problem: it comes as liquid, so it does not fill you up, and "
+            "it is what dentists see. Diet and zero versions cut the sugar and are the sensible "
+            "swap rather than a healthy drink; water, or fizzy water with a slice of lemon, is the "
+            "free one.")
+    if named:
+        return ("A glass of %s is about as sugary as cola - roughly 35g in a 330ml glass, seven "
+                "teaspoons - and an adult should stay under 30g a day in total. %s"
+                % (named, tail))
+    return ("A 330ml can of cola has about 35g of sugar, seven teaspoons, and lemonade, squash "
+            "and the rest are in the same range - an adult should stay under 30g a day in total. "
+            + tail)
+
+
 ENTRIES = [
     # --- calories in everyday food -----------------------------------------
     entry("sugar-in-coke", (("coke", "coca cola", "cola", "fizzy drink", "soft drink", "pepsi",
@@ -657,7 +1072,7 @@ ENTRIES = [
                               # healthy", and it was reaching the citrus-squeezing method in
                               # fruit.py because it carries the noun "juice"
                               "can i drink", "should i drink", "bad for", "ok to drink",
-                              "okay to drink")),
+                              "okay to drink", "as bad as", "better than", "worse than")),
           "Fruit juice has as much sugar as the equivalent amount of Coke - about 20g in a 200ml "
           "glass of orange juice - with none of the fibre of the fruit and none of the chewing that "
           "makes you feel full. One small glass a day with a meal is the usual advice; a smoothie is "
@@ -667,6 +1082,54 @@ ENTRIES = [
           # answer to it, and an honest pass leaves room for the medicine answer
           avoid=("statin", "statins", "medication", "medicines", "medicine", "pills", "tablets",
                  "warfarin", "blood pressure tablets", "antibiotics")),
+    # "Is coke bad for you" and "is lemonade healthy" were the composer's "not sure about that
+    # one", beside a fruit-juice row that answers the same question about a glass of juice. One
+    # verdict for the drinks, keyed by the names people use, and the diet versions stand down to
+    # the sweetener row below.
+    entry("a-sugary-drink",
+          (("coke", "cola", "coca cola", "pepsi", "lemonade", "squash", "fizzy drink",
+            "fizzy drinks", "soft drink", "soft drinks", "soda", "pop", "cordial",
+            "irn bru", "lucozade", "sprite", "fanta", "7up", "tonic water", "ginger beer",
+            "cream soda", "cherryade"),
+           ("bad for", "good for", "healthy", "unhealthy", "is it ok", "is it okay",
+            "ok to drink", "okay to drink", "how bad", "should i drink", "can i drink",
+            "is it bad", "worth drinking", "better than")),
+          _sugary_drink_reply,
+          # the diet versions are the sweetener question, the sugar count is the sugar row, and a
+          # glass of juice has its own answer; a spill is neither
+          avoid=("diet", "zero", "sugar free", "sugar-free", "sweetener", "sweeteners",
+                 "aspartame", "how much sugar in", "how many calories in", "calories in",
+                 "juice", "smoothie", "energy drink", "sports drink", "recipe", "cocktail",
+                 "mixer", "spill", "spilled", "stain", "carpet", "sofa", "fridge", "freeze",
+                 "ice cube", "bottle", "can i keep", "goes flat", "out of date",
+                 # plain fizzy water has none of the sugar this card is about
+                 "fizzy water", "sparkling water", "carbonated", "soda water",
+                 "club soda")),
+
+    # Plain fizzy water is the one drink in the fizzy aisle with no sugar in it, and it was a
+    # hedge: "is fizzy water bad for you", "is sparkling water good for you". Keyed by what it is
+    # called, and the flavoured bottles stand down because they are the sugary-drink question.
+    entry("sparkling-water",
+          # The phrases, not the bare adjectives: "sparkling" and "fizzy" are the wine's and the
+          # cider's words too, so `is sparkling wine bad for you` was told there is no sugar and no
+          # calories in water, and `is fizzy wine bad for you` the same. Every water line says the
+          # water, so the two-word phrases cover them all and the adjectives are the alcohol rows'
+          # to answer.
+          (("sparkling water", "fizzy water", "carbonated water", "soda water", "club soda",
+            "sparkling water drink"),
+           ("bad for", "good for", "healthy", "unhealthy", "safe", "is it ok", "is it okay",
+            "ok to drink", "teeth", "instead of", "count", "hydrate", "drink", "day")),
+          "Sparkling water is water with carbon dioxide dissolved in it, so there is no sugar and "
+          "no calories in it and it counts towards your fluids like still water. The fizz is a "
+          "weak acid, which is why dentists say drink it with a meal rather than sip it all day, "
+          "and it can leave you feeling bloated. The flavoured bottles are the ones to read: many "
+          "of them carry sugar or sweetener.",
+          # the flavoured and sweetened ones are the sugary-drink card, and a machine that will
+          # not fizz or a bottle that has gone flat is a different question
+          avoid=("flavoured", "flavored", "sweetener", "sugar free", "sugar-free", "diet",
+                 "lemonade", "coke", "cola", "squash", "goes flat", "gone flat", "went flat",
+                 "machine", "soda stream", "sodastream", "canister", "bottle of gas",
+                 "make my own", "carbonate at home")),
     # The sweet, asked about as a food. "is chewing gum bad for you" and "how much sugar in
     # chewing gum" are everyday questions about a thing people chew, and the smoking entry keys
     # bare "gum" for nicotine gum, so both reached the stop-smoking plan.
@@ -836,7 +1299,15 @@ ENTRIES = [
           bias=1),
     entry("eat-more-veg", (("vegetables", "veg", "greens", "salad", "fruit and veg"),
                            ("more", "eat", "how do i", "get", "fussy", "hate", "kids", "five a day",
-                            "portions", "refuses", "refuse", "wont eat", "picky")),
+                            "portions", "refuses", "refuse", "wont eat", "picky",
+                            # "she wont touch vegetables" is the same refusal as "she wont eat
+                            # them", and it was answered with a shrug: the word for the refusal
+                            # has to be on the key as well as on the ask below.
+                            "wont touch", "won't touch", "wont try", "won't try", "wont eat any",
+                            "turns his nose", "turns her nose", "turns their nose",
+                            "hates veg", "hates greens", "hates vegetables",
+                            "doesnt like veg", "doesn't like veg", "off his food",
+                            "off her food", "faddy", "picky eater")),
           _veg_reply,
           # a dressing, a salad to go with dinner, washing a bag of it, keeping it fresh, and the
           # veg that goes unused in the fridge are all other questions
@@ -849,10 +1320,35 @@ ENTRIES = [
                  # grass question arrived here: "how do i get my lawn green again" got the
                  # five-a-day answer instead of garden's lawn row.
                  "lawn", "lawns", "grass", "mow", "mowing", "mowed", "turf",
-                 "greener", "green again", "brown patches") + _DISLIKE,
+                 "greener", "green again", "brown patches",
+                 # A line that asks for a meal and mentions the refusal on the way past is a meal
+                 # question: "whats a quick dinner for two kids who wont eat anything green" was
+                 # answered by the kids' dinner row until the refusal words above tipped the
+                 # contest to this one. The meal rows keep those.
+                 "for dinner", "for tea", "for supper", "for lunch", "for tea tonight",
+                 "quick dinner", "quick tea", "dinner idea", "dinner ideas",
+                 # a child named only as "one of them" is a household at a table, and the
+                 # picky-eater row is the one built for that line ("one of them wont touch
+                 # greens"); this entry speaks about one person the line has named.
+                 "one of them", "one of the kids", "one of my kids", "one of the children",
+                 "one of ours", "one of mine", "tea idea",
+                 "tea ideas", "meal idea", "meal ideas", "what can i cook", "what should i cook",
+                 "what should i make", "meal plan") + _DISLIKE,
           # and the line has to be about eating more of it, not about the veg in the drawer
           ask=("more", "fussy", "hate", "kids", "kid", "children", "five a day", "portions",
                "wont eat", "sparingly", "eet", "vegtables", "how do i get",
+               # a refusal said in the third person is the same question as "wont eat": "he
+               # refuses to eat greens" and "she wont touch vegetables" were answered with a
+               # shrug because neither word was on this gate, though both are on the key above
+               "refuse", "refuses", "refused", "refusing", "wont touch", "won't touch",
+               "wont try", "won't try", "turns his nose", "turns her nose", "turns their nose",
+               # "hate" already takes the forms of the word, so "hates veg" / "hates greens"
+               # need not be spelled out here - and they must not be: a phrase built from words
+               # the line already has stood this whole entry aside, and "she hates anything
+               # green" went back to a nod.
+               "turns up his nose", "turns up her nose", "doesnt like veg",
+               "doesn't like veg", "off his food",
+               "off her food", "picky eater", "faddy",
                # how little of it they eat, said as a shortfall rather than as "more"
                "enough", "barely", "hardly", "not eating", "dont eat", "don't eat",
                "should eat", "ought to eat", "need to eat"),
@@ -1034,6 +1530,8 @@ ENTRIES = [
           # "how many" and "should i" are how the daily limit is asked, and they are also how a
           # cooking time is asked: "how many minutes should i boil eggs" was answered with the
           # two-a-day advice. A time is asked of the pot, so a line with a time in it is not this.
+          # "how many eggs" is the allowance here, not a count in a dish or in the box
+          guard=not_a_count_for_the_box_or_the_dish,
           avoid=("crack", "cracked", "cracks", "shell", "shells", "fridge",
                  # a raw egg is the food-safety answer's question, not the daily limit's
                  "raw egg", "raw eggs", "raw",
@@ -1048,8 +1546,12 @@ ENTRIES = [
                  "out of date", "gone off", "use by", "best before", "float", "floats"),
           bias=1),
     entry("red-meat", (("red meat", "beef", "lamb", "pork", "bacon", "sausages", "processed meat",
-                        "ham", "steak"), ("bad", "healthy", "unhealthy", "cancer", "how much",
-                                          "should i", "safe")),
+                        "ham", "steak",
+                        # mince is the red meat most people cook and the one they ask about:
+                        # "is mince healthy" and "is mince good for you" were the search shrug.
+                        "mince", "minced beef"),
+                       ("bad", "healthy", "unhealthy", "cancer", "how much", "how often",
+                        "should i", "safe", "good")),
           "The UK advice is no more than 70g of red meat a day, and to go easy on processed meat "
           "(bacon, ham, sausages) because the cancer link is strongest there. Lean red meat is a "
           "good source of iron and zinc, so it is a question of amount and frequency rather than "
@@ -1076,7 +1578,36 @@ ENTRIES = [
                  # steak with" was the 70g-a-day answer, and the seasoning table has the salt,
                  # pepper and horseradish it asked for.
                  "season", "seasoning", "seasoned", "spice", "spices", "spiced", "herb",
-                 "herbs", "rub", "rubbed", "marinade", "marinate", "flavour", "flavor")),
+                 "herbs", "rub", "rubbed", "marinade", "marinate", "flavour", "flavor",
+                 # how hot, how long and how it is done is not an avoid phrase but the guard
+                 # above: `_not_a_cooking_question` reads the whole line with the cooking verbs
+                 # the rest of the knowledge base uses, so "what temperature should i cook pork
+                 # at", "what gas mark for roast beef" and "how long do i cook a joint for" all
+                 # stand this row down without a list of wordings to keep up.
+                 # what to make with the meat on the shelf is the recipe row's question, and
+                 # "what should i make for tea, i've got mince in" was answered with the 70g a
+                 # day once mince joined the subject above. "what's a good swap for mince in a
+                 # bolognese" is the same: the person is cooking, not auditing their diet.
+                 "what should i make", "what can i make", "what should i cook", "what can i cook",
+                 "make for tea", "make for dinner", "make for lunch", "make with", "meal with",
+                 "dinner with", "tea with", "recipe", "swap for", "swaps for", "swapped",
+                 "substitute", "instead of mince", "i've got", "i have got", "ive got",
+                 # a mince pie is fruit and suet in pastry, not the red meat on the plate, and
+                 # "is a mince pie healthy" was answered with the 70g a day.
+                 "mince pie", "mince pies", "mincemeat",
+                 # what it costs is the shopping question, not this one: "how much is mince a
+                 # kilo" was answered with the 70g a day because the meat and "how much" were
+                 # both in the line. "how much is too much red meat" says none of these words.
+                 "a kilo", "per kilo", "per kg", "price", "prices", "priced", "cost", "costs",
+                 "cheaper", "cheapest",
+                 # how much of it to buy or cook for the people at the table is the portion row's
+                 # question: "how much mince do i need", mid-chilli for eight, was answered with
+                 # the 70g a day once mince joined the subject above. A policy line never asks
+                 # what you need or what you weigh it out in.
+                 "do i need", "will i need", "should i buy", "shall i buy", "need to buy",
+                 "per person", "per head", "grams", "grammes", "kg", "kilos",
+                 "how much mince", "how much beef", "how much lamb", "how much pork"),
+          guard=not_a_cooking_question),
     entry("fruit-sugar", (("fruit", "fructose", "grapes", "mango"), ("too much", "sugar",
                                                                    "fattening", "bad",
                                                                    "how much fruit")),
@@ -1360,7 +1891,14 @@ ENTRIES = [
                  # medicine and the stomach are health.py's medicine-with-food
                  "ibuprofen", "paracetamol", "aspirin", "naproxen", "painkiller", "painkillers",
                  "tablet", "tablets", "medicine", "medicines", "medication", "antibiotic",
-                 "antibiotics", "steroid", "steroids"),
+                 "antibiotics", "steroid", "steroids",
+                 # a railway is not a session: "should i eat before or after my train" was told
+                 # about "the energy for the session". A bare "train" is not here, because the
+                 # exercise is "training" and the avoid list matches forms, not whole words.
+                 "my train", "the train", "a train", "train home", "train journey", "flight",
+                 "plane", "ferry"),
+          # a dose is not a session, and this answer is only true of a session: see `not_a_dose`
+          guard=not_a_dose,
           bias=2),
     entry("emotional-eating", (("eat when", "eating when", "comfort eating", "emotional eating",
                                 "eat my feelings", "food when", "i eat too much", "cant stop "
@@ -1642,6 +2180,28 @@ ENTRIES = [
           avoid=("grow", "growing", "plant", "planting", "harvest", "sprouting", "chit", "chitting",
                  "store", "storing", "boil", "boiling", "roast", "roasting", "mash", "chips",
                  "wedges", "recipe", "cook", "salad", "soup", "gnocchi")),
+    # A roast potato is not a jacket potato: once "roast" was out of the baked-potato row's
+    # avoid, "how many calories in roast potatoes" and "are roast potatoes fattening" were
+    # answered with the jacket potato's "about 200 calories for a medium one", which is the
+    # wrong potato and the wrong number - the fat the tray goes in is the whole question.
+    entry("roast-potato-nutrition",
+          # the bare potato is the baked-potato row's line: "how many calories in potatoes" is
+          # a plain potato, not a tray of them, so only the roast names are keyed here.
+          (("roast potato", "roast potatoes", "roasties", "roastie", "roasted potatoes",
+            "roasted potato"),
+           ("calories", "calorie", "fattening", "fatten", "healthy", "healthier", "unhealthy",
+            "bad for you", "good for you", "slimming", "diet", "weight loss", "waistline",
+            "carbs", "carb", "keto", "nutrition", "nutritious", "how many calories")),
+          "About 200 calories per 100g as a side, nearer 300 if the tray is deep in oil - the "
+          "potato itself is only about 90 before the fat goes on, so it is a carbohydrate like any "
+          "other and the oil is what adds up. A thin film that just coats them, on a tray that is "
+          "hot rather than swimming, is what keeps a roast potato an everyday thing.",
+          # the method, the keeping, the crisps and the jacket potato are four other answers
+          avoid=("how do i make", "how do you make", "recipe", "parboil", "crispy", "crisp",
+                 "keep", "keeps", "freeze", "reheat", "leftover", "leftovers", "jacket",
+                 "baked", "mash", "chips", "crisps", "wedges", "salad", "soup", "grow",
+                 "plant", "sprout", "store")),
+
     entry("skip-a-meal",
           # a skipped breakfast has its own entry ("is breakfast important"), which says why a
           # bowl with protein in it helps; this row is the meal people drop in the middle of a day
@@ -1673,12 +2233,11 @@ ENTRIES = [
             # "should i have dairy" was the one shape of the same question that still had no
             # answer on this head: it was fenced off the free-from card and the milk row's list
             # had "can i have" but not "should i have", so it went to the refusal.
-            "should i have", "should i drink", "should i eat")),
-          "Milk is good for you: a 200ml glass has about 7g of protein and a third of an adult's "
-          "daily calcium, and it is one of the cheapest ways to get both. Semi-skimmed is the "
-          "sensible default for most adults - the same protein and calcium as whole milk with about "
-          "half the fat. Whole milk is the right one for a child under two, and a fortified plant "
-          "milk is the swap if you do not do dairy.",
+            "should i have", "should i drink", "should i eat",
+            # "is oat milk ok" was the porridge recipe: the row that reads "oat" and "milk" took
+            # it, and this row never saw the line because "ok" was not one of its ask words.
+            "ok", "okay", "fine", "safe", "alright", "any good", "worth it", "better than")),
+          _a_plant_milk,
           bias=1,
           avoid=("breast", "formula", "weaning", "allergy", "allergies", "intolerant", "intolerance",
                  "lactose", "gone off", "off milk", "sour", "expired", "curdle", "curdled",
@@ -2065,6 +2624,11 @@ ENTRIES = [
                  # down for "is soup filling" and ate every plain fullness question.
                  "washing machine", "machine", "washer", "dishwasher", "tumble dryer",
                  "dryer", "boiler", "kettle", "bath", "radiator", "shower", "toilet",
+                 # the same list, in the words people use: a loo fills, a cistern fills and a
+                 # header tank fills, and "the loo bangs after it fills" was told what protein a
+                 # plate of pasta has. The bowl and the tank are the fixture, not the plate.
+                 "loo", "loos", "lav", "lavatory", "wc", "bog", "cistern", "cisterns", "tank",
+                 "the tank", "header tank", "flush", "flushes", "flushing", "overflow",
                  "dental", "dentist", "tooth", "teeth", "gum", "gums", "cavity", "toothache",
                  "hurts", "hurting", "hurt", "sensitive", "ache", "aching",
                  # "can you fill in this form" and "i filled in the form but it didnt save" were
@@ -2167,6 +2731,13 @@ HEALTH_WORDS = ("healthy", "healthier", "unhealthy", "good for you", "good for m
 # A recipe, a cooking time or a portion is another table's question, and the brown against white
 # comparison is brown-rice, which carries the fibre figures.
 HEALTH_AVOID = ("how do i", "how long",
+                # a serving frame is a dinner, not a verdict: "what can i have with fish` was
+                # handed the oily-fish paragraph, and "what goes with lentils" the lentil one,
+                # because the food name is half of every verdict key. One shared list, so every
+                # food in the table is held out of a pairing ask at once.
+                "have with", "have it with", "eat with", "goes with", "go with", "serve with",
+                "serving with", "pairs with", "alongside", "on the side", "as a side",
+                "side dish", "side dishes", "what side", "which side",
                 # the bare "how much" was a cooking quantity guard, and it also stood the
                 # verdicts down for a portion of one food ("how much peanut butter should i
                 # eat"). The quantities it was there for are named instead.
@@ -2346,8 +2917,12 @@ FOOD_HEALTH = (
      "more resistant starch, which is good for the gut; a spotted one is sweeter and easier to "
      "digest before a run. One or two a day is fine, and the same holds for apples, oranges and "
      "pears at 60 to 80 calories each.",
+     # "is apple juice healthy" was the banana card: "apple" is in this key and "healthy" is the
+     # ask, so the row answered for a glass of juice. Juice has its own row, and the fruit's
+     # verdict is not the drink's.
      ("smoothie", "loaf", "cake", "bread", "banana bread", "muffin", "muffins", "ice cream",
-      "frozen", "ripen", "ripe", "green", "peel", "slug", "fly", "flies")),
+      "frozen", "ripen", "ripe", "green", "peel", "slug", "fly", "flies", "juice", "juices",
+      "cider", "smoothies", "dried", "crisps", "chips", "tree", "trees", "grow")),
     ("avocado-healthy", ("avocado", "avocados", "guacamole"),
      "Avocado is a good food that is easy to overdo: half a medium one is about 150 calories and "
      "15g of fat, nearly all of it monounsaturated, which is the kind that helps cholesterol "
@@ -2494,6 +3069,32 @@ for _food_id, _food_names, _food_line, _food_avoid in FOOD_HEALTH:
         _food_id, (_food_names, HEALTH_WORDS), _food_line,
         avoid=HEALTH_AVOID + _food_avoid, bias=1,
         guard=_not_a_verdict_on_what_is_going_off))
+
+
+# How often, not whether: "how often can i eat tuna" was handed the fish-freshness card ("fish
+# goes off faster than anything else") and "how much tuna is safe" the raw-fish card, so the one
+# number the person asked for was in neither. It is a fact about tuna alone and it is the same
+# number for everyone, so it is a row of its own, and its subject is the bare word: a two-word
+# subject phrase clears the lookup on its own and took "is tinned tuna good for you" off the
+# verdict it already had.
+ENTRIES.append(entry(
+    "tuna-a-week", (("tuna",), ("how often", "how many", "how much", "a week", "per week",
+                                "every day", "every other day", "twice a week", "times a week",
+                                "in a week", "safe", "limit", "too much", "maximum")),
+    "Four medium tins a week, or two fresh tuna steaks: that is the limit for an adult, and it is "
+    "about the mercury rather than the fat. Tuna is the one oily fish that does not count towards "
+    "the two portions a week - canning strips most of the omega-3 - so it is protein, not a "
+    "fish-oil dose. If you are pregnant or trying, keep to the same four tins; a child gets about "
+    "half a tin as a portion.",
+    # the freshness, the recipe and the animal are not the frequency question
+    avoid=("smell", "went off", "off fish", "freshness", "defrost", "thaw", "recipe", "recipes",
+           "sandwich", "salad", "pasta", "bake", "feed", "my cat", "my dog", "cat food",
+           "dog food", "healthy", "good for you", "fattening", "nutritious", "calories",
+           # and what is in it is the nutrition card's: "how much protein in a tin of tuna" is
+           # about the 26g, not about how many tins a week
+           "protein", "carb", "carbs", "carbohydrate", "fat", "fats", "iron", "vitamin",
+           "vitamins", "minerals", "omega", "nutrition", "nutrients", "ingredients"),
+    bias=2))
 
 # "is olive oil good for you" was the shopping row ("Look for extra virgin and a harvest date"),
 # which is a good answer to a question nobody asked, and "is olive oil fattening" the search

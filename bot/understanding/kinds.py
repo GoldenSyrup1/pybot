@@ -10,7 +10,7 @@ reading to the most general, so adding a word to one set improves every line tha
 import re
 
 from . import lexicon
-from .normalize import (UP_TO_LEADS, background_clause, background_positions,
+from .normalize import (KIN, UP_TO_LEADS, background_clause, background_positions,
                         opens_without_subject, strip_leaders)
 
 NEGATIONS = lexicon.NEGATIONS
@@ -31,7 +31,14 @@ GREETINGS = ("hi", "hello", "hey", "hiya", "morning", "good morning", "good afte
              "salutations")
 FAREWELLS = ("bye", "goodbye", "see you", "see ya", "later", "night", "good night",
              "talk later", "take care", "ttyl", "gtg", "cya", "best wishes", "best regards",
-             "kind regards", "warm regards")
+             "kind regards", "warm regards",
+             # The short ways out people type, and the ones that say "you" in the middle - "see
+             # you later" and "talk to you later" are the same goodbye as "later", and the reading
+             # that looks for "you" took them for a question about the bot. "ciao" is left out on
+             # purpose: it opens a chat as often as it ends one, so it stays with the greeting.
+             "ttfn", "cheerio", "laters", "adios", "night night", "nighty night",
+             "ta ta", "see you later", "see you soon", "talk to you later",
+             "speak later", "speak to you later", "catch you later", "bye for now")
 THANKS = ("thanks", "thank you", "thx", "cheers", "ty", "ta", "much appreciated",
           "appreciate", "appreciated", "appreciate it")
 
@@ -162,6 +169,8 @@ VERDICT_ASK = re.compile(
     r"| (?:going to|gonna) (?:get|be) worse"
     r"| (?:going to|gonna) (?:spread|get worse))"
     r"|(?:is|was) (?:that|this|it)(?: (?:going to|gonna))? (?:get worse|getting worse|spread|serious)"
+    r"|(?:is|was) (?:he|she|they) right"
+    r"|(?:are|were|is|was) (?:they|these|those) (?:safe|ok|okay|fine|normal|bad|a problem|a risk|any good)"
     r"|(?:should|do|ought) i (?:be )?(?:worried|worry|worrying|bother)"
     r"|does (?:that|this|it) matter"
     r"|will (?:that|this|it) (?:get|be) (?:worse|ok|okay|fine)"
@@ -169,13 +178,43 @@ VERDICT_ASK = re.compile(
     r"(?: then| though| honestly)?")
 
 
+# The words that make a line a question about something other than what the bot just said.
+QUESTION_WORD = re.compile(r"\b(?:why|when|where|how|who|whom|whose|which|what)\b")
+
+
 def _asks_a_verdict(text):
-    """True when the whole line asks for a judgement of the thing just said."""
+    """True when the line asks for a judgement of the thing just said.
+
+    The verdict is usually the whole line ("is that bad"), and the cap below is what keeps a line
+    with a subject of its own out. But the same question is asked after the thing it is about, and
+    that line carries no reading at all by the whole-line form: "my resting heart rate is 90 is
+    that bad", "i left the chicken out all night is it safe", "they said two weeks is that normal"
+    (48 of the deck's 60,260 turns got no shape of their own this way, and 18 more got a wrong one).
+    The tail is read by the same pattern, and the cap stays on the *verdict clause* rather than on
+    the line, so a short statement in front of the verdict does not hide it.
+    """
     flat = re.sub(r"[^a-z0-9 ]+", " ", (text or "").lower())
     flat = re.sub(r"\s+", " ", flat).strip()
-    if not flat or len(flat.split()) > 7:
+    if not flat:
         return False
-    return VERDICT_ASK.fullmatch(flat) is not None
+    words = flat.split()
+    if len(words) > 30:
+        return False          # a long line is a statement with its own subject, not this ask
+    if VERDICT_ASK.fullmatch(flat) is not None:
+        return True
+    # The verdict at the end, from any word that leaves at most seven of them: the pattern itself
+    # is what says a verdict is there, so a "did" or an "is" inside the statement matches nothing.
+    # The words in front must be a statement, though: "when should i worry" and "and why does it
+    # matter" end on a verdict pattern word for word, and both ask a different question - a when
+    # and a why - so a question word before the verdict keeps that reading.
+    for start in range(1, len(words) - 1):
+        if len(words) - start > 7:
+            continue
+        if QUESTION_WORD.search(" ".join(words[:start])):
+            return False
+        if VERDICT_ASK.fullmatch(" ".join(words[start:])) is not None:
+            return True
+    return False
 
 
 # A line that only rules something out is not a new subject, it is a limit on the last answer:
@@ -253,24 +292,47 @@ PAST_ENDS = re.compile(r"^(?:[a-z]{3,}(?:ed|ought|aught)|went|got|came|said|saw|
 A_THING_NOT_A_CLAIM = frozenset("""works work helps help changes happens matters seems makes does goes
 comes gets stops starts fixes fits runs moves shows feels looks sounds costs needs stays keeps turns
 grows hurts adds counts means bothers lives takes gives brings appeals excites suits
-satisfies interests improves settles lasts ends agrees sticks""".split())
+satisfies interests improves settles lasts ends agrees sticks sorts arrives
+# The irregular pasts, which no ending rule reaches: "nothing got sorted", "nothing came of it",
+# "nothing went right", "nothing did". Each of those was answered with the answer described back
+# at the person - "Nothing there was about got sorted, so the answer holds" - so the verb is
+# listed in the tense it is said in as well as the one the list starts in.
+got came went did was were""".split())
 # The same words said in another tense: "nothing helped", "nothing has worked", "nothing is
 # working". The reading looks at the last word of the limit, so the ending is stripped before the
 # list is asked - the two forms that are a claim are the past tense and the "-ing", and neither is
 # a thing anybody limits ("no sweets" strips to "sweet", which is not on the list).
 CLAIM_ENDS = ((3, "ing"), (1, "s"), (2, "ed"), (1, "d"))
+# The list is written in one tense and people say these words in every tense: "nothing works",
+# "nothing worked", "nothing has worked", "nothing changed". The list's own "changes" and the
+# line's "changed" are the same claim, but neither is the other word, so both sides are cut back
+# to a stem before the list is asked. "moved" leaves "move" and meets "moves"; the -ed cut that
+# leaves "mov" is why more than one stem is tried. A doubled consonant is undone for the same
+# reason: "stopped" is "stop", which is what "stops" leaves.
+CLAIM_STEMS = frozenset(form[:-1] if form.endswith("s") and len(form) > 3 else form
+                        for form in A_THING_NOT_A_CLAIM)
 
 
-def names_a_claim(word):
-    """True when the word after "nothing" is the verb of a clause with its object left out."""
-    word = str(word or "").lower()
+def _claim_forms(word):
+    """The stems a word could be, so "changed", "changes" and "change" all answer to one."""
     forms = {word}
     for cut, _suffix in CLAIM_ENDS:
         if len(word) > cut + 2:
             forms.add(word[:-cut])
     if word.endswith("ing"):
         forms.add(word[:-3] + "e")
-    return any(form in A_THING_NOT_A_CLAIM for form in forms)
+    for form in list(forms):
+        if len(form) > 3 and form[-1] == form[-2]:
+            forms.add(form[:-1])
+    return {form[:-1] if form.endswith("s") and len(form) > 3 else form for form in forms}
+
+
+def names_a_claim(word):
+    """True when the word after "nothing" is the verb of a clause with its object left out."""
+    word = str(word or "").lower()
+    if word in A_THING_NOT_A_CLAIM:
+        return True
+    return any(form in CLAIM_STEMS for form in _claim_forms(word))
 
 
 LIMIT_NOT_A_THING = frozenset("""i me my we you he she they it them us her him his hers its our
@@ -476,6 +538,28 @@ def two_ends_of_one_scale(text):
                          text):
                 return True
     return False
+# "or" joins a choice only when the person has not already turned both sides down. "i dont want a
+# dog or a cat" was read as a choice ask, and the composer answered "Cat." - a pick between the two
+# things the person had just said no to - and "not pizza or curry" was quoted back as an option
+# ("If you were hoping I'd say \"not pizza\", then you've decided already"). The tell is in front of
+# the "or": a want, a like or a can-have that is negated, or a line that opens with the refusal.
+# A choice put as a doubt ("i cant decide, pizza or curry") is untouched: the negation there is on
+# deciding, not on either thing.
+REFUSED_PAIR = re.compile(
+    r"^\s*(?:no|not|never|without|neither)\b"
+    r"|\b(?:dont|don'?t|do not|doesnt|doesn'?t|didnt|didn'?t|wont|won'?t|wouldnt|wouldn'?t|"
+    r"cant|can'?t|cannot|shouldnt|shouldn'?t)\s+(?:\w+\s+){0,2}?"
+    r"(?:want|wants|wanted|like|likes|love|eat|eating|have|having|drink|drinking|wear|do|doing|"
+    r"need|needs|use|fancy|stand|bother|manage)\b"
+    r"|\ballergic\b|\bhate\b")
+
+
+def _turns_the_pair_down(text):
+    """True when the thing before the "or" turns both sides down rather than asking which."""
+    head = str(text or "").lower().split(" or ")[0]
+    return bool(REFUSED_PAIR.search(head))
+
+
 COMPARE = ("difference between", "different from", "compare", "which one", "or is it")
 
 REQUEST = frozenset("help need want trying wanna please tell show explain give write make "
@@ -520,10 +604,26 @@ SELF_ONLY_CUES = (
 # so the check is here rather than in SELF_ONLY_CUES, which is the sad list's.
 CONFUSED_SELF_ONLY = frozenset(("confused", "confusing", "confusion", "muddled", "baffled",
                                 "bewildered", "puzzled"))
+# A word that names what a person does to other people is a label on them, not a mood of theirs:
+# "im boring" and "my mum says im boring" are somebody's verdict, and read as the person's own
+# boredom the line got "Try something with your hands: a new recipe, a jigsaw, or one drawer
+# tidied" - an answer to a complaint nobody made. The same word names a mood when a thing is its
+# subject ("the film was boring", "work was exhausting"), which is the reading that stays.
+LABEL_ON_A_PERSON = frozenset((
+    "boring", "annoying", "tiring", "exhausting", "draining", "knackering", "frustrating",
+    "depressing", "embarrassing",
+))
 THING_OR_PERSON_CUES = frozenset((
     "worn thin", "worn to a thread", "at my limit", "at breaking point",
     "at my wits end", "at my wits' end", "beside myself", "at the end of my patience",
     "reaching the end of my rope",
+    # A worry is said of things as well as people - "the news is worrying", "the cough is
+    # worrying me", "my mum is worrying about money" - and "worn down" is said of stairs. Read
+    # as the speaker's state wherever the word appears, all of those would claim the person in
+    # the line is the one who is anxious, so they are read only where the line says the state
+    # is the speaker's own: "im worrying", "im stressing about money", "im worn down by the kids".
+    "worrying", "stressing", "stressed out", "overthinking", "obsessing", "spiralling",
+    "spiraling", "worn down",
 ))
 # One of those phrases is also the money row's. `bot/knowledge/money.py` keys the `cant-pay`
 # answer on "at my limit", and puts the period words in that row on purpose: "i'm at my limit
@@ -657,7 +757,10 @@ HEART_IN_A_STATE = re.compile(
     r"(?:\s+(?:is|was|feels|felt|seems|has|had|been))*"
     r"(?:\s+" + HEART_DEGREES + r")*"
     r"\s+(?:broken|shattered|torn|in pieces|aching|aches|breaks|heavy|breaking)\b")
-BROKEN_HEARTED = re.compile(r"\bbroken[\s-]?hearted\b")
+# The broken heart said as an adjective, which is how most people type it: "broken hearted",
+# "heart-broken", and the one word "heartbroken" that puts the same two words the other way
+# round. "heartbreaking" is left out: it is said of a film or a story, not of a person.
+BROKEN_HEARTED = re.compile(r"\b(?:broken[\s-]?hearted|heart[\s-]?broken)\b")
 # The broken heart said as a thing rather than a state: "i have a broken heart", "i dont know
 # what to do with a broken heart".
 A_BROKEN_HEART = re.compile(r"\b(?:a|an|my|our|her|his|their|your)\s+broken\s+heart\b")
@@ -714,7 +817,18 @@ EMOTION_WORDS = {
                 # name and answered "Nice to meet you, Beside" before this. "at the end of my
                 # rope" is left out of both lists on purpose: that one is the hopelessness
                 # list's, and it is a crisis cue rather than a mood.
-                "beside myself"),
+                "beside myself",
+                # The doing form of a worry, which is how most people say it: "im worrying",
+                # "im stressing about money", "im overthinking a text". The list held the
+                # adjective and the noun - "worried", "stress", "panic" - so these named no
+                # feeling at all and were answered "I'm listening - say more if it helps" or
+                # "Thanks for telling me", the two lines STYLE.md calls the worst answers there
+                # are. "panicking" was already here, so the frame reads the -ing form of a
+                # feeling; it was only the words that were missing. "stressed out" was in the
+                # lexicon as a feeling and not in this list, so the longer way of saying
+                # "stressed" was the one that said nothing.
+                "worrying", "stressing", "stressed out", "overthinking", "obsessing",
+                "spiralling", "spiraling"),
     "tired": ("tired", "exhausted", "knackered", "worn out", "drained", "no energy",
               "burned out", "burnt out", "shattered", "wiped out", "wiped",
               # "im zonked after the night shift", "im pooped", "im whacked", and "im
@@ -722,7 +836,9 @@ EMOTION_WORDS = {
               "zonked", "pooped", "whacked", "frazzled",
               # Worn down rather than out of steam all at once: "im worn thin", "im worn to a
               # thread".
-              "worn thin", "worn to a thread",
+              # "im worn down" is the plainest way of saying it and it named no feeling, so a
+              # person worn down by a month of nights got "I'm listening".
+              "worn thin", "worn to a thread", "worn down",
               # "my brain is fried", "im fried": nothing left to think with.
               "fried",
               # The same thing said as what the tiredness stops them doing, or as a tank:
@@ -844,7 +960,7 @@ fun funny enjoy enjoyed success succeeded won win calm relaxed fine okay""".spli
 # all.", because the thank you stopped looking like one. The word is the person being spoken
 # to, so it is not a feeling, and only the last word of a line people say to somebody counts.
 TERMS_OF_ADDRESS = frozenset("""love mate pet hun honey sweetheart duck ducky flower sunshine
-    pal bud chick dear darling babe lass lad""".split())
+    pal bud chick dear darling babe lass lad bella""".split())
 ADDRESSED_LINES = frozenset("""thanks thank cheers ta hello hi hiya hey morning afternoon
     evening night bye goodbye yes no ok okay alright right please sorry""".split())
 # "ok" is a feeling only when it is said about somebody's state ("im ok", "i am doing ok"). On
@@ -1092,6 +1208,32 @@ DEFINITION = ("what is a", "what is an", "what are", "what does", "difference be
 # one sent the line to the search hedge instead of the answer.
 ASKS_ABOUT_A_PERSON = re.compile(r"\bwhat (?:is|are|r) (?:you|u|ya|we|us|they)\b")
 
+# A bare "what is X", with no article, is the same definition ask: "what is burnout", "what is
+# copd", "what is polenta". The phrase list above needs "what is a" or "what is an", so 208 of the
+# 266 bare forms on the deck carried no definition at all: the reply was a proper definition and
+# there was no label to read it against.
+BARE_DEFINITION = re.compile(
+    r"^\s*(?:(?:and|but|so|then|ok|okay|right|oh|well|now|sorry|hi|hello|please)\s+)*"
+    r"what(?:'s|s| is| are| was)?\s+(?:is|are|was)\s+([a-z][a-z'\u2019-]{1,28})"
+    # Not a definition: something compared or judged ("whats french food like", "what is scotland
+    # for a weekend"), a purpose ("what is this for"), a live figure or listing ("what is today's
+    # date", "whats showing at the odeon", "what is the weather").
+    r"(?![^?]*\b(?:like|for|worth|good|cheap|cheapest|easier|easiest|better|best|worse|worst|"
+    r"date|time|day|weather|price|cost|news|forecast|temperature|showing|playing|opening|"
+    r"score|length|size)\b)", re.I)
+# The head word of a bare "what is X" that names nothing to define: an article or pronoun ("what
+# is it", "what is this"), a preposition ("what is in the fridge", "whats behind it"), a state
+# ("what is happening", "whats coming up"), a number ("what is two thirds of a cup"), or a word
+# for no particular thing ("whats something cheap to do tonight").
+NOT_A_DEFINITION_HEAD = frozenset("""a an the my your our his her their its this that these
+those it i you we they he she there on in up out off about wrong going happening happened next
+new best better missing too more most so all any some not just for to with from of at by under
+over behind inside between near against than left coming showing playing occurring eating cooking
+red one none something anything nothing everything someone anyone everyone two three four five
+six seven eight nine ten half quarter third quarter percent percent cheapest easiest quickest
+longest shortest biggest smallest largest worth nice easy good double triple eleven twelve thirteen fourteen fifteen sixteen seventeen
+eighteen nineteen twenty thirty forty
+fifty sixty seventy eighty ninety hundred thousand million""".split())
 
 def _has_any(text, phrases):
     return any(phrase in text for phrase in phrases)
@@ -1222,6 +1364,10 @@ def cue_about_person(text, cue):
         # talk to"): it already reads as how someone feels, so what follows adds nothing.
         return bool(re.search(r"\b" + re.escape(cue) + r"\b", text))
     for match in re.finditer(r"\b" + re.escape(cue) + r"\b", text):
+        if _a_verb_holds_it(text, match.start()):
+            # "im moving flat on saturday" is a move to a flat, not a low mood: the verb in
+            # front of the word takes it as its object, so the word is a thing here.
+            continue
         rest = text[match.end():].lstrip()
         if not rest or rest[0] in ".,!?;:-|":
             return True
@@ -1244,6 +1390,47 @@ def cue_about_person(text, cue):
             # clause about the person's feeling, and "im mad busy today" has none.
             return True
     return False
+
+
+# Words ending in -ing that are things or names, so the guard below leaves them alone: "im at the
+# building in the morning" is not a verb holding the word after it.
+ING_THINGS = frozenset("""morning evening ceiling building wedding pudding clothing shopping
+    offering meeting parking lighting heating bedding flooring roofing fencing bedding
+    thing something nothing anything everything king ring string spring wing sing bring swing
+    going being doing having making taking coming""".split())
+
+# The -ing words that take no object. "im moving flat" and "im renting flat" are a move and a
+# tenancy: the verb in front of the feeling word takes it as the thing the verb acts on. A verb of
+# posture, movement or becoming takes no object at all - what follows it is what the person is
+# doing it *as*, or where they are - so "im sitting sad", "im running flat", "im becoming sad"
+# and "im staying sad" are all the person's own state, said with the verb still going on. Read as
+# objects, ten of those lines lost the condolence they had and got a card about the next thing.
+ING_TAKES_NO_OBJECT = frozenset("""
+    act acting appear appearing arrive arriving become becoming come coming fall falling feel
+    feeling get getting go going grow growing keep keeping lie lying live living look looking
+    remain remaining rest resting rise rising run running seem seeming sit sitting sleep sleeping
+    sound sounding stand standing stay staying turn turning wait waiting walk walking work
+    working""".split())
+
+
+def _a_verb_holds_it(text, at):
+    """True when the word in front of a feeling word is a verb doing something to it.
+
+    "im moving flat on saturday" is a move to a flat and "im renting flat next month" is about
+    the tenancy, but both read as a low mood because a feeling word followed by a preposition
+    counted as the person's own state. An -ing word in front of it is the verb that takes it as
+    its object, wherever the person cue sits - but only a verb that can take an object at all
+    (ING_TAKES_NO_OBJECT), because "im sitting sad" is the person's own state with a verb going
+    on beside it, not a thing done to the sadness. A copula or a feeling verb is let through,
+    because those are what make the word describe the person: "i was feeling flat", "my tomato
+    plants are looking sad".
+    """
+    words = [word.strip(".,!?;:-|\"'").lower() for word in text[:at].split()]
+    if not words:
+        return False
+    last = words[-1]
+    return (last.endswith("ing") and last not in FEELING_CUES_BEFORE
+            and last not in ING_THINGS and last not in ING_TAKES_NO_OBJECT)
 
 
 def _state_before(text, at):
@@ -1480,9 +1667,13 @@ FEELING_FILLER = frozenset("""a an bit little lot kind kinda sort so too very re
 # a determiner before "down" is the opposite case - "a down sleeping bag", "the down pillow".
 FEELING_COPULA = frozenset("""am is are was were be been being feel feels feeling felt get gets
     getting got seem seems seemed look looks looking sound sounds sounded""".split())
+# Words that stand between a person and a feeling word without taking it as their object: the
+# copulas and the feeling verbs ("i was feeling flat", "the plants are looking sad"). Every other
+# -ing word in that place is doing something to the next word.
+FEELING_CUES_BEFORE = FEELING_COPULA | frozenset("feel feels feeling felt".split())
 
 
-def _a_broken_heart_shape(text):
+def a_broken_heart_shape(text):
     """True when the line says a heart is broken, in any of the shapes people type it."""
     low = " ".join(str(text or "").lower().replace("\u2019", "'").split())
     return bool(HEART_IN_A_STATE.search(low) or BROKEN_HEARTED.search(low)
@@ -1493,7 +1684,50 @@ def _a_broken_heart_shape(text):
 # trouble, and the sad pool's advice is written for the person who is in it.
 NOT_THEIR_OWN = frozenset("""her his their your mum mom mother dad father son daughter husband
     wife partner friend sister brother child kid boss neighbour neighbour's nan gran""".split())
-# The words people say they have a broken heart with, when there is no pronoun in front of it.
+
+# The people a heart can belong to without being the speaker's. "she is heartbroken" and
+# "my dad was broken hearted" are somebody else's trouble, and the card about a broken heart is
+# written for the person who is in it. Only a person who is the *subject* of the line counts:
+# "her heart is broken" puts the heart itself first, and a heart is a part of a person, so
+# reading whose it is takes more than the word in front of it.
+A_PERSON_ELSE = frozenset("""mum mom mother dad father son daughter husband wife partner
+    friend sister brother child kid boss neighbour nan gran""".split())
+A_PERSON_IS_THE_SUBJECT = re.compile(r"^(?:he|she|they|him|them)\b")
+# A heart said as the thing the line is about: "his heart is broken", "my mums heart is broken".
+# A heart is a part of a person, and whose it is takes reading the person, not the word in front
+# of it - so a line that makes the heart the subject is left to the row that already answered it.
+A_POSSESSED_HEART = re.compile(r"\b(?:my|our|her|his|their|your|the|a|an)\s+(?:\w+'?s\s+)?hearts?\b")
+
+
+def _somebody_elses_heart(text):
+    """True when the broken heart the line names is somebody else's, and the line says whose.
+
+    "she is heartbroken" and "my mum is heartbroken" give another person as the subject and the
+    feeling after it, which is their state and not the speaker's. It is read from the words,
+    because there is no state word here for `_state_owner` to hang an owner on - "heartbroken"
+    is a feeling but not a state word - so without this the line is nobody's, and the speaker's
+    card answers somebody else's trouble.
+    """
+    low = " ".join(str(text or "").lower().replace("\u2019", "'").split())
+    if not a_broken_heart_shape(low) or _a_broken_heart_is_theirs(low):
+        return False
+    if A_POSSESSED_HEART.search(low):
+        return False                     # "his heart is broken": the heart is the thing said
+    if A_PERSON_IS_THE_SUBJECT.match(low):
+        return True                      # "she is heartbroken", "they are broken hearted"
+    words = low.split()
+    if len(words) > 1 and words[0] in ("my", "our", "the"):
+        person = words[1].strip(".,!?'\"")
+        if person in A_PERSON_ELSE or person[:-1] in A_PERSON_ELSE:
+            if words[2:3] in (["heart"], ["hearts"]):
+                # "my mums heart is broken" - the possessive apostrophe is often missing, so the
+                # heart sitting right after the person is the case this reads anyway: the heart
+                # is the thing the line is about, and whose it is takes more than that.
+                return False
+            return True                  # "my mum is heartbroken", "my wife said she is heartbroken"
+    return False
+
+
 HAVE_A_BROKEN_HEART = re.compile(r"\b(?:i have|i've got|ive got|i got|i had)\b[^.]{0,24}broken heart")
 
 
@@ -1509,7 +1743,7 @@ def _a_broken_heart_is_theirs(text):
     is as much somebody else's as "her".
     """
     low = " ".join(str(text or "").lower().replace("\u2019", "'").split())
-    if not _a_broken_heart_shape(low):
+    if not a_broken_heart_shape(low):
         return False
     words = low.split()
     starts = [match.start() for match in
@@ -1529,7 +1763,7 @@ def _a_broken_heart_is_theirs(text):
     if owner in ("a", "an", "the"):
         return False                     # "a broken heart" is the thing being talked about
     return not re.search(r"\b(?:her|his|their|your)\b", low) \
-        and bool(re.match(r"^(?:i|im|i'm|ive|i've)\b", low))
+        and bool(re.match(r"^(?:i|im|i'm|ive|i've|we|we're|weve|we've|our)\b", low))
 
 # The polite way of saying a day is not great. These are the whole answer to "how are you", and
 # they carry no word of mood at all, so "could be better" was read as no feeling and got a search
@@ -1909,6 +2143,8 @@ def emotion_of(text):
             idiom = NOT_A_MOOD_THERE.get(cue)
             if idiom is not None and idiom.search(text):
                 continue
+            if cue in LABEL_ON_A_PERSON and _said_of_the_speaker(text, cue):
+                continue
             if (cue in SELF_ONLY_CUES or cue in ALWAYS_SELF_ONLY or cue in THING_OR_PERSON_CUES
                     or cue in CONFUSED_SELF_ONLY
                     or cue in A_COMPARISON) and not _said_of_the_speaker(text, cue):
@@ -1938,7 +2174,7 @@ def emotion_of(text):
     acted = _acts_on_the_speaker(text)
     if acted:
         return acted
-    if _a_broken_heart_shape(text):
+    if a_broken_heart_shape(text):
         return "sad"          # "my heart is broken" is the low said with the heart as the thing
     sounded = _feeling_said_as_a_sound(text)
     if sounded:
@@ -2304,6 +2540,13 @@ def _about_bot_kind(text, words, norm=()):
         # A tally of the bot's own chats or days: there is no such number to give, and the
         # memory answer is the honest one, so it is read the same way as "what do you remember".
         return "memory"
+    if A_YOUR_KIN.search(" ".join(norm)) or A_YOUR_OWN_THING.search(" ".join(norm)):
+        return "life"
+    if (A_HOW_MANY_OF_THE_BOTS_OWN.search(" ".join(norm))
+            and set(norm) & BOT_LIFE):
+        return "life"
+    if A_WHAT_ITS_LIKE.search(" ".join(norm)):
+        return "identity"
     if _asks_about_its_own_life(norm):
         return "life"
     if _has_any(bare, ABOUT_BOT) or text.strip().endswith(ABOUT_BOT_END):
@@ -2782,11 +3025,13 @@ def shortage_of(text):
 # carry a word outside this set.
 BOT_LIFE = frozenset("""
 family families kid kids child children son daughter mum mom mother father dad daddy parents
-parent brother sister sibling siblings partner husband wife girlfriend boyfriend friends friend
+parent brother brothers sister sisters sibling siblings gran grans grandma grandmas grandad
+grandads grandpa grandparents grandparent uncle uncles aunt aunts auntie aunties cousin cousins
+niece nephews relatives relative partner husband wife girlfriend boyfriend friends friend
 home house flat apartment town hometown address pets pet dog dogs cat cats kitten puppy hamster
 rabbit budgie garden
-job jobs work boss employer colleague colleagues coworker coworkers wages wage salary paycheck
-pay paid money bank account mortgage bills rent
+job jobs work boss manager managers employer colleague colleagues coworker coworkers wages wage
+salary paycheck pay paid money bank account mortgage bills rent
 body face hands feet hair
 birthday age born
 name nickname
@@ -2797,7 +3042,7 @@ car cars
 # so "do you have a dog lead" and "how's your day" keep their own reading.
 BOT_LIFE_FILLER = frozenset("""
 a an any some the your you u ur yourself yours own much many really actually ever then now
-yet already also too about of for at in on like
+yet already also too about of for at in on like and or there both coming come came best
 """.split())
 # The shapes the ask takes. A line has to be one of these and be made of the words above, so a
 # question that turns the same words on the world ("do you have a dog that bites") is not read
@@ -2805,8 +3050,17 @@ yet already also too about of for at in on like
 BOT_LIFE_ASK = re.compile(r"""
     (?: (?:do|does|did)\s+(?:you|u|ya)\s+(?:have|has|got|get|own|need|want)
       | (?:have|has)\s+(?:you|u|ya)\s+got
-      | (?:what|whats|what's|how)\s+(?:is|are|was|were|s|does|do)?\s*(?:your|ur)
+      | (?:what|whats|what's|who|whos|who's|whose|which|how)\s+
+        (?:is|are|was|were|s|does|do)?\s*(?:your|ur)
       | (?:are|is|was|were)\s+(?:you|u)\s+(?:a|an)
+      # "were your mum and dad there", "was your brother there too", "are your parents
+      # coming": the thing asked about is the bot's own family, said from the front with no
+      # "do you have" in it. Read as an ordinary question it reached the search hedge - "I
+      # don't know enough to answer that honestly" to somebody asking whether the bot's mum
+      # was at a party - when the bot knows the answer perfectly well: no family at all. The
+      # rest-gate below still has to pass, so "is your shop open" and "were your prices
+      # online" name something outside the bot's own life and are left alone.
+      | (?:are|is|was|were)\s+(?:your|ur)
     )\s*
 """, re.VERBOSE)
 
@@ -3040,6 +3294,49 @@ myself yourself
 THEIR_PROBLEM = frozenset("""
 my our me us mine ours happen happens happened occurring seems broken broke leaking dripping noisy
 """.split())
+
+
+# "what's it like being you" asks what it is like to be the bot - no day, no dinner, no family -
+# and the honest answer is the one that says what the bot is. Read as an ordinary question it
+# reached the search hedge, which is no answer at all to a question about itself.
+# The words that make "your" a question about the bot's family rather than about a thing: "were
+# your parents there", "were your parents at the wedding", "are your gran and grandad coming". The
+# all-words gate in `_asks_about_its_own_life` cannot carry these, because the wedding and the
+# hospital name the world and would take the line out of the bot's own vocabulary - while the
+# answer is the same one either way, that there is no family to have been anywhere. A kin word
+# straight after "your" is enough on its own; "was your car in the garage" is not kin and keeps
+# the gate.
+KIN = frozenset("""family families kid kids child children son daughter mum mom mother father dad
+    daddy parents parent brother brothers sister sisters sibling siblings gran grans grandma
+    grandmas grandad grandads grandpa grandparents grandparent uncle uncles aunt aunts auntie
+    aunties cousin cousins niece nephews relatives relative partner husband wife girlfriend
+    boyfriend""".split())
+# The same ask with an auxiliary or a follow-up in front of it: "do your parents live near you"
+# (the ask is a life of its own, not "were your parents there"), "what about your sisters", "and
+# your brother". The kin word still has to be the word straight after "your", so "do your prices
+# include vat", "did your delivery arrive" and "and your car insurance" keep their own reading.
+A_YOUR_KIN = re.compile(
+    r"\b(?:"
+    r"(?:was|were|are|is)\s+(?:your|ur|yours)\s+(?:" + "|".join(sorted(KIN)) + r")"
+    r"|(?:do|does|did|have|has)\s+(?:your|ur)\s+(?:" + "|".join(sorted(KIN)) + r")"
+    r")\b")
+# "what about your job", "how about your dog", "and your bills": the ask about the bot's own life
+# said as a follow-up, with no verb at all. Every word a life like that is described with counts
+# here (not only kin), because the thing named is the bot's own - there is no job, no dog and no
+# bill on this side - and the answer is the same one. It has to be "your" straight after the
+# follow-up, so "what about your interview" and "how about your neighbour's dog" keep theirs.
+A_YOUR_OWN_THING = re.compile(
+    r"\b(?:(?:what|how)\s+about|and)\s+(?:your|ur)\s+(?:"
+    + "|".join(sorted(BOT_LIFE)) + r")(?:\s+(?:too|then|either|as\s+well))?\s*[?.!]*$")
+
+# "how many brothers have you got", "how many kids do you have": the same ask about the bot's own
+# life with a count in front of it. The shape in BOT_LIFE_ASK has the person word after the verb,
+# so a count in front ("how many brothers have you got") matches nothing and the line reached the
+# search hedge - a search cannot say how many brothers the bot has, and the answer is none.
+A_HOW_MANY_OF_THE_BOTS_OWN = re.compile(
+    r"\b(?:how|what)\s+many\s+\w+(?:\s+\w+)?\s+(?:have|has|do|does)\s+(?:you|u|ya)\b")
+
+A_WHAT_ITS_LIKE = re.compile(r"\b(?:what|whats|what's)\b.*\blike\s+being\s+(?:you|u|ya)\b")
 
 
 def _asks_about_its_own_life(norm):
@@ -3374,8 +3671,10 @@ def farewell_only(norm):
     if rest and rest[0] in _THANKS_WORDS:
         # "bye, thanks for the help" says thank you on the way out, which is still the way out.
         return True
+    # A goodbye is said to somebody: "bye love", "night pet", "ciao bella" and "bye duck" are
+    # still the goodbye, and the name it is said to does not make it a line about them.
     return all(word in FAREWELL_TAIL or word in POLITE or word in _SAID_ON_ITS_OWN
-               for word in rest)
+               or word in TERMS_OF_ADDRESS for word in rest)
 
 
 def greeting_only(norm):
@@ -3460,6 +3759,16 @@ HELP_WAS_GOOD = frozenset((
 ))
 # The agreement in front of a praise says nothing and does not stop it being one.
 BEFORE_HELP_WAS_GOOD = frozenset("ok okay yeah yep yes ah oh right cool so".split())
+# The softener after the praise says nothing either: "that helps actually", "that really helps
+# tbh", "that helped a lot honestly". Read without it the line said the help was good, and a
+# softener is not news: it was read as a statement about nothing, and answered with the filler
+# "Got it. Is there anything you'd like a hand with?" right after the person said it worked.
+AFTER_HELP_WAS_GOOD = frozenset("""actually tbh honestly really though tho anyway now then
+    mind cheers thanks""".split())
+# A softener the chat table spells out in full: "tbh" is read as "to be honest", so the tail is
+# three words rather than one and the words have to come off together.
+AFTER_HELP_WAS_GOOD_SAID_OUT = ("to be honest", "to be fair", "if im honest", "if i am honest",
+                                "in all honesty", "to tell the truth")
 
 
 def _says_the_help_was_good(norm):
@@ -3467,6 +3776,15 @@ def _says_the_help_was_good(norm):
     words = list(norm)
     while len(words) > 2 and words[0] in BEFORE_HELP_WAS_GOOD:
         words = words[1:]
+    while len(words) > 2:
+        said = " ".join(words)
+        tail = next((phrase.split() for phrase in AFTER_HELP_WAS_GOOD_SAID_OUT
+                     if said.endswith(" " + phrase)), None)
+        if tail is None and words[-1] in AFTER_HELP_WAS_GOOD:
+            tail = [words[-1]]
+        if tail is None or len(words) - len(tail) < 2:
+            break
+        words = words[:-len(tail)]
     return " ".join(words) in HELP_WAS_GOOD
 
 
@@ -4013,6 +4331,119 @@ def _asks_the_room(stripped):
     return len(stripped) > 2 and stripped[2] in ASK_THE_ROOM_WANTS
 
 
+# The end of a line can ask for the answer without a question word in it: "i have a wedding in
+# june and i need a dress, any ideas". These are the words that make the last clause of a line
+# the ask rather than a second thing said.
+TAIL_ASKS = frozenset("""ideas idea thoughts thought advice tips tip suggestions suggestion
+    recommendations recommendation help pointers""".split())
+TAIL_ASK_FILLER = frozenset("""any some more your please a quick few""".split())
+# A setup is the situation a person describes before they ask; past a couple of sentences it is
+# not a setup any more but two things said, and the reply belongs to the second half anyway.
+SETUP_MOST_WORDS = 45
+# Clauses that only hold the line together. "thanks, what should i cook tonight" has no setup:
+# the person has said nothing about their situation yet.
+SETUP_NOTHING = frozenset("""thanks thank you ta cheers hi hello hey morning evening goodnight ok
+    okay right so well and but oh ah hmm um yeah yes no anyway alright lol haha lmao""".split())
+# Words that join a situation to the question and name nothing in it. A setup made only of these
+# is not a situation: "since when have you been about" reads "since" as the setup and "when have
+# you been about" as the ask, and the answer is held to a word that says nothing.
+SETUP_CONNECTIVES = frozenset("""since because cos cause and but so if when while although
+    though as then also plus or with for to of in on at by from that it its this these those
+    there here neither nor either both too same me""".split())
+
+
+def _asks_at_the_end(clause):
+    """True when the last clause asks for the answer without a question word."""
+    stripped = strip_leaders(clause) or clause
+    if not stripped:
+        return False
+    if _opens_question(stripped):
+        return True
+    return bool(set(stripped) & TAIL_ASKS) and set(stripped) <= (TAIL_ASKS | TAIL_ASK_FILLER)
+
+
+# A setup that only frames the question sets nothing up: "never mind, what is the tax deadline",
+# "quick question, what time does tesco close", "honestly, what do i do". The situation these
+# lines ask about is not in them, and the answer must not be held to the frame.
+FRAME_NOT_A_SETUP = re.compile(
+    r"^(?: (?:and |but |oh |well |so |ok |okay |right |no )?"
+    r"(?:never mind|nevermind|i mean|i meant|you know what i mean|i dunno|dunno"
+    r"|not sure|no idea|honestly|sorry|one more thing|one thing|another thing|quick one"
+    r"|back to \w+(?: \w+){0,2}"
+    r"|of course|fair enough|me too|same here|no worries|anyway|just wondering"
+    r"|just asking|quick question|random question|random one|hi|hey|hello|hiya"
+    r"|good question)\b(?: .{0,12})?)+$")
+
+
+# A frame said at the very front of a situation, inside it rather than instead of it: the
+# question is still about the situation, and the words of the frame are not part of it.
+A_FRAME_IN_FRONT = re.compile(
+    r"^(?:(?:hi|hiya|hey|hello|morning|evening|ok|okay|right|well|also|i mean|i meant"
+    r"|honestly|sorry|cheers"
+    r"|thanks|thank you|no worries|quick one|quick question|random question|random one"
+    r"|one more thing|another thing|just wondering|just asking|lol|haha|lmao|anyway"
+    r"|bit of a random one|bit random|random one|and|but|so)(?:[\s,.-]+|$))+", re.I)
+
+
+def _says_nothing_but_the_floor(clause):
+    """Whether the clause is only the words that hold a conversation together.
+
+    "thanks, what should i cook tonight" says nothing about a situation, and neither does
+    "ok thanks. also, should i worry about the damp patch" - the courtesy and the "also" are the
+    turn, not the situation, and the answer must not be held to them.
+    """
+    words = set(strip_leaders(clause) or clause)
+    return not words or words <= (SETUP_NOTHING | SETUP_CONNECTIVES)
+
+
+def the_setup(line):
+    """The situation a line describes before the question it ends on, else None.
+
+    "friends are coming for sunday lunch and one of them is vegan, what can i cook that everyone
+    will eat" says the situation and then asks; the ask is what the line is about (it is
+    `focus`) and the setup is what the answer has to hold to. Read whole, the situation's words
+    are the ones a reply is found by, and the answer goes to the situation instead of the
+    question: "my son has a football match on saturday and its freezing, what should he wear" is
+    answered with the temperature a baby's room should be, because the only thing the line named
+    that a card knows about is the freezing.
+
+    Two questions in one line have no setup ("what is your name and how old are you"): the
+    second is another ask, not the condition for the first.
+    """
+    clauses = [clause for clause in (line.get("clauses") or []) if clause]
+    if len(clauses) < 2:
+        return None
+    ask_at = None
+    for index in range(len(clauses) - 1, 0, -1):
+        if _asks_at_the_end(clauses[index]):
+            ask_at = index
+            break
+    if ask_at is None:
+        return None
+    before = clauses[:ask_at]
+    if any(_opens_question(clause) for clause in before):
+        return None
+    if all(_says_nothing_but_the_floor(clause) for clause in before):
+        return None
+    # The situation's words are the ones a card is found by, so the courtesy or the frame in
+    # front of it is not part of it: "hiya, quick one - my 14 year old wants her ears pierced" is
+    # a question about the piercing, and "hiya" and "quick one" would only be noise in the search.
+    setup = " ".join(" ".join(strip_leaders(clause) or clause) for clause in before)
+    setup = A_FRAME_IN_FRONT.sub("", setup).strip(" ,-")
+    if not setup:
+        # Only the frame was there: "lol ok anyway, whats for dinner" says nothing to hold to.
+        return None
+    if len(setup.split()) > SETUP_MOST_WORDS:
+        return None
+    if FRAME_NOT_A_SETUP.match(" " + setup):
+        return None
+    if not set(setup.split()) - SETUP_CONNECTIVES:
+        # "since, when have you been about": the words before the ask join it, they do not
+        # describe anything the answer has to hold to.
+        return None
+    return setup
+
+
 def _opens_question(clause):
     """True when a clause opens like a question ("is 8gb enough"), not like an order."""
     stripped = strip_leaders(clause) or clause
@@ -4216,6 +4647,63 @@ def _asks_the_bot(norm):
         return False
     return (norm[0] in YOU_WORDS and norm[1] in ASK_VERBS and norm[2] in ASK_FOLLOW)
 
+# A person drops the "is there" and the question mark: "any word on the job", "any luck with the
+# boiler", "any chance of a refund" are questions about the thing after the link, and read as
+# statements they got the shrug instead of an answer ("I'm listening - say more if it helps").
+# The word in front is only the kind of answer wanted, never the subject.
+# "news" is left out on purpose: asking for the news asks for a briefing, and the honest "I
+# can't see the news from here" already answers it. Read as a question about the thing, the bot
+# answered it from the small-talk pool instead ("None that I know of. What's been the best bit of
+# your week?"), which is no answer to "any news on the trains".
+# "progress" and "update" are left out: they ask how a thing the person has in hand is getting
+# on ("any progress on the leak", "any update on my parcel"), and no card knows that, so read as
+# a question the bot searched and said so - where the nod the line got before was the honest
+# reply. The words here ask for something the bot can answer from what it knows.
+ANY_ANSWER_WANTED = frozenset("""word words luck idea ideas chance chances
+    joy sign signs hint hints intel new else""".split())
+ANY_ANSWER_LINKS = frozenset("on about with from of for regarding concerning re".split())
+# An ask for a list already asks, so the frame adds nothing to it: "any ideas for a cheap night
+# out" is a request for suggestions, and read as a question it lost the list answer and got a
+# shrug. Only the plural of a list word is here, because it is the only one of the answer words
+# that asks the same thing the frame adds to the others.
+ANY_ALREADY_ASKS = frozenset(("idea", "ideas"))
+
+def after_any_link(norm):
+    """The words after the link in "any news about X", or () when the line is another shape.
+
+    The tuple is what the line is about: "any word on the job" is about the job, and read whole
+    the topic was the word it was asked with. A line that only says the kind of answer wanted
+    ("any luck?") has nothing after the link, so it keeps the conversation's subject, and so does
+    one that puts the whole ask after it ("any idea how to stop him"): there the ask is the line
+    and the thing it is about came from the turns before.
+    """
+    if not norm or norm[0] not in ("any", "anything"):
+        return ()
+    if len(norm) < 2 or norm[1] not in ANY_ANSWER_WANTED:
+        return ()
+    for at in range(2, len(norm)):
+        if norm[at] in ANY_ANSWER_LINKS:
+            return tuple(norm[at + 1:])
+    return ()
+
+
+def _asks_after_any(norm):
+    """True for "any word on the job" and its cousins, which ask without a question mark.
+
+    It has to name the thing after the link. "any luck" and "any ideas" on their own are
+    already read as well as they can be, and a bare frame says nothing new about the line.
+    """
+    if not norm or len(norm) < 2 or norm[1] in ANY_ALREADY_ASKS:
+        return False
+    about = after_any_link(norm)
+    return bool(about) and not _names_a_person(about)
+
+
+def _names_a_person(words):
+    """True when the tail of an "any word about X" names a person rather than a thing."""
+    return any(words[at] in OWNS_A_PERSON and words[at + 1] in A_PERSON_NAMED
+               for at in range(len(words) - 1))
+
 # Asking the room for a name is asking for a recommendation: "anyone know a good plumber".
 ASK_FOR_A_NAME = frozenset("""know knows knew recommend recommends suggest suggests
     found find""".split())
@@ -4249,6 +4737,15 @@ A_PERSON_AFTER = frozenset("""
     bud fella lad matey mother father sister brother son daughter partner wife husband
     wishes regards
 """.split())
+# "any word from my sister" asks about a person, and nothing in the knowledge base knows her: as
+# a question it turned a listening reply into a search punt, which is worse than what it had. A
+# tail that names a person is left as it was; a service is not a person and keeps its answer
+# ("any word from the vet" reaches the vet card).
+A_PERSON_NAMED = (A_PERSON_AFTER_A_POSSESSIVE | KIN | A_PERSON_AFTER
+                  | frozenset("""boss bosses manager managers colleague colleagues
+                      neighbour neighbours neighbor neighbors teacher teachers doctor
+                      doctors gp dentist dentist's""".split()))
+OWNS_A_PERSON = frozenset(("my", "our", "his", "her", "your", "their", "me"))
 # " or " and "better than" compare things; a bare substring is not enough, because "better
 # thanks" contains "better than".
 COMPARISON = re.compile(r"(?:\s+or\s+|\bbetter than\b|\binstead of\b|\bversus\b|\bvs\b)")
@@ -4285,6 +4782,73 @@ def _ask_words(norm):
 def _asks_it_back(norm):
     """True when the whole line is the question turned back on the bot."""
     return " ".join(_ask_words(norm)) in ASKS_IT_BACK
+
+
+# The greetings people type without the words "how are you": "hows u" reads as "how is you",
+# "hows things" as "how is things", "how you doing", "what u saying", "u ok". The small-talk
+# list holds the phrases as said, and these are the same greeting with the verb or the subject
+# written another way, so they are read as a shape instead of one phrase per spelling. Every
+# word has to be part of the greeting - "how is life in spain" and "how are you supposed to
+# defrost a turkey" name something, so they are questions and not a greeting.
+GREETING_ASK_WORDS = frozenset("""
+    how what whats is are was were am be been r u ya you your yours yourself yourselves the
+    things everything life day days week weekend evening morning night
+    going doing doin do been getting keeping saying say much
+    today tonight then now lately anyway mate love friend
+    all alright ok okay good fine well too so it have has having
+""".split())
+# The words that stand for the person being asked after: "hows things", "hows life". They are
+# the subject of the greeting, so a line has to have one of these or a "you" to be one.
+GREETING_ASK_SUBJECT = frozenset("""you u ya your yours yourself yourselves things everything
+    life day days week weekend evening morning night""".split())
+# A line that is only "u ok", "you alright", "you good" is the same greeting with the "how" left
+# off. It is told apart from the short agreement "you too" by the state word, which an agreement
+# does not have.
+GREETING_ASK_STATE = frozenset("ok okay alright good fine well".split())
+GREETING_ASK_ABOUT_SOMETHING = frozenset("with about to for if when on at in".split())
+# The short shape has no "how" in it, so the person has to be named for it to be the greeting:
+# "you good" and "u ok" ask after the bot, and "good morning" and "good day" are greetings that
+# say nothing about how anyone is.
+GREETING_ASK_SECOND_PERSON = frozenset("you u ya your yours yourself yourselves".split())
+# A greeting that opens on "what" is the "what are you saying" shape and nothing else: the same
+# words with a day in them ask the date ("what day is it"), and "what are you doing" asks how
+# the bot fills its time, which has its own answer.
+GREETING_WHAT_SAYING = frozenset("""what are is r you u ya saying say sayin then now there
+    mate all""".split())
+
+
+def asks_how_i_am(norm):
+    """True when the whole line asks the bot how it is, however the greeting is spelled.
+
+    This is the greeting as a shape, so it does not depend on which spelling of it a phrase
+    list happens to hold: "how you been", "hows everything" and "what u saying" are the same
+    question as "how are you", and the caller that answers one answers them all. A state word
+    followed by "with", "about", "to" and the rest asks about something else ("you ok with
+    that", "you alright to drive"), so the short shape stands down for it.
+    """
+    # "hows everything with you" and "how are you doing with yourself": the person adds "with
+    # you" to the same greeting, so the tag is dropped rather than read as asking about a thing.
+    while len(norm) > 2 and norm[-2] == "with" and norm[-1] in GREETING_ASK_SECOND_PERSON:
+        norm = norm[:-2]
+    if not norm or len(norm) > 8:
+        return False
+    words = set(norm)
+    if not words & GREETING_ASK_SUBJECT:
+        return False
+    if norm[0] == "what":
+        return words <= GREETING_WHAT_SAYING
+    if norm[0] != "how":
+        if len(norm) > 4 or not words & GREETING_ASK_STATE \
+                or not words & GREETING_ASK_SECOND_PERSON:
+            return False
+        at = next(index for index, word in enumerate(norm) if word in GREETING_ASK_STATE)
+        # The person comes before the state in the greeting ("u ok", "you good"); a line that
+        # puts the state first and the person after it agrees with what was just said ("ok nah
+        # ur right"), which is not a question about the bot.
+        if not any(word in GREETING_ASK_SECOND_PERSON for word in norm[:at]):
+            return False
+        return not (len(norm) > at + 1 and norm[at + 1] in GREETING_ASK_ABOUT_SOMETHING)
+    return words <= GREETING_ASK_WORDS
 
 
 # A line that ends in one of these is asking to be told it is true, not telling news:
@@ -4709,6 +5273,26 @@ A_DATE_FIGURE = re.compile(
     re.I)
 
 
+def _a_bare_definition(text):
+    """True for a bare "what is X" that asks what the thing is, and False for the rest.
+
+    The head word decides most of it (see NOT_A_DEFINITION_HEAD), and a possessive head - "what
+    is peru's capital" - asks about somebody's thing rather than the meaning of a word.
+    """
+    found = BARE_DEFINITION.search(text)
+    if not found:
+        return False
+    head = found.group(1).lower()
+    if head.endswith(("'s", "\u2019s")) or re.search(r"\d", head):
+        return False
+    # The apostrophe is gone by the time the line is read, so "peru's capital" arrives as "peru s
+    # capital": a lone "s" after the head is the possessive, and the line asks about a thing that
+    # belongs to something rather than what a word means.
+    if re.match(r"\s*s\b", text[found.end():]):
+        return False
+    return head not in NOT_A_DEFINITION_HEAD
+
+
 def _ask_labels(norm, text):
     """The asks the line itself makes, gratitude already taken off."""
     asks = set()
@@ -4736,7 +5320,8 @@ def _ask_labels(norm, text):
         asks.add("opinion")
     if _has_any(text, COMPARE) or words & {"vs", "versus"}:
         asks.add("compare")
-    if _has_any(text, DEFINITION) and not ASKS_ABOUT_A_PERSON.search(text):
+    if not ASKS_ABOUT_A_PERSON.search(text) and (
+            _has_any(text, DEFINITION) or _a_bare_definition(text)):
         asks.add("definition")
     # "the 3rd of may" is a date, not a sum: an ordinal, or a day of a month, names a position on
     # a calendar, and counting it as arithmetic made the birthday line ask for an amount. What is
@@ -4744,7 +5329,8 @@ def _ask_labels(norm, text):
     digits = bool(re.search(r"\d", A_DATE_FIGURE.sub(" ", text)))
     if words & MATH_WORDS or "%" in text or (digits and ({"of", "each", "per", "split"} & words)):
         asks.add("maths")
-    if _has_any(text, (" or ",)) and not two_ends_of_one_scale(text):
+    if _has_any(text, (" or ",)) and not two_ends_of_one_scale(text) \
+            and not _turns_the_pair_down(text):
         asks.add("choice")
     if words & {"list", "ideas", "options", "examples", "suggest"}:
         asks.add("list")
@@ -4782,6 +5368,24 @@ VERB_FORMS = BARE_VERBS | frozenset(
     stem[:-1] + "ing" if stem.endswith("e") else stem + "ing"
     for stem in VERBISH - {"is", "are", "was", "were", "am", "be", "been", "being"}
     if len(stem) > 2 and stem.isalpha())
+
+
+# The same verbs said of a thing rather than by the person: "the heating comes on", "it settles at
+# the top", "the pump catches". A report about the thing is written that way, and the -ed and -ing
+# tests miss it, so the word was read as the part of the answer the follow-up named - "its a
+# banging sound when the heating comes on" after the banging card came back "Same for comes: ...",
+# a lead-in about a word nobody was talking about. The tense of a verb is the same verb.
+def _third_person(stem):
+    if len(stem) > 2 and stem.endswith("y") and stem[-2] not in "aeiouy":
+        return stem[:-1] + "ies"
+    if stem.endswith(("s", "sh", "ch", "x", "z", "o")):
+        return stem + "es"
+    return stem + "s"
+
+
+VERB_THIRD = frozenset(
+    _third_person(word) for word in (VERBISH | BARE_VERBS)
+    if word.isalpha() and word not in {"is", "are", "am", "be", "been", "being"})
 
 
 # An -ing word after a present or a modal auxiliary is the subject of the question, not the
@@ -5185,6 +5789,39 @@ BACK_AFTER = frozenset("""thanks cheers ta ok okay alright fine good great well 
     working work busy off home out just finishing finishing up sorted done""".split())
 
 
+def _asks_what_was_meant(text):
+    """True when the whole line asks what the bot's own last answer meant.
+
+    "what do you mean", "what does that mean", "how do you mean it" and the half a dozen ways
+    people type the same question ("wot u mean", "wdym", "whatcha mean", "whaddya mean by
+    that") name nothing of their own: they point at the line just given. The knowledge base read
+    them as a follow-up on the subject of the last answer and took the word "mean" for the thing
+    named, so after "my tomato plants have blight" the person got "The same goes for the wot u
+    mean: cut off and bin the affected leaves" - their own slip said back at them as the thing
+    being asked about, and the composer's own reply ("Just this: Brown-black patches ...") was
+    the right one all along.
+
+    The spellings are read in one place already, by the reply that answers this question
+    (`bot/memory/meant.py::MEAN`), so this borrows that rule rather than keeping a second list
+    that falls behind it. A thing named after "mean" is not this reading: "what does the boiler
+    pressure mean", "what does it mean to be a good friend" and "what does mean reversion mean"
+    are questions about a thing, and their card keeps the turn.
+    """
+    asked = str(text or "").strip()
+    if not asked:
+        return False
+    from ..memory import meant
+
+    return bool(meant.MEAN.match(asked))
+
+
+# "what does that mean for my mortgage": the meaning is being applied to a thing of theirs. The
+# thing is the question when it has just been talked about ("... for my pay" after a payslip),
+# and it is a question of its own when it has not - see
+# `bot/understanding/__init__.py::_the_meaning_is_applied_to_what_was_said`.
+MEANT_APPLIED_TO = re.compile(r"\bfor\s+(?:my|our)\s+([a-z'\u2019-]+)", re.I)
+
+
 def _asks_back(norm):
     """True when the line ends by handing the question back to the bot.
 
@@ -5454,7 +6091,7 @@ def classify(line):
     if not norm:
         kind = "empty"
     elif (signals["question_mark"] or _opens_question(norm) or opens_like_question
-          or _asks_the_bot(norm) or _asks_for_help(text) or tag
+          or _asks_the_bot(norm) or _asks_for_help(text) or tag or _asks_after_any(norm)
           or (asks and _starts_with(norm, THANKS)
               and (signals["question_mark"] or set(norm) & QUESTION_WORDS
                    or _thanks_still_asks(norm)))):
@@ -5500,18 +6137,24 @@ def classify(line):
         intent = "empty"
     elif signals["laughter"] and len(norm) <= 5:
         intent = "laugh"
+    elif _starts_with(strip_leaders(norm), FAREWELLS) and farewell_only(strip_leaders(norm)):
+        # The goodbye is read before the reading that looks for "you": "see you later" and
+        # "ttyl" (which the lexicon writes out as "talk to you later") are the way out, and
+        # "can you talk later" is not, because it does not open with the farewell. The leaders
+        # are taken off first, because a goodbye is preceded by one as often as not: "ok bye
+        # ttfn", "right then, good night".
+        intent = "farewell"
     elif _about_bot(text, words, norm):
         intent = "about_bot"
     elif kind == "greeting":
         intent = "greeting"
-    elif _starts_with(norm, FAREWELLS) and farewell_only(norm):
-        intent = "farewell"
     elif kind == "thanks":
         intent = "thanks"
     elif _has_any(" " + text + " ", CORRECTION) and ("meant" in words or "mean" in words):
         intent = "correction"
     elif (_asks_it_back(norm) or _asks_about_the_bot_day(norm)
-          or _asks_what_the_bot_is_doing(norm) or the_manners_question(norm)):
+          or _asks_what_the_bot_is_doing(norm) or the_manners_question(norm)
+          or asks_how_i_am(norm)):
         intent = "smalltalk"
     elif agreement_of(text):
         intent = "ack"
@@ -5564,6 +6207,10 @@ def classify(line):
     emotion = None
     if "i" in words or "im" in words or "my" in words or kind != "question":
         emotion = emotion_of(text)
+    if state_owner in (None, "thing") and _somebody_elses_heart(text):
+        # Somebody else's broken heart is their trouble: the pool for the person in it stands
+        # aside, and the same arm keeps the heartbreak row from answering about the speaker.
+        state_owner = "other"
     if emotion and state_owner in (None, "thing") and _a_broken_heart_is_theirs(text):
         # A heart is a part of a person, so `_whose_state` calls it a thing, and a thing's state
         # is not the person's mood (bot/modules/chat.py stands the sad pool down on it). A broken
@@ -5626,6 +6273,11 @@ def classify(line):
         # ("not bad, and you?", "im fine thanks, yourself"): a reply that only answers the
         # person answers half of it. See `_asks_back`.
         "asks_back": _asks_back(norm),
+        # True when the whole line asks what the bot's own last answer meant ("what do you
+        # mean", "what does that mean", "wot u mean", "wdym"): it names nothing of its own, so
+        # no knowledge entry is its answer and the store says the last answer again. See
+        # `_asks_what_was_meant`.
+        "asks_what_was_meant": _asks_what_was_meant(text),
         # The thing a line that only rules something out takes away ("no horror", "no treats",
         # "without the garlic"), as a list, plus the flag the composer reads. A line that says
         # more than a limit is not one, so "no horror but the last one was good" stays its own.
@@ -6006,6 +6658,19 @@ _A_POST_HOLDER = re.compile(
 _A_HOW_MUCH_I_SPENT = re.compile(
     r"\bhow\s+much\s+(?:did|have|has|do)\s+(?:i|we)\s+(?:spend|spent|pay|paid|earn|earned|"
     r"save|saved)\b")
+# The same holds for a figure about the person's own account, whatever verb asks it. "how much am
+# i paying for my subscription" is not a price the world sets: the bot cannot see their bill, their
+# subscription or their account, and the reply that answers it ("what you pay is on your own bill")
+# is a better one than a price card. Only the `did i spend` shape was fenced, so `am i paying`
+# fell through to the bare `how much` in `_A_COUNT` and read as a price. What makes the figure
+# theirs is the person doing the paying, or a possessive on the thing billed - and neither is a
+# word about time, so this is a fence and not a class of its own.
+_A_MY_OWN_FIGURE = re.compile(
+    r"\b(?:am|do|will|would|should|have|did|can)\s+i\s+(?:be\s+)?(?:paying|charged|billed|"
+    r"spending|getting\s+charged)\b|"
+    r"\bmy\s+(?:own\s+)?(?:bill|bills|subscription|subscriptions|account|card|statement|"
+    r"tariff|contract|plan|direct\s+debit|standing\s+order|invoice|receipt|payslip|quota|"
+    r"allowance)\b")
 # A measure in, "in" or "to", a measure out is a conversion, and a conversion is arithmetic: the
 # numbers do not move. "how much is 200g in cups" and "how much is 180c in fahrenheit" were read as
 # prices because "how much" is the price ask and nothing said otherwise. A quantity of money on
@@ -6123,10 +6788,56 @@ _MONEY_FOR = re.compile(r"\bhow\s+much\s+for\b")
 # a thing - "the heating starts", "what time do i clock in" - the verb is somebody else's
 # business, so "start" and "finish" are not here at all, and a place's times are never the
 # person's own diary.
+# A place is named with more than one word as often as with one: the post office, the swimming pool,
+# the station ticket office. The verb of opening is still the same ask, so the thing in front of it
+# is looked for as a place however many words it is, and the folder that keeps the hours is the one
+# that fixes them - "is the post office open" is as much a place's times as "is tesco open".
+_A_PLACE_THAT_KEEPS_HOURS = re.compile(
+    r"\b(?:shops?|stores?|supermarkets?|gyms?|pools?|librar(?:y|ies)|chemists?|"
+    r"pharmac(?:y|ies)|surger(?:y|ies)|doctors?|dentists?|banks?|garages?|stations?|offices?|"
+    r"centres?|centers?|clinics?|cafes?|pubs?|restaurants?|takeaways?|chippys?|markets?|"
+    r"museums?|halls?|churches?|schools?|colleges?|tips?|dumps?|post\s+office|"
+    r"leisure\s+centre|swimming\s+pool|garden\s+centre|car\s+park)\b")
+# The same list, as the thing the line has to name before a day word can make a verb of opening an
+# ask about hours: "is the post office open today" is the hours, "is the front door open today" is
+# a door. So the day-word arms below require a place, and a door, a lid, a window, an eye or a
+# fridge door is therefore never one - however the line words the day.
+_A_LINE_THAT_NAMES_A_PLACE = r"(?=[^\n]*" + _A_PLACE_THAT_KEEPS_HOURS.pattern + r")"
+# A place word is not enough on its own: "is the garage door open today" names a garage and asks
+# about a door, so a door, a gate, a window, a lid or an eye right before the verb of opening is the
+# thing that opens, and no hours. This is the fence the place word alone cannot keep.
+_NOT_A_FITTING_THAT_OPENS = (r"(?![^\n]*\b(?:doors?|gates?|windows?|lids?|drawers?|eyes?|"
+                            r"mouth|flaps?|valves?|caps?|tins?|jars?|boxes?)\s+"
+                            r"(?:open|opens|closed|closes|shut|shuts)\b)")
+# The day the ask is about. Words of now and a day of the week are what turn "open" into a question
+# about hours; on their own they are not one ("the window is open").
+_A_DAY_WORD = (r"(?:today|tonight|tomorrow|now|this\b|on\b|at\b|until\b|till\b|late\b|"
+               r"for\s+the\s+day|,)")
+# Who may use a place is not when it is open: `is the swimming pool open to non members`, `is the
+# shop open to offers`, `is the cafe open for lunch`. The word after the verb of opening is the
+# whole difference - "open to" and "open for" name the people or the purpose - unless what follows
+# is the day itself ("open for the day", "open to the public today" is still not hours, but "open
+# for the day" is), so the fence looks at the word after it.
+_NOT_OPEN_TO_SOMEBODY = (r"(?![^\n]*\b(?:open|opens)\s+(?:to|for)\s+"
+                         r"(?!(?:today|tonight|tomorrow|now|late|the\s+day|the\s+weekend|"
+                         r"the\s+summer|christmas|easter)\b))")
 _HOURS = re.compile(
     r"\bopening\s+(?:hours?|times?)\b|\bclosing\s+time\b|\blate\s+opening\b|"
     r"\bbank\s+holiday\s+hours\b|"
     r"\b(?:open|opens|closed?|closes|shuts?)\s+(?:until|till|at|on|late|early)\b|"
+    + _A_LINE_THAT_NAMES_A_PLACE + _NOT_A_FITTING_THAT_OPENS + _NOT_OPEN_TO_SOMEBODY +
+    r"\b(?:is|are|was|were|does|do|will)\s+(?:[\w']+\s+){0,4}?(?:open|opens)\s+"
+    r"(?:today|tonight|tomorrow|now|this\s+\w+)\b|"
+    + _A_LINE_THAT_NAMES_A_PLACE + _NOT_A_FITTING_THAT_OPENS + _NOT_OPEN_TO_SOMEBODY +
+    r"\b(?:is|are|was|were)\s+(?:[\w']+\s+){0,3}?(?:open|opens|closed|closes|shut|shuts)\b"
+    r"(?=\s*" + _A_DAY_WORD + r")|"
+    + _NOT_A_FITTING_THAT_OPENS + _NOT_OPEN_TO_SOMEBODY +
+    r"\b(?:is|are|was|were|does|do)\s+(?:the\s+|a\s+)?(?:\w+\s+){0,2}?"
+    + _A_PLACE_THAT_KEEPS_HOURS.pattern + r"\s+(?:open|opens|closed|closes|shut|shuts)\b|"
+    + _NOT_A_FITTING_THAT_OPENS + _NOT_OPEN_TO_SOMEBODY +
+    _A_PLACE_THAT_KEEPS_HOURS.pattern + r"\s+(?:\w+\s+){0,2}?"
+    r"(?:open|opens|closed|closes|shut|shuts)\b(?=\s*" + _A_DAY_WORD + r")|"
+    + _NOT_OPEN_TO_SOMEBODY +
     r"\b(?:is|are|was|were)\s+(?:it|they|there(?:\s+anywhere)?|"
     r"(?:the|this|that|my|our|your|any)\s+\w+|"
     r"\w+)\s+open\b|"
@@ -6291,8 +7002,9 @@ _A_SAYS_NOW = re.compile(
 _A_HOW_MANY = re.compile(r"\bhow\s+many\b")
 _A_COUNT = re.compile(r"\bhow\s+many\b|\bhow\s+far\s+is\b|\bhow\s+long\s+is\b|\bhow\s+much\b")
 _A_RECORD = re.compile(
-    r"\bthe\s+(?:biggest|largest|tallest|oldest|longest|highest|deepest|fastest|slowest|"
-    r"smallest|richest|heaviest|widest|commonest|most\s+common|most\s+popular|"
+    r"\bthe\s+(?:biggest|largest|tallest|oldest|youngest|longest|shortest|highest|lowest|"
+    r"deepest|shallowest|fastest|slowest|smallest|richest|poorest|wealthiest|heaviest|"
+    r"lightest|widest|narrowest|thinnest|strongest|busiest|rarest|commonest|most\s+common|most\s+popular|"
     r"most\s+\w+|least\s+\w+)\b")
 # A definition names the thing. A word for freshness, for the best one or for the main one is not
 # the thing: "what is the latest iphone" names a model that changes every year and settles nothing,
@@ -6527,7 +7239,7 @@ def over_time(line, read, previous=None, carrying_on=False):
     if not _MONEY.search(text) and (_A_A_CONVERSION.search(text)
                                     or _A_HOW_MUCH_OF_A_UNIT.search(text)):
         return False, None
-    if _A_HOW_MUCH_I_SPENT.search(text):
+    if _A_HOW_MUCH_I_SPENT.search(text) or _A_MY_OWN_FIGURE.search(text):
         return None, None
     if _A_THE_CLOCK.search(text):
         return None, None

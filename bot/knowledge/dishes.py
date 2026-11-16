@@ -1045,7 +1045,13 @@ def _line_text(understood):
 
 
 def side_in(text):
-    """The side a line names ('rice', 'potatoes', ...), or None."""
+    """The side a line names ('rice', 'potatoes', ...), or None.
+
+    A colour in front of "one" is a choice between two objects and names no side: see
+    `COLOUR_CHOICE`.
+    """
+    if a_colour_choice(text):
+        return None
     for key, phrases in SIDE_WORDS.items():
         for phrase in phrases:
             if _phrase_in(text, phrase):
@@ -1646,6 +1652,49 @@ def _a_sink_is_a_bake(text):
     return any(_phrase_in(low, word) for word in _SINK_AS_A_BAKE)
 
 
+# A fault already happened; "does that ruin it" is a plan being weighed. The rows that answer a
+# dish going wrong are keyed on the words a dish fails with and on the dish, and the dish can come
+# from the line before ("is the food expensive" / "does that ruin it"), so a question asked in the
+# present about what a choice would do to a dish got the list of ways a pot fails, or the fix for
+# a roast that was in too long. A dish fault is only ever said about something already cooked, so
+# a ruin-or-spoil verb standing as the subject's own verb after does/will/would is another
+# question, and every row that answers a fault stands down for it.
+#
+# The shape stays this narrow on purpose. A wider rule ("any ruin word not reporting a fault is a
+# plan") also swallows real questions - "why did my sauce ruin" lost the four-fault list, and
+# "will adding cream ruin it" lost the pot's own answer and fell through to a turn about
+# pharmacists - so what is matched here is only the pronoun that carries the choice: "does that
+# ruin it", "will this spoil the sauce", "would they wreck it".
+_PLAN_THAT_MIGHT_BE_RUINED = re.compile(
+    r"\b(?:does|do|will|would|can|could|might|may|shall|should)\s+"
+    r"(?:that|this|it|they|these|those)\s+"
+    r"(?:ruin|ruins|spoil|spoils|wreck|wrecks)\b", re.I)
+
+# A question about the fault itself is the fault's to answer, not a plan: "why did my sauce
+# ruin", "how did it go wrong", "what did i do wrong". Only these asking words, because "will
+# it be ruined if i freeze it" is a plan in the same words.
+_ASKED_ABOUT_THE_FAULT = re.compile(
+    r"\b(?:why|how come|what went wrong|what did i do wrong|how do i stop|how can i stop)\b",
+    re.I)
+
+
+def a_plan_that_might_be_ruined(understood):
+    """True unless the line is weighing what a choice would do to a dish, not reporting a fault.
+
+    One reader for every row that answers a dish that went wrong - the fault list in
+    `cooking_gaps`, the bake list beside it, and this module's own table of everyday problems -
+    because the fault is the same in all of them and a fix that only reaches one leaves the same
+    wrong answer on the same line two entries over.
+    """
+    if not isinstance(understood, dict):
+        return True
+    text = str(understood.get("plain") or understood.get("clean") or understood.get("text")
+               or "")
+    if _ASKED_ABOUT_THE_FAULT.search(text):
+        return True
+    return _PLAN_THAT_MIGHT_BE_RUINED.search(text) is None
+
+
 def problem_in(text):
     """Which of the everyday problems this text names, or None."""
     for key, (words, _general, _by_dish) in PROBLEMS.items():
@@ -1892,6 +1941,12 @@ def _asks_doneness(text):
                if word not in _ASK_NOISE and word not in DONE_WORD]
     return all(word in _GENERIC_SUBJECT for word in subject)
 
+# A making verb and a fault in one line is a method question: see the note in ask_kind.
+MAKING_A_FAULT = re.compile(
+    r"\b(?:make|making|made|cook|cooking|cooks|roast|roasting|bake|baking|baked|fry|frying|"
+    r"fried|grill|grilling|boil|boiling|simmer|simmering)\b[^?.!]{0,60}?"
+    r"\b(?:hard|harder|stale|soggy|dry|tough|rubbery|mushy|burnt)\b", re.I)
+
 
 def ask_kind(understood):
     """Which kind of follow-up this line is: 'temp', 'time', 'done', ... or None."""
@@ -1908,6 +1963,12 @@ def ask_kind(understood):
     # "how long does a victoria sponge last", "how long does cake keep": the dish sits between
     # the ask and the verb, so no phrase in the keep list could match it. The shape is the ask.
     keeps = 6 if KEEP_ASK.search(str(text)) else 0
+    # "how do i make roast potatoes without them going hard" is a method question with a fault
+    # in it, not a storage one: "going hard" is a keep phrase here, so the roast potato plan
+    # answered it with its reheating note ("they reheat well at 200C for 8 minutes"). A making
+    # verb beside a fault word makes it a fault, and the row that fixes that fault answers it;
+    # "how do i keep a cake from going hard" says keep and not make, so it stays a keeping line.
+    making_a_fault = bool(MAKING_A_FAULT.search(str(text)))
     best, best_rank = None, (0, 0)
     for kind, asks, helpers in ASK_KINDS:
         score = 0
@@ -1924,6 +1985,8 @@ def ask_kind(understood):
         # a helper word alongside the ask confirms the shape of the question
         if any(_same_word(word, helper) for word in have for helper in helpers):
             score += 1
+        if kind == "keep" and making_a_fault:
+            continue
         rank = (2 if kind in PART else 0 if kind in PLAIN else 1, score)
         if rank > best_rank:
             best, best_rank = kind, rank
@@ -2275,6 +2338,76 @@ COOKING_WORDS = (
 ) + FOOD_WORDS + DISH_WORDS + PLAN_NAMES
 
 
+def _temp_asks():
+    """The ways of asking for the oven's heat, as one key."""
+    asks, helpers = [], []
+    for kind, parts, words in ASK_KINDS:
+        if kind != "temp":
+            continue
+        for part in parts:
+            if part not in asks:
+                asks.append(part)
+        for word in words:
+            if word not in helpers:
+                helpers.append(word)
+    return tuple(asks), tuple(helpers)
+
+
+# The plans whose own card is the whole method, so a heat question about one of them was
+# answered with a recipe that never says the figure in its first sentence: "what temperature do
+# i bake bread at" was "About 3 hours start to finish. Mix 500g strong white flour...", "what
+# gas mark for bread" was the flour-and-yeast list, and "what temperature for roast potatoes"
+# was the parboil. Measured by asking every plan in this table its own heat question and reading
+# the first sentence back: 15 of the 27 led with a method. The other 12 already answer with the
+# figure ("A 20cm sponge bakes at 180C...", "Bake a lasagne at 190C...") and their cards keep the
+# question, so this row names the fifteen rather than every dish the table knows.
+_RECIPE_CARDS = (
+    # biscuits, cookies
+    "biscuit", "biscuits", "cookie", "cookies", "shortbread", "flapjack", "flapjacks",
+    # bread
+    "bread", "sourdough", "loaf", "loaves",
+    # chilli
+    "chilli con carne", "chilli", "chili",
+    # chips
+    "chips", "oven chips", "frozen chips",
+    # curry
+    "curry", "tikka", "korma",
+    # fish pie
+    "fish pie",
+    # gammon
+    "gammon", "gammon steak", "gammon steaks",
+    # meringues
+    "meringue", "meringues", "pavlova",
+    # pasta bake
+    "pasta bake", "baked pasta",
+    # pie
+    "pie", "pies", "apple pie", "fruit pie",
+    # roast potatoes
+    "roast potatoes", "roast potato", "roasties",
+    # scones
+    "scone", "scones", "fruit scone", "cheese scone",
+    # spag bol
+    "spag bol", "spaghetti bolognese", "spaghetti bolognaise", "bolognese", "bolognaise",
+    # stew
+    "beef stew", "stew", "casserole",
+    # sunday roast
+    "sunday roast", "roast dinner", "roast lunch")
+
+
+def _the_heat(memory, understood):
+    """The plan's figure for the heat, when the card for this dish answers with a recipe.
+
+    The figure is what was asked for and the plan holds it in one sentence. Only the dishes
+    whose card buries it get this row, and only when the line names the dish: a bare "what
+    temperature?" after a cake is a follow-up, and the follow-up row has it.
+    """
+    if ask_kind(understood) != "temp":
+        return None
+    if not _dish_named_in_the_line(understood):
+        return None
+    return reply("temp", memory, understood)
+
+
 def _asks():
     """Every way of asking a follow-up, and the words that come with it, as one key."""
     asks, helpers = [], []
@@ -2556,22 +2689,136 @@ SIDE_METHOD = ("do the", "do them", "do it", "cook the", "cook them", "roast the
 GOES_WITH = ("go with", "goes with", "serve with", "serving with", "pairs with", "have with",
              "eat with", "alongside")
 
+# The pairing ask has an adverb slot people fill: "what goes nicely with cheese", "what goes well
+# with lentils", "what pairs best with blue cheese". A list of phrases cannot hold every adverb,
+# so the verb and "with" are matched with a word allowed between them.
+GOES_WITH_SHAPE = re.compile(
+    r"\b(?:go|goes|going|went|serve|serves|serving|pair|pairs|pairing|eat|eats|eating|"
+    r"have|has|having)\s+(?:\w+\s+){0,2}with\b"
+    r"|\b(?:go|goes|serve|serves|pair|pairs)\s+alongside\b"
+    r"|\b(?:on|as)\s+(?:the|a)\s+side\b|\bside\s+dishes?\b")
+
+
+def _asking_to_pair(text):
+    """True when the line asks what to put beside something, however the verb is dressed."""
+    return bool(GOES_WITH_SHAPE.search(text))
+
+# A "what goes with X" line about a food with no dish and no side of its own is not a punt: the
+# pairing rule is the answer, and it is the same rule every time - something starchy, something
+# green, and something sharp or wet to cut the fat in the middle of the plate. Which sharp thing
+# depends on how rich the food is, so the food named picks one of three short answers. Cheese and
+# apple and penne were three "I'd rather not guess" lines on main, all of them a food anyone
+# could pair in a sentence.
+PAIRING_FOODS = ("cheese", "apples", "apple", "pear", "pears", "grapes", "fig", "figs",
+                 "penne", "fusilli", "macaroni", "rigatoni", "tagliatelle", "linguine",
+                 "gnocchi", "couscous", "quinoa", "halloumi", "lentils", "chickpeas",
+                 "sausages", "sausage", "ham", "salmon", "mackerel", "prawns", "tofu",
+                 "avocado", "tomatoes", "cucumber", "courgette", "aubergine", "beetroot",
+                 "sweet potato", "butternut", "hummus", "houmous", "yoghurt", "oats",
+                 "porridge", "eggs", "bacon", "chorizo", "steak", "chicken", "lamb", "pork",
+                 "duck", "turkey", "cod", "haddock", "tuna", "mushrooms", "peppers", "spinach",
+                 "broccoli", "cabbage", "peas", "beans", "carrots", "potatoes", "rice", "pasta",
+                 "noodles", "bread", "mash", "chips", "polenta", "wrap", "wraps", "pitta")
+
+# A fat that wants cutting: the sharp thing is the point of the plate beside it.
+PAIRING_RICH = ("Rich food wants something sharp and something crisp beside it: pickle or "
+                "chutney, a few grapes or a sliced pear, crackers or warm bread, and a handful of "
+                "leaves with a mustardy dressing if it has to be a meal. The rule underneath is "
+                "that fat needs acid - the same reason chips want vinegar and pork wants apple "
+                "sauce.")
+
+PAIRING_PLAIN = ("Plain and starchy wants something wet on top: a sauce, a stew, a curry, or "
+                 "the juices from the pan, plus one sharp thing because the starch has no acid "
+                 "of its own. So pasta wants a sauce with garlic and a little of the water it "
+                 "cooked in; rice wants a curry or a daal and a squeeze of lemon; bread wants "
+                 "olive oil, tomato or soup.")
+
+PAIRING_LEAN = ("Something starchy, something green, and something sharp or juicy: potatoes "
+                "or rice or bread, a green vegetable with butter or oil on it, and a squeeze of "
+                "lemon, a spoon of yoghurt, or a tomato salad. Keep it to one of each and it "
+                "works with nearly anything - the sharp thing is what stops the plate tasting "
+                "flat.")
+
+RICH_FOODS = ("cheese", "cream", "butter", "lamb", "duck", "pork", "sausage", "sausages",
+              "bacon", "chorizo", "halloumi", "pie", "pastry", "batter", "chips", "avocado",
+              "salmon", "mackerel", "chocolate", "goats cheese", "feta", "steak", "beef")
+
+PLAIN_FOODS = ("rice", "pasta", "spaghetti", "penne", "fusilli", "macaroni", "rigatoni",
+               "tagliatelle", "linguine", "noodles", "couscous", "quinoa", "bread", "potato",
+               "potatoes", "mash", "polenta", "porridge", "oats", "wrap", "wraps", "pitta")
+
+
+def _names_any(text, words):
+    """True when the line says one of these words, as a word rather than a run of letters."""
+    return any(_phrase_in(text, word) for word in words)
+
+
+def asks_for_a_side_of_a_food(text):
+    """True when the line asks the pairing way and names a food it can be paired with."""
+    return _asking_to_pair(text) and _names_any(text, PAIRING_FOODS)
+
+
+def general_sides(text):
+    """The pairing rule for a food we have no dish for: fat wants acid, starch wants something
+    wet, and anything else wants one of each."""
+    if _names_any(text, RICH_FOODS):
+        return PAIRING_RICH
+    if _names_any(text, PLAIN_FOODS):
+        return PAIRING_PLAIN
+    return PAIRING_LEAN
+
+
+# A colour in front of "one" is a choice between two objects, not a food: "should i get the
+# green one or the blue one" was given the side card ("Green vegetables: broccoli or beans
+# steamed for 4 to 5 minutes, while everything else is on the table"), and so was "do you want
+# the red one or the green one". `greens` is a side word and the loose plural match makes any
+# `green` match it, so the colour has to be read as what it is here - a preference between two
+# things the line has not named, which the side card cannot answer.
+COLOUR_CHOICE = re.compile(
+    r"\b(?:the|this|that|these|those|my|your|his|her|their|our|a|an)\s+"
+    r"(?:green|blue|red|black|white|grey|gray|brown|pink|purple|orange|yellow|beige|cream)\s+"
+    r"(?:one|ones|thing|things|version|colour|color)\b", re.I)
+
+# ...and a determiner alone is not enough either: "and the green ones, are they the same as
+# brown", asked after lentils, names the green ones of the thing on the table and the side card
+# is its answer. What makes the colour a choice is the choice being put: "or", "which", "between",
+# "shall i", "do you want". Only then does the line name two unnamed things and nothing in the
+# kitchen can answer it.
+_CHOICE_FRAME = re.compile(
+    r"\bor\b|\bvs\b|\bversus\b|\bbetween\b|\bwhich\b|\bshall i\b|\bshould i\b"
+    r"|\bdo you want\b|\bwould you\b|\brather\b|\bprefer\b|\bpick\b", re.I)
+
+
+def a_colour_choice(text):
+    """True when the line is choosing between two things by their colour, and names neither."""
+    text = str(text or "")
+    return bool(COLOUR_CHOICE.search(text) and _CHOICE_FRAME.search(text))
+
 
 def _sides(memory, understood):
     text = ""
     if isinstance(understood, dict):
         text = understood.get("norm_text") or understood.get("clean") or ""
+    if a_colour_choice(text):
+        return None
     if not _asking_for_a_side(text):
         return None
     if any(phrase in text for phrase in SIDE_METHOD):
         return None
     key = side_in(text)
     plan = PLANS.get(dish_for(memory, understood) or "")
-    if key and plan is None and any(phrase in text for phrase in GOES_WITH):
+    if key and plan is None and _asking_to_pair(text):
         return None
     if key:
         return SIDES.get(key)
-    return plan.get("sides") if plan else None
+    if plan:
+        return plan.get("sides")
+    # A food with no dish of its own, asked as a pairing: the rule is the answer. Only a line
+    # that asks the pairing way and names a food gets here, so "what goes with a grey sofa" and
+    # "what goes with my curtains" still fall through to the rows that answer them.
+    if asks_for_a_side_of_a_food(text):
+        return general_sides(text)
+    return None
 
 
 # A cooking conversation stops naming dishes after the first answer and starts naming
@@ -3602,6 +3849,15 @@ def _pudding_for(have, text):
 # An ask in the same line ("what shall we have for pudding", "how do i make a crumble") keeps the
 # reading, because there the dessert word is the thing still to be made.
 ATE_ALREADY = re.compile(r"\b(?:ate|eaten|drank|drunk|had|has had|have had|having)\b", re.I)
+
+# "what about pudding as a reward" is a parent asking whether to bribe a child, and the answer
+# is the child advice that says not to ("no pudding as a reward for finishing"). The pudding is
+# the thing the reward is made of, not the question, so a line about a reward, a bribe, a star
+# chart or good behaviour stands this answer down. "Pudding is a nice treat" is still a pudding
+# question: "treat" alone is not in this list, only the words that name a system of rewarding.
+REWARDED = re.compile(r"\b(?:reward|rewards|rewarding|rewarded|bribe|bribes|bribing|bribed|"
+                      r"good behaviou?r|star chart|sticker|stickers|incentive|incentives|"
+                      r"pocket money|allowance)\b", re.I)
 PUDDING_ASK = re.compile(
     r"\b(?:what|which|who|any|anything|ideas?|suggest\w*|recommend\w*|make|makes|making|made|"
     r"recipe|serve|serving|shall|could|should|want|need|fancy|instead|tonight|pudding|dessert)\b",
@@ -3620,8 +3876,9 @@ def _pudding(memory, understood):
         return None
     # "she wants pocket money for sweets" is a parent and a child's pocket money: "sweets" is a
     # dessert word and the crumble below was answering a question nobody asked. The pudding is
-    # the thing the money is for, so the money card keeps the line.
-    if "pocket money" in text or "allowance" in text:
+    # the thing the money is for, so the money card keeps the line. The same reading covers the
+    # reward and the bribe: "what about pudding as a reward" is the fussy-eating question.
+    if REWARDED.search(text):
         return None
     # A report of eating stands down: the sweet word names what has been eaten, not what to make.
     if ATE_ALREADY.search(text) and not PUDDING_ASK.search(text):
@@ -4494,6 +4751,21 @@ ENTRIES = [
     # A follow-up is only half a question: it leans on a dish the conversation already
     # named. So it yields the line to any entry that answers it on its own ("how long is a
     # rugby match") and only fills the gap where nothing else fits.
+    entry("plan-temp", (_RECIPE_CARDS, _temp_asks()[0]), _the_heat, ask=COOKING_WORDS, bias=3,
+          # the oven's heat is not the proving heat, the frying heat, or how hot to serve it:
+          # a dough rises at room temperature and a steak is rested, not baked
+          avoid=("rise", "rises", "rising", "prove", "proves", "proving", "proof", "starter",
+                 "yeast", "room temperature", "room temp", "fridge", "freezer", "serve",
+                 "serving", "reheat", "warm through", "internal", "inside", "safe", "done",
+                 "thermometer", "frying pan", "hob", "ring", "grill", "air fryer", "microwave",
+                 "slow cooker", "pressure cooker", "bain marie", "water bath", "sugar",
+                 "fever", "oven thermostat", "dial", "fan oven conversion", "gas to electric",
+                 # a dish whose name holds the word for another dish is that dish, not this
+                 # one: a bread and butter pudding bakes at 170C and a garlic bread at 200C,
+                 # and the loaf's 230C is neither
+                 "bread and butter pudding", "garlic bread", "soda bread", "banana bread",
+                 "bread sauce", "breadcrumbs", "bread crumbs", "breadsticks", "bread sticks",
+                 "naan bread", "pitta bread", "pita bread")),
     entry("plan-followup", _asks(), _follow_up, ask=COOKING_WORDS, bias=-2,
           # "what should i do the night before an interview" met "before" and "do" here and got
           # the kitchen follow-up. An interview is not a dish.
@@ -4547,7 +4819,16 @@ ENTRIES = [
           # the memory reads the conversation to be about.
           avoid=("what can i", "what should i", "what do i", "what could i", "can i make",
                  "can i cook", "should i make", "how do i", "any idea", "ideas for",
-                 "whats good", "what's good")),
+                 "whats good", "what's good",
+                 # The announcement is not only food: "im starting a new job monday, any advice"
+                 # is a plan being started, and this row claimed it on "starting" and then
+                 # declined (no dish is named), so the line was answered by nothing at all while
+                 # work.py's first-day row stood behind it. A kitchen row standing down for the
+                 # things people start elsewhere is the whole fix - it can only ever punt them.
+                 "job", "jobs", "new job", "interview", "career", "shift", "shifts",
+                 "school", "term", "exam", "exams", "college", "university", "uni",
+                 "course", "class", "classes", "gym", "diet", "marathon",
+                 "dieting", "new year", "resolution", "resolutions")),
 
     # A vegetable that stayed hard or went tough. The words that say so ("hard", "woody",
     # "stringy", "undercooked") are words the meat faults never use, so the entry needs a
@@ -4610,6 +4891,9 @@ ENTRIES = [
             "time", "make", "not", "so")),
           _problem,
           ask=COOKING_WORDS,
+          # A plan being weighed is not a dish that failed: "does that ruin it" after a
+          # substitution question was answered with the fix for a roast that was in too long.
+          guard=a_plan_that_might_be_ruined,
           # Under the entry written for that exact trouble ("rice-sticky", "cake-sink"): where
           # the knowledge base already knows the dish's problem, its answer is the better one.
           bias=-2,
@@ -5030,7 +5314,13 @@ ORDER_AT_A_PLACE = (
     "carvery", "nandos", "wetherspoons",
     # the food named instead of the place
     "sushi", "italian", "mexican", "greek", "turkish", "japanese", "korean", "vietnamese",
-    "spanish", "french", "pizza", "burger", "tapas", "ramen", "noodle bar")
+    "spanish", "french", "pizza", "burger", "tapas", "ramen", "noodle bar",
+    # the menu named instead of the place: "what should i order off the menu", "whats good on the
+    # menu", "help me pick something from the menu". A menu is the list you choose from at a
+    # table, and the planning questions that also say menu keep their own cards - the avoid list
+    # on the row below holds the week's meals, a party and a cafe of your own.
+    "menu", "the menu", "set menu", "tasting menu", "lunch menu", "dinner menu", "specials",
+    "specials board", "wine list", "a la carte", "prix fixe")
 
 # The asking shapes are the ordering ones and nothing else. "any pubs you would pick" is a
 # question about which pubs to go to, and the bare "pick", "choose" and "fancy" above are safe
@@ -5041,7 +5331,12 @@ ORDER_AT_A_PLACE_ASK = (
     "what should i eat", "what should we eat", "what to eat", "what should i have",
     "what should we have", "whats good", "whats nice", "whats best", "anything good",
     "anything nice", "what do you recommend", "what would you recommend", "what would you get",
-    "what would you order", "whats your pick")
+    "what would you order", "whats your pick",
+    # "help me pick something from the menu", "i cant choose off the menu": the asking verb is
+    # the picking, and the menu is the place above
+    "help me pick", "help me choose", "help me decide", "cant choose", "can't choose",
+    "cannot choose", "cant decide", "can't decide", "what would you pick", "what do you pick",
+    "what should i choose", "what should we choose")
 
 ENTRIES.append(entry(
     "order-at-a-place", (ORDER_AT_A_PLACE, ORDER_AT_A_PLACE_ASK),
@@ -5052,8 +5347,40 @@ ENTRIES.append(entry(
     # and how much to order for a night in
     avoid=("takeaway", "take away", "take-away", "takeout", "take out", "order in", "delivery",
            "deliveroo", "just eat", "uber eats", "chippy", "chip shop", "curry house", "kebab",
-           "fish and chips")
+           "fish and chips",
+           # a menu you are writing rather than reading: the week's meals, a party, a cafe of
+           # your own, a print run. "what should i have on the menu for a dinner party" is the
+           # party-food card's question and "what should i cook this week" is the meal plan's.
+           "for the week", "this week", "next week", "weekly", "plan", "planning", "meal plan",
+           "party", "birthday", "christmas", "wedding", "buffet", "design", "print", "printing",
+           "my cafe", "my restaurant", "my pub", "pricing", "profit", "allergen", "allergens")
     + OUT_AVOID))
+
+# The words printed on the menu are a fact, not a choice: "what is a set menu", "what does a la
+# carte mean", "whats the difference between set menu and a la carte". The asking shapes are the
+# definition ones only, because "what should i get from the set menu" is the card above and the
+# both-words line needs the difference asked for before the words are worth explaining.
+ENTRIES.append(entry(
+    "what-the-menu-words-mean",
+    (("set menu", "set menus", "a la carte", "prix fixe", "tasting menu", "tasting menus",
+      "table d'hote", "table d'hôte"),
+     ("what is", "what are", "what does", "what do", "meaning", "mean", "difference",
+      "different", "explain", "explained", "whats the",
+      # "is a set menu cheaper", "is a tasting menu worth it": the value question, which the
+      # first sentence of the card answers
+      "cheaper", "worth it", "worth", "value", "better value", "best value", "more expensive")),
+    "A set menu is one fixed price for two or three courses chosen from a short list, and it is "
+    "usually the best value on the board. A la carte is the full list with every dish priced on "
+    "its own, so you pay for exactly what you want and nothing else. A tasting menu is a run of "
+    "small courses the kitchen decides, priced per person and taken by the whole table. If you "
+    "want the cheapest good meal, order the set menu; if there is one dish you really came for, "
+    "order that a la carte.",
+    # "what should i get from the set menu" and "whats good off the a la carte" ask what to
+    # order, and the ordering card answers those
+    avoid=("what should i", "what should we", "what shall i", "what shall we", "what do i order",
+           "what to order", "whats good", "whats nice", "recommend", "pick", "choose",
+           "cant decide", "can't decide"),
+    bias=1))
 
 # "Should we get a takeaway" is a yes-or-no about the evening, and "how do i order on my phone",
 # "is it ok to get one twice a week" and "what time do takeaways open" are three other questions.
@@ -5958,3 +6285,41 @@ for _slug, _names, _what in DISH_WHAT:
     ENTRIES.append(entry(
         "what-is-%s" % _slug, (_names, DISH_WHAT_ASKS), _what_is_a_dish,
         bias=2, ask=DISH_WHAT_ASKS, avoid=DISH_WHAT_AVOID))
+
+# A cheap lunch is a place, not a method: "wheres a good place for a cheap lunch near the
+# station" was the packed-lunch card and "where should we eat near the office" was the
+# choose-in-this-order rule, so both answered a question about where with something that named
+# nowhere. The kinds of place that are cheap are the same everywhere, so the answer names them
+# and says where to look, then offers to narrow it once the person says the area.
+ENTRIES.append(entry(
+    "cheap-lunch-where",
+    (("cheap lunch", "cheap lunches", "cheap eats", "lunch near", "lunch around",
+      "where to eat", "where should we eat", "where should i eat", "where can i eat",
+      "where can we eat", "somewhere to eat", "anywhere to eat", "anywhere cheap to eat",
+      "cheap to eat", "a place to eat", "place to eat", "places to eat", "cheap place to eat",
+      "good place to eat", "good place for lunch", "place for lunch", "where to get lunch",
+      "grab lunch", "get some lunch", "eat out cheap", "somewhere good for lunch",
+      "somewhere for lunch", "lunch in town", "lunch near work", "lunch near here",
+      "lunch round here"),
+     # the second group is what makes it a question about *where*: a place word, or the
+     # near/around that names one. A bare "where should i eat" is not this row's - in a chat
+     # about Lisbon the city's own cheap-eats answer belongs to that line.
+     ("near", "nearby", "around", "station", "office", "work", "town", "lunch",
+      "anywhere", "recommend", "suggest", "get", "place", "places", "eat out",
+      "cheap", "cheaply", "cheapest", "here", "today", "tonight")),
+    "Look for the places that sell a lot of one thing: a market hall or a food court, a bakery, "
+    "a cafe at the back of a shop, a street food van in a regular spot, or the lunch board "
+    "outside a restaurant that wants the office trade. Walk a street back from the station or "
+    "the main road, where the rents are lower, and follow the queue of people who work nearby.",
+    # a dinner out, a birthday table and a packed lunch of your own are other questions
+    avoid=("dinner", "birthday", "anniversary", "valentine", "celebrate", "date night",
+           "book a table", "booking", "michelin", "ideas", "packed lunch", "lunchbox",
+           "make my own", "recipe", "meal plan", "cook",
+           # a dog, a wheelchair or a diet is a different kind of place question, and each has
+           # a row of its own that knows it
+           "dog", "dogs", "puppy", "pet", "pets", "kid", "kids", "children", "toddler",
+           "baby", "high chair", "vegan", "vegetarian", "veggie", "gluten", "allergy",
+           "allergic", "wheelchair", "accessible"),
+    # the choose-in-this-order rule and the meal plan both beat it on a line that names no
+    # place, and this row is the one that answers where
+    bias=2))

@@ -283,23 +283,46 @@ ENTRIES = [
           "World War One began in 1914 after the heir to the Austro-Hungarian throne, Archduke "
           "Franz Ferdinand, was assassinated in Sarajevo. Alliances then pulled the great powers "
           "in: Austria attacked Serbia, Russia mobilised, and Germany declared war on Russia and "
-          "France."),
+          "France.",
+          # "How should I start an essay about the causes of the First World War?" is a study
+          # question and the facts above are not the answer to it: a line that says essay,
+          # coursework or revision is asking how to write, so this row keeps out of it.
+          avoid=("essay", "essays", "coursework", "assignment", "dissertation", "paragraph",
+                 "paragraphs", "revise", "revision", "homework", "exam", "question paper"),
+          # "when did the first world war start" is the start row's, and the end row reads "when"
+          # too: with the end row at two, the start row has to be read as strongly or the first
+          # question anyone asks about the war gets the armistice.
+          bias=2),
     entry("ww1-end", (("world war one", "world war 1", "ww1", "first world war"),
                        ("end", "ended", "when", "1918", "armistice")),
           "World War One ended with the armistice on 11 November 1918, at 11am. The fighting "
           "stopped on the Western Front that morning, though the peace treaty was not signed "
-          "until the following June."),
+          "until the following June.",
+          avoid=("essay", "essays", "coursework", "assignment", "dissertation", "paragraph",
+                 "paragraphs", "revise", "revision", "homework", "exam", "question paper"),
+          # "how did the first world war end" and "what ended the first world war" scored the same
+          # as the essay row, whose key reads "ending" as "end": a line that names the war and asks
+          # how it ended is history, and the name is worth more than a tie. The number is worth
+          # less than the name ("ww1" is one word where "first world war" is three), so the tie is
+          # broken at two, for the lines said the short way round.
+          bias=2),
     entry("ww2-start", (("world war two", "world war 2", "ww2", "second world war"),
                          ("start", "started", "why", "1939", "begin", "caused", "cause",
                           "causes")),
           "World War Two began in Europe on 1 September 1939, when Germany invaded Poland; "
           "Britain and France declared war two days later. Japan had already been at war with "
-          "China since 1937, and the United States joined in December 1941 after Pearl Harbor."),
+          "China since 1937, and the United States joined in December 1941 after Pearl Harbor.",
+          avoid=("essay", "essays", "coursework", "assignment", "dissertation", "paragraph",
+                 "paragraphs", "revise", "revision", "homework", "exam", "question paper"),
+          bias=2),
     entry("ww2-end", (("world war two", "world war 2", "ww2", "second world war"),
                        ("end", "ended", "when", "1945", "over")),
           "World War Two in Europe ended on 8 May 1945, when Germany surrendered; Japan "
           "surrendered on 15 August after the atomic bombs, signing on 2 September. That autumn "
-          "is when the war was finally over worldwide."),
+          "is when the war was finally over worldwide.",
+          avoid=("essay", "essays", "coursework", "assignment", "dissertation", "paragraph",
+                 "paragraphs", "revise", "revision", "homework", "exam", "question paper"),
+          bias=2),
     # When it was built is a different year from when it sank, and "when" was enough to make
     # "when was the titanic built" the sinking: the sinking now refuses the building words, and
     # the building entry below answers them.
@@ -787,7 +810,13 @@ ENTRIES = [
           "translated the Bible into German, which shaped the modern language.",
           avoid=("king", "mlk", "civil rights", "i have a dream", "assassinated", "memphis",
                  "atlanta", "1963", "1968")),
-    entry("first-prime-minister", (("prime minister", "pm"), ("first", "walpole")),
+    # "first" alone is not this row's word: it is a number in every "during the first world war"
+    # line, so "who was the prime minister during the first world war" was answered with Walpole.
+    # The row is about the first one as a thing in itself, and that is said as a phrase.
+    entry("first-prime-minister", (("prime minister", "pm"),
+                                   ("first prime minister", "first british prime minister",
+                                    "first ever prime minister", "first pm", "walpole", "1721",
+                                    "first one", "very first")),
           "Robert Walpole is counted as the first British prime minister: he ran the government "
           "from 1721 to 1742 and was called first lord of the treasury rather than prime minister, "
           "which was meant as an insult at the time.",
@@ -1003,7 +1032,13 @@ ENTRIES = [
           "communist governments of eastern Europe collapsed one by one, and the Soviet Union "
           "broke up in December 1991. Years of arms spending and Gorbachev's reforms had already "
           "loosened the system from inside.",
-          avoid=("what was", "about", "start", "started", "begin", "began", "cause", "caused")),
+          # the row's own key names the war, so the lift cannot take a line that does not, and
+          # the frost row keys "cold" and "how" - "how did the cold war end" was frost advice
+          # on tender plants once the work row stopped answering it
+          bias=4,
+          avoid=("what was", "about", "start", "started", "begin", "began", "cause", "caused",
+                 # how long it ran is the other card, which has the dates at both ends
+                 "how long", "last", "lasted", "duration")),
     entry("ww2-winner", (("world war two", "world war 2", "ww2", "second world war"),
                          ("won", "win", "winner", "winners", "victors", "allies", "who won")),
           "The Allies won the Second World War: Britain, the Soviet Union, the United States, "
@@ -1788,7 +1823,11 @@ PAST_ASK = ("who", "who was", "who is", "who won", "what", "what was", "what is"
             "when", "when was", "when did", "which", "why", "why did", "was", "is", "were",
             "did", "about", "tell me about", "born", "die", "died", "death", "how old",
             "how long", "how many", "long", "last", "lasted", "won", "win", "winner", "killed",
-            "many", "old", "happened", "started", "start", "famous", "known for")
+            "many", "old", "happened", "started", "start", "famous", "known for",
+            # the plainest request to be told about a thing that happened: "explain the first
+            # world war" and "describe the trenches" were answered by nothing at all, because
+            # only "tell me about" counted as asking.
+            "explain", "explained", "describe", "summarise", "summarize")
 MADE_ASK = ("invent", "invented", "invention", "inventor", "discover", "discovered",
             "discovery", "first", "made", "created", "built", "who", "came up with")
 

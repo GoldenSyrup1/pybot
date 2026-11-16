@@ -59,6 +59,84 @@ NOT_A_PRICE = re.compile(
     r"water|milk|protein|salt|sugar|fibre|calories|units|grams|ml|litres|paracetamol|ibuprofen|"
     r"is safe|are safe|is too much|is normal|is enough)\b|"
     r"\bhow much\b[^.?!]{0,20}\b(?:can|should|could) i\b", re.I)
+# A spend repeated through the week and then asked for by the year is a sum, not a quote. "how
+# much does lunch out five days a week cost me in a year" was answered "There is no list price for
+# that: what it comes to depends on the size of the job", which is a fitted kitchen's answer, not a
+# lunch's. Two shapes have to be there together, because either alone is an ordinary price ask:
+# a count of times in a short span ("five days a week", "twice a week", "every day") and a longer
+# span to add them over ("in a year", "over the year"). "a gym is 50 a month" has the first and
+# not the second, and "how much does it cost to redo a bathroom" has neither.
+A_REPEATED_SPEND = re.compile(
+    r"\b(?:\d+|one|two|three|four|five|six|seven|twice|three times|four times|every|each)\b"
+    r"[^.?!]{0,24}?\b(?:a|per|each|every)\s+(?:day|week|month)\b", re.I)
+A_LONGER_SPAN = re.compile(
+    r"\b(?:in|over|for|across)\s+a\s+year\b|\ba\s+year\b|\bper\s+year\b|\bannual(?:ly)?\b|"
+    r"\bin\s+(?:twelve|12)\s+months\b", re.I)
+# What the sum is of: money spent. A repeat with no cost in it is a plan or a frequency question
+# ("i go to the gym three times a week for a year"), which is not this reading.
+ASKS_A_COST = re.compile(
+    r"\bhow much\b|\bcosts?\b|\bcosting\b|\bspend\b|\bspent\b|\bafford\b|"
+    r"\bexpensive\b|\bset me back\b|\bcome to\b|\bcomes to\b", re.I)
+# An amount already in the line is the costs table's: "i spend 5 pound a day on lunch" is
+# answered "£5 a day is about £1,825 a year", with the price the person gave. This reading is for
+# the ask that gives the frequency and no price, where the only honest number is the count.
+AN_AMOUNT_ALREADY = re.compile(
+    r"[£$]|\b\d+\s*(?:p|pence|pounds?|quid|bucks|euros?)\b|\b(?:fiver|tenner|twenty)\b|"
+    r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:pounds?|quid)\b", re.I)
+A_COUNT_IN_A_SPAN = re.compile(
+    r"\b(\d+|one|two|three|four|five|six|seven|twice|three times|four times|five times)\s*"
+    r"(?:days?|times|nights?|lunches|cups?|pints?|cigarettes?|takeaways?|journeys?|trips?|"
+    r"rides?|lessons?|bottles?|coffees?)?\s*(?:a|per|each|every)\s+(day|week|month)\b", re.I)
+A_EVERY_SPAN = re.compile(r"\b(?:every|each)\s+(day|week|month)\b", re.I)
+COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+               "twice": 2, "three times": 3, "four times": 4, "five times": 5}
+A_YEAR = {"day": 365, "week": 52, "month": 12}
+# One example price, so the line shows the sum rather than describing it. A fiver is the one
+# price everybody can divide by, and it is named as an example rather than as the answer.
+EXAMPLE = 5
+
+
+def times_a_year(clean):
+    """The count of a repeated spend in a year, and the span it was said in, or (None, None)."""
+    if not ASKS_A_COST.search(clean):
+        return None, None
+    if AN_AMOUNT_ALREADY.search(clean):
+        return None, None
+    if not A_LONGER_SPAN.search(clean):
+        return None, None
+    found = A_COUNT_IN_A_SPAN.search(clean)
+    if not found:
+        # "a coffee every day" says the span and no count, which is one in each.
+        plain = A_EVERY_SPAN.search(clean)
+        if not plain:
+            return None, None
+        return A_YEAR[plain.group(1).lower()], " ".join(plain.group(0).split())
+    said, span = found.group(1).lower(), found.group(2).lower()
+    count = int(said) if said.isdigit() else COUNT_WORDS.get(said)
+    if not count:
+        return None, None
+    return count * A_YEAR[span], " ".join(found.group(0).split())
+
+
+def sum_lines(clean):
+    """The lines for a repeated spend asked for by the year, or None."""
+    times, said = times_a_year(clean)
+    if not times:
+        return None
+    figure = times * EXAMPLE
+    written = said[:1].upper() + said[1:]
+    return (
+        "{w} is {n:,} a year. Put your own price on one - £5 each is £{fig:,} - and that is the "
+        "figure to weigh against cutting it back.".format(w=written, n=times, fig=figure),
+        "{w} is {n:,} times a year, so put a price on one: at a fiver each that is £{fig:,}, "
+        "which is what the habit really costs.".format(w=written, n=times, fig=figure),
+    )
+
+
+def a_sum_through_the_year(clean):
+    """True when the line adds up a repeated spend over a longer span, which is not a quote."""
+    return bool(times_a_year(clean)[0])
+
 PRICE_LINES = (
     "There is no list price for that: what it comes to depends on the size of the job, the state "
     "of the thing and when you want it, so ask two firms to price the same description in writing "
@@ -93,6 +171,40 @@ RATE_LINES = (
 A_WORTH = re.compile(
     r"\bworth it\b|\bworth the money\b|\bworth buying\b|\bworth the extra\b|"
     r"\bworth paying\b|\bworth the price\b|\bgood buy\b|\bis it worth\b", re.I)
+# The precept below is about one thing you own: what it costs to put right, what it costs to
+# replace. "Worth it" is not that question on its own - it is asked of a series, a degree, a
+# physio appointment, a castle and a dog as readily as of a boiler, and the repair-or-replace
+# answer read as nonsense to all of them ("is it worth watching the sopranos next" got "what it
+# would cost to put right and what the new one costs"). So the kind is only read where the line
+# carries the repair-or-buy words the precept is about: fixing, mending, servicing, replacing,
+# claiming, buying a thing. Everywhere else the line keeps whatever the composer had, which for a
+# work, a place, a course or a person is a hedge rather than the wrong answer.
+A_REPAIR_OR_BUY = re.compile(
+    r"\b(?:fix|fixes|fixing|fixed|mend|mends|mending|mended|repair|repairs|repairing|repaired|"
+    r"service|services|servicing|serviced|replace|replaces|replacing|replacement|replaced|"
+    r"new one|second hand|secondhand|refurb(?:ish|ished)?|upgrade|upgrading|claim|claims|"
+    r"claiming|claimed|install|installs|installing|buy|buys|buying|bought|"
+    r"worth the money|worth buying|good buy|worth paying|worth the price|"
+    r"paying extra|pay extra)\b", re.I)
+# A phrase, not a word: "does it need replacing" and "is it worth a service" are the same ask
+# with no buying word in it, and the thing being asked about can be named by what is wrong with
+# it ("the boiler is on its last legs, is it worth it").
+A_BROKEN_THING = re.compile(
+    r"\b(?:broken|breaking|broke|not working|stopped working|gone wrong|last legs|leaking|"
+    r"faulty|dead|dead as|knackered|worn out|on the blink|cracked|rusting|needs? a repair|"
+    r"needs? fixing|needs? replacing|needs? a service|mend it|fix it|replace it|repair it)\b",
+    re.I)
+
+
+def not_about_one_owned_thing(clean):
+    """True when a "worth it" line is not about a thing that is repaired or replaced.
+
+    The shape is the guard the other kinds take. It reads the line, not the conversation: a line
+    that names neither the repair nor the thing going wrong is a question about a work, a place,
+    a course or a person, and the precept about the cost of putting it right does not fit it.
+    """
+    return not (A_REPAIR_OR_BUY.search(clean) or A_BROKEN_THING.search(clean))
+
 WORTH_LINES = (
     "What decides it is the condition, what it would cost to put right and what the new one "
     "costs: if the repair comes to more than about half of new, it usually is not worth it. Get "
@@ -182,8 +294,15 @@ DURATION_LINES = (
 # Whether a socket will carry two things is a sum, not a lookup: the watts are on both labels.
 # The wording is either the rating named ("13 amp plug") or two things put on one supply ("off one
 # socket", "on an extension lead"), which is the same sum however it is asked.
+# "Trip" is two words in English. The fuse sense is the past or the continuous ("the fuse
+# tripped", "it keeps tripping") and the bare present with something that trips after it ("it
+# trips the breaker"); the holiday sense takes none of those ("does that matter for the trip",
+# "our trip to cornwall"). A bare "trip" was read as a socket sum, so a holiday line that asked
+# about the plan got the watts of a 13-amp socket.
 A_LOAD = re.compile(
-    r"\b\d+\s*-?\s*amp\b|\bextension lead\b|\bplug socket\b|\bfuse\b|\btrip(?:s|ped)?\b|"
+    r"\b\d+\s*-?\s*amp\b|\bextension lead\b|\bplug socket\b|\bfuse\b|"
+    r"\btripp(?:ed|ing)\b|\btrips?\b\s+(?:the\s+|a\s+|our\s+|my\s+|your\s+)?"
+    r"(?:fuse|circuit|breaker|mcb|rcd|socket|supply|switch|electric\w*|mains|ring)\b|"
     r"\b(?:off|from|on|into)\s+(?:one|the same|a single)\s+(?:socket|plug|circuit|extension)\b",
     re.I)
 LOAD_LINES = (
@@ -223,6 +342,38 @@ A_RULE = re.compile(
 NOT_A_RULE = re.compile(
     r"\b(?:uno|monopoly|chess|poker|scrabble|darts|snooker|board game|"
     r"bishop|knight|rook|pawn|checkmate|the pieces)\b", re.I)
+# "Do I need to" is the plainest way to ask a yes-or-no about a procedure, and it is not a
+# question about rules: "do i need to prick them" (potatoes), "do i need to soak broad beans",
+# "do i need to peel kiwi" and "do i need to see a physio" were all told about the version of the
+# rules in force and the issuing office's page. The other shapes here (am i allowed, is it legal,
+# do i have to, am i entitled, what are my rights, can my landlord) are about rules on their own;
+# the "do i need" shapes are only about rules when the line names a rule's subject as well - a
+# licence, a permit, a visa, a deposit, a notice period, a form, HMRC, the council.
+A_DO_I_NEED = re.compile(r"\bdo i need (?:a |an |to )\b|\bdo i have to\b|\bdo we need to\b", re.I)
+A_RULE_SUBJECT = re.compile(
+    r"\b(?:licen[cs]e|licen[cs]ed|permit|permission|visa|insurance|insurer|mot\b|"
+    r"tax|taxed|deposit|notice|contract|landlord|tenant|letting agent|employer|boss|\bhr\b|"
+    r"council|council tax|hmrc|gov\.uk|government|court|probate|benefits?|universal credit|"
+    r"housing benefit|claim|claiming|form|forms|declaration|statement|registration|register|"
+    r"passport|inspection|consent|referral|prescription|legal|law|rights|entitled|mortgage|"
+    r"solicitor|conveyanc\w*|certificate|crime number|vet\b|policy|warranty|guarantee|"
+    r"refund|return it|duty|obliged|obligation)\b", re.I)
+
+
+def not_a_bare_procedure(clean):
+    """True when a "do i need to" line names nothing a rule is about.
+
+    The rest of `A_RULE` stands on its own: "am i allowed", "is it legal" and "what are my
+    rights" are about rules whichever thing follows them. Only the "do i need" / "do i have to"
+    shapes are the everyday yes-or-no about a procedure, and they need the subject of a rule in
+    the same line before the precept about the wording in force is the right thing to say.
+    """
+    return bool(A_DO_I_NEED.search(clean)) and not A_RULE_SUBJECT.search(clean)
+
+
+def not_a_rule(clean):
+    """Both guards for the rule kind: the board game, and the bare procedure."""
+    return bool(NOT_A_RULE.search(clean)) or not_a_bare_procedure(clean)
 RULE_LINES = (
     "Whether that is allowed turns on the rules as they stand this year and on your own case, so "
     "the current wording decides it rather than what anyone has heard. GOV.UK has the national "
@@ -302,6 +453,84 @@ HOWTO_LINES = (
     "and what is not.",
 )
 
+# A record: a deposit, a deed, a warranty, a policy, a receipt, a booking. Nobody can answer one
+# of these from a description of it, because the answer is the entry the body holding it has -
+# the date, the terms in force at the time and the name on it. Saying "ask them for it in writing,
+# quoting the reference" is the part that is true of every one of them, and it is what the hedge
+# ("a quick search online will get you a solid answer") never said.
+A_RECORD = re.compile(
+    r"\b(?:deposit|deeds?|title plan|land registry|warrant(?:y|ies)|guarantee|receipt|invoice|"
+    r"policy|insurance|cover note|booking|reservation|tenancy agreement|assured shorthold|"
+    r"certificate|statement|reference number|reference|paperwork|the small print|terms|"
+    r"boundary|boundaries)\b",
+    re.I)
+# Not every line with one of those words is a question about the entry. A deposit paid towards a
+# car, a booking someone is making now and a policy the person is asking how to write are other
+# kinds of ask, and an insurance claim for a fire is somebody else's turn (NOT_HERE).
+# What a word means is a definition, not an entry: "what does a deed mean" and "whats a reference
+# number" are asking about the kind of thing, and the record line answers a question about the
+# person's own paper. The article after the ask is the tell, which leaves "what does my policy say
+# about a leak" alone.
+# The article after the ask is the tell between a definition and a person's own paper, and the
+# article can be "the" as easily as "a": "what does the small print mean" is asking what a phrase
+# means, and "the small print" is in A_NAMED_DOCUMENT, so the record line took a turn that the
+# rule it lives by forbids. "what does the small print say" stays the record's: "say" is about a
+# copy the person is holding and "mean" is about the words.
+NOT_A_RECORD = re.compile(
+    r"\b(?:whats|what is|what are|what does|what do|meaning of)\s+(?:a|an)\b|"
+    r"\bwhat\s+(?:does|do|is|are|did|can)\s+(?:the|this|that)\b[^.?!]{0,40}"
+    r"\b(?:mean|means|meaning|stand for|definition)\b|"
+    r"\b(?:how do i|how to|should i (?:take out|buy|get)|worth (?:getting|it)|"
+    r"cheapest|cancel my|switch my|compare)\b|"
+    # A complaint is not an ask. "whats the point of all this paperwork" and "i was drowning in
+    # paperwork" are somebody fed up, and the record line would answer with a lecture about dates
+    # and references. The phrase that made the line an ask at all is the one to drop it on.
+    r"\bwhats? the point of\b|\bwhat is the point of\b|\bsick of\b|\bfed up\b|"
+    r"\bdrowning in\b|\bcan'?t be (?:bothered|arsed)\b", re.I)
+
+# A bare kind noun is not a document. "the planning policy", "a personal statement", "in simple
+# terms" and "this paperwork" name a *sort* of paper, and the person's own copy is what has the
+# date and the name on it. So the kind words that people also use loosely need a possessive
+# ("my policy", "our statement") or the full name of a document ("terms and conditions",
+# "insurance policy") before they count as one. The kinds that only ever name a document of
+# theirs - a deposit, a receipt, a deed, a booking - need neither.
+A_LOOSE_KIND_WORD = re.compile(
+    r"\b(?:policy|policies|statement|statements|terms|paperwork|insurance|boundar(?:y|ies)|"
+    r"contract|agreement)\b", re.I)
+# "their" and "your" count: the bot asks about the person's own paper ("does your policy cover
+# water damage") as often as they state it.
+THEIR_OWN_PAPER = re.compile(r"\b(?:my|our|his|her|their|your|yours|ours|theirs)\b", re.I)
+A_NAMED_DOCUMENT = re.compile(
+    r"\b(?:terms and conditions|terms of (?:the|my|our|their|his|her|your)\b|"
+    r"insurance polic(?:y|ies)|policy wording|policy document|policy schedule|"
+    r"bank statement|statement of (?:the|my|our|their)\b|"
+    r"tenancy agreement|assured shorthold|contract of employment|the small print)\b", re.I)
+
+
+def _not_a_record(said):
+    """True when this line is not about the entry itself, so the record kind stands down.
+
+    The kinds' guards answer the same way: true means "not mine", and the next kind is read.
+    """
+    if NOT_A_RECORD.search(said):
+        return True
+    if A_NAMED_DOCUMENT.search(said) or THEIR_OWN_PAPER.search(said):
+        return False
+    return bool(A_LOOSE_KIND_WORD.search(said))
+RECORD_LINES = (
+    "What settles that is the entry itself rather than the general rule - the date on it, the "
+    "terms that were in force then, and the name it is in. The office or firm that holds it can "
+    "read it back to you, so ask for it in writing and quote the reference on it: the answer that "
+    "counts is the one on paper, not the one given over the phone.",
+    "That turns on the wording of the document, not on what is usually done: what it says, what "
+    "date it came into force and whose name is on it. Whoever issued it keeps the record, and the "
+    "one thing worth doing first is asking them to confirm in writing what their copy says.",
+    "Nobody can answer that from the description of it, because the answer is in the paperwork - "
+    "the date, the terms and the name on it. Ask the body holding it for the entry in writing with "
+    "the reference on it, and keep what they send: a written answer is the one that can be relied "
+    "on later.",
+)
+
 # Anything in here has an owner further up the composer, and "what decides it" is the wrong thing
 # to say to it: an emergency is not a question about a spec, and a bereavement is not a figure.
 NOT_HERE = re.compile(
@@ -323,16 +552,22 @@ KINDS = (
     # tariff or a quote would also match, and the steps are what it wants. The shape guard keeps
     # it off asks that only look like a how-to.
     ("howto", A_HOWTO, HOWTO_LINES, NOT_A_HOW_TO),
-    ("worth", A_WORTH, WORTH_LINES, None),
+    ("worth", A_WORTH, WORTH_LINES, not_about_one_owned_thing),
     ("distance", A_DISTANCE, DISTANCE_LINES, None),
     ("load", A_LOAD, LOAD_LINES, None),
     ("fit", A_FIT, FIT_LINES, None),
-    ("rule", A_RULE, RULE_LINES, NOT_A_RULE),
+    ("rule", A_RULE, RULE_LINES, not_a_rule),
     ("figure", A_STAT, STAT_LINES, None),
     ("moving", A_MOVING, MOVING_LINES, None),
     ("rate", A_RATE, RATE_LINES, None),
-    ("price", A_PRICE, PRICE_LINES, NOT_A_PRICE),
+    ("price", A_PRICE, PRICE_LINES, (NOT_A_PRICE, a_sum_through_the_year)),
     ("duration", A_DURATION, DURATION_LINES, NOT_A_QUEUE),
+    # A record is neither a price nor a rule: the wording on the document decides it, and the
+    # body holding it is the only one who can read it back. It comes after both, because a money
+    # shape and a length are what the person is asking about even when the line names a warranty
+    # or a statement: "what would the insurance be roughly" is a quote, and "how long does a
+    # warranty last" is a length. Only a line neither of those reads is about the entry itself.
+    ("record", A_RECORD, RECORD_LINES, _not_a_record),
 )
 
 
@@ -360,6 +595,23 @@ def names_only_a_page(reply):
     return bool(said) and bool(A_POINTER.search(said))
 
 
+# A reply that already points at the thing in the person's hand has done the job a record line
+# would do. "The receipt has the date and the maker's own page has the cover" answers the warranty
+# question: the paper is where the answer is, and the person already has it. Saying "the entry
+# itself rather than the general rule, ask for it in writing" over that trades something concrete
+# for something general, which is the trade this module exists to make the other way round.
+THE_PAPER_ITSELF = re.compile(
+    r"\bthe (?:receipt|deed|deeds|wording|document|documents|paperwork|certificate|policy|"
+    r"contract|agreement|statement|invoice|booking|label|manual|terms)\b|"
+    r"\b(?:date|name|reference|number) on it\b", re.I)
+
+
+def names_the_paper(reply):
+    """True when the reply already says the person's own paper is where the answer is."""
+    said = " ".join(str(reply or "").lower().split())
+    return bool(said) and bool(THE_PAPER_ITSELF.search(said))
+
+
 def reads(text):
     """The kind of question this is, and the lines for it, or (None, None).
 
@@ -371,10 +623,12 @@ def reads(text):
         return None, None
     if not (ASKS_SOMETHING.search(clean) or NAME_ONLY_ASK.search(clean)):
         return None, None
-    for kind, pattern, lines, guard in KINDS:
+    for kind, pattern, lines, guard in WORRY_SHAPES + KINDS + PROCEDURE_SHAPES:
         if pattern.search(clean):
-            if guard and (guard(clean) if callable(guard) else guard.search(clean)):
-                continue
+            if guard:
+                guards = guard if isinstance(guard, tuple) else (guard,)
+                if any(g(clean) if callable(g) else g.search(clean) for g in guards):
+                    continue
             return kind, lines
     return None, None
 
@@ -385,4 +639,46 @@ def pool(clean, memory=None):
     The shape is the one `findout.pool` returns, so the caller picks among them the usual way and
     the last line the bot said is not said again.
     """
+    summed = sum_lines(clean)
+    if summed:
+        return summed
     return reads(clean)[1]
+
+
+# ---------------------------------------------------------------------------------------------
+# Two shapes the kinds above have no room for, kept here so they read as what they are: a line
+# `gap` used to send nowhere, and one it was never the right module for.
+#
+# A bare "do i need to ..." is not a question about the rules unless the line names something a
+# rule is about, which `not_a_bare_procedure` now decides. What it left behind was a search hedge
+# - "I don't know enough to answer that honestly" - for "do i need to bring anything", "do i need
+# to take a towel", "do i need to print it", "do i need to prick them". Nothing in those says what
+# the thing is for yet, and that is the whole of the answer, so ask for it.
+A_NEED_TO = re.compile(r"\bdo (?:i|we) need (?:to |a |an )\b", re.I)
+NEED_TO_LINES = (
+    "Depends what it is for. Say the thing you are doing and I will tell you what it takes - and "
+    "where a rule rather than common sense decides it, who to ask.",
+    "It turns on the thing itself and on what it is for - a trip, a form, a job and a pan of "
+    "something all want different things. Tell me which it is and I will give you the short "
+    "version, rather than the general one that fits none of them.",
+    "That depends on the thing itself and what you are doing with it. Say which and I will tell "
+    "you, rather than guess at it.",
+)
+PROCEDURE_SHAPES = (("needto", A_NEED_TO, NEED_TO_LINES, None),)
+
+# "Do I need to worry" and "do i need to panic" have the shape of a practical ask and none of the
+# sense: somebody anxious is checking whether something is wrong. "Depends what for" is dismissive
+# to that, a rule card is off the subject, and the hedge is worse than either, so they get two
+# lines of their own - one question about the thing, and a promise of the straight answer once it
+# is named. Read before the rest, because the procedure shape below would ask an anxious person
+# what their trip is for.
+A_WORRY_ASK = re.compile(
+    r"\bdo (?:i|we) (?:need|have) to\b[^.?!]{0,24}\b(?:worry|panick?\w*|stress\w*|be anxious|"
+    r"be scared|be (?:worried|afraid)|fret)\b", re.I)
+WORRY_LINES = (
+    "Worry about what? Tell me what is coming up and I will say whether there is anything to do "
+    "about it, because most of what people brace for turns out to be somebody else's rule.",
+    "Say what it is and I will tell you straight whether there is anything to do about it. If "
+    "there is, it is usually one form or one call, and if there is not, you can stop carrying it.",
+)
+WORRY_SHAPES = (("worried", A_WORRY_ASK, WORRY_LINES, None),)

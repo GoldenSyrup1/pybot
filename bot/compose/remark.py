@@ -32,6 +32,7 @@ from . import pick, trouble
 from .fallback_data import A_THING_TAKEN
 from ..memory import facts
 from ..understanding.kinds import OTHER_PEOPLE
+from ..understanding.normalize import without_leaders
 
 # Something meant to happen over time: the cues that make a statement a plan, not a report.
 # A date is not a plan. "next week is going to be busy" and "the anniversary is next month" say
@@ -160,6 +161,76 @@ PLAN_REPLIES = (
     "Nice — worth doing properly. What would you want sorted out first?",
     "Worth deciding what the first step is, and what you'd count as done.",
     "Sounds like a good plan. What's the bit you're least sure about?",
+)
+
+
+# --- a want somebody else has, said by the person looking after them ---------------------------
+# "my son wants a tattoo", "my daughter wants to leave school at 16", "my dad wants a scooter at
+# 78": the wanting is theirs and the asking is the person's, so the line is a request for help
+# with it and the reply is about what it would take. Every one of these lines was filed back to
+# them instead ("Noted: your son wants a tattoo."), which names the thing and leaves them nowhere
+# to start. The same want in the first person already gets a reply - "i want a motorbike" gets
+# "What kind of motorbike do you usually go for?" - so the shape is not new, only whose it is.
+#
+# The readers below take the want only when somebody the person looks after is named as the one
+# wanting it. A want they are told about rather than asked about ("my boss wants me to work
+# saturday") is not this: nobody is asking for help with a shift. And a want said with "me" after
+# it is a request made *to* the person ("my mum wants me to visit"), which is answered about the
+# visit, not about the wanting.
+DEPENDANT = frozenset("""
+son daughter child children kid kids toddler teenager teen lad boy girl baby grandson
+stepson stepdaughter granddaughter mum mom mother father dad wife husband partner grandchild
+nephew niece
+""".split())
+DEPENDANT_WANT = re.compile(
+    r"\b(?:my|our|his|her|their)\s+(?:" + "|".join(sorted(DEPENDANT)) + r")\b[^.!?]*?\b(?:"
+    r"wants?|wanted|needs?|would\s+like|would\s+love|is\s+desperate\s+for|keeps\s+asking\s+for|"
+    r"is\s+asking\s+for)\b", re.I)
+# A want aimed at the person themselves, which is a request to them rather than a thing to price.
+ASKED_OF_THE_PERSON = re.compile(r"\b(?:wants?|needs?|would\s+like)\s+(?:me|us)\b", re.I)
+# "My daughter wants to be a boy" is not a thing to price, and neither is "my son wants to be a
+# footballer": `wants to be` is a wish about who somebody is, so "price it and check the rules" is
+# not a wrong answer to one of those but a glib one, and glib is worse. A want that names an
+# activity - "wants to leave school", "wants to get a tattoo" - is a thing with a first step.
+WANTS_TO_BE = re.compile(r"\bwants?\s+to\s+be\b", re.I)
+# A weapon is not a purchase to price now and think about later - the reply has to weigh why the
+# want is there, which is a different conversation and not one this pool can open. Nothing below
+# is a kitchen tool, so a cooking word in the line puts a knife back with the ordinary wants.
+A_WEAPON = frozenset("""
+gun guns shotgun shotguns pistol pistols handgun handguns revolver revolvers firearm firearms
+airgun airguns rifle rifles crossbow crossbows machete machetes taser tasers knuckleduster
+""".split())
+WEAPON_WORDS = frozenset(("knife", "knives", "blade", "blades", "sword", "swords"))
+NOT_A_WEAPON = (
+    "cooking", "cook", "chef", "kitchen", "carving", "whittling", "craft", "fishing",
+    "camping", "garden", "bread", "sharpening", "cutlery",
+)
+# The store answers a want it has filed in more than one frame: "Noted: your son wants a tattoo.",
+# "Got it - your son wants a tattoo.", and, straight after a feeling, "Your son is 16 and wants a
+# motorbike. That explains it - no wonder it sits on you." The frames differ; the shape does not -
+# every one of them is the line said back and nothing else, so the want is filed and the person is
+# left nowhere to start, and one of them invents a mood the line never said. `a_want_said_back`
+# below reads the shape rather than the frames (`bot/memory/repeat.py`, `only_said_it_back`), so a
+# new frame does not need a new entry here.
+# A death is the store's to answer, not a want to price: "my mum died and my son wants a
+# motorbike" is a bereavement with a want in it, and a feeling guessed beside it is at least about
+# the right subject. The death is often a turn back rather than in this line ("my mum died last
+# year", then "my son is 16 and wants a motorbike"), so a condolence in the reply counts too - the
+# store has remembered and said it, and a want's first step on top of that reads as if it had not.
+A_LOSS_IN_THE_LINE = re.compile(
+    r"\b(?:died|dying|death|dead|passed\s+away|funeral|hospice|terminal|bereave\w*|widow\w*|"
+    r"cancer)\b", re.I)
+A_CONDOLENCE = re.compile(
+    r"\bi(?:'m|\s+am)\s+(?:really\s+|so\s+|very\s+)?sorry\b|\bsorry\s+for\s+your\s+loss\b",
+    re.I)
+
+DEPENDANT_WANT_REPLIES = (
+    "Then start with what it would really take - the price, and what the rules allow - before "
+    "anyone says yes or no. What has been looked at so far?",
+    "The asking is the easy half. Price it and check the rules first, because those two decide it "
+    "more often than the wanting does.",
+    "Ask what it is really for first - the thing itself and what it gets them are different "
+    "problems. What has been said so far?",
 )
 
 
@@ -937,7 +1008,14 @@ def regret_reply_for(clean, words, memory, repaired=""):
 # things" is a worry about her, and "my son is 3 and hates mushrooms" has a taste in the tail
 # for the cooking side to answer. Only a line that is *just* the fact lands here.
 THEIR_PERSON = (r"(?:mum|mom|mam|mother|dad|father|parents|sister|brother|son|daughter|kid|"
-                r"kids|child|children|boy|girl|eldest|youngest|gran|granny|nan|grandma|"
+                r"kids|child|children|boy|girl|eldest|youngest|"
+                # what a parent calls a child instead of "my son": the little one, the baby, the
+                # toddler, the eldest. "my little one is 7 months old" was answered "Got it. Is
+                # there anything you'd like a hand with?", which reads nothing, and the age
+                # pools below already know what to ask a parent of a baby.
+                r"baby|baby boy|baby girl|little one|little boy|little girl|little man|"
+                r"little lad|little miss|oldest|firstborn|toddler|"
+                r"gran|granny|nan|grandma|"
                 r"grandmother|grandad|grandpa|grandfather|grandparents|nana|aunt|uncle|"
                 r"cousin|partner|husband|wife|niece|nephew|grandson|granddaughter|"
                 r"grandchildren|grandkids|grandsons|granddaughters|stepson|stepdaughter|"
@@ -948,16 +1026,28 @@ THEIR_PERSON = (r"(?:mum|mom|mam|mother|dad|father|parents|sister|brother|son|da
 # one", "our wee one", and "my baby is 7 months old" is the same fact as "my boy is 7 months old".
 # Without these words the age was read for a boy and ignored for a baby, and the same sentence
 # typed with the word a parent actually uses got nothing back.
+# A qualifier sits between "my" and the child as often as not - "my other son", "my eldest
+# daughter", "my baby girl" - and with no room for it the whole pair of facts was missed and the
+# line got a line that fits any message ("Sounds alright. Anything good in it?").
+THEIR_QUALIFIER = (r"(?:other|eldest|oldest|youngest|little|big|small|wee|first|second|third|"
+                   r"middle|baby|grown up|grownup|step|adopted|foster) ")
 THEIR_CHILD = (r"(?:son|daughter|kid|kids|child|children|boy|girl|eldest|youngest|niece|"
+               r"baby|baby boy|baby girl|little one|little boy|little girl|little man|"
+               r"little lad|little miss|oldest|firstborn|toddler|"
                r"nephew|grandson|granddaughter|grandkids|grandchildren|stepson|"
                r"stepdaughter|baby|babies|toddler|toddlers|newborn|newborns|infant|infants|"
                r"little one|little lad|little man|little fella|little fellow|little girl|"
                r"little boy|wee one|wee man|wee lad|small one)")
 # What a parent says about a child is often two facts in one line - a name and an age - and
 # both are the same kind of thing, so one shape reads the pair.
+#
+# The "is" is optional because people leave it out - "my sons called tom, hes 9" is the same two
+# facts as "my son is called tom and he is 9" - and the pair is as often joined with a comma as
+# with "and". Both forms fell past this shape to a line that fits any message ("Nice one. How did
+# the rest of it go?") a turn after the same two facts got "Mia, 6. What is she like just now?".
 THEIR_NAME_AGE = re.compile(
-    r"^my (?P<person>" + THEIR_CHILD + r")(?:'?s)? (?:is called|is named|name is|name's) "
-    r"(?P<name>[a-z][a-z'-]{1,14}) and (?:she|he|they|it)(?:'?s| is| are) "
+    r"^my (?:" + THEIR_QUALIFIER + r")?(?P<person>" + THEIR_CHILD + r")(?:'?s)? (?:is called|is named|name is|name's|called|named) "
+    r"(?P<name>[a-z][a-z'-]{1,14})(?: and |, )?(?:she|he|they|it)(?:'?s| is| are) "
     r"(?:just |only |nearly )?(?P<age>\d{1,2})$")
 THEIR_NAME = re.compile(
     r"^my (?P<person>" + THEIR_PERSON + r")(?:'?s)? (?:is called|is named|name is|name's) "
@@ -967,7 +1057,7 @@ THEIR_NAME = re.compile(
 AGE_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
              "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
 THEIR_AGE = re.compile(
-    r"^(?:my|our|the) (?P<person>" + THEIR_CHILD + r")(?:'?s)? (?:is|are|is now|just turned|turns?) "
+    r"^(?:my|our|the) (?:" + THEIR_QUALIFIER + r")?(?P<person>" + THEIR_CHILD + r")(?:'?s)? (?:is|are|is now|just turned|turns?) "
     r"(?:just |only |nearly |about )?(?P<n>\d{1,2}|" + "|".join(AGE_WORDS) + r")"
     r"(?:\s?(?:years?|yrs?\.?|y/o|yo|months?|mths?\.?|mth)(?:[ -]?old)?| old| now)?$")
 # A number with no unit beside a baby's own word is the age in months, because that is how a parent
@@ -1030,7 +1120,7 @@ THEIR_CALLED = re.compile(
     r"(?P<names>[a-z][a-z'\-]{1,14}(?: and [a-z][a-z'\-]{1,14})?)"
     r"(?: and (?:she|he|they)(?:'?s| is| are) (?:just |only |nearly )?(?P<age>\d{1,2}))?$")
 THEIR_NAME_SO = re.compile(
-    r"^my (?P<person>" + THEIR_CHILD + r") (?P<name>[a-z][a-z'\-]{1,14}) "
+    r"^my (?:" + THEIR_QUALIFIER + r")?(?P<person>" + THEIR_CHILD + r") (?P<name>[a-z][a-z'\-]{1,14}) "
     r"(?:is|is now|just turned|turns?) (?:just |only |nearly )?(?P<age>\d{1,2})$")
 # What they are into: "my sister loves gardening", "my wife is into knitting", "my brother is mad
 # about trains". The store files it and says it back - "Noted: your sister loves gardening." -
@@ -1186,11 +1276,156 @@ def fill_person(line, person_word):
     return filled
 
 
+# How somebody was *with them* is not a fact about that person to file away. "my mum was funny
+# with me" was answered "Noted: your mum was funny with you.", which is the store writing down a
+# mood as though it were a trait, and "he snapped at me this morning" got "Thanks for telling me -
+# I'm here if you want to dig into any of that". A friend says the thing that is true - it is
+# unsettling when you do not know why - and asks the one question that helps, which is whether
+# they know what set it off.
+THEIR_MOOD_WITH_YOU = re.compile(
+    r"\b(?:(?:my|our)\s+(?:\w+\s+){0,2}?)?(?:mum|mom|mam|mother|dad|father|husband|wife|partner|"
+    r"boyfriend|girlfriend|sister|brother|son|daughter|friend|mate|boss|manager|colleague|"
+    r"flatmate|housemate|neighbour|neighbor|nan|nana|gran|granny|grandma|grandad|grandpa|aunt|"
+    r"uncle|cousin|he|she|they)\s+(?:was|were|is|are|has been|had been|'s been|been)\s+"
+    r"(?:being\s+)?(?:funny|off|short|sharp|snappy|offhand|cold|cool|distant|offish|surly|cross|"
+    r"irritable|grumpy|moody|brusque|abrupt|weird|odd|strange)\s+with\s+(?:me|us)\b"
+    r"|\b(?:he|she|they|my\s+\w+)\s+snapped\s+at\s+me\b"
+    r"|\b(?:he|she|they|my\s+\w+)\s+blanked\s+me\b"
+    r"|\bgave\s+me\s+the\s+cold\s+shoulder\b", re.I)
+THEIR_MOOD_WITH_YOU_LINES = (
+    "Being funny with you and not saying why is unsettling. Do you know what set {them} off?",
+    "That is an odd way to be with you. Is it a one-off, or has it been like this a while?",
+    "You are left guessing when {they} {do} that. Did {they} say anything at all?",
+    "Being got at without knowing why wears you down. What happened just before it?",
+)
+
+
+# The turn after: the person says how long or how often it has been going on. "it happens most
+# weeks", "she has been like that all week", "it has been like that since june" were answered
+# "Thanks for telling me - I'm here if you want to dig into any of that", which is the pool for a
+# line the bot has understood nothing of. The line adds the one thing that matters about a mood
+# that keeps coming back - it is not a bad afternoon - so the reply takes the length in.
+GOING_ON = re.compile(
+    r"^(?:(?:it|that|this)s?\s+)?(?:all|most|every)\s+(?:the\s+)?"
+    r"(?:time|weeks?|weekends?|days?|nights?)\b"
+    r"|\bits\s+been\s+(?:going\s+on|like\s+that|happening)\s+(?:for|since|all|most|every)\b"
+    r"|\b(?:it|that|this|she|he|they)s?\s+(?:been|has\s+been|'s\s+been)\s+like\s+(?:that|this)\s+"
+    r"(?:all|for|since)\b"
+    r"|(?:it|that|this|she|he|they)\s+(?:happens|happened|does\s+(?:it|that)|is\s+like\s+that|"
+    r"has\s+been\s+like\s+(?:that|this)|keeps?\s+happening|goes?\s+on)[^.!?]{0,26}?"
+    r"\b(?:most|every|all)\s+(?:single\s+|other\s+)?(?:weeks?|weekends?|days?|nights?|mornings?|time|the\s+time)\b"
+    r"|\b(?:she|he|they|it)\s+(?:has\s+been|had\s+been|'s\s+been|was|is)\s+like\s+(?:that|this)\s+"
+    r"(?:all|for|since)\b"
+    r"|\b(?:it|this|that)\s+(?:has\s+been|had\s+been|'s\s+been)\s+going\s+on\s+(?:for|since)\b"
+    r"|\b(?:it|this|that)\s+(?:has\s+been|had\s+been|'s\s+been)\s+for\s+"
+    r"(?:about\s+)?(?:\d+|a|an|two|three|four|five|six|seven|eight|nine|ten|a\s+few|"
+    r"a\s+couple\s+of|several)\s+(?:weeks?|months?|years?|days?)\b"
+    r"|\b(?:for|since)\s+(?:about\s+)?(?:\d+|a|an|two|three|four|five|six|seven|eight|nine|ten|"
+    r"a\s+few|a\s+couple\s+of|several)\s+(?:weeks?|months?|years?|days?)\b"
+    r"|\bsince\s+(?:january|february|march|april|may|june|july|august|september|october|"
+    r"november|december|christmas|last\s+(?:week|month|year|summer|autumn|winter|spring))\b",
+    re.I)
+GOING_ON_LINES = (
+    "That long is a lot of guessing. Have you asked {them} straight out?",
+    "Being off with you for that long stops being a mood and starts being a habit. Have you said "
+    "anything to {them}?",
+    "If it has been going on that long, it is worth saying to {them}, not sitting on. "
+    "What would you want to say?",
+)
+
+
+def their_mood_going_on_reply_for(clean, memory):
+    """"it happens most weeks" after a mood with them, or None to leave the line to the caller."""
+    if not clean or "?" in clean:
+        return None
+    kept = (memory or {}).get("mood_with_you")
+    if not isinstance(kept, dict):
+        return None
+    turns = (memory or {}).get("turns") or []
+    # The note is for the turn right after the mood, not for the rest of the chat. The count is
+    # read loosely because the turn being answered may already be in the history, and the pair
+    # before it may not be: the window is the next line, or the one after that.
+    if not 0 <= len(turns) - int(kept.get("at") or 0) <= 2:
+        return None
+    if not GOING_ON.search(clean):
+        return None
+    if _has_phrase(clean, CRISIS):
+        return None
+    person = _pronoun_person(kept.get("person") or "")
+    return _pick_filled(GOING_ON_LINES, memory, clean,
+                        lambda line: fill_person(line, person))
+
+
+def _pronoun_person(person):
+    """The relation whose pronouns are the ones in the line: "he snapped" is a husband here.
+
+    The pronoun sets in this file are keyed by the relation ("husband", "wife"), so a bare "he"
+    filled every line with "they" - "You are left guessing when they do that" about a line that
+    said he. Anything else is passed through as it is (an empty word means "they").
+    """
+    return {"he": "husband", "she": "wife", "they": ""}.get(person, person)
+
+
+def their_mood_with_you_reply_for(clean, words, memory):
+    """A reply to "somebody was off with me", or None to leave the line to whoever owns it."""
+    if not clean or "?" in clean:
+        return None
+    match = THEIR_MOOD_WITH_YOU.search(clean)
+    if not match:
+        return None
+    said = " ".join(clean.split())
+    if _has_phrase(said, CRISIS) or _has_phrase(said, NOT_PLAIN):
+        return None
+    person = ""
+    for word in ("mum", "mom", "mam", "mother", "dad", "father", "husband", "wife", "partner",
+                 "boyfriend", "girlfriend", "sister", "brother", "son", "daughter", "friend",
+                 "mate", "boss", "manager", "colleague", "flatmate", "housemate", "neighbour",
+                 "neighbor", "nan", "nana", "gran", "granny", "grandma", "grandad", "grandpa",
+                 "aunt", "uncle", "cousin", "he", "she", "they"):
+        if re.search(r"\b" + word + r"\b", said):
+            person = word
+            break
+    # "he snapped at me" and "she blanked me" name the person by pronoun, and the pronoun sets in
+    # this file are keyed by the relation ("husband", "wife"), so the pronoun is read as the one
+    # relation whose pronouns are its own. Without this a bare "he" filled every line with "they":
+    # "You are left guessing when they do that" about a line that said he.
+    person = _pronoun_person(person)
+    if isinstance(memory, dict):
+        # Kept for one turn, so the length of it ("it happens most weeks") is answered on the line
+        # after, which is the turn a person says it on.
+        memory["mood_with_you"] = {"person": person, "at": len(memory.get("turns") or [])}
+    return _pick_filled(THEIR_MOOD_WITH_YOU_LINES, memory, clean,
+                        lambda line: fill_person(line, person))
+
+
 THEIR_NAME_LINES = (
     "{name} — that is a good one. Where did it come from?",
     "{name}. Do you call {them} {name} all the time, or does it get shortened?",
-    "{name} — noted with care. What {do} {they} make of it?",
+    "{name}. Who picked it?",
 )
+# The third line used to ask what the child makes of their own name, which was written for a
+# child old enough to have a view of it and read badly for every smaller one: "my baby is called
+# rose" got "Rose — noted with care. What do they make of it?", and "my little girl is
+# called ivy" the same with "she". A baby has no view of its own name - nobody has, until they
+# are old enough to have been teased about it. Who chose the name is a question every parent can
+# answer, of a newborn and of a nine-year-old alike, so the line asks that and the pool stays one
+# pool instead of splitting by the word a parent uses for the child.
+# ...for a child. A grown relation's name was not chosen by the person in front of you, so the
+# three lines above say the wrong thing: "my wife is called anna" was answered "Anna — that is a
+# good one. Where did it come from?", which is what you say about a baby, and "noted with care.
+# What does she make of it?" is a question about her own name. The grown pool asks the same
+# interest as history or as a shortening, which is what there is to ask about a name in use.
+# Every line has to fit a "they" as well as a "she", so the verb comes from the person word
+# ({Do}, and the agreeing form in the other places) and the third line names no verb at all:
+# "Does they get called anything for short?" came out for a partner and a cousin.
+THEIR_NAME_GROWN_LINES = (
+    "{name} — that's a lovely name. Is it a family one?",
+    "{name}. {Do} {they} get called anything for short?",
+    "{name} — nice. Is there a story behind it?",
+)
+# The person words that are a child rather than an adult (see THEIR_CHILD, which is the same list
+# as a pattern for the age shapes).
+A_CHILD_NAMED = frozenset(THEIR_CHILD.strip("(?:)").split("|"))
 THEIR_NAME_AGE_LINES = (
     "{name} at {n} — that is a good age. What {are} {they} into at the moment?",
     "{name}, {n}. What {are} {they} like just now?",
@@ -1317,15 +1552,112 @@ def _pick_filled(lines, memory, clean, fill):
     return pick([fill(line) for line in lines], memory, clean)
 
 
+# A child the chat already knows, named on its own with a new age: "my kids are ada 7 and sam 4"
+# then "ada is 8". The store reads the name against the child it holds and puts the age right -
+# the name alone is enough - but nothing composed a reply, so the line fell to the floor and the
+# bot asked who 8 was about a child it had just corrected in its own memory. That question is
+# right for a figure the chat cannot place ("hes 9" as a first line) and wrong for one it can.
+A_HELD_NAME_AND_AN_AGE = re.compile(
+    r"^(?P<name>[a-z][a-z'\-]{1,19}) (?:is|is now|will be|turns|just turned) "
+    r"(?:just |only |nearly |about )?(?P<n>\d{1,2}|" + "|".join(AGE_WORDS) + r")"
+    r"(?:\s?(?:years?|yrs?\.?|y/o|yo|months?|mths?\.?|mth)(?:[ -]?old)?| old| now)?$")
+# A birthday still to come ("ada is 8 next week") is a thing somebody is looking forward to, and
+# the reader that answers it ends on the coming day rather than on a figure to put right.
+A_MILESTONE_TAIL = re.compile(r"\b(?:next|on|this|in)\s+(?:week|month|year|monday|tuesday|wednesday|"
+                              r"thursday|friday|saturday|sunday|january|february|march|april|"
+                              r"may|june|july|august|september|october|november|december)\b")
+# Saying it back with the age the bot had is the whole of the reply: it shows the correction was
+# taken, names the child, and does not ask a question the person has already answered.
+AGE_PUT_RIGHT = (
+    "{name} at {n} now — I had {old}.",
+    "{name}'s {n}, then, not {old} — got it.",
+    "{name} at {n}. I had {old}, so that is the one thing I will change.",
+)
+# The same line when the chat holds the name and no age for it yet ("my son is called sam" then
+# "sam is 8"), and when it already holds the age just said ("ada is 7" of a child the chat has at
+# 7). In both the bot knows the child, so neither is a figure it cannot place.
+AGE_FIRST_TOLD = (
+    "{name} at {n}, then.",
+    "{name}, {n} — good to know.",
+    "{name} at {n}. That is one to remember.",
+)
+AGE_ALREADY_HAD = (
+    "{name} at {n} — that is what I had.",
+    "{name}, {n}. I had that already, so nothing changes.",
+)
+
+
+def _the_people_in(memory, name):
+    """Every entry the store holds for that name, the people and the animals."""
+    held = memory if isinstance(memory, dict) else {}
+    found = []
+    for entry in held.get("others") or []:
+        if isinstance(entry, dict) and str(entry.get("name") or "").strip().lower() == name:
+            found.append(entry)
+    theirs = held.get("user") if isinstance(held.get("user"), dict) else {}
+    for entry in theirs.get("pets") or []:
+        if isinstance(entry, dict) and str(entry.get("name") or "").strip().lower() == name:
+            found.append(entry)
+    return found
+
+
+def _the_age_i_had(name, memory):
+    """The age an earlier turn gave that name, or None: the store overwrites it in place."""
+    held = memory if isinstance(memory, dict) else {}
+    old = None
+    for fact in held.get("facts_log") or []:
+        value = fact.get("value") if isinstance(fact, dict) else None
+        if not isinstance(value, dict):
+            continue
+        if str(value.get("name") or "").strip().lower() != name:
+            continue
+        if isinstance(value.get("age"), int) and value["age"]:
+            old = value["age"]
+    return old
+
+
+def _an_age_put_right(clean, memory):
+    """A known child or animal, named alone with a new age, said back with the age it had."""
+    if A_MILESTONE_TAIL.search(clean or ""):
+        return None
+    match = A_HELD_NAME_AND_AN_AGE.match(clean or "")
+    if not match:
+        return None
+    name = match.group("name")
+    found = _the_people_in(memory, name)
+    if not found:
+        return None
+    said = match.group("n")
+    n = int(said) if said.isdigit() else AGE_WORDS[said]
+    if not n or n > 120:
+        return None
+    spelled = str(found[0].get("name") or name).strip().title()
+    old = _the_age_i_had(name, memory)
+    if not isinstance(old, int) or not old:
+        return pick(AGE_FIRST_TOLD, memory, clean).format(name=spelled, n=n)
+    if old == n:
+        return pick(AGE_ALREADY_HAD, memory, clean).format(name=spelled, n=n)
+    return pick(AGE_PUT_RIGHT, memory, clean).format(name=spelled, n=n, old=old)
+
+
 def their_people_reply_for(clean, words, memory):
     """A reply to a plain fact about one of their people, or None to leave it to the caller."""
     if not clean or "?" in clean:
         return None
+    # A fact about one of their people is as often said after a leader as on its own: "and my sons
+    # called tom, hes 9", "oh and my daughter is called mia". Every shape below starts at "my", so
+    # the leader hid the whole family of them and the line fell to a line that fits any message.
+    # The reading of a leader is the shared one (`normalize.without_leaders`), not a list here.
+    clean = without_leaders(clean) or clean
     if set(words) & NOT_PLAIN or _has_phrase(clean, CRISIS):
         return None
     refused = _a_taste_they_refuse(clean, memory)
     if refused:
         return refused
+
+    put_right = _an_age_put_right(clean, memory)
+    if put_right:
+        return put_right
     match = THEIR_ELDER_AGE.match(clean)
     if match:
         said = match.group("n")
@@ -1372,7 +1704,9 @@ def their_people_reply_for(clean, words, memory):
     match = THEIR_NAME.match(clean)
     if match:
         name = match.group("name").strip().title()
-        return _pick_filled(THEIR_NAME_LINES, memory, clean,
+        person = (match.group("person") or "").strip().lower()
+        pool = THEIR_NAME_LINES if person in A_CHILD_NAMED else THEIR_NAME_GROWN_LINES
+        return _pick_filled(pool, memory, clean,
                             lambda line: fill_person(line.replace("{name}", name),
                                                      match.group("person")))
         line = pick(THEIR_NAME_LINES, memory, clean).replace("{name}", name)
@@ -1417,6 +1751,7 @@ def their_people_reply_for(clean, words, memory):
                             lambda line: fill_person(line.replace("{thing}", said),
                                                      match.group("person")))
     return None
+
 
 
 # --- something of theirs, said as a plain fact -------------------------------------------
@@ -1676,6 +2011,105 @@ def a_thing_of_theirs_reply_for(clean, words, memory):
     asks = OWN_ASKS if kind == "space" else OWN_KIT_ASKS
     return _pick_filled([f"{fact}. {ask}" for ask in asks], memory, clean, lambda line: line)
 
+# --- a relationship said to be in trouble -------------------------------------------------
+# "my marriage is on the rocks", "me and my husband barely talk", "things are bad with my wife",
+# "my mum and i dont get on". These are not the plain facts above: the store files one as a fact
+# and says it back - "Noted: things are bad with your wife." - which is the coldest line in this
+# file, and it is not a thing to take an interest in like a birthday. What a friend answers is the
+# one question about the two of them. The **trouble words** decide it, never the person on his or
+# her own: "my wife works away" is a plain fact, "my wife and i barely talk" is this. A body, an
+# injury, a drink, a fist or a death in the line belongs to safety or to loss, and an affair or a
+# divorce has its own weighing (the whole of that turn is a decision, not a question about it).
+_RELATION_PERSON = (r"(?:mum|mom|mam|mother|dad|father|son|daughter|child|kid|partner|husband|"
+                    r"wife|boyfriend|girlfriend|fiance|fiancee|ex|sister|brother|best friend|"
+                    r"bestie|friend|flatmate|housemate|mother in law|father in law|in laws)")
+# The marriage itself, which names no person and still needs the same question.
+MARRIAGE_IN_TROUBLE = re.compile(
+    r"\b(?:my|our)\s+(?:marriage|relationship)\s+(?:is|has|feels)\s+(?:on the rocks|rocky|"
+    r"in trouble|in a bad way|falling apart|a mess|not in a good place|over|dead)\b")
+BAD_WITH_THEM = re.compile(
+    r"\bthings (?:are|have been|arent|are not|aint)\s+(?:bad|rough|hard|rubbish|terrible|awful|"
+    r"not good|not great|not the same)\s+(?:with|between)\s+(?:my|our)\s+(%s)\b" % _RELATION_PERSON)
+# The quiet between two people, said from either side: "me and my husband barely talk", "my mum
+# and i never talk any more", "we hardly speak".
+QUIET_BETWEEN_THEM = re.compile(
+    r"\b(?:me and|i and|myself and)\s+(?:my|our)\s+(%s)\s+(?:barely|hardly|never)\s+"
+    r"(?:talk|speak)\b"
+    r"|\b(?:my|our)\s+(%s)\s+and\s+i\s+(?:barely|hardly|never|dont|don't|do not)\s+"
+    r"(?:talk|speak|get on)\b"
+    r"|\bwe\s+(?:barely|hardly|never)\s+(?:talk|speak)\b"
+    r"|\b(?:my|our)\s+(%s)\s+(?:is|has been|seems|feels|sounds)\s+(?:distant|cold|withdrawn|"
+    r"off with me|cold with me|distant with me)\b"
+    % (_RELATION_PERSON, _RELATION_PERSON, _RELATION_PERSON))
+# The same pair and the rows between them: "we argue all the time", "me and my wife keep rowing".
+ROWS_BETWEEN_THEM = re.compile(
+    r"\b(?:me and|i and)\s+(?:my|our)\s+(%s)\s+(?:keep\s+)?(?:argue|arguing|row|rowing|fight|"
+    r"fighting|bicker|bickering)\b"
+    r"|\b(?:my|our)\s+(%s)\s+and\s+i\s+(?:keep\s+)?(?:argue|arguing|row|rowing|fight|"
+    r"fighting|bicker|bickering)\b"
+    r"|\bwe\s+(?:keep\s+)?(?:argue|arguing|row|rowing)\b"
+    % (_RELATION_PERSON, _RELATION_PERSON))
+# Two people who do not get on, or a relationship gone wrong with no row and no silence named.
+RELATION_GONE_WRONG = re.compile(
+    r"\b(?:my|our)\s+(%s)\s+and\s+i\s+(?:dont|don't|do not)\s+get on\b"
+    r"|\b(?:dont|don't|do not)\s+get on with\s+(?:my|our)\s+(%s)\b"
+    r"|\bwe (?:are|keep|have been)\s+(?:growing|drifting) apart\b"
+    % (_RELATION_PERSON, _RELATION_PERSON))
+# Not this shape, whatever relation the line names: an emergency about somebody, a drink, a fist,
+# or the end of a marriage, which is weighed rather than asked about.
+NOT_A_RELATION_TROUBLE = re.compile(
+    r"\b(?:hurt|hurts|hurting|injur\w*|hospital|ambulance|a and e|stroke|seizure|fit|fits|"
+    r"collapsed|collapse|bleeding|blood|overdose|cancer|tumour|tumor|dementia|alzheimer\w*|"
+    r"chemo\w*|died|dying|death|funeral|drink|drinks|drinking|alcohol|drunk|hit|hits|hitting|"
+    r"punch\w*|knife|gun|police|threat\w*|abuse\w*|affair|cheat\w*|divorce|cheated)\b")
+# The pool says the thing back in its own shape and then asks the one question, because the three
+# ways a relationship goes wrong want three different questions: the silence wants when it last
+# was not silent, the rows want what they are about, and a marriage gone wrong wants what changed.
+THE_QUIET_LINES = (
+    "That is a lonely way to live. When did {pair} last have a proper talk?",
+    "Sorry to hear it. What is an evening at home like for {pair} now?",
+    "That is hard going. What happened the last time {pair} tried to talk?",
+)
+THE_ROWS_LINES = (
+    "That wears a person down. What do the rows tend to be about?",
+    "That is exhausting. Is there one thing that sets it off with {who}?",
+    "Nothing I can fix from here, but I can listen. What was the last row about?",
+)
+THE_RELATION_LINES = (
+    "That is a hard place to be. What has changed with {who}?",
+    "Sorry to hear it. What has gone wrong with {who} lately?",
+    "That is a heavy thing to carry. What does a bad week look like for {pair}?",
+)
+
+
+def the_two_of_them(clean, memory=None):
+    """A reply to a relationship said to be in trouble, or None to leave it to the caller.
+
+    The line has no question in it, so nothing reads it as one: without this the store files it
+    as a fact and says it back, or the floor says it is listening, and both of those answer a
+    marriage the way they answer a bus timetable.
+    """
+    if not clean or "?" in clean:
+        return None
+    if NOT_A_RELATION_TROUBLE.search(clean):
+        return None
+    pool = None
+    if QUIET_BETWEEN_THEM.search(clean):
+        pool = THE_QUIET_LINES
+    elif ROWS_BETWEEN_THEM.search(clean):
+        pool = THE_ROWS_LINES
+    elif MARRIAGE_IN_TROUBLE.search(clean) or BAD_WITH_THEM.search(clean) \
+            or RELATION_GONE_WRONG.search(clean):
+        pool = THE_RELATION_LINES
+    if not pool:
+        return None
+    found = re.search(r"\b(?:my|our)\s+(%s)\b" % _RELATION_PERSON, clean)
+    who = "your " + found.group(1) if found else "the two of you"
+    pair = "you and your " + found.group(1) if found else "the two of you"
+    return _pick_filled(pool, memory, clean,
+                        lambda line: line.replace("{who}", who).replace("{pair}", pair))
+
+
 
 def _has_phrase(clean, phrases):
     return any(f" {phrase} " in f" {clean} " for phrase in phrases)
@@ -1746,6 +2180,52 @@ def _asked_last(memory):
     return last.endswith("?")
 
 
+def a_want_said_back(said_back, clean):
+    """True when the store's answer to this line only filed the want, so the reader can take it.
+
+    The test is the shape, not a list of frames: a reply that only says the line back has filed
+    the want and answered nothing, whether it opens "Noted:", "Got it -" or, straight after a
+    feeling, ends "That explains it - no wonder it sits on you." The store's own shaped answers
+    are not that shape - "So you are thinking about a horse. Who would look after it in the day?"
+    is a better reply than anything this pool can say, and it says something the line did not.
+    A death in the line keeps the store's turn whatever shape its answer has.
+    """
+    if A_LOSS_IN_THE_LINE.search(str(clean or "")) or A_CONDOLENCE.search(str(said_back or "")):
+        return False
+    from ..memory import repeat  # at call time: repeat imports the compose package itself
+    return repeat.only_said_it_back(clean, said_back)
+
+
+def dependant_want_reply_for(clean, words, memory):
+    """A reply to a want somebody the person looks after has, or None to leave it to the caller.
+
+    The line is a request for help with that want, so the reply is the first step of it - never
+    the echo, which files the want and answers nothing. Everything this reader does not own is
+    left to the caller: a want of the person's own (that is `reply_for` above), a want aimed at
+    the person rather than at a thing ("my son wants me to buy him a car"), a line about a loss
+    or an emergency, and any line that asks something.
+    """
+    if not clean or not DEPENDANT_WANT.search(clean):
+        return None
+    if set(words) & NOT_PLAIN or _has_phrase(clean, CRISIS):
+        return None
+    if ASKED_OF_THE_PERSON.search(clean) or WANTS_TO_BE.search(clean):
+        return None
+    if set(words) & A_WEAPON:
+        return None
+    if set(words) & WEAPON_WORDS and not _has_phrase(clean, NOT_A_WEAPON):
+        return None
+    if set(words) & ASKS or _has_phrase(clean, DOUBT):
+        return None
+    if _has_phrase(clean, COUNTERFACTUAL):
+        return None
+    options = DEPENDANT_WANT_REPLIES
+    if _asked_last(memory):
+        # Two questions in a row is an interrogation: say something they can use instead.
+        options = tuple(o for o in options if not o.endswith("?")) or options
+    return pick(options, memory, clean)
+
+
 def reply_for(clean, words, memory, topics=()):
     """A short reply that fits the plan in a statement, or None to leave it to the caller."""
     if not clean or set(words) & NOT_PLAIN or _has_phrase(clean, CRISIS):
@@ -1777,9 +2257,19 @@ def reply_for(clean, words, memory, topics=()):
 # The reading is the grammar - the person's own "i/we" in front of the booking, or their own
 # "i'm/we're booking" - so a question ("should i book the tickets now"), a step still ahead
 # ("i need to book the car in") and a mistake ("i double booked tuesday again") are left alone.
+# The same arrangement said without a person in front of it: "physio booked for friday", "the
+# tickets are booked for saturday", "hotel booked". English puts the thing booked first when the
+# person is obvious, and the reading above asks for their "i/we", so these lines fell through to
+# the composer - "the tickets are booked for saturday" got "Got it. Is there anything you'd like a
+# hand with?", and "physio booked for friday" was read as the noun "book" and answered with a book
+# recommendation. What a friend says to a booking is about the arrangement either way, so the
+# shape is "<the thing> is/are booked" or "<the thing> booked <when>".
 ARRANGED = re.compile(
     r"\b(?:i|we|i'?ve|we'?ve|ive|weve)\s+(?:(?:have|had|just|finally|only|already)\s+)*booked\b"
-    r"|\b(?:i'?m|im|we'?re|were)\s+booking\b")
+    r"|\b(?:i'?m|im|we'?re|were)\s+booking\b"
+    r"|\b(?:is|are|was|were|it's|its)\s+(?:now\s+|all\s+|already\s+|finally\s+)?booked\b"
+    r"|\b[a-z][a-z'\u2019-]*(?:\s+[a-z][a-z'\u2019-]*){0,2}\s+booked\s+"
+    r"(?:for|on|at|in|next|this|tomorrow|today|tonight|yesterday|[0-9])\b")
 # Two bookings at once is the mistake, not the arrangement: "i double booked tuesday badly" has
 # its own line in the diary pools, and "Sorted. When is it?" answers the wrong thing.
 DOUBLE_BOOKED = re.compile(r"\b(?:double|over|re)[- ]?book\w*")
@@ -1809,9 +2299,36 @@ BOOKED_REPLIES = (
     # something twice, and "that's one off the list" is enough for a booking.
     "Good - that's one off the list.",
 )
-# The reply that asks when it is, and the one the same booking gets when it has already said:
+# The replies that ask when it is, and the ones the same booking gets when it has already said:
 # the question is the only part that is wrong, and the swap keeps the rest of the pool in place.
-ALREADY_DATED = {"Good - that's one off the list. When is it?": "Good - that's one off the list."}
+# There are two of them, and the miss this map was written for came back through the second:
+# "ive booked the physio for friday" and "the room is booked for saturday" both said the day and
+# were asked "Is it soon, or have you got a while yet?" because only the first was swapped.
+# A swap may take the question away from a dated booking, and it may not take the reply away
+# with it. The second one was swapped for "Nice one." - two words back to a line that had just
+# told the bot where they are going and when, which is the stock cheer STYLE.md counts as no
+# answer. It was also the first line of a chat: "weve booked a week in cornwall in august" is a
+# whole plan, and the bot's opening reply to it was "Nice one." Whatever a swap says, it has to
+# be something the person can answer, so the dated reply keeps a question and only loses the one
+# the line already answered.
+ALREADY_DATED = {
+    "Good - that's one off the list. When is it?": "Good - that's one off the list.",
+    "Nice one. Is it soon, or have you got a while yet?": "Nice one. Anything left to sort before then?",
+}
+
+
+# An ask typed without its question mark: "is the room booked for saturday", "can the tickets be
+# booked for friday". The bare "<thing> booked for <when>" is an arrangement, and the same words
+# behind an opener are a question, so a line that starts with one and does not start its booking
+# with the person is left to the readers that answer questions.
+QUESTION_FIRST = re.compile(
+    r"^\W*(?:is|are|was|were|do|does|did|can|could|should|shall|will|would|have|has|am)\b", re.I)
+THE_PERSON_WITH_IT = re.compile(r"^(?:i|we|i'?m|im|i'?ve|ive|we'?re|were|we'?ve|weve)\b", re.I)
+# The booking is behind the person already: "we had a babysitter booked for tonight", "i had the
+# tickets booked a month ago". Nothing has been sorted that needs cheering, and the line is
+# usually the setting for what comes next ("and she cant make it now"), so it is left to the
+# readers that answer small talk.
+HAD_IT_BOOKED = re.compile(r"\bhad\b(?:\s+\w+){0,5}\s+booked\b", re.I)
 
 
 def reads_as_arranged(clean):
@@ -1825,6 +2342,10 @@ def reads_as_arranged(clean):
     booked = ARRANGED.search(clean)
     if booked and TURNED.search(clean[booked.start():]):
         return False  # the line takes the news back after the booking
+    if HAD_IT_BOOKED.search(clean):
+        return False  # the booking is behind them: the news is what comes next
+    if booked and QUESTION_FIRST.match(clean) and not THE_PERSON_WITH_IT.match(clean[booked.start():]):
+        return False  # a question about a booking, typed without its question mark
     return bool(booked)
 
 
@@ -1835,7 +2356,9 @@ def _says_when_it_is(clean):
     saying a date the store understands counts here too - "in june", "next friday", "on the 3rd",
     "tomorrow", "in three weeks", and a date after the verb that carries it ("the term ends 12
     july")."""
-    return bool(clean and facts.FUTURE.search(clean))
+    return bool(clean and facts.FUTURE.search(clean)) or bool(
+        set(str(clean or "").lower().replace(",", " ").replace(".", " ").split())
+        & (facts.DAYS | facts.MONTHS))
 
 
 def arranged_reply_for(clean, words, memory):

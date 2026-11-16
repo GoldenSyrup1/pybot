@@ -27,6 +27,9 @@ _IS_A_BIKE = ("bike", "bikes", "bicycle", "bicycles", "pushbike", "push bike", "
               "two wheels",
               # parts only a bicycle has, for the lines that never say the word
               "handlebars", "handlebar", "cranks", "pedals", "saddle", "pannier", "panniers",
+              # the named kinds of bar, because the line that asks about one never says "bike" and
+              # a bare "bar" belongs to the boiler as well
+              "drop bars", "flat bars", "riser bars", "bar ends", "aerobars", "bullhorn bars",
               "top tube", "chainring", "derailleur",
               # only a bicycle has these, and the line that names one never says "bike"
               "inner tube", "inner tubes", "tubeless", "quick release", "bike rack",
@@ -38,8 +41,13 @@ _IS_A_BIKE = ("bike", "bikes", "bicycle", "bicycles", "pushbike", "push bike", "
 # the motor or the phone, a light that does not work is a bulb, and "my bike battery keeps going
 # flat" was pulling the wheel-off answer for a puncture. Only the tyre entries stand down for
 # these, because the battery entry below is about exactly this.
+# "Charge" in this list means a battery's charge, and a shop's charge is money: a price line
+# about a puncture ("how much does a bike shop charge to fix a puncture") must not be read as a
+# line about a battery, so the price entries take the list without those three words.
 _NOT_A_TYRE = ("battery", "batteries", "charge", "charging", "charger", "motor", "screen",
                "phone", "laptop", "light", "lights", "lamp", "headlight", "headlights", "dynamo")
+_NOT_A_TYRE_PRICE = tuple(word for word in _NOT_A_TYRE
+                          if word not in ("charge", "charging", "charger"))
 
 # Every reply here is about a bicycle, so a car, van or motorbike line passes: a clutch, an
 # MOT and a tread depth have nothing to do with a chain and a puncture.
@@ -260,6 +268,69 @@ _BIKE_SERVICE_AVOID = ("lock", "locks", "locking", "locked", "d-lock", "u-lock",
                        "shops")
 
 
+# The fit card answered every line with the saddle, while the parts it covers are three: the
+# saddle, the bars and the reach. A line that names the bars wants the bars - and it is asking one
+# of two things, which bars to get or how to move the ones it has. So the reply is read from the
+# line: the choice for "drop bars or flat bars" and "are drop bars comfortable", the stem for
+# "my bars are too low" and "the bars feel too far away", and the saddle first only when the line
+# is about the seat.
+_BAR_WORDS = frozenset(("bars", "bar", "handlebars", "handlebar", "drop bars", "flat bars",
+                        "riser bars", "bar ends", "aerobars", "bullhorn bars", "stem",
+                        "reach", "tops", "hoods"))
+_SEAT_WORDS = frozenset(("saddle", "seat", "seatpost", "seat height", "seat post"))
+# "bar" is a substring of "bargain", "barely" and "barbecue", so the whole-word test is what
+# decides it: "is a second hand bike a bargain" was read as a question about the bars because
+# the bargain had a "bar" in it. A bar named on its own still has to be the word on its own.
+_A_BAR_NAMED = re.compile(r"\bbars?\b|\bhandlebars?\b", re.I)
+_BAR_CHOICE = re.compile(r"\b(?:or|instead|which|better|best|worth|comfortable|comfort|"
+                         r"get|buy|change|swap|switch)\b")
+_BAR_MOVE = re.compile(r"\b(?:too\s+(?:low|high|far|long|close|short)|low|high|far|raise|"
+                       r"lower|adjust|moving|move|numb|tingl\w*|sore|ache|hurt\w*)\b")
+
+WHICH_BARS = (
+    "Drop bars put your hands in three or four positions, which is what makes them comfortable on "
+    "a long ride, and they drop your chest for less wind; flat bars give more control and a better "
+    "view in traffic, and are the right answer for a town bike. If you ride for an hour or more on "
+    "open roads, drops are worth the getting used to; if your rides are short or in traffic, flat "
+    "bars with bar ends are the easier choice. Width matters as much as shape: about as wide as "
+    "your shoulders, and a little wider for control off road.")
+
+MOVING_BARS = (
+    "The height is set at the stem: undo the two bolts on the side and add or remove the spacers "
+    "under it, which moves the bars 5 to 10mm at a time - tighten them back to just snug and check "
+    "the steering turns freely. Too far away is a shorter stem, 10 or 20mm shorter, or a bar with "
+    "less reach; too low for good is more spacers, and if the steerer has none left, a riser bar or "
+    "a stem with a steeper angle does the same job. Numb or tingling hands is the bars too far or "
+    "too low, or the saddle tipped nose-down, and it is worth fixing before a long ride rather than "
+    "riding through.")
+
+
+def _bike_fit(memory, understood):
+    """Which bars to get, how to move the bars you have, or the saddle first."""
+    reading = understood or {}
+    said = str(reading.get("clean") or reading.get("text") or "").lower()
+    if not said:
+        said = " ".join(str(one) for one in (reading.get("words") or ())).lower()
+    words = set(str(one).lower() for one in (reading.get("words") or ()))
+    names_bars = bool(words & _BAR_WORDS) or bool(_A_BAR_NAMED.search(said))
+    names_seat = bool(words & _SEAT_WORDS)
+    if names_bars and not names_seat:
+        # a bar named with a fault of height or reach is the stem; a bar named on its own, or
+        # with a choice between two of them, is the choice between them
+        if _BAR_MOVE.search(said) and not _BAR_CHOICE.search(said):
+            return MOVING_BARS
+        return WHICH_BARS
+    return SADDLE_FIRST
+
+
+SADDLE_FIRST = (
+           "Set the saddle height first: heel on the pedal at the bottom of the stroke should "
+           "straighten the leg, so with the ball of the foot on the pedal the knee keeps a slight "
+           "bend. Too low aches the front of the knee, too high rocks the hips and hurts behind "
+           "it. Then slide the saddle so the knee sits over the pedal axle, and aching hands or "
+           "neck mean the bars are too far away. Numbness in the hands, feet or groin is the one "
+           "thing not to ride through.")
+
 ENTRIES = [
     # --- the flat tyre -----------------------------------------------------
     _entry("bike-puncture",
@@ -289,6 +360,25 @@ ENTRIES = [
     # about a second-hand bicycle, "how much do tyres cost" was reaching the puncture repair, and
     # with that turned down for holding no price it fell to the car's card - £55 to £80 a corner
     # and a 205/55 R16 sidewall, said to somebody buying a bicycle.
+    # The price of the repair itself, which neither the how-to nor the tyre price answers:
+    # "how much to fix a bike puncture" was the wheel-off method and "how much does a bike shop
+    # charge to fix a puncture" was the e-bike battery, because a shop's *charge* is not a
+    # battery's charge. The figure is the whole reason people ask, so it goes first.
+    _entry("bike-puncture-price",
+           (("puncture", "punctures", "punctured", "flat tyre", "flat tyres", "tyre flat",
+             "slow puncture", "inner tube", "inner tubes", "fix a puncture", "mend a puncture",
+             "repair a puncture", "patch a puncture", "fitted"),
+            # only the words that ask a price: "how do i fix a puncture on my bike" is the
+            # method, and a "fix" in the ask list made it the price
+            _bike(("how much", "cost", "costs", "price", "prices", "charge", "charges", "pay",
+                   "paying", "spend", "worth", "expensive", "cheap", "cheaper", "shop"))),
+           "About £10 to £20 at a bike shop for a puncture: most will fit a new inner tube and "
+           "check the tyre for the thorn or glass that caused it for that, and a patch on its own "
+           "is often cheaper or free if you bought the tube there. Doing it yourself is £5 to £8 "
+           "for a tube, and the levers cost £3 to £5 once. A puncture that keeps coming back is "
+           "usually the sharp thing still in the tyre, so ask them to run a finger round the "
+           "inside, and a tyre with a cut or a thin patch is worth replacing at £15 to £35.",
+           ask=_IS_A_BIKE, avoid=_NOT_A_BIKE + _NOT_A_TYRE_PRICE, bias=2),
     _entry("bike-tyre-price",
            (("tyre", "tyres", "tire", "tires", "inner tube", "inner tubes", "tube",
              "puncture resistant", "new tyre", "new tyres"),
@@ -317,13 +407,19 @@ ENTRIES = [
     # off it. The tyre entries stand down for the word battery, so without this the line that says
     # a bike battery keeps going flat passed to a phone's Low Power Mode instead.
     _entry("bike-battery",
-           (("battery", "batteries", "battery flat", "battery going flat", "charge", "charging",
-             "charger", "range", "motor", "assist", "power"),
+           (("battery", "batteries", "battery flat", "battery going flat",
+             # "charge" on its own is what a shop does to your card, and it pulled this card for
+             # "how much does a bike shop charge to fix a puncture": the battery's charge is
+             # said as a phrase or as the thing being charged.
+             "a charge", "on a charge", "one charge", "per charge", "full charge", "one full charge",
+             "holds a charge", "hold a charge", "charge it", "charge them", "charging", "charger",
+             "range", "motor", "assist", "power"),
             # "keeps dying" is how people say a pack is worn out, and it was reaching the
             # greeting: "dying" reads as a person's news unless the bike is in the keys.
             _bike(("flat", "going flat", "keeps going", "dies", "dying", "keeps dying", "dead",
                    "wont charge",
-                   "not charging", "wont hold", "charge", "charging", "range", "how far",
+                   "not charging", "wont hold", "a charge", "on a charge", "charging",
+                   "range", "how far",
                    "lose", "losing", "last", "battery", "motor", "power", "winter", "store",
                    "storage", "care", "look after", "replace",
                    # a pack is the one bike part people ask the price of, and the price is an
@@ -332,7 +428,12 @@ ENTRIES = [
            _bike_battery,
            # the follow-up below shares the word battery, which makes it common in this domain
            # and costs this entry the rarity point that put it ahead of the chemistry card
-           ask=_IS_A_BIKE, avoid=_NOT_A_BIKE, bias=2),
+           ask=_IS_A_BIKE,
+           # a shop's "charge" is money and a puncture is a repair: the battery card held the
+           # price of mending a tyre because the line had the word charge in it
+           avoid=_NOT_A_BIKE + ("puncture", "punctures", "punctured", "flat tyre", "flat tyres",
+                                "inner tube", "inner tubes", "tyre repair", "mend a puncture"),
+           bias=2),
 
     # The turn after the bike has been named may leave it out: "how far can an ebike go on a
     # charge" then "and how much is a new battery" was answered with the phone battery price.
@@ -598,6 +699,7 @@ ENTRIES = [
     # --- the fit that makes a ride hurt -----------------------------------
     _entry("bike-setup",
            (("saddle", "seat", "seatpost", "seat height", "handlebars", "handlebar", "reach",
+             "drop bars", "flat bars", "riser bars", "bar ends", "aerobars", "bars",
              "stem", "bike fit", "position",
              # the weight of a bad position lands on the hands, the neck and the back
              "hands go numb", "hands numb", "numb hands", "fingers go numb", "sore hands",
@@ -605,13 +707,20 @@ ENTRIES = [
             _bike(("too low", "too high", "height", "hurts", "hurt", "knee", "knees", "back",
                    "neck", "wrist", "wrists", "hands", "numb", "numbness", "sore", "soreness",
                    "ache", "aches", "aching", "pain", "painful", "uncomfortable", "comfortable",
-                   "position", "adjust", "how", "should", "right"))),
-           "Set the saddle height first: heel on the pedal at the bottom of the stroke should "
-           "straighten the leg, so with the ball of the foot on the pedal the knee keeps a slight "
-           "bend. Too low aches the front of the knee, too high rocks the hips and hurts behind "
-           "it. Then slide the saddle so the knee sits over the pedal axle, and aching hands or "
-           "neck mean the bars are too far away. Numbness in the hands, feet or groin is the one "
-           "thing not to ride through.",
+                   "position", "adjust", "how", "should", "right",
+                   # "drop bars on a hybrid bike" and "flat bars or riser bars on a hybrid" named
+                   # only the bars and the kind of bike, and the row needs two of its own words:
+                   # the bar words say which part, so they are keys of this row as well as the
+                   # saddle's. The bicycle itself is still the `ask`, so a boiler's "1.5 bar" and
+                   # a "pair of bars" cannot reach here.
+                   "bars", "bar", "handlebar", "handlebars", "drop bars", "flat bars",
+                   "riser bars", "bullhorn bars", "bar ends", "aerobars", "stem", "reach",
+                   "tops", "hoods", "hybrid", "gravel", "commuter", "tourer",
+                   # reach has its own words, and "my handlebars are too far away" said the bar
+                   # twice and nothing else, so the row never scored
+                   "far", "too far", "further", "close", "too close", "long", "short",
+                   "stretched out", "reaching"))),
+           _bike_fit,
            ask=_IS_A_BIKE,
            avoid=_NOT_A_BIKE + ("child", "childs", "child's", "kid", "kids", "son", "daughter",
                                 "toddler", "year old", "nursery", "school",
@@ -716,7 +825,9 @@ ENTRIES = [
            ask=_IS_AN_EBIKE, avoid=_NOT_AN_EBIKE, bias=4),
     _entry("ebike-charge-cost",
            (_IS_AN_EBIKE,
-            ("charge", "charging", "charger", "electricity", "per charge", "cost to charge",
+            # a shop "charge" is money, so the battery's charge is a phrase here too
+            ("a charge", "on a charge", "one charge", "full charge", "charge it", "charging",
+             "charger", "electricity", "per charge", "cost to charge",
              "how much electricity", "power", "a year", "annual", "leccy")),
            "About 10p a full charge, so a year of commuting is £15 to £25: a 500Wh battery is "
            "half a unit of electricity, and a unit is around 25p, which is why the electricity "
@@ -827,6 +938,9 @@ ENTRIES = [
                                 "brompton", "rent", "hire", "insurance", "insure", "train",
                                 "parking", "puncture", "brakes", "gears", "chain", "tyre",
                                 "tyres", "saddle", "sizing", "size",
+                                # the parts people price one at a time, which have rows of
+                                # their own: "how much is a new inner tube" was a new bike
+                                "inner tube", "inner tubes", "new tube", "a tube",
                                 # a bike that has broken is the rights question, not the price
                                 # one: second-hand-private says buyer beware, or the dealer's
                                 # 30 days, and a price guide is no answer to a fault you have
@@ -1090,7 +1204,11 @@ ENTRIES = [
                                 "locked", "stolen", "stole", "theft", "thief",
                                 "buying a bike", "buy a bike", "buying a new bike",
                                 "which bike", "what bike", "new bike", "fix mine",
-                                "repair mine", "second hand", "secondhand"),
+                                "repair mine", "second hand", "secondhand",
+                                # "how far should i cycle as a beginner" is a distance, and the
+                                # kit list answered it because "beginner" is one of its keys
+                                "how far", "how long", "distance", "miles", "kilometres",
+                                "kilometers", "km", "in a day", "a day"),
            bias=2),
 
 ]

@@ -110,6 +110,16 @@ _REFUSES_AID = re.compile(
     r"\b(?:wont|won'?t|will not|would not|refuses?|refused|refusing|hates?|hated|"
     r"doesn'?t want|dont want|does not want|do not want)\b[^.]{0,25}\b(?:stick|frame|zimmer|"
     r"rollator|walker|wheelchair|scooter|aid|rail|handle|crutch(?:es)?)\b", re.I)
+# Not everybody who limits a walk is unable to do one. "he hates walking so keep it short" and
+# "he'd rather sit in a pub all day" limit the same day out and want the same short-hop plan; on
+# main both were answered by whatever the chat was already about (the hiking-water card, or the
+# budget card) and neither was kept, so "and what does he not like doing" asked for it in vain.
+# The trip gate below is what keeps a job or a house out: "i hate walking to work" names no plan.
+_DISLIKES_THE_WALK = re.compile(
+    r"\b(?:hates?|hated|dislikes?|can'?t stand|cannot stand|cant stand|doesn'?t like|don'?t like|"
+    r"do not like|isn'?t keen on|not keen on|would rather not|prefers? not to)" + r"\b[^.]{0,24}"
+    r"\b(?:walk(?:ing)?|hikes?|hiking|rambl(?:e|ing)|hills?|steps?|stairs)\b"
+    r"|\brather sit\b|\bsit in a pub\b", re.I)
 # A pushchair is a child's seat, not a limit on the person pushing it: "we need somewhere flat for
 # the pushchair" is a buggy and its wheels, and a short-walk itinerary is the wrong advice.
 _PUSHCHAIR = re.compile(
@@ -218,6 +228,8 @@ def _kind(clean):
         said = _LIMIT_VERB.search(clean).group(0).lower()
         if "stairs" in said:
             return "stairs"
+        return "walk"
+    if _DISLIKES_THE_WALK.search(clean):
         return "walk"
     if _FLAT.search(clean):
         return "walk"

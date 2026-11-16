@@ -590,8 +590,13 @@ def _temperature(clean):
     return None
 
 
-_C_ASKS = re.compile(r"\bcelsius|\bcentigrade|\bdegrees? c\b|°c\b")
-_F_ASKS = re.compile(r"\bfahrenheit|\bdegrees? f\b|°f\b")
+# "how do i convert c to f" is the plainest way anyone asks this, and it was a search hedge
+# while every spelled version answered: the pattern required the whole word or "degrees c", so a
+# bare letter matched nothing. A single bold letter between spaces is a unit and nothing else in
+# a conversion line, so it is allowed here - and only here, where the line has no number and the
+# two letters are what the ask is made of.
+_C_ASKS = re.compile(r"\bcelsius|\bcentigrade|\bdegrees? c\b|°c\b|\bc\b")
+_F_ASKS = re.compile(r"\bfahrenheit|\bdegrees? f\b|°f\b|\bf\b")
 
 
 _BARE_TEMPERATURE = re.compile(
@@ -1162,9 +1167,20 @@ _A_DISH_PART = re.compile(r"\s+(?:powder|powders|sauce|sauces|paste|pastes|oil|f
                           r"leaf|leaves|plant|pepper|peppers)\b")
 
 
+# The ask, not the clause in front of it. "im making a lasagne for eight, how long does it take"
+# names a dish and a headcount and was answered "1.2 kg of mince in all" - the shopping list to a
+# question about the clock. A line that asks how long, how soon, what time, when, or in how many
+# minutes or hours is owed a time, and the portion of the dish is a different answer.
+_A_TIME_IS_THE_ASK = re.compile(
+    r"\bhow long\b|\bhow soon\b|\bwhat time\b|\bwhen\b|"
+    r"\bhow many (?:hours?|minutes?|mins?|days?)\b")
+
+
 def _a_dish_for_a_table(clean):
     """How much of a named dish to cook for the number of people the line names."""
     if not isinstance(clean, str) or not clean:
+        return None
+    if _A_TIME_IS_THE_ASK.search(clean):
         return None
     people = _people_asked(clean)
     if not people or people < 2 or people > 60:
@@ -1291,6 +1307,11 @@ _PEOPLE_COUNT = re.compile(
     r"|\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+of\s+us\b"
     r"|\b(?:party|table|group|booking|buffet)\s+(?:of|for)\s+"
     r"(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b"
+    # "ive got 20 coming on saturday, how much rice should i cook": the people are coming, and
+    # the number is the table. Without this the portion answer was per person and never said the
+    # total, which is the whole of what a cook with twenty coming cannot work out mid-pan.
+    r"|\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a dozen)\s+"
+    r"coming\b"
     r"|\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:of\s+us\s+)?"
     r"(?:for|at)\s+(?:dinner|lunch|supper|christmas|the\s+weekend)\b")
 # Nutrition, money and units of alcohol are a different question with the same words in it.
@@ -1332,17 +1353,48 @@ _PEOPLE_VALUE = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
                  "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
 
 
+# The people at the table counted by the groups a line names. "with 4 adults and 3 kids, how
+# much mince do i need" is seven people, and every group is a group of people: the adult count
+# alone is the wrong table, and it is one of the two ways a real question was answered 600 g
+# for four. The same rule reads the two groups in either order ("3 kids and 2 adults").
+_TABLE_GROUPS = re.compile(
+    r"\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a dozen)\s+"
+    r"(?:adults?|grown[\s-]?ups?|pensioners?|teenagers?|kids?|children|child|toddlers?|"
+    r"babies|baby|guests?|people|persons?|heads|of\s+us)\b", re.I)
+_GROUP_VALUE = dict(_PEOPLE_VALUE, **{"a dozen": 12})
+
+
+def people_in_groups(text):
+    """How many people the groups named in the line add up to, or None when it names none.
+
+    Every group counts: "4 adults and 3 kids" is seven, "3 kids and 2 adults" is five, and a
+    line with one group ("for 4 people", "6 kids") is that group. A child is a person at the
+    table too, so the total is what the shopping and the pan are for - the note that children eat
+    a little less belongs in the answer, not in a count that quietly leaves them out.
+    """
+    total = 0
+    for raw in _TABLE_GROUPS.findall(str(text or "").lower()):
+        count = int(raw) if raw.isdigit() else _GROUP_VALUE.get(raw)
+        if count:
+            total += count
+    return total or None
+
+
 def _people_asked(clean):
     """How many people the line cooks for, or None when it only says "a person"."""
     if re.search(r"\bbetween\s+us\b", clean):
         return 2  # "how much chicken between us" is dinner for two
+    grouped = people_in_groups(clean)
     found = _PEOPLE_COUNT.search(clean)
     if not found:
-        return None
+        return grouped
     raw = next((part for part in found.groups() if part), "")
-    if raw.isdigit():
-        return int(raw)
-    return _PEOPLE_VALUE.get(raw)
+    said = int(raw) if raw.isdigit() else _PEOPLE_VALUE.get(raw)
+    # A group count is the table, and the plain count is only better when it says more: "6
+    # coming, 2 of them kids" is a table of six, and the four adults in it are not the table.
+    if grouped and (not said or grouped > said):
+        return grouped
+    return said
 
 
 def _people_before(memory, statements_only=False, asked_for_an_amount=False):
@@ -1501,6 +1553,11 @@ def _per_person(clean, memory=None):
     if not re.search(r"\bhow (?:much|many|big|large)\b|\bwhat size\b|"
                      r"\bi (?:need|want)\b|\bi(?:'?m| am) (?:cooking|making)\b", clean):
         return None
+    # A time in the line is a cooking question, not a portion: "how many minutes each side for a
+    # steak" is the pan's answer, and the "each" that said so to this row is the side of the
+    # meat rather than a person. Nothing else that wants a weight of food puts a time in it.
+    if re.search(r"\b(?:minutes?|mins?|hours?|hrs?|seconds?)\b", clean):
+        return None
     # "i need a cake for 20 people" wants the tin, not a weight of cake: the cake-size row
     # answers it, and the article is what tells the two needs apart. A bare food is the portion
     # question ("i need mince for four people"); "a cake", "a leg of lamb" and "a big cake for a
@@ -1657,6 +1714,94 @@ _LAND_ASK = re.compile(r"\bhow (?:big|large|long|wide)\b|\bsize of\b|\bwhat size
                        r"|\bwhat(?:'s| is)\b|\bhow much (?:land|ground|space)\b")
 
 
+# A size said as a share of an acre is still a question about a size, and the answer people
+# want is a picture of it, not a conversion: "a garden of 0.15 acres, is that big" and "is 0.2
+# of an acre a big garden" were both shrugs. The references are things a person has stood on,
+# smallest first, so the answer is the nearest one a person can picture.
+_AREA_PICTURES = (
+    ("parking space", "parking spaces", 12.5),
+    ("doubles tennis court", "doubles tennis courts", 260.0),
+    ("football pitch", "football pitches", 7140.0),
+)
+# What a share of a land measure is said as, for the share written in words: "half an acre",
+# "a quarter of an acre", "two thirds of an acre".
+_WORD_SHARE = (("three quarters", 0.75), ("two thirds", 2 / 3.0), ("three quarters of", 0.75),
+               ("two thirds of", 2 / 3.0), ("a third", 1 / 3.0), ("a quarter", 0.25),
+               ("a half", 0.5), ("half", 0.5), ("quarter", 0.25), ("third", 1 / 3.0))
+# The words that ask for a judgement of size rather than a conversion. A land unit with a
+# number or a share on it is the fence: nothing else in the line can reach this.
+_A_SIZE_JUDGEMENT = re.compile(
+    r"\b(?:big|large|small|huge|tiny|sizeable|decent|reasonable|enough)\b"
+    r"|\bhow much (?:land|ground|space)\b|\bis that a lot\b")
+
+
+def _count_said(ratio):
+    """A count of a picture, said the way a person says it: "two", "two and a half".
+
+    Halves are as precise as a picture gets - "2 and a quarter doubles tennis courts" is a
+    number nobody says - and the word "about" in front of it covers the rounding.
+    """
+    whole = int(ratio)
+    part = ratio - whole
+    if part < 0.25:
+        return "%d" % whole
+    if part < 0.75:
+        return ("%d and a half" % whole) if whole else "half"
+    return "%d" % (whole + 1)
+
+
+def _area_pictures(square_metres):
+    """The nearest thing a person has stood on, said as a count: "about two tennis courts"."""
+    for name, plural, size in _AREA_PICTURES:
+        ratio = square_metres / size
+        if ratio < 5 or size == _AREA_PICTURES[-1][2]:
+            break
+    if ratio < 0.4:
+        return "less than half a " + name
+    if ratio < 0.75:
+        return "about two thirds of a " + name
+    if ratio < 1.15:
+        return "about a " + name
+    if ratio < 1.85:
+        return "a bit more than a " + name
+    return "about %s %s" % (_count_said(ratio), plural)
+
+
+def _share_before(clean, start):
+    """The count or share of a land measure said before it: 0.15, half, a quarter, 2."""
+    text = clean[:start]
+    found = re.search(r"(\d+(?:\.\d+)?)\s*(?:of\s+)?(?:an?\s+)?$", text)
+    if found:
+        return float(found.group(1))
+    for word, value in _WORD_SHARE:
+        if re.search(r"\b" + re.escape(word) + r"\s*(?:of\s+)?(?:an?\s+)?$", text):
+            return value
+    return None
+
+
+def _land_in_pictures(value, unit, clean=""):
+    """A number of acres asked *whether it is big*: the size, then the nearest picture of it."""
+    table = {name: size for name, _, size in UNITS["area"]}
+    square_metres = value * table[unit]
+    if square_metres < 1:
+        return None
+    if abs(value - 1) < 1e-9:
+        said = "One " + SAID_ONE[unit]
+    elif abs(value - round(value)) < 1e-9:
+        said = "%d %s" % (round(value), SAID[unit])
+    else:
+        said = "%s %s" % (_fmt(value), SAID[unit])
+    body = "%s is about %s square metres - %s" % (
+        said, _fmt(round(square_metres)), _area_pictures(square_metres))
+    # A garden is the thing people are really asking about, and most gardens are far smaller
+    # than a quarter of an acre, so the comparison is worth saying once here.
+    if square_metres >= 400 and "garden" in clean:
+        body += ", which is a generous garden for a house"
+    if abs(value - 1) < 1e-9:
+        return body + "."      # one acre is the definition itself: the tail would repeat it
+    return body + ". " + LAND_PLAIN[unit]
+
+
 def _land_size(clean, mentions):
     """"how big is an acre": one land measure named, with no number and no second unit."""
     if len(mentions) != 1:
@@ -1664,6 +1809,14 @@ def _land_size(clean, mentions):
     start, end, family, unit = mentions[0]
     if family != "area" or unit not in LAND_PLAIN:
         return None
+    # "a garden of 0.15 acres, is that big": a count of land with a size judgement on it is a
+    # picture question, and it is answered before the no-number rule below.
+    if _A_SIZE_JUDGEMENT.search(clean):
+        counted = _share_before(clean, start)
+        if counted is not None:
+            pictured = _land_in_pictures(counted, unit, clean)
+            if pictured:
+                return pictured
     # "an acre" and "a hectare" are the article, not a count: only a real number makes the
     # line a conversion of some acres rather than a question about one of them.
     before = clean[max(0, start - 14):start]
@@ -1720,6 +1873,58 @@ def _is_a_distance(clean):
     return bool(_NOT_A_HEIGHT.search(clean)) and not re.search(r"\btall\b", clean, re.I)
 
 
+# A stated height is context when the line goes on to ask something else. The human's shape:
+# "im 5 foot 2 and i need trousers for work, what do i look for" was answered "5 foot 2 is about
+# 157 cm, or 1.57 m." - a true sentence and not the question. The ask word alone is not enough,
+# because "im 5 foot 9, what is that in cm" asks about the measure itself, so the few words after
+# the ask word are read too.
+_ASKS_ELSEWHERE = re.compile(
+    r"\b(?:what|which|where|who|whose|should|shall|could|would|can|need|needs|looking for"
+    r"|look for|recommend|suggest|ideas|advice|buy|buying|wear|choose|pick|worth|fit|fits)\b",
+    re.I)
+_A_MEASURE_QUESTION = re.compile(
+    r"\b(?:cm|centimetres?|centimeters?|m|metres?|meters?|feet|foot|ft|inches?|inch|tall|height"
+    r"|that|this|it|in|convert|converted)\b", re.I)
+
+
+# A complaint in the line is a question even when it is said without a question word: on main
+# `ff33dbb` "i am 5ft 2 and standing all day at work kills my feet" was answered with the
+# conversion, because a height and a hurt came in the same breath.
+_A_COMPLAINT = re.compile(
+    r"\b(?:hurt|hurts|hurting|ache|aches|aching|achy|sore|pain|painful|kills?|killing"
+    r"|blister|blisters|swollen|numb|too (?:small|tight|big|long|short|loose)"
+    r"|doesn'?t fit|don'?t fit|does not fit|do not fit|rubbed|rubbing)\b", re.I)
+
+
+# A count asked for is a question about the things counted, not about the measure they are cut
+# from: "im boarding out the loft ceiling, 3 by 2 metres, how many sheets" has an "im" and a metre
+# measure in it, so it read as the person's own height and was answered "2 m is about 6 foot 7"
+# while the plasterboard card that the same words reached never got the line.
+_ASKS_HOW_MANY = re.compile(r"\bhow\s+(?:many|much)\s+(?P<thing>[a-z]+)", re.I)
+# Sizes people ask for that the unit table does not carry: a horse is 15 hands, a field 40 paces.
+# A line that asks a height in those is the measure's own question, so it keeps the conversion -
+# "im 4 foot 11 how many hands is that" answered "4 foot 11 is about 150 cm" on main, and a guard
+# that read "hands" as a count of things turned it into "I'm listening".
+_A_MEASURE_SAID_ANOTHER_WAY = frozenset(("hand", "hands", "pace", "paces", "span", "spans"))
+
+
+def _asks_something_else(clean):
+    """True when a stated height comes with a question about something that is not a measure."""
+    if _A_COMPLAINT.search(clean):
+        return True
+    for match in _ASKS_HOW_MANY.finditer(clean):
+        # "how many feet is 2 metres" and "how many grams in a cup" are the measure's own
+        # questions, so a unit word keeps the conversion.
+        thing = match.group("thing").lower()
+        if not _UNIT_WORD.fullmatch(thing) and thing not in _A_MEASURE_SAID_ANOTHER_WAY:
+            return True
+    for match in _ASKS_ELSEWHERE.finditer(clean):
+        tail = " ".join(clean[match.end():].split()[:5])
+        if not _A_MEASURE_QUESTION.search(tail):
+            return True
+    return False
+
+
 def _own_height(clean):
     """The other number for a height the person states about themselves, or None.
 
@@ -1729,6 +1934,10 @@ def _own_height(clean):
     if not _SAYS_OWN_HEIGHT.search(clean):
         return None
     if _is_a_distance(clean):
+        return None
+    # "im 5 foot 2 and i need trousers for work, what do i look for": the height is a fact about
+    # the person, and the question is about trousers. Converting here answered neither.
+    if _asks_something_else(clean):
         return None
     metres, said = None, ""
     found = _HEIGHT_METRES.search(clean)
@@ -1870,12 +2079,27 @@ _NOT_A_FOOD = frozenset((
     "costs", "price", "prices", "each", "person", "people", "portion", "serving", "worth"))
 
 
+# "Pounds" is money when a figure carries it and the line asks whether that is a lot, dear or
+# worth it: "is 4 pounds a lot for a pint of milk" is a price question, and answering it with
+# what the milk weighs reads the "pounds" as a weight. The same word is a weight in "5 pounds of
+# potatoes" and "a pint of milk in pounds", where nothing in the line is judging a price.
+_POUNDS_IS_MONEY = re.compile(
+    r"(?:£\s*\d|\b\d+(?:\.\d+)?\s*(?:pounds?|quid|pence|p\b|gbp))"
+    r"[^.?!]*?\b(?:a lot|lot for|expensive|cheap|cheaper|cheapest|dear|dearer|overpriced|"
+    r"rip.?off|worth it|worth the|too much|reasonable|fair|good price|bad price|a rip|what price)",
+    re.I)
+
+
 def _asks_for_weight(clean):
     """True when the line wants a weight: "how many grams", "what does a cup weigh", "in oz".
 
     "How much water for two cups of tea" names a food and a cup but wants a pour, not grams,
-    so a food's cup weight is only given when the line itself asks for a weight.
+    so a food's cup weight is only given when the line itself asks for a weight. A figure in
+    pounds that the line is judging the price of is money, not a weight, so it asks nothing about
+    grams: "is 4 pounds a lot for a pint of milk" wants the price the milk sells at.
     """
+    if _POUNDS_IS_MONEY.search(clean):
+        return False
     if _WEIGH.search(clean):
         return True
     return bool(re.search(r"\b(?:grams?|g|kg|kilograms?|oz|ounces?|pounds?|lbs?)\b", clean))
@@ -1950,12 +2174,48 @@ def _rule_sentence(family, from_unit, to_unit):
     return f"To go from {said_from} to {said_to}, {rule}: {example}."
 
 
+# The words a line made of nothing but a conversion is allowed to keep once its units are taken
+# out: the grammar between them and the ask in front of them.
+_BARE_JOIN = frozenset((
+    "to", "in", "into", "as", "convert", "converting", "how", "do", "i", "many", "much", "is",
+    "are", "there", "and", "the", "a", "an", "what", "s"))
+
+
 def _is_bare_pair(clean, mentions):
-    """True when the line is nothing but two units and the word between them: "km to miles"."""
-    others = [word for word in re.findall(r"[a-z0-9/'’]+", clean)
-              if word not in ("to", "in", "into", "as", "convert")]
-    return bool(others) and all(word in _NAMES or word.isdigit() for word in others) \
-        and len(mentions) >= 2
+    """True when the line is nothing but two units and the word between them: "km to miles".
+
+    The units are taken out by where they were found, not word by word: a unit can be two words
+    ("ml to fl oz", "kin to fluid ounces") and the old word check read "fl" as a stray, so every
+    line naming a fluid ounce as one of a bare pair returned None.
+    """
+    if len(mentions) < 2:
+        return False
+    rest = clean
+    for start, end, _family, _unit in reversed(mentions):
+        rest = rest[:start] + " " + rest[end:]
+    rest = re.sub(r"\d+(?:\.\d+)?", " ", rest)
+    words = re.findall(r"[a-z]+", rest)
+    return bool(words) and all(word in _BARE_JOIN for word in words)
+
+
+# The ounce is two units in one word: 28.35 g of weight and 28.4 ml of liquid. Which one a line
+# means is settled by the measure on the other side - "150 ml to oz" is fluid ounces, "150 g to
+# oz" is weight - so the family of the other measure picks the sense, whichever side it is on.
+# Before this the liquid sense was one special case inside the "how many ounces in a pint"
+# branch, so every other shape hedged: "ml to oz", "150 ml to oz", "500 ml to oz", "how do i
+# convert ml to oz" and "how do i convert oz to ml" were all a search offer, while "how many oz
+# in 500 ml" answered.
+def _the_ounce_pair(family, unit, other_family, other_unit):
+    """Both sides of a conversion, with a bare ounce read in the other side's family."""
+    if unit == "ounce" and other_family == "volume":
+        return "volume", "fl oz", other_family, other_unit
+    if other_unit == "ounce" and family == "volume":
+        return family, unit, "volume", "fl oz"
+    if unit == "fl oz" and other_family == "mass":
+        return "mass", "ounce", other_family, other_unit
+    if other_unit == "fl oz" and family == "mass":
+        return family, unit, "mass", "ounce"
+    return family, unit, other_family, other_unit
 
 
 def _how_to_convert(clean, mentions):
@@ -1967,6 +2227,8 @@ def _how_to_convert(clean, mentions):
         return None
     for position, (start, _end, family, unit) in enumerate(mentions):
         for other_start, _oend, other_family, other_unit in mentions[position + 1:]:
+            family, unit, other_family, other_unit = _the_ounce_pair(
+                family, unit, other_family, other_unit)
             if other_family != family or other_unit == unit:
                 continue
             return _rule_sentence(family, unit, other_unit)
@@ -2865,7 +3127,8 @@ def _answer(clean, memory=None):
             if text == "in" or not (_TARGET.search(before)
                                     or re.search(r"how (?:many|much)\s+$", before)):
                 continue
-            to_family, to_unit = _NAMES[text]
+            family, unit, to_family, to_unit = _the_ounce_pair(
+                family, unit, *_NAMES[text])
             if to_family != family or to_unit == unit:
                 continue
             # The unit wanted ends the question: "how many hours is that in a week" names a
@@ -2885,8 +3148,14 @@ def _answer(clean, memory=None):
         # else that happens to name a measure ("how many days in a week should I run").
         if source and not _tail_is_about_the_measure(clean[source[3]:]):
             source = None
-        if want and source and want[1] == "ounce" and source[1] == "volume":
-            want = ("volume", "fl oz")  # "how many ounces in a pint" is a liquid measure
+        if want and source:
+            # "how many ounces in a pint" is a liquid measure; the same rule as everywhere else.
+            # The source is often written without a number ("how many ml in an ounce"), so the
+            # ounce is read here too rather than only the unit wanted.
+            want_family, want_unit, source_family, source_unit = _the_ounce_pair(
+                want[0], want[1], source[1], source[2])
+            want = (want_family, want_unit)
+            source = (source[0], source_family, source_unit, source[3])
         if want and source and want[0] == source[1] and want[1] != source[2]:
             if source[1] == "mass" and source[2] in ("cup", "tbsp", "tsp"):
                 return _cup_of_something(clean)

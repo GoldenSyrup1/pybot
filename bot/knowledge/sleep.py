@@ -450,6 +450,12 @@ ENTRIES = [
           # and "boiling" would take a line about boiling a potato.
           avoid=("goodnight", "night night", "off to bed", "im off", "bedtime for me", "see you",
                  "bye", "good night", "baby", "toddler", "child", "fever", "radiator", "boiler",
+                 # a dressing question is the clothes, whatever the weather: "what should i wear
+                 # to a funeral in the heat" and "what should i wear to a wedding abroad in the
+                 # heat" were told to cool the room rather than the bed, because the hot day is
+                 # in this card's subject group and the two questions only say "what to wear"
+                 "wear", "wearing", "what to wear", "should i wear", "outfit", "outfits",
+                 "what do i wear", "what shall i wear", "dress code",
                  "water bottle", "hot flush", "menopause",
                  # a sleeping person asking about the heating is the heating's question: the
                  # thermostat answer had "should i turn the heating off at night" as a bowl of
@@ -529,7 +535,7 @@ ENTRIES = [
           guard=_a_machine_that_is_on_is_not_a_sleeper),
 
     entry("sleep-trouble",
-          (("sleep", "sleeping", "insomnia") + SLEEPING_BADLY,
+          (("sleep", "sleeping", "insomnia", "awake") + SLEEPING_BADLY,
            ("trouble", "can't", "cant", "cannot", "struggle", "problems",
             "better", "at all", "half the night", "help",
             # the adverb form of the same report: "i sleep very badly" and "i sleep so badly"
@@ -551,6 +557,11 @@ ENTRIES = [
             # they call it. None of them names a subject of its own.
             "cure", "cured", "curing", "get rid of", "stopped",
             "tossing", "turning", "stay asleep", "staying asleep",
+            # Being kept awake is the same report as not sleeping, and the line usually blames
+            # something for it - the moon, a neighbour, the heat. Without these the blame got the
+            # answer: "the full moon keeps me awake" was told the length of a lunar cycle.
+            "keeps me awake", "keep me awake", "kept me awake", "wide awake",
+            "awake all night", "awake half the night",
             # "what should i do about insomnia" is the plainest ask there is. The list carried
             # the want words ("cure", "get rid of", "improve") and no plain ask, so the shortest
             # question anyone asks about a bad night was a search hedge. health.PLAIN_DO_ASK is
@@ -685,6 +696,39 @@ ENTRIES = [
           "It isn't dangerous, but the light and the story keep your brain alert, so you fall "
           "asleep later and wake more in the night. If you need something playing, a podcast or "
           "radio set to sleep is easier on sleep than a screen."),
+    # Reading is the wind-down most people already have, and asking whether it is bad for
+    # sleep got a novel: "is it bad to read in bed" was `pick-plain`, "reading before sleep good
+    # or bad" was a book "about" sleep, and "how do i stop reading so late" was the lapsed-reader
+    # answer. The medium is the whole question - paper in low light is fine, a backlit screen and
+    # a page-turner at bedtime are not - so the entry is a sleep answer beside the tv one.
+    entry("read-bedtime",
+          (("read", "reading", "reads", "book", "books", "novel", "kindle", "ereader",
+            "e-reader", "chapter", "chapters", "audiobook", "audio book"),
+           ("bed", "in bed", "before bed", "bedtime", "night", "sleep", "asleep", "late",
+            "sleeping", "fall asleep", "wind down", "evening", "bad", "good", "ok", "okay",
+            "stop")),
+          ("Reading on paper in low light is one of the better wind-downs there is, and a book you "
+           "have read before is easier to put down than a new one. It is the backlit screen and "
+           "the scrolling that delay sleep, so a phone or tablet story is the one to move; an "
+           "e-reader on a warm setting is much closer to paper. If a book hooks you so hard you "
+           "are still going at 2am, keep a dull one by the bed and save the page-turner for the "
+           "daytime."),
+          # a child's bedtime story, a book to read next and a present are three other answers,
+          # and so is a line about a light that will not switch off
+          avoid=("kid", "kids", "child", "children", "son", "daughter", "toddler", "baby",
+                 "teenager", "teen", "year old", "years old", "read to", "reading to",
+                 "aloud", "out loud", "stories for", "bedtime story", "bedtime stories",
+                 "recommend", "suggest", "what book", "which book", "what should i read",
+                 # a line that asks for a book to read is a pick, and the setting it names
+                 # ("in bed", "before bed") does not turn it into a question about sleep
+                 "good book", "book to read", "books to read", "something to read", "any book",
+                 "a book for", "some book", "reading list",
+                 "gift", "present", "birthday", "christmas", "library", "bookshop",
+                 "book club", "lamp", "bulb", "light", "lights", "torch", "curtain", "blind",
+                 "shut", "broken", "battery", "glasses", "eyes", "eye test", "sight",
+                 "how do i read", "how to read", "learn to read", "dyslexia",
+                 "finished", "finish a book", "gave up", "give up"),
+          bias=1),
     # The afternoon dip is a time of day, not a feeling: "how do i stop feeling tired in the
     # afternoon" is nobody's idea of how to have a difficult conversation, but the bag of words
     # "how i feel" in that row's key read it that way, and this answer did not exist to win.
@@ -893,6 +937,35 @@ ENTRIES = [
           avoid=("baby", "toddler", "child", "newborn", "cough", "cold", "worse at night",
                  "hurts", "pain", "ache")),
 
+    # A duvet is chosen by tog, and nobody knows the numbers: "which duvet tog for winter" and
+    # "what bedding is warmest" were both a hedge, while "how do i wash a duvet" is the cleaning
+    # row's line. The warmth words are the key's second half here and the washing words stand the
+    # row down, so the two questions about one duvet stay apart.
+    entry("duvet-tog",
+          (("duvet", "duvets", "quilt", "quilts", "bedding"),
+           ("tog", "togs", "warm", "warmest", "warmer", "winter", "cold", "cosy",
+            "thick", "thicker", "summer")),
+          "A 13.5 tog duvet is the winter one, 4.5 tog is for summer and 10.5 tog or two thin ones "
+          "that button together cover the rest of the year. Tog measures warmth for its weight, "
+          "not how heavy it feels, so a 13.5 tog feather duvet and a 13.5 tog hollowfibre one are "
+          "equally warm - buy the filling you can wash and dry. For a cold bedroom, a second "
+          "lighter duvet on top or a hot water bottle at your feet warms you faster than a heavier "
+          "one over your whole body.",
+          # a duvet that is washed, stained or smelly is the cleaning row's; a baby's bedding and
+          # the safe-sleep rules are the baby rows'; a fever is not a tog
+          avoid=("wash", "washing", "washed", "clean", "cleaning", "stain", "stains",
+                 "smell", "smells", "musty", "yellow", "dryer", "tumble", "machine",
+                 "baby", "babies", "newborn", "toddler", "cot", "crib", "moses",
+                 "fever", "temperature", "sweat", "sweating", "night sweats", "allergy",
+                 "allergic", "feather allergy", "dust mite",
+                 # being cold in bed is a bedding question only while it is about the bedding:
+                 # "i am always cold in bed" is the always-cold symptom row's line, whose answer
+                 # is thyroid, iron and the doctor, and a tog is no answer to it
+                 "always cold", "always so cold", "all the time", "constantly", "cold hands",
+                 "cold feet", "cold all", "feel the cold", "thyroid", "iron", "anaemic",
+                 "anemic", "circulation", "shivering", "shiver", "tired all", "exhausted",
+                 "cold sweats", "cant get warm", "can't get warm", "never warm"),
+          bias=1),
     entry("bedroom-temp", (("bedroom", "room temperature", "my room"), ("warm", "warmth",
                             "temperature", "degrees", "hot", "cold", "how warm", "how cool",
                             # A bedroom said to be freezing is this row's question, not the
@@ -933,7 +1006,13 @@ ENTRIES = [
                  # has to be named for the food rows to keep their own line.
                  "steak", "steaks", "beef", "pork", "lamb", "turkey", "bacon", "sausage",
                  "sausages", "fish", "salmon", "pastry", "cream", "cook", "cooking", "oven",
-                 "recipe", "soften", "mayonnaise"),
+                 "recipe", "soften", "mayonnaise",
+                 # a radiator that will not heat is the heating rows' question, whatever room it
+                 # is in: "the radiator in my room is cold" was answered with the temperature a
+                 # bedroom should be for sleep, which is not what was asked. So is every other
+                 # part of the system a person names when a room is cold.
+                 "radiator", "radiators", "heating", "boiler", "thermostat", "thermostatic",
+                 "bleed", "bleeding", "trv", "valve", "valves"),
           bias=1),
 
     # "does tea keep you up" asks about tea and sleep at once, and the caffeine entry no longer
@@ -1041,6 +1120,18 @@ ENTRIES.append(entry(
            "my son", "my daughter", "pregnant", "pregnancy", "shift", "night shift",
            "work nights", "worked nights", "insomnia", "cant sleep", "can't sleep",
            "wake up", "waking", "woke up", "hot", "sweating", "pain", "ache", "snore",
-           "snoring", "nap", "naps"),
+           "snoring", "nap", "naps",
+           # A thing that goes wrong in the evening is that thing's card, not the hour before
+           # bed: "the wifi drops every evening when everyone is home, what should i do" was
+           # answered with this routine, because the row claims the ask ("what should i do")
+           # and the evening, so two setting words were enough to reach it. Nothing below is a
+           # bedtime question.
+           "wifi", "wi fi", "wi-fi", "internet", "broadband", "router", "connection",
+           "phone signal", "mobile signal", "boiler", "heating", "radiator", "radiators",
+           "thermostat", "tap", "taps", "drip", "drips", "dripping", "leak", "leaks", "leaking",
+           "fridge", "freezer", "washing machine", "washer", "dishwasher", "tumble dryer",
+           "oven", "hob", "cooker", "kettle", "telly", "tv", "television", "printer", "laptop",
+           "computer", "bulb", "bulbs", "flicker", "flickering", "flickers", "clicking",
+           "clicks", "banging", "bangs", "rattling", "rattles", "humming", "hums"),
     ask=("whats a good", "what is a good", "what's a good", "good", "best", "recommend",
          "suggest", "what should i do", "look like", "help me", "give me")))

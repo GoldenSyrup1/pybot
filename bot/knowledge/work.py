@@ -40,7 +40,15 @@ MANAGING_ASKS = ("manager", "managing", "manage", "managed", "team", "my team", 
                  "what do i do", "what should i do", "what can i do", "dont know what to do",
                  "don't know what to do", "not sure what to do", "no idea what to do",
                  "how", "help", "deal", "handle", "deal with", "say", "tell", "talk",
-                 "word", "approach", "first")
+                 "word", "approach",
+                 # "first" was in this list on its own and that one word was enough to hand a
+                 # history question to a work card: "first world war" is a name, and with "war"
+                 # read as a form of "warring" the two together made "what caused the first world
+                 # war" a row about two colleagues who will not speak. A first-time manager is
+                 # the question this word was here for, so it is said as that and not as the word.
+                 "first team", "my first team", "first time managing", "first time manager",
+                 "first time in charge", "first time as a manager", "newly promoted",
+                 "just been made a manager", "new manager")
 NOT_PAY_RAISE = ("raise money", "raise funds", "money for", "funds for", "fundraising",
                  "charity", "sponsor", "crowdfund", "awareness",
                  "raise a child", "raise children", "raise a family", "raise kids",
@@ -98,6 +106,19 @@ WORK_SUBJECT = ("hours", "hour", "pay", "paid", "unpaid", "contract", "rights", 
                 "employer", "work", "working", "job", "shift", "shifts", "rota", "overtime",
                 "holiday", "leave", "breaks", "break", "rest", "union", "acas", "payslip")
 
+# The words that make `law` mean a relation rather than a statute. "my in laws are coming for
+# lunch sunday" was answered "Your contract is the place to look first: it sets your hours, your
+# breaks and whether overtime is paid" because `WORK_SUBJECT` carries `law` and `in laws` spells
+# it; `my mother in law is coming sunday` got the visit card, so the plural was the whole fault.
+IN_LAW = re.compile(r"\bin\s*-?\s*laws?\b")
+# A line can hold a relation and a job at once - "my mother in law is my boss", "my in laws want
+# me to quit my job" - and the job is the question there, so these keep the contract answer. The
+# relation words are not in this list; the point is the job, said plainly.
+IN_LAW_JOB = ("job", "jobs", "work", "working", "worked", "employer", "boss", "manager",
+              "shift", "shifts", "rota", "contract", "overtime", "payslip", "holiday",
+              "annual leave", "sacked", "dismissed", "redundant", "redundancy", "hours",
+              "wages", "union", "acas", "self employed", "resign", "resigning")
+
 # A break in a bone is not a break in a shift, and "break" alone was enough to reach the fallback
 # below: "what's the difference between a sprain and a break" and "whats the difference between a
 # fracture and a break" were both answered "Your contract is the place to look first". The words
@@ -147,6 +168,68 @@ _A_THING_THAT_HAPPENED = re.compile(
     r"spilled|no\s+gloves|no\s+training|guard\s+off|near\s+miss|report)\b")
 
 
+_SOMEONE_ELSE = re.compile(
+    r"(?<![a-z0-9])(my (husband|wife|partner|son|daughter|friend|brother|sister|mum|mom|dad|"
+    r"father|mother|colleague|cousin|neighbour|neighbor|flatmate|roommate)|he was|she was|"
+    r"they were|his job|her job|their jobs?)(?![a-z0-9])")
+_MY_OWN = re.compile(r"(?<![a-z0-9])(me|my|i|i'm|im|ive|i've|myself)(?![a-z0-9])")
+
+
+def _it_is_their_own_dismissal(understood):
+    """True when the person is asking about their own sacking, not telling us someone else's.
+
+    The bare event words are the subject now, so "my husband was sacked from his job" reached the
+    interview answer; that line is news about a husband and belongs with the comfort card. A line
+    that says "me" or "my job" as well is the person's own, so "my boss sacked me" still counts.
+    """
+    said = " " + str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower() + " "
+    if not _SOMEONE_ELSE.search(said):
+        return True
+    return bool(re.search(r"(?<![a-z0-9])(me|my job|my last job|my own job|mine|myself)(?![a-z0-9])", said))
+
+
+_CHOOSING_A_NAME = re.compile(
+    r"(?<![a-z0-9])(use as|use for a|put as|put down as|who can i|who can be|who could i|"
+    r"who should i|who do i ask|who do i use|who can be my|no experience|no work experience|"
+    r"never had a job|never worked)(?![a-z0-9])")
+
+
+def _not_choosing_a_name(understood):
+    """False when the line is choosing who to name, which is the who-to-ask card's question.
+
+    The check card reads the bare noun, so "i have no experience what can i use as a reference"
+    reached it and got told the questions a reference check asks - an answer to a question
+    nobody asked, from a person with no manager to name. The words that say "which name do I
+    put down" stand the check card down; "no experience" and "first job" are no longer part of
+    its key, because they belong to the person choosing, not to the check.
+    """
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    return not _CHOOSING_A_NAME.search(said)
+
+
+_WRITING_A_REFERENCE = (
+    "write", "writing", "written", "draft", "drafted", "word", "worded", "wording",
+    "letter", "letters", "recommend", "recommendation", "compose", "put together",
+    "what should i say", "how do i say", "give a reference", "give someone a reference",
+    "give him a reference", "give her a reference", "given a reference", "asked to write",
+    "asked me to write", "for a colleague", "for a student", "for an employee",
+    "for my colleague", "for my student", "for my employee", "for a leaver", "for staff",
+)
+
+
+def _writing_one_not_needing_one(understood):
+    """True when the line is somebody writing a reference, not somebody needing one.
+
+    Three questions share the noun. "Who should I use as a reference" is the person job-hunting
+    (the references entry), "will they check my references" is what happens afterwards (the
+    reference-check entry), and "how do I write a reference letter" is the manager's half (this
+    entry). A line only reaches this card when it says the letter is being written or given:
+    "do i need a reference for a first job" and "do i have to give a reference for a leaver"
+    were both answered with how to word one, because the bare noun plus a stray word was enough.
+    """
+    return _said(understood or {}, _WRITING_A_REFERENCE)
+
+
 def _not_a_body_part_that_hurts(understood):
     """False when the line is a part of the body hurting, so the body cards answer it.
 
@@ -178,9 +261,46 @@ def _the_asking_has_its_own_answer(understood):
     return not _ASKING_TO_ASK.search(_said_text(understood or {}))
 
 
+# A war between countries is not two people who cannot work together. The quarrel row keys
+# "warring", and the word family folds that to "war" - the commonest noun in the other world - so
+# "what was the cause of the first world war" was answered with the work rule for a clash between
+# two members of staff, and so were "when did the first world war end", "who won the first world
+# war", "how did the korean war end" and "what were the causes of the hundred years war". A war
+# named as a thing stands the row down, and the history rows take the line.
+A_NAMED_WAR = re.compile(
+    r"\b(?:(?:world|cold|civil|great|first|second|hundred years|korean|vietnam|gulf|iraq|"
+    r"afghan|syrian|ukrainian|crimean|boer|trench|nuclear|trade|price)\s+war|"
+    # "a war of words" and "a war of nerves" between two people are the quarrel row's own lines,
+    # so the metaphor is not a war named as a thing
+    r"war\s+(?:in|of|on|against)\s+(?!words|nerves)\b|"
+    r"ww1|ww2|wwi|wwii|battle of|armistice)\b", re.I)
+
+
+def _a_named_war(understood):
+    """False when the line names a war, which is nobody's clash with a colleague."""
+    return not A_NAMED_WAR.search(_said_text(understood or {}))
+
+
 def _said_text(understood):
     """The line as the person typed it, for the replies that say their own word back."""
     return str(understood.get("clean") or understood.get("text") or "")
+
+
+# A who-ask is a route: "who do i talk to about a problem at work" is asking which person to go
+# to, not how to give a talk. The presentation row keys the bare words "talk", "speak" and "present"
+# against "work", so it claimed it and answered with slides. The shape is checked, not the
+# wording, because asking who to approach has no fixed phrasing: "who do i contact about my sick
+# pay", "which number do i ring about the rota", "who should i speak to about my hours".
+_WHO_TO_GO_TO = re.compile(
+    r"^\s*(?:so |ok |okay |right |and |but |then )*"
+    r"(?:who|who's|whos|whose|whom|which (?:person|service|number|office|department|team)|"
+    r"where do i)\b[^?]{0,60}?"
+    r"\b(?:talk|speak|ask|ring|phone|call|contact|complain|report|write|go|turn|raise)\b")
+
+
+def _a_who_ask_is_a_route(understood):
+    """False when the line is asking which person or office to approach."""
+    return not _WHO_TO_GO_TO.search(_said_text(understood).lower())
 
 
 def _said(understood, phrases):
@@ -224,6 +344,12 @@ def _whose_tears(text):
         if not (_CRY_WORD.fullmatch(words[i]) or _CRY_WORD.fullmatch(said)):
             continue
         near = " ".join(words[max(0, i - 4):i])
+        # "my boss made me cry", "he reduced me to tears" and "she upset me and i cried" name
+        # somebody else and the person crying is still the one writing: the pronoun in front of
+        # the verb is the object of it. Read that before the other-person test, or the speaker
+        # is handed advice on how to look after the person who upset them.
+        if i and words[i - 1] in ("me", "us", "myself"):
+            return "mine"
         if _NOBODY_ELSE.search(near):
             return "mine"
         if _FIRST_PERSON.search(near) and not _ANOTHER_PERSON.search(near):
@@ -447,6 +573,19 @@ PRESENTATION_NERVES = ("Write the first thirty seconds word for word and say it 
                        "half as much as you do.")
 
 
+# The ask for the shape of the day rather than for preparation.
+# The shape of the day is asked several ways and the tuple had two of them: "what does an
+# interview day look like" reached nothing, "how does the day go" reached the preparation answer.
+SHAPE_OF_THE_INTERVIEW = ("what happens", "what to expect", "what should i expect",
+                          "what do i expect", "what can i expect", "whats it like",
+                          "what is it like", "interview like", "like an interview",
+                          "what do they ask", "what will they ask", "what kind of questions",
+                          "look like", "looks like", "the day", "day go", "day like",
+                          "run through", "run me through", "walk me through", "walk through",
+                          "the format", "whats the format", "what is the format",
+                          "how does it go", "how does the day")
+
+
 def _presentation_nerves(memory, understood):
     """The presentation answer, with the body named first when the line is a symptom."""
     if _said(understood, NERVES_BODY):
@@ -457,12 +596,25 @@ def _presentation_nerves(memory, understood):
     return PRESENTATION_NERVES
 
 
+# "what happens at a job interview" asks for the shape of the day, not for how to prepare,
+# and it was a shrug: the row's key had every asking word except the one people use for it.
+WHAT_HAPPENS_AT_AN_INTERVIEW = (
+    "Nearly always the same shape: someone meets you at reception, a few minutes of small talk "
+    "on the way in, then twenty to forty minutes of questions about what you have actually done "
+    "- a time you fixed something, a time you got it wrong - then five or ten minutes for your "
+    "questions, and a word about next steps or a tour. Answer with examples rather than "
+    "adjectives, keep one question ready about the team and the first six months, and ask when "
+    "you will hear back before you leave.")
+
+
 def _interview_prep(memory, understood):
     reply = ("Prepare four stories in situation-task-action-result shape: a week you organised, "
              "a difficult customer or colleague, something you fixed, and a time you got it wrong "
              "and changed. Then write three questions for them about the team, the first six "
              "months and what good looks like. Say the answers out loud once - saying it is "
              "different from thinking it.")
+    if _said(understood, SHAPE_OF_THE_INTERVIEW):
+        return WHAT_HAPPENS_AT_AN_INTERVIEW
     if _said(understood, NERVES):
         return "Nerves before an interview are normal, and they shrink once you have something " \
                "ready. " + reply
@@ -494,7 +646,11 @@ def _say_no(memory, understood):
 # "shes" and "hes" are their own words to the whole-word test, so the contractions are listed
 # beside the bare pronouns; without them "shes nervous about the first day" was still handed the
 # packing list.
-_ANOTHER_PERSON = ("she", "he", "her", "him", "his", "they", "them", "their", "shes", "hes",
+# The tuple below had the name of the regex 300 lines up, and the second definition wins: the
+# guard in `_whose_tears` called `.search()` on a tuple, so the whole answer raised and the
+# arbiter dropped it. "i cant stop crying" was answered with a habit card because of it. Two
+# different kinds under one name is the shape `tests/test_no_name_is_defined_twice.py` now fails on.
+_ANOTHER_PERSON_WORDS = ("she", "he", "her", "him", "his", "they", "them", "their", "shes", "hes",
                    "theyre", "herself", "himself",
                    "my son", "my daughter",
                    "my child", "my kid", "my teen", "my partner", "my friend", "my nephew",
@@ -509,7 +665,7 @@ def _first_day(memory, understood):
     # else feels about it, and handing *him* a packing list is no answer to that. The nerves answer
     # reads his own worst of it instead, so the line is left to it. The person asking about their
     # own first day keeps the list, because that is the useful thing on the day itself.
-    if (_said(understood, NERVES) and _said(understood, _ANOTHER_PERSON)
+    if (_said(understood, NERVES) and _said(understood, _ANOTHER_PERSON_WORDS)
             and not _said(understood, _FIRST_DAY_ASKS)):
         return None
     # a week in, the ask is not what to bring: it is how to stop feeling like a spare part.
@@ -634,6 +790,12 @@ def _pay_and_hours(memory, understood):
     # contract rule only reached the line on the word "break".
     if _said(understood, INJURY_WORDS) and not _said(understood, BREAK_WORK_CUES):
         return None
+    # An in-law is a relation, not a statute: "my in laws are coming for lunch sunday" reached
+    # this fallback on the `laws` inside `in laws` and was answered "Your contract is the place
+    # to look first", while `my mother in law is coming sunday` got the visit card. The words
+    # that make a relation say so, and a line with one and no job in it is somebody's family.
+    if IN_LAW.search(line) and not _said(understood, IN_LAW_JOB):
+        return None
     return ("Your contract is the place to look first: it sets your hours, your breaks and whether "
             "overtime is paid. On top of it the law gives you a 20-minute break on a shift over "
             "six hours, 11 hours between shifts, and an average 48-hour week unless you signed an "
@@ -727,6 +889,10 @@ _NOT_BODY_WEIGHT = (r"(?!\s+(?:weight|fat|kilos?|kilograms?|pounds?|lbs|stones?|
                     r"my weight|some weight|a stone|a few pounds))")
 _CARRY_OVER = re.compile(
     r"\bcarry|carried|carrying|roll(?:ed)? over|use it or lose|"
+    # Days kept back from an earlier year are the same question as days carried over: "i saved
+    # three days of holiday can i use them" and "i have 5 days holiday saved up from last year"
+    # are not asking for the 28-day figure, they are asking whether the saved ones survive.
+    r"\bsaved\b|\bsaved up\b|left over|leftover|from last year|from the year before|"
     rf"\blose\b{_NOT_BODY_WEIGHT}|\blost\b{_NOT_BODY_WEIGHT}|forfeit|unused|"
     r"\binto (?:january|february|march|april|may|june|july|august|september|october|november|"
     r"december|next year|the next year|next month)\b|\btake it into the next\b", re.IGNORECASE)
@@ -1380,6 +1546,30 @@ def a_body_standing(understood):
     return True
 
 
+# The verb "meet" is about people; the noun "meeting" is about a room, and the matcher reads one
+# as the other. "how do i meet new people" and "how do i meet someone" were answered with tactics
+# for saying one thing in a room of colleagues.
+_MEET_VERB = re.compile(r"\bmeet\b", re.I)
+
+
+def _the_room_and_not_the_verb_meet(understood):
+    """The speaking-up row's guard: a body standing is not the room, and meeting people is not one.
+
+    False when "meet" is the verb about people and the line names no room ("how do i meet new
+    people", "how do i meet someone"). A line that names the room - "in a meeting", "in
+    meetings", "on a team call", "at work" - keeps the row, and so does every line without the
+    verb at all.
+    """
+    if not a_body_standing(understood):
+        return False
+    said = str((understood or {}).get("text") or (understood or {}).get("clean") or "")
+    if not said and isinstance(understood, dict):
+        said = " ".join(str(one) for one in (understood.get("words") or ()))
+    if not _MEET_VERB.search(said):
+        return True
+    return bool(_A_ROOM_NAMED.search(said))
+
+
 # A job in a named place is a different question from how to look for work: the way in, the
 # certificate and the check are the employer's own. "how do i get a job in a care home", and the
 # same line about a supermarket, a school, a cafe, a warehouse, a nursery, a hospital, a hotel
@@ -1516,6 +1706,38 @@ _A_WHAT_TO_DO_ASK = re.compile(
 
 def _asks_what_to_do(clean):
     return bool(_A_WHAT_TO_DO_ASK.search(clean))
+
+
+# The verbs a wage that never came is said with, and the pay it is owed under. A verb alone is
+# a lunch, a haircut or a holiday ("i havent had my hair cut in months"), so each verb is
+# written with each pay noun and the phrase is what the unpaid-wages row matches. That is one
+# mechanism for every wording of the same claim rather than a list of the ones we happened to
+# see: "i havent had my holiday pay", "i still havent had my wages", "i havent had any pay from
+# them", "my holiday pay is missing" and "i didnt get my bonus" all come out of it.
+_WAGE_VERBS = ("havent had", "haven't had", "have not had", "hadnt had", "hadn't had", "hasnt had",
+               "hasn't had", "havent received", "haven't received", "have not received",
+               "has not received", "not received", "never received", "didnt receive",
+               "didn't receive", "never got", "didnt get", "didn't get", "havent got",
+               "haven't got", "not got")
+_WAGE_NOUNS = ("my pay", "my wages", "my wage", "my salary", "my bonus", "my holiday pay",
+               "my money", "my commission", "my earnings", "my income", "my final pay",
+               # A payslip is the paper, not the wage: "i didnt get my payslip" and "my payslip
+               # is missing" are the payslip rows' questions (there is a row for reading one and
+               # a row for one that came out short), and with "my payslip" in this table they
+               # were told to write to payroll about the money.
+               "my final wages", "my overtime pay", "my pay packet", "my paycheck",
+               "any pay", "any wages", "any money", "the pay", "the wages", "the bonus",
+               "the money", "the salary", "the holiday pay")
+_WAGE_MISSING = ("is missing", "isnt there", "isn't there", "hasnt come", "hasn't come",
+                 "never came", "did not come", "didnt come", "didn't come", "hasnt arrived",
+                 "hasn't arrived", "has not arrived", "did not arrive", "didnt arrive",
+                 "didn't arrive", "never arrived", "never turned up", "did not turn up",
+                 "hasnt gone in", "hasn't gone in", "has not gone in", "hasnt come through",
+                 "hasn't come through")
+_UNPAID_WAGE_PHRASES = tuple(
+    ["%s %s" % (verb, noun) for verb in _WAGE_VERBS for noun in _WAGE_NOUNS]
+    + ["%s %s" % (noun, tail) for noun in _WAGE_NOUNS for tail in _WAGE_MISSING]
+)
 
 ENTRIES = [
     # A late filing is a question with a number in the answer, and the penalty climbs in bands:
@@ -1920,11 +2142,20 @@ ENTRIES = [
           avoid=("my kids", "my children", "siblings", "brother", "sister", "dog", "cat",
                  "neighbours", "my ex", "husband", "wife", "partner", "boyfriend", "girlfriend",
                  "we argue", "we row", "we fight", "me and my", "my mum", "my dad", "my friend",
-                 "flatmate", "our marriage"),
+                 "flatmate", "our marriage",
+                 # a war is a name, and "war" is read as a form of the key word "warring": with
+                 # "how" in the ask list, "how did the first world war end" had both signals and
+                 # was told to sit down with two people who will not speak. History questions
+                 # name a war, a year or a battle, so those words hold this row out of them.
+                 "world war", "first world war", "second world war", "war one", "war two",
+                 "war 1", "war 2", "ww1", "ww2", "wwi", "wwii", "great war", "1914", "1918",
+                 "1939", "1945", "armistice", "treaty", "versailles", "battle", "sarajevo"),
           # the staff words are what this row is here for, and family.py's row for a couple who
           # row sits on the same words ("argue", "not speaking to each other") with its own
           # script for a partner. Bias, not an avoid list on their file: the line names staff.
-          bias=2),
+          bias=2,
+          # a named war is not a clash between two members of staff (see `A_NAMED_WAR`)
+          guard=_a_named_war),
 
     # "my staff are scared of me" and "my team ignores my ideas" are one question: the team has
     # gone quiet, and the manager needs to make it safe to speak. Both were shrugs ("That sounds
@@ -2391,7 +2622,11 @@ ENTRIES = [
                  # decision to hear about, not a how-to for the boss (see someone-close-quitting).
                  "partner", "husband", "wife", "boyfriend", "girlfriend", "fiance", "fiancee",
                  "my mum", "my mom", "my dad", "my parents", "my friend", "my kids",
-                 "my children", "mate")),
+                 "my children", "mate",
+                 # and a landlord is told in the same words and wants a different letter:
+                 # "how do i tell my landlord im leaving" is a notice, not a resignation
+                 "landlord", "landlords", "landlady", "letting agent", "letting agents",
+                 "tenancy", "tenancies", "lease", "my flat", "my house", "my room")),
 
     entry("the-notice-that-has-gone-in-is-news",
           # The other side of `quit-a-job-message`: once the notice has gone in there is no letter
@@ -2481,12 +2716,50 @@ ENTRIES = [
           "the detail where it earns you the interview."),
 
     entry("cv-gaps",
-          (("cv", "resume", "career break", "employment gap"),
-           ("gap", "gaps", "break", "unemployed", "years off", "time out", "caring", "illness")),
+          (("cv", "resume", "career break", "employment gap",
+            # The gap is the thing people ask about without saying "CV": "how do i explain a gap
+            # in my work history", "how do i explain a gap after maternity leave", "i took 3 years
+            # off to care for my mum how do i explain it". Each of these was answered by another
+            # card entirely - the essay-subjects one, the walking one, the sick-day message - so
+            # the phrases here name the gap itself, and the explain words in the second half turn
+            # them into the question about the interview.
+            # "gap in my" and "gap on my" were bare phrases here, and a phrase with no noun in
+            # it takes the house: "how do i seal a gap in my window" was answered with what to
+            # put on a CV (@lemon-elk, #14490). The bare phrase and the word "gap" in the second
+            # half matched, so every hole in a home became a gap in a career. The phrases that
+            # stay are the ones with the thing in them.
+            "work history", "job history", "gap in my employment", "gap in my career",
+            "gap in my cv", "gap in my work history", "gap in my job history",
+            "gap in my resume", "gap on my cv", "gap on my resume", "gap on my work history",
+            "gap after maternity", "gap after having a baby", "gap after my degree",
+            "gap of", "employment history", "years off work", "time out of work",
+            "time off work for",
+            "was off work", "was off sick for", "off sick for a year", "not worked for",
+            "havent worked", "have not worked", "back to work after",
+            # "i took 3 years off to care for my mum how do i explain it" reached the walking
+            # card, because "caring" was in the second half and nothing in the line named the
+            # gap itself. "years off" and the care phrases are the gap being described.
+            # "looking after my" was here, with "looking after" in the second half, and the pair
+            # matched "how do i look after my mum who has dementia" - a care question answered
+            # with what to put on a CV. The gap is named with the words of work ("years off",
+            # "work history") or of the explaining; the caring words alone are the care card's.
+            "time off to care", "off to care", "care for my", "caring for my mum",
+            "caring for a"),
+           ("gap", "gaps", "break", "unemployed", "years off", "time out", "caring", "illness",
+            "explain", "explaining", "explanation", "account for", "explain it", "talk about",
+            # "how do i" and a bare "care" were here and are not any more: they are the words of
+            # every ask, so "how do i look after my mum who has dementia" matched the gap words
+            # in the first half and was answered with what to put on a CV. The second half is the
+            # words of the explaining, not the words of the asking.
+            "bring up", "interview", "recruiter", "employer", "explain it")),
           "Put the gap on the CV with a plain label - \"Career break: caring for a parent, "
           "2019-2021\" - because an unexplained gap reads as bigger than it is. Add anything you "
           "did in it: a course, volunteering, freelance work, a language. Written down, it stops "
-          "being the thing the interview is secretly about."),
+          "being the thing the interview is secretly about.",
+          # a hole in the house is not a gap in a career: the words below keep the row off
+          # "how do i seal a gap in my window" even if a future key phrase is too loose
+          avoid=("window", "windows", "door", "doors", "fence", "floor", "floorboard",
+                 "roof", "wall", "hedge", "gate", "teeth", "tooth", "draught", "seal")),
 
     # Caring for somebody is the commonest unpaid job there is, and the person writing it as
     # "just caring" asked how to make it count: nothing in the table had it, so the line got
@@ -2630,10 +2903,16 @@ ENTRIES = [
             # "how do i get a reference from a manager i didnt get on with": the hard version of
             # the ask, which is the one worth answering
             "get", "manager", "didnt get on", "didn't get on", "dont get on", "don't get on",
-            "not get on", "didnt like", "left", "leave", "quit", "fired")),
+            "not get on", "didnt like", "left", "leave", "quit", "fired",
+            # the person with nobody to name is choosing a name, which is this card: these words
+            # left the check card's key and the lines fell to the job-search plan instead
+            "first job", "first proper job", "no experience", "no work experience",
+            "never had a job", "never worked")),
           "Ask two people who have managed you - or one manager and one senior colleague - and ask "
           "before you hand their name over. Send them the job description and one line about what "
-          "you want them to stress. A manager from years ago is fine; a friend is not.",
+          "you want them to stress. A manager from years ago is fine; a friend is not. If nobody "
+          "has managed you yet, a teacher, a coach or the person who ran the volunteering is the "
+          "usual choice.",
           # a landlord's reference for a flat or a mortgage is the renting entry's line, and a
           # referee in a football match is a person with a whistle rather than a name on a form:
           # "how much do referees get paid" was answered with how to ask a manager for a reference
@@ -2641,6 +2920,59 @@ ENTRIES = [
                  "flat", "house", "mortgage", "deposit",
                  "football", "football match", "match", "whistle", "linesman", "offside",
                  "soccer", "rugby", "paid", "get paid", "pay", "earn", "salary")),
+
+    # Two more questions about a reference came back as a shrug or as the wrong card: "will they
+    # check references" and "what does a reference say" got the search hedge, and "can my old boss
+    # give me a bad reference" got the how-to-write-one card. The subject is the same as the entry
+    # above, but the question is what happens after you hand the name over, so it is its own card.
+    entry("reference-check",
+          (("reference", "references"),
+           ("check", "checks", "checking", "checked", "say", "says", "saying", "bad", "good",
+            "would they", "will they", "do they", "sacked", "dismissed",
+            # "no experience" and "first job" were here and took the choosing lines
+            # ("what can i use as a reference with no experience") to this card; they are the
+            # who-to-ask card's words, so they are gone from this key
+            "worth anything", "matter", "holds up")),
+          "They usually ring one of the two after the interview and before the offer, and the "
+          "questions are plain: the dates you were there, your job title, and whether they would "
+          "take you back. Permission comes first, so a boss who rings without asking is in the "
+          "wrong. What they say has to be true, so a dismissal can be mentioned if it is accurate - "
+          "though many big employers now give only dates and title to avoid the argument.",
+          # the two entries either side of this one: who to ask, and how to write one
+          avoid=("who should i", "who do i ask", "how do i write", "how to write", "write a",
+                 "write me", "reference letter", "letter of recommendation",
+                 "landlord", "landlady", "tenancy", "tenant", "letting", "renting", "rent",
+                 "flat", "house", "mortgage", "deposit", "football", "match", "whistle",
+                 "linesman", "offside", "soccer", "rugby", "paid", "pay", "earn", "salary",
+                 "essay", "assignment", "coursework", "bibliography", "harvard", "cite"),
+          # choosing a name is the who-to-ask card, whatever else the line says
+          guard=_not_choosing_a_name,
+          bias=2),
+
+    # And the employer's side of the same word, which was answered with how to write the letter:
+    # "can i refuse to give a reference" is a question about being obliged to give one at all.
+    entry("reference-obliged",
+          (("reference", "references"),
+           ("refuse", "refusing", "refused", "obliged", "obligation", "have to give",
+            "required to give", "must give", "must i give", "legal", "legally", "the law",
+            # "does a reference have to be my manager" is the job-hunter's question and was
+            # answered with the law on employers, so the bare "have to" is not in this key
+            "have to give", "do i have to give", "for a leaver", "for a leaving",
+            # the same question in the words people use for being made to: "can my employer
+            # make me give a reference" was the how-to-write-one card
+            "make me give", "make me write", "force me", "forced to", "compelled",
+            "compulsory", "can they make me", "can my employer make me",
+            "sued", "wont give", "won't give", "wont write", "won't write", "decline")),
+          "In the UK an employer is not obliged to give one unless your contract says so or a "
+          "regulator "
+          "does - banks, care work and teaching are the usual exceptions - and a plain no is "
+          "lawful. If you do give one it must be fair and accurate, so stick to dates, title and "
+          "facts you could stand behind in front of the person. A short no is safer than a "
+          "half-hearted yes.",
+          avoid=("landlord", "landlady", "tenancy", "tenant", "letting", "renting", "rent",
+                 "flat", "house", "mortgage", "deposit", "football", "match", "whistle",
+                 "linesman", "essay", "assignment", "bibliography", "harvard", "cite"),
+          bias=2),
 
     # The other half of the reference: not asking for one but writing one, which is asked in
     # the words "how do i write a reference letter" and "how do i give someone a reference", and
@@ -2666,6 +2998,11 @@ ENTRIES = [
           # asking someone to be your referee is the entry above, and a landlord's reference is
           # the tenancy one
           avoid=("my referee", "be my reference", "who should i ask", "my landlord",
+                 # "can my old boss give me a bad reference" is the person needing one, and
+                 # "can i refuse to give a reference" is whether they have to give one at all:
+                 # both are about the reference itself, not about how to word the letter
+                 "give me a", "give me one", "bad reference", "good reference", "refuse",
+                 "obliged", "required to give", "what does a reference", "checks my reference",
                  "landlady", "tenancy", "tenant", "letting agent", "renting", "mortgage",
                  "to be a reference", "ask for a reference", "get a reference",
                  # "give me a book recommendation" is a pick, not a reference letter: the noun
@@ -2677,10 +3014,14 @@ ENTRIES = [
                  # employer writing one: the property, not the job, is what the letter is for
                  "for a flat", "for a house", "for a rental", "for an apartment",
                  "flat reference", "house reference", "landlord reference",
+                 # the employer's own question ("do i have to give a reference for a leaver")
+                 "have to give", "do i have to", "obliged", "legally", "required to give",
+                 "make me give", "make me write", "force me", "compelled", "can they make me",
                  "tenant reference", "rental reference"),
           # the icing row in cooking.py keys the bare word "letters" for piped icing and ranks
           # ahead on a line like "how do i write a reference letter"; the bias keeps the letter
           # with the reference while that reach is on main (#3359 is the fix for it)
+          guard=_writing_one_not_needing_one,
           bias=1),
     entry("job-search-plan",
           (("job search", "find a job", "looking for work", "out of work", "job hunting",
@@ -2696,7 +3037,11 @@ ENTRIES = [
           # a named workplace is `job-in-a-place`'s line: the way into a care home or a
           # supermarket is the employer's own, and this plan names none of it
           avoid=("masters", "master's", "degree", "phd", "postgrad", "postgraduate",
-                 "university", "college", "another country", "abroad", "visa", "move to"),
+                 "university", "college", "another country", "abroad", "visa", "move to",
+                 # a line about a reference is the reference rows' question, and "first job"
+                 # is in this row's key: "who should i use as a reference for my first job"
+                 # was answered with the plan for finding one
+                 "reference", "references", "referee", "referees", "character reference"),
           # ... and the guard, not a word in that list, because every place word here is also an
           # ordinary one: see `_not_a_named_place`.
           guard=_not_a_named_place),
@@ -2864,7 +3209,20 @@ ENTRIES = [
             # "how do i get better at interviews", "how do i interview better" and "how do i
             # improve my interview technique" were all a shrug over an answer that exists: the
             # subject is named and the improving verb was not in the row
-            ) + IMPROVE),
+            # "what happens at a job interview", "what should i expect", "what do they ask you"
+            # are the same subject asked for the shape of the day, and were a shrug too
+            "what happens", "what to expect", "what should i expect", "what do i expect",
+            "what can i expect", "whats it like", "what is it like", "interview like",
+            "like an interview", "what do they ask", "what will they ask", "what do they ask you",
+            "what kind of questions",
+            # the shape of the day asked as a what-does-it-look-like: "what does an interview day
+            # look like", "how does the day go", "run me through the interview day" and "whats
+            # the format of the interview" were a shrug or the preparation answer, because only
+            # "what happens" and "what to expect" were wordings the row knew.
+            "look like", "looks like", "the day", "day go", "day like", "run through",
+            "run me through", "walk me through", "walk through", "the format",
+            "whats the format", "what is the format", "how does it go",
+            "does the day") + IMPROVE),
           _interview_prep,
           # "what should i wear" is in the key list because a follow-up that keeps the subject
           # ("im nervous about my interview, what should i wear") is an outfit question, not a
@@ -3099,6 +3457,16 @@ ENTRIES = [
             "why i was sacked", "why i got sacked", "why you were sacked", "why i was let go",
             "why you were let go", "why i was made redundant", "why you were made redundant",
             "explain being sacked", "explain being fired", "explain the gap", "explain my gap",
+            # The event said plainly is the subject too: "i was sacked how do i explain it in an
+            # interview" was the STAR-stories script because none of the rehearsed phrasings
+            # above was in the line. The interview frame is the second group, so news of a
+            # sacking with no interview, cv or employer in it still stays with its own card.
+            "sacked", "fired", "dismissed", "let go", "made redundant", "got the sack",
+            "was let go", "was dismissed",
+            # "explain that" and the reason for the dismissal, which the practical exit card
+            # outscored: "i was dismissed for gross misconduct how do i explain that"
+            "explain that", "explain this", "gross misconduct", "misconduct",
+            "how do i bring it up", "how do i explain it", "how do i explain that",
             "being sacked in an interview", "being fired in an interview",
             "being made redundant in an interview", "got fired in an interview"),
            ("interview", "interviewer", "job", "role", "company", "employer", "recruiter",
@@ -3114,12 +3482,17 @@ ENTRIES = [
             # quit smoking" all got the interview script (robust-sparrow and early-badge both
             # measured it). The lines that are the interview question name a job or are already
             # whole phrases in group one.
-            "sacked", "fired", "dismissed", "redundant", "let go", "made redundant")),
+            "sacked", "fired", "dismissed", "redundant", "let go", "made redundant",
+            # the ways the dismissed person asks what to do about it
+            "explain", "explaining", "say", "saying", "say it", "explain it", "tell them",
+            "tell a new", "disclose", "mention")),
           "Short, true and forward-looking: what the old job could not offer, then what you went "
           "looking for. \"I had gone as far as I could there and wanted the design work to be the "
           "main part of the job, which is what this role is.\" Never blame a person and do not "
           "mention money first; if you were let go, one plain sentence and move on - \"the team was "
-          "restructured and my role went with it\" - then say what you have done since.",
+          "restructured and my role went with it\" - then say what you have done since. You need "
+          "not volunteer it if the form does not ask, but never answer no to a direct question: a "
+          "reference check can bring it out, and a quiet explanation beats being caught.",
           # A sacking asked as an interview question ties with `interview-prep`'s generic
           # script, and this is the answer that fits it.
           # `leaving` in the second group is a job word, and one line says it about a person:
@@ -3130,6 +3503,7 @@ ENTRIES = [
                  "leave him", "leaving her", "leaving him",
                  "strength", "strengths", "greatest strength", "biggest strength",
                  "my weaknesses", "my weakness", "greatest weakness", "biggest weakness"),
+          guard=_it_is_their_own_dismissal,
           bias=1),
 
     # "why do you want this job" is the interview question said by its own name, with no
@@ -3446,8 +3820,11 @@ ENTRIES = [
            ("have to", "must i", "do i need", "tell them", "say", "should i", "payroll", "hr",
             "boss", "back", "owed", "keep it", "what do i do", "last month", "this month",
             "just noticed", "found out", "what now", "worried",
-            # "i was overpaid at work" names the place and nothing else from this half
-            "work", "job", "my pay", "wages")),
+            # "i was overpaid at work" names the place and nothing else from this half, and
+            # "my employer overpaid me" names the payer instead: whoever pays the wages is the
+            # same question, so the payer's name is a word on this side too.
+            "work", "job", "my pay", "wages", "employer", "company", "payroll department",
+            "payslip", "pay slip", "pay day", "monthly pay")),
           ("Tell payroll in writing today, because money paid by mistake can be taken back "
            "and, if it is a real overpayment, keeping quiet looks like dishonesty later. Say what "
            "you think is wrong and ask for a written breakdown; a genuine overpayment is usually "
@@ -3503,7 +3880,15 @@ ENTRIES = [
             # and nothing else, so the food and the occasion have to be key words too
             "food", "meal", "dinner", "lunch", "supper", "table", "someones house",
             "at someones", "at a friends", "second helping", "helping")),
-          _say_no),
+          _say_no,
+          # A child who will not eat their dinner is not a person learning to refuse a second
+          # helping politely. This card keys on "refuse" and on the meal, so every line a parent
+          # writes about a refusing child reached it - "my 4 year old refuses dinner" was told to
+          # keep their refusal to four words and move the attention off themselves. A child or an
+          # age in the line stands this row down, and the picky-eater card in family.py answers.
+          avoid=("my son", "my daughter", "my child", "my children", "my kid", "my kids",
+                 "my boy", "my girl", "toddler", "toddlers", "year old", "year-old", "yearold",
+                 "yr old", "nursery", "school dinner", "school dinners")),
 
     entry("masters-or-job",
           (("masters", "postgrad", "postgraduate", "phd", "further study", "do a degree"),
@@ -3519,7 +3904,14 @@ ENTRIES = [
     entry("first-day",
           (("first day", "new job", "starting a new job", "start on monday", "starting monday",
             "new role", "new starter", "im new here", "i'm new here", "started this week",
-            "started last week"),
+            "started last week",
+            # the same job said without "new": "im starting a job on monday, any advice" was
+            # the two-offers card and "i start my job next week, what should i expect" was the
+            # maternity-rights card, because "expect" reads as "expecting". A job that has not
+            # begun yet is the first day whatever adjective is in front of it.
+            "starting a job", "start my job", "starts my job", "starting my job",
+            "start a job", "starts a job", "start work", "starting work", "job starts",
+            "starts next week", "starts on monday", "starts tomorrow", "job on monday"),
            ("nervous", "wear", "bring", "tips", "expect", "what to", "worried", "first week",
             "feel lost", "lost", "settle", "overwhelmed", "dont know anyone",
             # "how do i prepare for my first day" was a shrug: getting ready for it is the same
@@ -3533,7 +3925,11 @@ ENTRIES = [
             "questions to ask", "first day questions", "ask questions",
             "questions on my first day", "questions on the first day",
             "questions for my first day", "ask my new team",
-            "ask my new boss", "ask my new manager", "ask my team")),
+            "ask my new boss", "ask my new manager", "ask my team",
+            # "im starting a new job monday, any advice" named the job and asked for advice, and
+            # the only advice word in the group was "tips" - the line went to the kitchen's
+            # announcement row instead (it keys "starting") and was answered by nothing.
+            "advice", "any advice", "some advice", "any tips", "advice for")),
           _first_day,
           # a job that has already gone wrong is the hated-job question, not the notebook one:
           # "my new job is not what i expected" was getting the day-one packing list
@@ -3799,6 +4195,12 @@ ENTRIES = [
           # without swallowing the question.
           avoid=("boiler", "car", "engine", "cake", "make a", "making a", "made a", "makes a",
                  "how do i make", "how to make", "make my", "make the",
+                 # What it is worth is `redundancy-pay`'s question, and that row wins on its
+                 # own once it names the event: only the asks whose answer is a figure and
+                 # whose words the pay row does not also carry are fenced off here. A fence on
+                 # "what do i get" alone sent "what do i get if i get sacked" to a shrug, since
+                 # no row names a sack but this one.
+                 "entitled to anything", "am i owed", "what am i owed", "what am i due",
                  # a job lost years ago is a story, not the offer on the table today: the list
                  # below is "do not sign it on the day", which has already happened.
                  "last year", "years ago", "a year ago", "years back", "long ago",
@@ -3818,7 +4220,13 @@ ENTRIES = [
                  "my partner", "my mum", "my dad", "my son", "my daughter", "my brother",
                  "my sister", "my colleague", "a colleague", "someone at work", "he got",
                  "she got", "he was", "she was", "he has been", "she has been", "his job",
-                 "her job", "their job")),
+                 "her job", "their job",
+                 # A job that has ended is not the only sense of "was fired": "the crowd was
+                 # fired up" and "i got fired up in the meeting and said too much" hold the
+                 # key's own phrases as words, so both were told to "ask for the offer in
+                 # writing and don't sign it on the day". The word that changes the sense is
+                 # the one after it, so the fence names the phrase and not the verb.
+                 "fired up", "fired-up")),
 
     # Somebody else cut the hours. This is the mirror of flexible-hours, which is you asking to
     # go part time: "my hours got cut at work can they do that" was a shrug, "my boss has cut my
@@ -3899,6 +4307,10 @@ ENTRIES = [
            ("too much", "overloaded", "swamped", "piling", "stretched", "prioritise", "say no",
             "juggling", "drowning", "last minute", "last-minute", "dumping", "dumps",
             "keeps giving", "keeps asking", "keeps adding", "end of the day", "5pm", "out of hours",
+            # the workload brought up in a sentence about what to say, rather than complained of:
+            # "what should i say to my boss about the workload"
+            "what should i say", "what do i say", "what to say", "bring it up", "raise it",
+            "talk to", "tell",
             "extra work", "keep up", "keep on top", "push back", "pushing back", "picked up",
             "picking up", "paid for one", "getting paid", "one salary")),
           "Ask for fifteen minutes and bring the list: \"I have these five things due; I can do "
@@ -3929,7 +4341,14 @@ ENTRIES = [
                  "stay late", "work late", "every day", "on call")),
 
     entry("boss-silent",
-          (("boss", "manager", "line manager", "supervisor", "employer", "hr", "head office"),
+          (("boss", "manager", "line manager", "supervisor", "employer", "hr", "head office",
+            # The silence is the same problem when the person is a peer: "my colleague keeps
+            # ignoring my emails" got the inbox-volume card and then the chat's acknowledgement,
+            # and the answer below (ask twice in writing, then copy somebody above) is what a
+            # colleague needs too. "client" and "supplier" are left out on purpose - those are
+            # chasing money and belong to their own rows.
+            "colleague", "colleagues", "coworker", "co-worker", "co worker", "workmate",
+            "workmates", "team member", "teammate", "teammates"),
            ("replies", "reply", "responds", "respond", "ignores", "ignored", "ignoring",
             "silence", "unanswered", "unresponsive", "ghosting", "ghosts", "chased", "chasing",
             "never answers", "not answering", "no answer", "no reply", "no response",
@@ -4552,7 +4971,14 @@ ENTRIES = [
             # same ask in the words people actually use, and neither reached this entry: one
             # got the shop-complaint answer, the other a shrug.
             "go to hr", "go to human resources", "take it to hr", "report", "reported",
-            "reporting", "escalate", "escalated"),
+            "reporting", "escalate", "escalated",
+            # The ask for the route is the same question as the act: "who do i talk to about a
+            # problem at work" was answered with slides, because the presentation row keys the
+            # bare words "talk" and "work". Naming the person is part of asking how to raise it.
+            "talk to about", "speak to about", "talk to someone about", "who do i talk to",
+            "who do i speak to", "who to talk to", "who should i talk to", "who can i talk to",
+            "who should i speak to", "who can i speak to", "who do i approach", "who should i ask",
+            "who do i raise", "who do i take it to"),
            ("issue", "issues", "concern", "concerns", "matter", "something", "safeguarding",
             "problem", "worry", "boss", "manager", "hr", "work",
             "workplace", "colleague", "colleagues", "team", "union", "complaint", "complaints",
@@ -4732,8 +5158,14 @@ ENTRIES = [
           # "flexible hours" is what most people write, and without it in the key the ask
           # entry missed "can i ask for flexible hours" once the right-to-ask entry existed
           (("flexible working", "flexible hours", "compressed hours", "four day week",
-            "four days", "4 days",
-            "three days", "3 days", "part time", "part-time", "hybrid working", "fewer days",
+            # The bare counts sat here on their own and took every leave line with a number of
+            # days in it: "i lost 3 days of holiday can i get them back" and "i saved three days
+            # of holiday can i use them" both got "put it in writing with the shape you want,
+            # could I do 8-4 instead of 9-5". A number of days is only this row's when it comes
+            # with the arrangement ("four days a week", "go down to three days", "three days a
+            # week"), and those shapes are all named below.
+            "four days a week", "4 days a week", "three days a week", "3 days a week",
+            "part time", "part-time", "hybrid working", "fewer days",
             "less days", "work from home request", "work from home", "wfh", "change my hours",
             "change my days",
             # how people describe going part time without the words "part time": the days they
@@ -4741,7 +5173,8 @@ ENTRIES = [
             "reduce my hours", "fewer hours", "cut my hours", "less hours", "go part time",
             "reduce my days", "go down to three", "go down to four", "back three days",
             "go down to four days", "three days a week", "four days a week", "3 days a week",
-            "4 days a week",
+            "4 days a week", "go down to 3 days", "go down to 4 days", "down to three days",
+            "down to four days",
             # a job share is the same request with a partner in it, and "how do i handle a job
             # share" was reaching money's index-fund entry ("shares" reads as the verb)
             "job share", "job sharing", "job-share", "share my job", "share the role",
@@ -4753,8 +5186,16 @@ ENTRIES = [
           "three-month trial and fix the date you will review it - a trial is far easier to say "
           "yes to than a permanent change.",
           # working from home with a toddler is a childcare question, and "my son wants to work
-          # from home" is somebody else's job: neither is the request to the manager.
-          avoid=("toddler", "baby", "with kids", "with the kids", "with children", "childcare",
+          # from home" is somebody else's job: neither is the request to the manager. The child
+          # words are kept as the phrase that makes it a childcare line, not as bare nouns,
+          # because a baby is usually the *reason* for the request and the commonest way to say
+          # it stood this row down: "i want to go part time after the baby" reached a
+          # birth-registration card, "can i go part time after the baby" the health visitor,
+          # "i want to go part time after maternity leave" a shrug, and "once the baby is here"
+          # the smallest-first-step template.
+          avoid=("with a toddler", "with a baby", "with the baby", "with kids", "with the kids",
+                 "with children", "childcare", "childcare costs", "childminder",
+                 "looking after the kids", "while looking after",
                  "my son", "my daughter", "my husband", "my wife", "my partner", "my mum",
                  "my dad", "my friend",
                  # "wants to" and "wanted to" used to be here and they also matched the ask
@@ -5371,7 +5812,12 @@ ENTRIES = [
                  "offer letter", "to get an offer", "before the offer", "job application",
                  "cover letter",
                  "went to someone else", "didnt get", "did not get", "wasnt promoted",
-                 "was not promoted", "lost out")),
+                 "was not promoted", "lost out",
+                 # a job that has not started yet is the first day, and no offer is being
+                 # weighed: "im starting a job on monday, any advice" was the four columns
+                 "starting a job", "start my job", "starting my job", "start a job",
+                 "starts a job", "job starts", "starts next week", "starts on monday",
+                 "first day")),
 
     entry("job-affecting-mental-health",
           (("mental health", "my head", "anxiety", "anxious about work", "depressed about work",
@@ -5416,7 +5862,13 @@ ENTRIES = [
     # careful in proportion). The size is in the words the person uses, so this card takes the
     # next-day shapes and the row above stands down for them by phrase.
     entry("dreading-work-tomorrow",
-          (("dread work tomorrow", "dreading work tomorrow", "dread tomorrow",
+          # The idiom that names the feeling and not yet its object: "i get a sinking feeling on
+          # sunday night", "the sinking feeling before work". The word "sinking" is a sink to the
+          # reader of nouns, so the line reached nothing at all, and the second list still asks for
+          # the job or the day, which is what keeps "i have a sinking feeling about tomorrow" on
+          # the open question a scan or a funeral deserves.
+          (("sinking feeling", "dread work tomorrow",
+            "dreading work tomorrow", "dread tomorrow",
             "dreading tomorrow", "dread monday", "dreading monday", "monday dread",
             "monday morning dread", "sunday night dread", "sunday dread", "sunday scaries",
             "cant face it", "can't face it", "dont want to go to work tomorrow",
@@ -5512,6 +5964,12 @@ ENTRIES = [
                  "remedy", "symptoms", "nausea", "morning sickness", "heartburn",
                  "fever", "temperature", "covid", "infection", "antibiotics", "dizzy",
                  "vomit", "diarrhoea", "constipation", "rash", "itchy",
+                 # a job that has not started yet is the first day, not the maternity rights:
+                 # "i start my job next week, what should i expect" reached this row through
+                 # "expect"/"expecting" and was told when to tell the boss about a baby
+                 "starting a job", "start my job", "starting my job", "start a job",
+                 "starts a job", "job starts", "starts next week", "starts on monday",
+                 "first day",
                  "trying to get", "how do i get pregnant", "cant get pregnant",
                  "test negative", "miscarriage", "miscarried", "losing the baby",
                  # "expecting" is a loose form of "expected", so "my new job is not what i
@@ -5637,7 +6095,11 @@ ENTRIES = [
      # are the allowance shapes only, so "when do i leave", "leave my job" and "how many
      # days leave until christmas" are not this row's subject.
      "days leave", "much leave", "leave days", "leave left", "leave balance",
-     "leave allowance", "leave entitlement"),
+     "leave allowance", "leave entitlement",
+     # the same question with the allowance only implied: "can i use the days i saved from
+     # last year" names no holiday word at all, so the days themselves are the subject here
+     "days saved", "days i saved", "saved days", "days from last year", "days carried over",
+     "carried over days"),
     ("entitled", "entitlement", "how much", "how many days", "statutory", "minimum",
     # "how many days leave do i have left" asks the balance, which is the same question
     # with the number the person actually wants at the end of it.
@@ -5651,7 +6113,13 @@ ENTRIES = [
     # "can i carry holiday into january" is the carry-over rule, which the paragraph below
     # already speaks to and this row could not be reached for
     "carry", "carry over", "carried over", "carrying", "lose", "loses", "losing", "lost",
-    "unused", "forfeit", "use it or lose")),
+    "unused", "forfeit", "use it or lose",
+    # The days kept back from an earlier year are asked for without any of the words above:
+    # "i saved three days of holiday can i use them" and "i have 5 days holiday saved up from
+    # last year" were a search hedge and a small-talk nod. The holiday word is already the
+    # subject half of this key, so a money line cannot reach these.
+    "saved", "saved up", "save them", "use them", "use the days", "use my days",
+    "from last year", "from the year before", "left over", "leftover", "roll over")),
     _holiday_entitlement,
     # A holiday somebody is saving for is a trip they are paying for, and the allowance is not the
     # answer to it: "how much should i save for a holiday" got the 5.6 weeks, "how much should i
@@ -5667,6 +6135,15 @@ ENTRIES = [
     # words. The trip shapes stand it down so travel.py's own cost row answers; they are trip
     # shapes only, so "how much holiday do i get" and "can i carry holiday into january" stay.
     avoid=("sleeps", "countdown", "days to go", "till i go", "until i go", "till we go",
+           # saving money for the trip is not the leave you have left: "how do i save for a
+           # holiday" reached this row once "saved" became a key word here
+           "save for", "saving for", "saving up for", "saved up for", "money for",
+           "spending money", "holiday money", "pay for", "afford",
+           # and the amount that gives it away: "i want to save 200 a month for a holiday" has
+           # no "save for" in it, so the money words are the sum and the month
+           "a month", "per month", "each month", "a week for", "a fortnight for",
+           "standing order", "direct debit", "set aside", "put away", "putting by",
+           "pounds", "quid", "£",
            # "lose" and "lost" are in this row's key so that "i lost 3 days of holiday" reaches
            # the carry-over rule, and body weight then came with them: "how do i lose weight for
            # my holiday" got the carry-over paragraph. A weight question is health.py's, so
@@ -5678,6 +6155,11 @@ ENTRIES = [
            # and "cost" or "price" anywhere in the line is that question rather than the
            # allowance one; "how much holiday pay am i owed" says pay, not cost.
            "holiday abroad", "cost", "costs", "price", "prices", "expensive", "cheap",
+           # "do i get holiday pay when im made redundant" asks about the final payslip, not
+           # the annual allowance: the pay row says what is owed on top of the figure, so the
+           # allowance stands down for a line about a job that is going.
+           "made redundant", "being made redundant", "redundant", "redundancy", "severance",
+           "laid off", "job gone", "let go",
            "holiday price", "holiday deal", "holiday deals", "cheap holiday",
            "cheap holidays", "holiday budget", "spend on a holiday",
            "trip to", "week in", "weeks in", "nights in", "all inclusive", "package holiday",
@@ -5719,7 +6201,17 @@ ENTRIES = [
            # notice for holiday" is still the allowance question.
            "my notice", "notice period", "handed my notice", "handing my notice",
            "hand my notice", "resignation", "internet", "data", "roaming", "phone", "wifi",
-           "wi-fi", "mobile", "signal"),
+           "wi-fi", "mobile", "signal",
+           # A holiday from paying is a break the lender grants, never the 5.6 weeks: "how do i
+           # get a payment holiday on my loan" was answered with the annual leave figure, because
+           # "holiday" and "how do i get" are this row's two words. The money a person owes is
+           # what stands this row down, and money.py's payment-holiday row answers it.
+           "payment holiday", "payment break", "holiday from my payments",
+           "holiday from payments", "holiday on my loan", "holiday on my mortgage",
+           "mortgage", "mortgages", "remortgage", "loan", "loans", "credit card",
+           "credit cards", "overdraft", "overdrafts", "repayment", "repayments",
+           "repaying", "debt", "debts", "arrears", "lender", "student loan",
+           "car finance", "hire purchase"),
     # "if i work 4 days a week" is a rarer pair of words than the entitlement words, so the
     # flexible-working letter answered those lines instead of this row: both reach it with four
     # words, and the letter's key words are the rarer ones. Two ranks clear of it, and the ask
@@ -5948,7 +6440,10 @@ ENTRIES = [
                  'conversation', 'chat to', 'chat with', 'awkward', 'what to say',
                  # a meeting you cannot get a word into is the meetings card, not the slides
                  'speak up', 'never speak', 'rarely speak', 'talked over', 'spoken over',
-                 'get my point across', 'get a word in', 'in meetings', 'in the meeting')),
+                 'get my point across', 'get a word in', 'in meetings', 'in the meeting'),
+          # "who do i talk to about a problem at work" was answered with slides: a who-ask is a
+          # route to a person, and the guard reads the shape rather than a list of wordings
+          guard=_a_who_ask_is_a_route),
     # Speaking up in a meeting is not a talk and not a voice problem: "how do i speak up in
     # meetings" got the mumbling exercises and "how do i get my point across in meetings" got
     # nothing at all, because the tree held the presentation, the small talk and the nerves and
@@ -5956,6 +6451,11 @@ ENTRIES = [
     entry('speak-up-meetings',
           (('meeting', 'meetings', 'standup', 'stand-up', 'stand up', 'team call', 'video call',
             'conference call', 'group call', 'weekly call', 'team meeting', 'board meeting',
+            # a "sit down" said as a thing ("a proper sit down with my manager") is a meeting;
+            # the verb ("when i sit down") is not, and bare `sit down` would take the posture
+            # lines, so only the noun phrases are here
+            'a sit down', 'sit down with', 'sit down about', 'sit down and talk',
+            'sit down to talk', 'proper sit down', 'sit down meeting',
             'meeting notes', 'in the meeting',
             # "speak up at work" names no room, and it is the same question as in one
             'speak up at work', 'speak up at', 'speak up in'),
@@ -6027,7 +6527,7 @@ ENTRIES = [
                  'push back', 'pushback', 'turn it down'),
           # "stand up" is a body going upright as often as a meeting: a line where the
           # standing happens to the person is the dizzy answer's, not this tactic's
-          guard=a_body_standing),
+          guard=_the_room_and_not_the_verb_meet),
     # The fear that stops people speaking up is not the room, it is the answer going wrong:
     # "what if i get it wrong" after the meetings card had nothing to come back with, because a
     # follow-up is read with the line before it put back in front and this row answered that
@@ -6142,7 +6642,12 @@ ENTRIES = [
                  # taking an offer is the deciding question, not the telling one
                  "take another offer", "take the offer", "accept the offer", "accept another offer",
                  "should i take", "should i accept", "should i stay", "turn it down",
-                 "turn down the offer", "negotiate"),
+                 "turn down the offer", "negotiate",
+                 # a landlord is told the same thing in the same words - "how do i tell my
+                 # landlord im leaving" is a notice letter, not a resignation, and this row took
+                 # it on the phrase "im leaving" alone
+                 "landlord", "landlords", "landlady", "letting agent", "letting agents",
+                 "tenancy", "tenancies", "lease", "my flat", "my house", "my room"),
           # wording's quit-a-job-message is the same score on "should i tell my boss", and the
           # question here is the timing, not the four lines of the letter
           bias=1),
@@ -6204,7 +6709,13 @@ ENTRIES = [
             # the same fact about somebody else - "my sister hasnt been paid" is asked by the
             # person helping, and "hasnt been paid" was missing while "not been paid" was there
             "hasnt been paid", "hasn't been paid", "havent been paid yet", "hasnt been paid yet",
-            "not been paid yet", "still hasnt been paid"),
+            "not been paid yet", "still hasnt been paid",
+            # A wage that never came is said with "had", "received" and "got" as often as
+            # with "paid", and "i havent had my holiday pay", "i still havent had my wages"
+            # and "my holiday pay is missing" were each answered with something else. The
+            # verb alone is a lunch, a haircut or a holiday, so the verb and the pay are
+            # written together above, once for every verb and every pay noun.
+            ) + _UNPAID_WAGE_PHRASES,
            ("what do i do", "what should i", "how do i", "can i", "claim", "who do i",
             "employer", "boss", "work", "agency", "month", "week", "wages", "pay", "owed",
             "unpaid", "late", "short",
@@ -6217,6 +6728,10 @@ ENTRIES = [
             # shrug even with the phrase in the key
             "pay was late", "wages were late", "wage was late", "salary was late",
             "pay was short", "pay came late", "pay arrived late", "pay is running late",
+            # the noun a wage is owed under: a bonus, commission or holiday pay is the same
+            # claim as a wage, and "i didnt get my bonus" was a sympathy line
+            "bonus", "holiday pay", "commission", "earnings", "income", "pay packet",
+            "paycheck", "payslip", "payslips",
             # "i didnt get paid on payday" carries the lateness and nothing else, so the payday
             # has to count as the subject: without it the line scored 3, which is under the
             # minimum, and the reply was an acknowledgement.
@@ -6253,6 +6768,14 @@ ENTRIES = [
                  "pension", "pip", "esa",
                  # the hours were worked and the rate is the question, not the payday
                  "overtime",
+                 # a pay rise that has not come is an argument about the rate, not a wage that
+                 # did not arrive: "i havent had a pay rise in years" is the same words as
+                 # "i havent had my pay" once the stopwords are read past, so the rise is
+                 # named here and the rate rows keep the line. Not a bare "raise": a grievance
+                 # is raised.
+                 "pay rise", "pay increase", "a rise", "a raise", "get a rise", "get a raise",
+                 "promotion", "promoted", "pay review", "pay award", "inflation",
+                 "cost of living", "pay gap", "underpaid compared",
                  # "didnt arrive" and "never turned up" are how people talk about a parcel, a
                  # suitcase and a takeaway too: "my suitcase didnt arrive what do i do" was
                  # told to write to payroll. A thing that has not come is the travel, the shop
@@ -6274,7 +6797,7 @@ ENTRIES = [
           # are late" could be answered here, and without this a rent line that says "late" and
           # "paying" was answered with the payroll letter: "im always late paying my rent" got
           # "put it in writing ... to payroll ... ACAS ... employment tribunal".
-          ask=("wage", "wages", "salary", "payday", "payslip", "payslips", "employer",
+          ask=("wage", "wages", "salary", "payday", "employer",
                "boss", "agency", "paid", "unpaid", "underpaid", "owed", "owe me", "owes me",
                "hours", "month", "week", "weekly", "job", "gone in", "come through",
                "arrived", "arrives", "came", "come", "turned up", "pay is late", "pay late",
@@ -6287,7 +6810,10 @@ ENTRIES = [
                "wage was late", "salary was late", "salary came late",
                "wage is late", "salary is late", "pay is always late", "final wages",
                "final pay", "didnt go in", "did not go in", "never went in", "always late",
-               "got paid late", "paid late again", "was paid late", "were paid late")),
+               "got paid late", "paid late again", "was paid late", "were paid late",
+               # "pay" and the nouns it is owed under: a bonus or holiday pay is a wage, and
+               # the key above now reaches lines that name one.
+               "pay", "bonus", "holiday pay", "commission", "earnings", "income")),
 
     # "should i take a pay rise or more holiday" was a shrug about a trade people really weigh.
     entry("pay-rise-or-holiday",
@@ -6345,10 +6871,22 @@ ENTRIES = [
     entry("redundancy-pay",
           (("redundancy pay", "redundancy money", "redundancy package", "severance",
             "statutory redundancy", "made redundant", "being made redundant", "redundant",
-            "laid off"),
+            "laid off",
+            # the same loss said without the word "redundant": "what am i entitled to when i
+            # lose my job" was the forgetting card, because "lose" is the word it knows, and
+            # "what do i get if im made redundant" was the next-steps card with its sympathy
+            "lose my job", "losing my job", "lost my job", "lose my job", "job gone",
+            "jobs gone", "being let go", "let go",
+            # and the question that names the figure without naming the event twice over
+            "redundancy rights", "redundancy entitlement"),
            ("how much", "owed", "entitled", "am i due", "pay", "paid", "money", "calculate",
-            "work out", "offer", "package", "week", "weeks", "years", "service", "notice",
-            "holiday", "what am i")),
+            "work out", "offer", "package", "years", "service", "notice",
+            "holiday", "what am i",
+            # "what do i get" is the commonest way of asking for the figure, and the row had
+            # only "how much" and "what am i": "what do i get if im made redundant" was the
+            # next-steps card, whose whole answer assumes the person has the letter in hand
+            "what do i get", "what will i get", "what would i get", "do i get", "will i get",
+            "am i getting", "i get", "getting")),
           "Statutory redundancy pay is half a week's pay for each full year under 22, one week "
           "for each year from 22 to 40, and one and a half weeks for each year over 41, capped at "
           "£700 a week and 20 years, so the maximum is £21,000 and many people get a good deal "
@@ -6359,14 +6897,111 @@ ENTRIES = [
           "giving up the right to claim - take free advice from ACAS or a union first.",
           ask=("how much", "owed", "entitled", "pay", "paid", "money", "calculate", "work out",
                "offer", "package", "week", "weeks", "years", "service", "notice", "holiday",
-               "what am i", "due"),
+               "what am i", "due",
+               # the entitlement ask, in the words people use for it: "what do i get", "what am
+               # i owed", "am i entitled to anything". The key still has to name the job loss,
+               # so the word "get" cannot drag an unrelated line in here - only the whole ask
+               # is listed, since a bare "i get" also sits inside "how do i get over losing my
+               # job", which is the comfort-and-next-steps card's line.
+               "what do i get", "what will i get", "what would i get", "do i get", "will i get",
+               "entitled to", "am i owed", "what am i owed",
+               # "week" and "weeks" are gone: half a week's pay is what the card says, and the
+               # word was catching the date instead - "i lost my job last week" is a person
+               # saying what happened, and it was quoted the statutory figure. "pay" holds the
+               # lines that really ask, and the weeks they ask about are counted by "how many
+               # weeks", "weeks pay" and "per week".
+               "how many weeks", "weeks pay", "weeks of pay", "per week", "weeks redundancy"),
           # the feelings and the next steps are the redundancy answer, and a boiler is not a job
           avoid=("boiler", "car", "engine", "cake", "feel", "feeling", "scared", "worried",
-                 "anxious", "what do i do", "next", "cv", "interview"),
+                 "anxious", "what do i do", "next", "cv", "interview",
+                 # getting over it is the comfort card's question, and "how do i get over
+                 # losing my job" was quoted the statutory figure once the job-loss words
+                 # reached the key of this row
+                 "get over", "cope", "coping", "deal with", "move on", "moving on",
+                 # the three questions about the same money that are not the figure: what
+                 # HMRC does with it, whether leaving of your own accord gets it, and what
+                 # happens when you are off sick. Each has its own row below.
+                 "tax", "taxed", "taxes", "taxable", "tax free", "after tax",
+                 "if i quit", "if i resign", "if i leave", "resign", "resigning", "quit",
+                 "quitting", "hand in my notice",
+                 # "voluntary redundancy" was in this list and made the offer question a
+                 # resigning question; the offer is the figure's line, so it is out.
+                 "off sick", "on sick leave", "sick leave", "sickness", "long term sick",
+                 "sick note", "signed off"),
           # A detail that says how long they were there is a question about the figure, and on
           # "redundant ive been there 6 years" both rows match: the next-steps row carries the
           # event's verbs ("been", "was", "got") and won the tie, so the follow-up to "im being
           # made redundant" answered "Same as before: ..." instead of the statutory figure.
+          bias=1),
+    # The tax question about the same money. "is redundancy pay taxed" and "do i pay tax on
+    # redundancy pay" were answered with the statutory figure, which never says what happens
+    # to it at HMRC; the words a person types for the money are still the key, and "tax" is
+    # what makes it this row's line rather than the figure's.
+    entry("redundancy-pay-tax",
+          (("redundancy pay", "redundancy payment", "redundancy money", "redundancy package",
+            "severance", "statutory redundancy", "made redundant", "being made redundant",
+            "redundant", "laid off", "lose my job", "losing my job", "lost my job", "job gone",
+            "let go"),
+           ("tax", "taxed", "taxes", "taxable", "tax free", "tax-free", "after tax",
+            "do i pay tax", "does hmrc", "hmrc", "payslip", "gross", "net",
+            # the shape of the question as people type it: "how much tax do i pay on
+            # redundancy pay" is the 30,000 question, and the take-home-pay row keys "how much"
+            # and "pay" and was taking it on score alone (lemon-otter's review)
+            "how much tax", "taxed on", "tax on", "tax bill", "take home")),
+          "The first \u00a330,000 of a redundancy payment is tax free, and anything above that is "
+          "taxed at your usual rate - so most people pay nothing on it at all. The \u00a330,000 "
+          "counts the whole package, not just the statutory part, and pay in lieu of notice "
+          "and holiday pay are taxed as ordinary wages. If payroll takes tax off the whole "
+          "thing, compare it with that figure and ask them to show you the working.",
+          ask=("tax", "taxed", "taxes", "taxable", "tax free", "tax-free", "after tax",
+               "do i pay tax", "hmrc", "gross", "net"),
+          # "how much tax do i pay on redundancy pay" is the take-home-pay row's shape - it
+          # keys "how much" and "pay" - and it was winning this line on score alone. The words
+          # of the money are in this row's key, so the row that holds the 30,000 comes first.
+          bias=4),
+    # Leaving of your own accord is the question the figure's row read as its own: "do i get
+    # redundancy pay if i quit" was told how much statutory pay is worth, which is not what
+    # happens when you resign. The key still needs the money's words, so "i quit smoking" is
+    # nothing to do with this row.
+    entry("redundancy-if-you-quit",
+          (("redundancy pay", "redundancy money", "redundancy package", "severance",
+            "statutory redundancy", "made redundant", "being made redundant", "redundant",
+            "laid off"),
+           # The act of leaving, and not the word "voluntary": "should i take voluntary
+           # redundancy" and "im being offered voluntary redundancy" are a person with an
+           # offer to weigh up, not a person asking what resigning pays, and the words of the
+           # offer are the next-steps card's (lemon-otter's review). The leaving verbs are what
+           # this row is for.
+           ("if i quit", "if i resign", "if i leave", "if i hand in", "resign", "resigning",
+            "resigned", "quit", "quitting", "hand in my notice", "hand my notice in",
+            "walk out")),
+          "No - redundancy pay is for a job that is going, not for you leaving, so resigning "
+          "gets you your notice and any holiday you have not taken but no statutory redundancy "
+          "pay. Voluntary redundancy is the exception: if the company offers it and you put "
+          "your hand up, you get the same package. If you are being pushed towards the door, "
+          "ask for a settlement agreement in writing and get free advice from ACAS or a union "
+          "before you hand in notice.",
+          ask=("if i quit", "if i resign", "if i leave", "if i hand in", "resign", "resigning",
+               "resigned", "quit", "quitting", "hand in my notice", "hand my notice in",
+               "walk out"),
+          bias=1),
+    # Being off sick when the job goes is asked as an employer question, and it reached no row
+    # at all: "can my employer make me redundant while im off sick" was a shrug. The event's
+    # own words are the key and the illness is the ask, so the figure's row stands aside.
+    entry("redundancy-while-off-sick",
+          (("made redundant", "being made redundant", "redundant", "redundancy", "laid off",
+            "job gone", "let go", "sacked"),
+           ("off sick", "on sick leave", "sick leave", "sickness", "long term sick",
+            "sick note", "signed off", "while im ill", "while i am ill", "off work sick",
+            "hospital", "depression", "stress")),
+          "Yes - being off sick does not stop your job going, but the selection still has to "
+          "be fair and they should talk to you about it rather than post the letter. Time off "
+          "for pregnancy, maternity leave, or because you raised a safety or whistleblowing "
+          "concern is protected, so a redundancy that is really about those is unfair. Keep "
+          "the sick notes, ask for the reason in writing, and have ACAS or a union rep look "
+          "at it while the clock is still running.",
+          ask=("off sick", "on sick leave", "sick leave", "sickness", "long term sick",
+               "sick note", "signed off", "while im ill", "while i am ill", "off work sick"),
           bias=1),
     entry("second-job",
           (("second job", "two jobs", "another job", "extra job", "side job", "moonlight",
@@ -6696,7 +7331,15 @@ WORK_ADDITIONS = (
             # demands the job or the money, so "i want to quit smoking" stays where it is.
             "want to quit", "want to leave", "wanting to quit", "wanting to leave",
             "thinking of quitting", "thinking about quitting", "thinking of leaving",
-            "thinking about leaving", "thinking of handing in my notice"),
+            "thinking about leaving", "thinking of handing in my notice",
+            # The decision is often asked as permission, with the length of the stay in the line:
+            # "is it ok to leave a job after three months", "is it bad to leave a job after a
+            # year". Nothing in the "should i" shapes fits those, and the age words in them took
+            # the line to a food table, so the ask is spelled out with the job in it.
+            "ok to leave a job", "ok to leave my job", "bad to leave a job",
+            "bad to leave my job", "wrong to leave a job", "wrong to leave my job",
+            "leave a job after", "leave my job after", "leave the job after",
+            "leaving a job after", "leaving my job after", "left a job after"),
            # the job words are in the second half so that "should i quit smoking" and "should i
            # stay in tonight" stay with whoever answers them
            ("job", "work", "career", "how do i", "how can i", "know", "decide", "figure out",
@@ -6717,7 +7360,11 @@ WORK_ADDITIONS = (
           "not on a Tuesday when it is unbearable.",
           ask=("should i", "if i", "whether", "how do i", "how can i", "how do you", "know",
                "decide", "worth", "need the money", "money", "afford", "cant afford",
-               "can't afford", "cannot afford", "bills", "wages", "pay"),
+               "can't afford", "cannot afford", "bills", "wages", "pay",
+               # asking permission to go is the same decision: "is it ok to leave a job after
+               # three months" wanted the three tests, and got a punt.
+               "is it ok", "is it bad", "is it wrong", "ok to leave", "bad to leave",
+               "wrong to leave", "a job after", "my job after"),
           avoid=("my partner", "my husband", "my wife", "my son", "my daughter", "he wants",
                  "she wants", "my friend", "my mum", "my dad",
                  # A home you want to leave because of the money is the landlord's question, and
@@ -6933,7 +7580,13 @@ WORK_ADDITIONS = (
           avoid=("i cried", "i cry", "i was crying", "i broke down", "i cant stop crying",
                  "i keep crying", "i nearly cried", "my tears",
                  "upset me", "upsets me", "upset my", "hurt my feelings", "annoyed me",
-                 "made me feel", "offended me", "rude to me", "upsetting me")),
+                 "made me feel", "offended me", "rude to me", "upsetting me",
+                 # A follow-up that asks for the words ("i dont know what to say to my boss")
+                 # carries the earlier crying into the text it is read on, and this row then
+                 # answered it with how to look after someone crying in front of you. The ask
+                 # for what to say is the difficult-conversation row's, not this one's.
+                 "what do i say", "what should i say", "what can i say", "what do i tell",
+                 "what to say", "what do i say to", "what do i tell her", "what do i tell him")),
 
     # A passive-aggressive email is not a difficult conversation in the room: it is a document,
     # and the answer is the reply you write, or do not write.
@@ -7634,6 +8287,98 @@ ENTRIES.append(entry(
     bias=1))
 
 
+# --- the words on a contract, an appraisal and a college course -------------------------
+# Six words that main passed or answered with the card next door: "what is a btec" was the
+# search hedge, and "what is a gcse" and "what is an a level" got the university-requirements
+# answer, which is the question about what you need one for, not what it is.
+_WORK_WORDS = (
+    (("redundancy", "being made redundant", "made redundant", "redundant"),
+     "Redundancy is your job going, not you doing anything wrong: the employer needs fewer people "
+     "in that role, so the role disappears and your contract ends. If you have two years' service "
+     "you are owed statutory redundancy pay - half a week's pay for each year under 22, a week "
+     "for each year from 22 to 40, a week and a half for each year over 41, capped at £700 a week "
+     "and 20 years - plus your notice and any holiday you have not taken.",
+     ("how much", "how do i claim", "claim", "my employer", "i have been", "i was", "voluntary",
+      "offer", "payout", "calculate", "calculator", "notice", "letter", "consultation")),
+    (("performance review", "appraisal", "one to one", "1 to 1", "probation review"),
+     "A performance review is the regular sit-down where your manager says how the job is going "
+     "and what changes, usually once or twice a year, with a rating that decides any pay rise. Go "
+     "in with three things you did that made a difference and one thing you want to learn, in "
+     "numbers where you can, and ask for the rating and the pay in the same conversation.",
+     ("how do i prepare", "prepare", "what should i say", "nervous", "my review", "went badly",
+      "bad review", "salary", "pay rise", "ask for")),
+    (("btec", "btecs", "btec diploma", "btec extended diploma"),
+     "A BTEC is a work-related qualification taken at school or college instead of, or alongside, "
+     "A levels: the Level 3 Diploma and Extended Diploma are the usual ones and they are graded "
+     "pass, merit, distinction, distinction star. They are assessed mostly by coursework rather "
+     "than exams, and universities accept them - a distinction star is worth about an A at A "
+     "level for entry - so they suit someone who does better on projects than in a three-hour "
+     "exam.",
+     ("how do i", "should i", "worth it", "my", "results", "grade", "ucas", "points", "apply",
+      "college")),
+    (("foundation year", "foundation course", "foundation degree", "access course"),
+     "A foundation year is the extra year at the start of a degree for someone without the usual "
+     "grades or the right subjects: you do a year of the basics, and passing it moves you onto "
+     "the first year of the degree. It is not the same as a foundation degree, which is a "
+     "two-year qualification of its own, or an Access course, which is a year at a college for "
+     "adults going to university.",
+     ("how do i", "should i", "worth it", "my", "student loan", "fees", "apply", "ucas",
+      "which university")),
+    (("personal statement", "ucas statement"),
+     "A personal statement is the one page - 4,000 characters, about 47 lines - where you say why "
+     "you want the course and what you have done that shows it: the subject you read round, the "
+     "work or volunteering, what you want to do after. Write it in plain first person, spend most "
+     "of it on the course rather than your childhood, and give it to a teacher or someone in the "
+     "job to read before you send it.",
+     ("how do i write", "how to write", "help me write", "start", "example", "opening",
+      "my personal statement", "draft", "word count", "characters", "ucas",
+      # the job version is a different page, and the cover letter has its own card
+      "for a job", "job application", "job interview", "cover letter", "applying for a job")),
+    (("gcse", "gcsEs", "gcses"),
+     "GCSEs are the exams most pupils in England, Wales and Northern Ireland take at 16, in eight "
+     "to ten subjects, graded 9 to 1 (9 is the top, 4 is a standard pass, 5 a strong pass). Maths, "
+     "English language and science are the ones nearly everyone takes, and the grades decide "
+     "which sixth form, college course or apprenticeship you can start.",
+     # "what gcses do i need to be a nurse" is the requirement for one job, not what a GCSE is
+     ("how do i revise", "revise", "revising", "results", "grades", "resit", "retake",
+      "how many", "which", "choose", "my", "equivalent", "entry requirements", "do i need",
+      "need to be", "need for", "to become", "to be a", "to be an", "require")),
+    (("a level", "a levels", "as level", "as levels"),
+     "A levels are the two-year exams taken at 16 to 18 in England, Wales and Northern Ireland, "
+     "usually three subjects, graded A star to E. Each is mostly decided by exams at the end of "
+     "the second year, and three good A level grades are the standard way into a degree.",
+     ("how do i revise", "revise", "revising", "results", "grades", "resit", "retake",
+      "how many", "which", "choose", "my", "equivalent", "entry requirements", "ucas points",
+      # "a level" is inside "a level 3", and a grade 3 has its own answer
+      "level 1", "level 2", "level 3", "level 4", "level 5", "grade", "grades", "do i need",
+      "need to be", "to be a", "to be an", "require")),
+)
+
+WORK_DEFINITION_ASKS = ("what", "whats", "what is", "what's", "what are", "mean", "means",
+                        "meaning", "define", "definition", "explain", "stand for", "stands for")
+
+
+def _work_word(memory, understood):
+    text = understood.get("clean") or ""
+    words = understood.get("words") or []
+    for keys, reply, avoid in _WORK_WORDS:
+        if not any(key in text or key in words for key in keys):
+            continue
+        if any(word in text or word in words for word in avoid):
+            continue
+        return reply
+    return None
+
+
+ENTRIES.append(entry(
+    "work-word",
+    (tuple(key for keys, _, _ in _WORK_WORDS for key in keys), WORK_DEFINITION_ASKS),
+    _work_word,
+    bias=2,
+    avoid=("how do i", "should i", "help me", "what can i do"),
+))
+
+
 # What a job is actually like, day to day. The lane had the pay ("how much does a plumber earn"),
 # the hours ("how many hours does a nurse work") and the way in ("how do i become a plumber") and
 # not the job itself: "what does a plumber do" and "what is it like being a nurse" were both a
@@ -8053,6 +8798,61 @@ ENTRIES.append(entry(
            "paper plates", "paper towels", "exam paper", "past paper", "past papers",
            "writing paper", "printer", "printing", "essay", "essays", "recycling", "bin", "bins"),
     bias=2))
+# The record is the subject, so the key is the record and the job, not the phrasing of the ask.
+def _a_criminal_record(memory, reading):
+    """The record and the job: what you declare, and when it stops counting."""
+    said = ((reading or {}).get("norm_text") or (reading or {}).get("clean") or "").lower()
+    # How long a DBS check takes to come back is about eight weeks and nothing to do with
+    # spent convictions, and "how long does a dbs check take" was the timing branch.
+    if "dbs" in said and re.search(r"\b(how long|how many weeks|how many days|takes?|"
+                                   r"come back|wait|waiting|delay|delayed|chase)\b", said):
+        return ""
+    if re.search(r"\b(how long|how many years|when does it|expire|expires|spent after|"
+                 r"come off|comes off|goes away|gone away|stay on|stays on|wiped|cleared)\b",
+                 said) or re.search(r"\bgo(?:es)? on (?:my|your) record\b", said):
+        return ("Most convictions become spent after a set time that runs from the end of the "
+                "sentence - a year for a fine or a community order, and longer for prison - and "
+                "after that you can answer no to most employers. A prison sentence of over four "
+                "years never becomes spent, and a caution is spent as soon as it is given.")
+    return ("A record is not an automatic no: most employers can ask only about unspent "
+            "convictions, and a spent one or a caution need not be declared unless the job is "
+            "exempt - work with children, patients, or in the justice system. Those jobs ask for "
+            "a standard or enhanced DBS check, where an old minor caution can be filtered out, so "
+            "apply and see rather than deciding for them.")
+
+
+ENTRIES.append(entry("a-criminal-record-and-a-job",
+          # One group, because the record is the subject whether or not the line names a job:
+          # "will a caution show on a dbs" names no job at all and is the same question.
+          ("criminal record", "police record", "on your record", "on my record",
+           # the two words of the phrase are keys as well as the phrase, because a phrase covers
+           # one word of the two a row needs: "i have a criminal record" is the whole subject
+           "criminal", "record", "conviction", "convictions", "convicted", "caution", "cautions",
+           "spent conviction", "spent", "unspent", "dbs", "dbs check", "disclosure",
+           "been to prison", "been in prison", "prison record",
+           # the job is the other half of the question and it is often one word of the line
+           "job", "jobs", "employer", "employers", "apply", "applying", "application",
+           "interview", "career", "careers", "declare", "nurse", "nursing", "teacher",
+           "teaching", "care home", "volunteer", "volunteering", "children"),
+          _a_criminal_record,
+          # The record has to be in the line. "job", "employer", "apply", "interview", "nurse"
+          # and "children" are keys because the job is the other half of the question, and one key
+          # word is enough for a row, so on their own they made every ordinary job line a criminal
+          # record question: "i have a job interview tomorrow" and "how do i apply for a job" were
+          # both told about unspent convictions. This is the gate that asks for the record, and it
+          # is a gate rather than a second key group because "will a caution show on a dbs" has no
+          # job word in it at all and is the same question.
+          ask=("record", "records", "conviction", "convictions", "convicted", "caution",
+               "cautions", "criminal", "spent", "unspent", "dbs", "disclosure", "prison",
+               "declare", "declared", "declaring"),
+          # A criminal record and a trip to America is a real question with a real answer, and
+          # this row is not it: "will a criminal record stop me travelling to america" was given
+          # the job card, which says nothing about an ESTA. The travel words stand the row down
+          # until that card exists, so the line keeps main's (wrong but harmless) answer.
+          avoid=("travel", "travelling", "traveling", "traveller", "abroad", "holiday",
+                 "holidays", "america", "american", "the states", "usa", "esta", "visa",
+                 "visas", "immigration", "border", "entry clearance", "emigrate", "moving to"),
+          bias=2))
 # --- passed over for a promotion is information, not a sentence ---------------
 # The turns after a promotion comes up and does not arrive. Every row that mentions promotion
 # wanted a different question - "how do i ask for one" is the promotion-case card, "never get
@@ -8104,6 +8904,250 @@ ENTRIES.append(entry(
            "salary", "how much", "more money", "interview", "application", "applying"),
     bias=1))
 
+
+
+
+# --- what a job pays ---------------------------------------------------------
+# "How much do nurses earn" and "what is the average salary for a teacher" were a shrug, and
+# "how much do care workers get paid" was a houseplant answer, because the only pay rows in the
+# tree were about one person's own pay (a pay rise, a payslip, a graduate starting salary). The
+# jobs are the ones DAY_TABLE above already names, so a job is read off one vocabulary, and the
+# figures below are the usual UK range for a full-time year, in pounds, before tax. Ranges, not
+# a single number: a person asking this wants the ballpark to argue with, and a range is honest
+# about a country where the same job pays different money in different places.
+#
+# Cleaner is not here: "how much does a cleaner get paid" is the price of a cleaner's hour and
+# the cleaning rows answer that at the rate a cleaner actually keeps. Neither is "carer": an
+# unpaid carer's "pay" is Carer's Allowance, which is a benefits question, not a wage.
+PAY_TABLE = {
+    "nurse": "A nurse in the NHS starts on band 5, about £30,000, and goes up to about £36,500 "
+    "with experience; a specialist or ward manager is £37,000 to £45,000. London adds about "
+    "£5,000, and nights, weekends and overtime are on top of the basic pay.",
+    "care worker": "£12 to £13.50 an hour, about £23,000 to £26,000 full time; night shifts and "
+    "sleep-ins add to that, and a senior care assistant gets £26,000 to £28,000. Experience and a "
+    "level 3 qualification are what move it up.",
+    "midwife": "Band 5 from about £30,000 to £36,500, and a midwife with experience on band 6 is "
+    "£37,000 to £44,000. Unsocial hours add about 20% on top, so the take-home is higher than the "
+    "band suggests.",
+    "paramedic": "Band 5, so about £30,000 to £36,500, with a specialist paramedic on band 6 up to "
+    "about £44,000. Shift allowance is on top and overtime is usually there for the taking.",
+    "doctor": "A foundation doctor starts at about £38,000 and is on about £44,000 in the second "
+    "year; a GP or a consultant is £70,000 to £130,000 depending on sessions, years and private "
+    "work. The overtime and unsocial hours are already in those figures.",
+    "dentist": "An NHS dentist is paid per item of treatment, roughly £30,000 to £65,000 a year, "
+    "and a practice owner doing private work makes £80,000 to £150,000. What a patient pays for a "
+    "check-up is a different number and a different question.",
+    "pharmacist": "£40,000 to £50,000 in a community pharmacy, £45,000 to £55,000 in a hospital, "
+    "and locum shifts at £30 to £45 an hour. A superintendent or a pharmacy owner earns more.",
+    "vet": "£36,000 to £50,000 for a small animal vet with a few years in, and £60,000 upwards with "
+    "a certificate or a partnership. Out-of-hours cover is paid on top and a locum day is £300 to "
+    "£450.",
+    "social worker": "Newly qualified is about £32,000, and with two or three years in it is "
+    "£34,000 to £44,000; a senior practitioner or team manager is £44,000 to £55,000. Agency "
+    "social workers are paid by the hour, often £30 to £40.",
+    "teacher": "A classroom teacher in England starts at £31,650 and the main scale runs to "
+    "£43,600; the leadership scale is £49,000 to £120,000. London adds 5% to 10%, and Scotland and "
+    "Wales have their own scales.",
+    "teaching assistant": "About £23,000 to £26,000 full time, £12.50 to £15 an hour, and the pay "
+    "is spread over 12 months because the job is term time only. A higher level teaching assistant "
+    "with a specialism gets £27,000 to £30,000.",
+    "police officer": "A constable starts at about £29,000 and reaches about £46,000 after seven "
+    "years; a sergeant is £48,000 to £52,000. Overtime, night duty and London weighting are on top.",
+    "firefighter": "About £30,000 as a trainee firefighter, around £42,000 once competent with the "
+    "shift allowance included, and a crew manager is £45,000 upwards. The shifts are what the "
+    "money is for.",
+    "hgv driver": "£14 to £18 an hour, about £32,000 to £42,000 a year. Nights out, ADR and weekend "
+    "or overtime shifts push a lorry driver past £45,000, and agency work pays more in the weeks "
+    "nobody wants.",
+    "delivery driver": "£12 to £14 an hour, about £25,000 to £30,000, and parcel firms that pay per "
+    "drop pay well in December and badly in January. Your own van and fuel come out of it if you "
+    "are a subcontractor.",
+    "bus driver": "£13 to £16 an hour, about £28,000 to £34,000, with London a few thousand more. "
+    "Split shifts and unsocial hours are the trade-off, and overtime is regular.",
+    "train driver": "£45,000 to £65,000 as a qualified driver, and more on long-distance and freight "
+    "work. Training pay is lower and the training takes nine to twelve months.",
+    "taxi driver": "Self-employed, so it is takings minus the car: £400 to £700 a week coming in, "
+    "which is about £25,000 to £35,000 a year before fuel, insurance, maintenance and licensing.",
+    "chef": "£13 to £17 an hour, about £26,000 to £35,000; a head chef is £32,000 to £45,000, and "
+    "hotels and fine dining pay more. The hours are long and the pay is per hour worked.",
+    "waiter": "The minimum wage and up: £11.44 to £13 an hour, plus tips, which are often pooled and "
+    "shared out. A head waiter or supervisor is £13 to £15 an hour.",
+    "retail worker": "£12 to £13 an hour, about £23,000 to £26,000 full time. A supervisor or team "
+    "leader is £26,000 to £30,000, and Sunday and bank holiday premiums make a difference to the "
+    "year.",
+    "warehouse worker": "£12 to £14 an hour, about £24,000 to £28,000. Night shifts pay 20% to 30% "
+    "more and agency rates move with demand, so the same job pays differently a mile apart.",
+    "factory worker": "£12 to £14 an hour, £24,000 to £29,000 full time, with 15% to 30% extra for "
+    "nights and rotating shifts. Skilled machine setting and maintenance is where the money is.",
+    "security guard": "£12 to £14 an hour, about £24,000 to £28,000, and the SIA licence is what "
+    "makes you employable at all. Nights, weekends and site work pay more than a reception desk.",
+    "postman": "£13 to £14 an hour, about £26,000 to £28,000, with driving duties and Christmas "
+    "overtime on top. A delivery office manager is £30,000 to £35,000.",
+    "office worker": "£23,000 to £30,000 for an administrator, and an office manager is £30,000 to "
+    "£38,000. London adds £3,000 to £5,000, and the sectors that pay best are finance and law.",
+    "accountant": "£35,000 to £55,000 once qualified, and about £38,000 newly qualified in practice. "
+    "A finance manager in industry is £50,000 to £65,000, and London and the big firms pay more "
+    "again.",
+    "solicitor": "About £40,000 newly qualified outside London, and £60,000 to £90,000 with five "
+    "years in. A City firm pays £100,000 and up from day one, for hours to match.",
+    "software developer": "£40,000 to £65,000 with a few years in, and senior or lead roles £70,000 "
+    "to £100,000. Contract work is £400 to £600 a day with no holiday pay, which is the trade.",
+    "engineer": "£28,000 to £35,000 starting, £35,000 to £50,000 chartered, and £50,000 upwards for "
+    "a principal or a specialist. Site, offshore and defence work pays a premium over an office "
+    "desk.",
+    "architect": "£32,000 to £40,000 newly qualified, £45,000 to £60,000 with a decade in, and a "
+    "partner or a practice owner more than that. The years of low pay before qualification are the "
+    "part people do not expect.",
+    "journalist": "£24,000 to £32,000 at a local paper or a trade title, and £35,000 to £50,000 in "
+    "a national newsroom. Freelance is paid per word and the money arrives late.",
+    "librarian": "£26,000 to £34,000, and a chartered or senior librarian is £35,000 to £45,000. "
+    "Council library budgets are why the top of that range is thin.",
+    "civil servant": "An administrative officer is £25,000 to £28,000, an executive officer £28,000 "
+    "to £34,000, and a higher executive officer £34,000 to £40,000. The London pay bands add £4,000 "
+    "to £5,000.",
+    "banker": "Branch and mortgage staff are £25,000 to £35,000 plus a small bonus; an investment "
+    "banking analyst is £60,000 to £100,000 with a bonus that can double it, for twice the hours.",
+    "barrister": "£25,000 to £40,000 in the first years of practice, £60,000 to £150,000 with a "
+    "decade in, and a handful earn far more. Chambers rent, insurance and no sick pay come out of "
+    "it.",
+    "mechanic": "£13 to £18 an hour, £27,000 to £36,000, and a master technician or a main dealer "
+    "specialist is £35,000 to £45,000. Your own tools are part of the deal.",
+    "plumber": "An employed plumber is £28,000 to £36,000. Self-employed, the takings are £40 to £80 "
+    "an hour, which sounds like more until the van, tools, insurance, pension and quiet weeks are "
+    "paid for - about £40,000 to £60,000 a year.",
+    "electrician": "An employed electrician is £30,000 to £38,000, and self-employed takings are "
+    "£40 to £70 an hour before the van, the test gear, the insurance and the certification. A "
+    "commercial or industrial spark earns more than a domestic one.",
+    "hairdresser": "£12 to £15 an hour employed, about £23,000 to £28,000, plus tips. Self-employed "
+    "in a chair you rent, the takings are the cut price less the rent, so £25,000 to £40,000 is the "
+    "usual spread.",
+    "bricklayer": "£15 to £20 an hour employed, £30,000 to £40,000, and piecework on a site can pay "
+    "more in a good week. Rain and winter are the unpaid part.",
+    "carpenter": "£15 to £20 an hour employed, about £30,000 to £40,000, and a bench joiner or a "
+    "site carpenter with their own tools and van can clear £45,000 on price work.",
+    "painter and decorator": "£14 to £18 an hour employed, £28,000 to £36,000, and self-employed "
+    "day rates of £150 to £250. The preparation nobody sees is what the day rate is really for.",
+    "builder": "A site manager is £40,000 to £55,000, a general builder running small jobs £35,000 "
+    "to £50,000, and a self-employed builder's profit depends on the jobs they price well.",
+    "roofer": "£14 to £19 an hour employed, £28,000 to £38,000, and a self-employed roofer's day "
+    "rate is £180 to £280. Bad weather weeks are unpaid, which is why the day rate is high.",
+    "plasterer": "£15 to £20 an hour employed, £30,000 to £40,000, and pricework on a new build is "
+    "£3 to £5 a square metre. A good plasterer's day rate is £200 to £250.",
+    "nursery nurse": "£12 to £14 an hour, about £22,000 to £25,000 full time, and a level 3 "
+    "childcare qualification is what gets you the job. A room leader is £25,000 to £28,000 and a "
+    "nursery manager £30,000 to £35,000.",
+    "kitchen porter": "£11.50 to £13 an hour, about £21,000 to £24,000 full time, and it is usually "
+    "the way into a kitchen. A commis chef with a year in is £22,000 to £25,000.",
+    "bar staff": "The minimum wage and up, £11.44 to £13 an hour, plus tips and often a meal on "
+    "shift. A shift supervisor or bar manager is £13 to £16 an hour, and the late finishes are part "
+    "of the job.",
+    "refuse collector": "£12 to £14 an hour, about £24,000 to £28,000, and the early starts are "
+    "the trade. The driver of the round, or a team leader, is £28,000 to £32,000.",
+    "receptionist": "£12 to £14 an hour, about £23,000 to £26,000 full time. A medical or dental "
+    "receptionist is similar, and a hotel reception manager is £28,000 to £32,000.",
+    "soldier": "£25,000 to £30,000 as a new soldier, with food and accommodation on top, and "
+    "£35,000 to £45,000 as a sergeant with a few years in. Trade and specialist pay is extra, and "
+    "the pension is the real perk.",
+    "farmer": "It depends on the farm and the year: an employed farm worker is £12 to £14 an hour, "
+    "about £25,000 to £29,000, and a farm manager £35,000 to £50,000. The owner's income is the "
+    "profit, which can be nothing.",
+}
+
+# The words that make a line a question about what a job pays. "make" is deliberately absent:
+# with it, "how do you make a nurse laugh" read as a pay question. A question about the hours,
+# the holiday, the training or the job itself is another row's, and the avoid list below says so.
+PAY_WORDS = ("how much", "how many", "much", "paid", "pay", "pays", "paying", "earning",
+             "earn", "earns", "earned", "salary", "salaries", "wage", "wages", "income",
+             "rate", "hourly", "per hour", "an hour", "a year", "a week", "average", "typical",
+             "usual", "starting pay", "starting salary", "starting wage")
+
+# The names people use for the jobs above, including the ones DAY_TABLE does not carry at all.
+# "nursery nurse" is here because the longest-match read of "nursery nurse" is the word "nurse",
+# and an NHS nurse's band 5 was answering a question about a nursery.
+PAY_ALIASES = (
+    ("nursery nurse", "nursery nurse"), ("nursery nurses", "nursery nurse"),
+    ("nursery worker", "nursery nurse"), ("nursery practitioner", "nursery nurse"),
+    ("kitchen porter", "kitchen porter"), ("kitchen porters", "kitchen porter"),
+    ("bar staff", "bar staff"), ("bartender", "bar staff"), ("bartenders", "bar staff"),
+    ("bar worker", "bar staff"), ("receptionist", "receptionist"),
+    ("receptionists", "receptionist"), ("soldier", "soldier"), ("soldiers", "soldier"),
+    ("army", "soldier"), ("support worker", "care worker"), ("support workers", "care worker"),
+    ("care assistant", "care worker"), ("care assistants", "care worker"),
+    ("shop assistant", "retail worker"), ("shop assistants", "retail worker"),
+    ("sales assistant", "retail worker"), ("sales assistants", "retail worker"),
+    ("lorry driver", "hgv driver"), ("lorry drivers", "hgv driver"),
+    ("truck driver", "hgv driver"), ("truck drivers", "hgv driver"),
+    ("binman", "refuse collector"), ("bin man", "refuse collector"),
+    ("binmen", "refuse collector"), ("bin men", "refuse collector"),
+    ("refuse collector", "refuse collector"), ("refuse collectors", "refuse collector"),
+)
+
+PAY_JOB_WORDS = set()
+for _name in PAY_TABLE:
+    PAY_JOB_WORDS.add(_name)
+    PAY_JOB_WORDS.add(_name + "s")
+for _alias, _name in DAY_ALIASES:
+    # "carer" and "carers" are left out on purpose: an unpaid carer's money is Carer's
+    # Allowance, which is a benefits answer, not a wage for a care worker.
+    if _name in PAY_TABLE and _alias not in ("carer", "carers"):
+        PAY_JOB_WORDS.add(_alias)
+for _alias, _name in PAY_ALIASES:
+    if _name in PAY_TABLE:
+        PAY_JOB_WORDS.add(_alias)
+
+# A first-person ask is about the person asking, not about the job: "how do i make a living as a
+# nurse" is a career question, and "how much do i pay a plumber" is the price of hiring one, not
+# what a plumber takes home. "you" is not in the second group on purpose - "how much do you earn
+# as a teacher" is a pay question about the job.
+_PAY_ASK_IS_THEIRS = re.compile(
+    r"\b(?:how|what) (?:much )?(?:do|does|did|can|should|shall|could|would) (?:i|we)\b"
+    r"|\b(?:do|should|would|will) (?:i|we) pay\b")
+
+
+def _pay_job_named(line):
+    """The job a line names for a pay question, longest name first."""
+    best = None
+    for alias, name in PAY_ALIASES:
+        at = line.find(" " + alias + " ")
+        if at >= 0 and (best is None or len(alias) > best[0]):
+            best = (len(alias), name)
+    if best:
+        return best[1]
+    name, _where = _job_named(line)
+    return name
+
+
+def _job_pay(memory, understood):
+    line = " " + ((understood or {}).get("clean") or (understood or {}).get("text") or "").lower() + " "
+    if _PAY_ASK_IS_THEIRS.search(line):
+        return None
+    return PAY_TABLE.get(_pay_job_named(line))
+
+
+ENTRIES.append(entry(
+    "what-a-job-pays",
+    (tuple(sorted(PAY_JOB_WORDS)), PAY_WORDS),
+    _job_pay,
+    # what the job costs a customer, what the day is like, how to get into it and how many hours
+    # or days off it comes with are all other answers: "how much does a plumber charge", "what
+    # does a nurse do", "how do i become a nurse", "how many hours does a nurse work",
+    # "how much holiday does a teacher get".
+    avoid=("charge", "charges", "charging", "cost", "costs", "price", "prices", "quote",
+           "quotes", "hire", "hiring", "become", "becoming", "qualify", "qualification",
+           "qualifications", "course", "courses", "apprentice", "apprenticeship", "training",
+           "work experience", "cv", "cover letter", "interview", "vacancy", "advert",
+           "hours", "shift", "shifts", "rota", "holiday", "holidays", "annual leave", "day off",
+           "days off", "pension", "sick pay", "maternity", "parental", "notice", "retire",
+           "retirement", "redundancy", "strike", "union", "overtime pay", "tax return",
+           "taxes",
+           # a tip is the tipping answer, not the wage: "how much do waiters earn in tips"
+           "tip", "tips", "tipping", "gratuity", "tronc",
+           # work being done in somebody's house is priced, not paid: "how much does a plumber
+           # want to fit a shower" is the quote question, whatever the verb
+           "fit", "fits", "fitting", "install", "installs", "installing", "installer",
+           "replace", "replacing", "want to", "come out", "call out", "call-out",
+           "do the job", "for the job", "a day's work"),
+    bias=3))
 # --- a promotion that is not what it looked like -------------------------------------------
 # "i got a promotion but i hate the job" was answered "Noted: you got a promotion but you hate
 # the job" - the promotion rows all read an ask about getting one, and the "hate my job" answer
@@ -8129,4 +9173,29 @@ ENTRIES.append(entry(
     avoid=("how do i ask for", "should i ask for", "how to get", "apply for", "applying for",
            "interview", "salary", "what should i say", "negotiate", "pay rise", "two job offers",
            "another job", "resign", "quit", "notice", "redundancy", "sacked", "fired"),
+    bias=1))
+
+# --- the words in an HR policy -------------------------------------------------------------
+# "What is a protected characteristic" was a search hedge, and it is the phrase the whole of
+# discrimination law hangs on, so the answer lists them and says what makes them matter.
+ENTRIES.append(entry(
+    "protected-characteristic",
+    (("protected characteristic", "protected characteristics", "equality act",
+      "equality act 2010", "protected by law", "discrimination law", "nine protected"),
+     ("what is", "whats", "what are", "which", "mean", "means", "list", "how many", "my rights",
+      "rights", "discriminated", "discrimination", "sacked", "fired", "treated unfairly",
+      "unfair", "complain", "tribunal", "claim")),
+    "The protected characteristics are the nine things the Equality Act 2010 stops an employer "
+    "treating you worse for: age, disability, gender reassignment, marriage and civil partnership, "
+    "pregnancy and maternity, race, religion or belief, sex, and sexual orientation. Being "
+    "treated badly because of one of them - in hiring, pay, promotion, hours or how you are "
+    "managed - is unlawful, and the burden shifts once you can show it probably happened: the "
+    "employer has to prove it did not. Keep the messages and dates, raise it in writing with "
+    "whoever the policy names, and note that a tribunal claim usually has to be started within "
+    "three months less one day of the act.",
+    # a redundancy, a warning and a grievance are their own processes, and the minimum wage is
+    # a different entitlement
+    avoid=("redundancy", "redundant", "warning", "grievance", "minimum wage", "holiday pay",
+           "sick pay", "notice period", "resign", "quit", "appraisal", "probation",
+           "zero hours", "contract"),
     bias=1))

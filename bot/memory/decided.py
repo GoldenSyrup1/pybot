@@ -480,6 +480,44 @@ def observe(text, memory):
     return memory["decided"]
 
 
+# A chat that settled the month of a trip has settled something. Answered "where did we settle on"
+# two lines after the bot itself said "you are going to Cornwall in September", this reader said
+# "You haven't settled on one yet." - the chat contradicted itself, and the one thing it did settle
+# was on the record the whole time. The plan is what a chat settles when it settles no choice.
+PLAN_KEYS = ("plans", "plan")
+
+
+def _the_plan_on_record(memory):
+    """The plan the chat has already said back to them, latest first, or None.
+
+    A plan the bot never said back is not one the chat settled: "im learning to swim" files the
+    plan "Swim", and "you settled on Swim" is a decision they never made. A plan the bot has
+    already confirmed - "Got it - you are going to Cornwall in September." - is the chat settled,
+    and the ask about it must not be told the chat settled nothing.
+    """
+    user = (memory or {}).get("user") if isinstance(memory, dict) else None
+    if not isinstance(user, dict):
+        return None
+    plans = [user.get("plan")] if user.get("plan") else []
+    if isinstance(user.get("plans"), list):
+        plans = list(user["plans"]) + plans
+    for plan in reversed([p for p in plans if p]):
+        plan = " ".join(str(plan or "").split())
+        words = [w for w in plan.lower().replace(",", " ").split() if len(w) > 2]
+        if words and said_back(memory, words):
+            return plan
+    return None
+
+
+def said_back(memory, words):
+    """Whether an earlier reply of the bot already said these words."""
+    for turn in list((memory or {}).get("turns") or []):
+        said = str((turn or {}).get("bot") or "").lower()
+        if said and all(w in said for w in words):
+            return True
+    return False
+
+
 def the_decision(memory):
     """The choice on record, or None."""
     held = (memory or {}).get("decided") if isinstance(memory, dict) else None
@@ -647,6 +685,15 @@ def answer(text, memory):
             # "what did i decide about the boiler" with nothing settled: the ask is about the
             # boiler, and the module that knows boilers should answer it.
             return None
+        plan = _the_plan_on_record(memory)
+        if (plan and DECIDING_WORD.search(str(text or ""))
+                and not _asks_about_another_thing(text, {"what": plan})):
+            # "what did we settle on" with a plan on record answers with the plan: the chat did
+            # settle it, and saying it settled nothing is the one answer that is not true.
+            return pick(["You settled on " + plan + ".",
+                         "That's settled: " + plan + ".",
+                         "The chat settled it: " + plan + "."], memory,
+                        seed_text=str(text or ""))
         if _a_choice_reached_for(memory):
             if not (DECIDING_WORD.search(str(text or "")) and _a_plan_since(memory)):
                 # They said a choice in words this reader does not have. Saying "nothing settled"

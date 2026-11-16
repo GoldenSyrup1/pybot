@@ -83,6 +83,18 @@ def restates_the_answer(bot_line):
     return bool(RESTATED.match(str(bot_line or "").strip()))
 
 
+# The thing a limit takes away is a thing the bot put on the table - "no horror", "no treats",
+# "hold the cheese". A person's own state is not a thing on any table: "nothing feels worth
+# doing", "nothing is fun any more", "nothing seems worth it" are the family that says the
+# pleasure has gone, and read as limits they cut the answer above down to a fragment of itself -
+# "Right - no feels worth doing, then, and that changes the answer: what would you use instead?"
+# - which is a reply about a list the bot never gave. A limit names what is left out, so the
+# words of it start with a noun or a noun's own modifier, never a linking verb or the person.
+A_STATE_IS_NOT_A_LIMIT = re.compile(
+    r"^(?:feel|feels|felt|feeling|is|are|was|were|be|been|being|seems|seem|seemed|"
+    r"i|im|i'm|ive|i've|me|my|we|we're|us)\b", re.I)
+
+
 def forms_of(thing):
     """The word forms of a ruled-out thing that count as the same thing in the bot's own line."""
     words = [w for w in WORD.findall(thing.lower()) if w]
@@ -91,6 +103,15 @@ def forms_of(thing):
     out = set()
     for word in words:
         out.add(word)
+        if word.endswith("ing") and len(word) > 5:
+            # "no walking up hills" is the walking the answer above calls "walk for half an hour a
+            # day": the thing is said as the doing of it and the answer says the bare verb, so the
+            # bare verb is the same thing. Without it the answer was not read as carrying the thing
+            # at all, and the entry for hills answered a person who had just said no to hills.
+            stem = word[:-3]
+            out.update({stem, stem + "e"})
+            if len(stem) > 2 and stem[-1] == stem[-2]:
+                out.add(stem[:-1])
         if word.endswith("ies") and len(word) > 4:
             out.add(word[:-3] + "y")
         elif word.endswith("es") and len(word) > 3:
@@ -139,6 +160,36 @@ def _pick(pool, memory):
 
 def _take_out(said, forms):
     """The answer above with the parts about the thing taken out, or "" when enough is left."""
+    kept, _dropped = _the_parts_left(said, forms)
+    if not kept:
+        return ""
+    left = _joined(kept)
+    if len(left) < LEAST_KEPT or len(left.split()) < LEAST_WORDS:
+        return ""
+    return left
+
+
+def steps_left(understood, memory):
+    """The parts of the answer above that the limit leaves, in the order they were given.
+
+    The reply is the whole of them, so the turn after it - "whats the first thing to change" - is
+    the first of them rather than a new search (`bot/memory/limit.py`, `move_after_a_limit`).
+    """
+    if not isinstance(understood, dict) or not understood.get("constraint"):
+        return []
+    things = [str(thing).strip() for thing in (understood.get("excludes") or []) if str(thing).strip()]
+    said = _last_answer(memory)
+    if not things or not said:
+        return []
+    kept, _dropped = _the_parts_left(said, forms_of(things[0]))
+    # A part that ends with a colon only introduces the parts after it ("Change a few things you can
+    # keep doing rather than going on a diet:"), so it is not a step to start with.
+    return [part.strip().rstrip(".,;:") for part in kept
+            if part.strip() and not part.strip().endswith(":")]
+
+
+def _the_parts_left(said, forms):
+    """(the parts of the answer that survive the limit, how many were taken out)."""
     parts = [part for part in PART.split(said) if part.strip()]
     kept = []
     dropped = 0
@@ -164,15 +215,12 @@ def _take_out(said, forms):
             continue
         kept.append(part.strip())
     if not dropped or not kept:
-        return ""
+        return [], dropped
     # The first thing left points back at what has just been taken out ("The same hand carries on
     # down to the floor...", "That also works for..."), so it is not a thing to say on its own.
     if BACK_REFERENCE.match(kept[0]):
-        return ""
-    left = _joined(kept)
-    if len(left) < LEAST_KEPT or len(left.split()) < LEAST_WORDS:
-        return ""
-    return left
+        return [], dropped
+    return kept, dropped
 
 
 def _joined(kept):
@@ -222,6 +270,63 @@ def _a_fact_put_right(memory):
     return isinstance(fixed, dict) and bool(fixed.get("value"))
 
 
+# The words after the negator are what make a line a limit on the answer above rather than a
+# statement about their life: a limit says "with", "that", "too", "but", "except" ("nothing with a
+# laugh track though", "nothing too scary"), and a statement says "makes", "feels", "is" ("nothing
+# makes me happy"). The distinction matters both ways round. Read as a statement, a limit gets a
+# cheer ("That's the best kind of day. What happened?" at somebody narrowing a film list, because
+# "laugh" is a pleasure word); read as a limit, a flat fortnight gets its answer cut down to a
+# fragment of itself ("Right - no feels worth doing, then").
+NOTHING_THAT_LIMITS = re.compile(
+    r"\bnothing\s+(?:with|that|too|but|except|without|involving|containing|featuring|before|"
+    r"after|under|over|like)\b")
+# A limit on a film or a programme with no "nothing" in it: the negator sits right in front of the
+# kind of thing a list carries ("no subtitles", "not too sad", "without the violence").
+NO_LAUGH_OR_SCARES = re.compile(
+    r"\b(?:no|not|without|except|minus)\s+(?:a\s+|the\s+|any\s+|too\s+|more\s+)?"
+    r"(?:laugh\s?track|laughter|laughing|comedy|comedies|jokes?|funny|scares?|scary|horror|"
+    r"gore|violence|subtitles|sad\s+ones?|sad\s+films?)\b")
+
+
+def a_limit_on_the_answer(text):
+    """True when the line is a thing taken out of the answer above, not a report of their day."""
+    said = " " + " ".join(str(text or "").lower().split()) + " "
+    return bool(NOTHING_THAT_LIMITS.search(said) or NO_LAUGH_OR_SCARES.search(said))
+
+
+# A limit said in words the reading does not file: "nothing with a laugh track though", "no
+# subtitles", "not too sad". The reading builds `["excludes"]` from a "no X" it can name, and
+# these arrive with an empty list, so the answer above was met with the neutral receipt ("Thanks
+# for telling me - I'm here if you want to dig into any of that") - the filler this shape least
+# deserves, because the person has just narrowed a list and is waiting for the next one. The words
+# after the negator are what make it a limit rather than a statement about their life: "nothing
+# makes me happy" says "makes", and keeps its own answer.
+A_LIMIT_SHAPE = re.compile(
+    r"\b(?:nothing|no|not|without|except|minus)\s+(?:with|that|too|more|any|much|a|the)?\s*"
+    r"\S")
+# What is said when the thing taken out cannot be named back: what the person has just narrowed
+# is on the screen, so the way forward is the one they picked it down to, not a guess about it.
+MISSED_LIMIT = (
+    "Leave that out, then - which of those was nearest, and I'll find another in the same vein.",
+    "Fair enough, that one's out. Tell me which of those you'd keep and I'll follow the thread.",
+    "Then it's out. Which of them came closest, and what would you change about it?",
+)
+
+
+def a_limit_the_reading_missed(clean, memory):
+    """The reply for a limit the reading did not file, or None to leave the line alone."""
+    said = " " + " ".join(str(clean or "").lower().split()) + " "
+    if not said.strip():
+        return None
+    if not A_LIMIT_SHAPE.match(said.strip()) or not a_limit_on_the_answer(said):
+        return None
+    above = _last_answer(memory)
+    if not above or above.rstrip().endswith("?"):
+        # Nothing was on the table, so there is nothing the person has narrowed.
+        return None
+    return _pick(MISSED_LIMIT, memory)
+
+
 def reply_for(understood, memory):
     """The reply for a line that only rules something out, or None to leave the line alone."""
     if not isinstance(understood, dict) or not understood.get("constraint"):
@@ -238,6 +343,10 @@ def reply_for(understood, memory):
     if not said:
         return None
     thing = things[0]
+    if A_STATE_IS_NOT_A_LIMIT.match(thing):
+        # "nothing feels worth doing" after an answer about a flat week is the person's own state,
+        # not a part of that answer they want taken out (see A_STATE_IS_NOT_A_LIMIT).
+        return None
     left = _take_out(said, forms_of(thing))
     if not left:
         if not _carries(said, forms_of(thing)):

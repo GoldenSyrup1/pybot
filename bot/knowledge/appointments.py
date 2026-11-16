@@ -6,6 +6,8 @@ rule after a blood test, and it reaches nothing at all if the kind of visit is n
 key. It answers health, so a follow-up in a health conversation can find it - a domain that does
 not declare health is never searched with the line before it.
 """
+import re
+
 from .lookup import entry
 
 ANSWERS = ("health", "food-and-drink")
@@ -142,6 +144,38 @@ def _the_line_before(memory, reading):
     return ""
 
 
+# The hours a person goes without food is the fasting row's question, and the line says so: it
+# names the fast (or the food it cannot have) and asks how long. Kept as the reading health.py
+# uses, so the two agree on which lines are the fasting ones.
+_A_FAST_LENGTH_ASK = re.compile(
+    r"\bhow long\b[^.?]*(?:fast|fasting|fasted|without food|no food|nothing to eat|empty stomach)"
+    r"|(?:fast|fasting|fasted)\b[^.?]*\bhow long\b"
+    r"|\bhow many hours\b[^.?]*(?:fast|fasting|fasted|without food|no food|nothing to eat)",
+    re.IGNORECASE)
+
+# "how long does a fasting blood test take" is about the visit, and this card says five minutes
+# in the chair, so that line stays here even though it names the fast.
+_A_TEST_THAT_TAKES = re.compile(
+    r"\b(?:test|tests|appointment|appointments)\s+(?:take|takes|took|last|lasts)\b", re.IGNORECASE)
+
+
+def _the_line_wants_a_length(line, reading):
+    """Whether the line asks how long to go without food, which is the hours and not this advice.
+
+    `memory["understood"]["wants"]` is the shared reading of the shape of answer a line asks for,
+    written once by bot/modules/intent.py, and "time" is a length. This card has no length in it,
+    so on a fasting question it stands aside and the row in health.py that opens with "eight to
+    twelve hours without food" answers. The card keeps every line it can answer itself: "do i
+    need to fast", "what should i do before a blood test", "what should i bring", and "how long
+    does a fasting blood test take", whose five minutes in the chair are here.
+    """
+    if str((reading or {}).get("wants") or "").strip().lower() != "time":
+        return False
+    if _A_TEST_THAT_TAKES.search(line):
+        return False
+    return bool(_A_FAST_LENGTH_ASK.search(line))
+
+
 def _before_an_appointment(memory, reading):
     """The card for the kind of appointment the line is about, or the general one."""
     line = " ".join(str((reading or {}).get("text") or "").split()).lower()
@@ -181,6 +215,11 @@ def _before_an_appointment(memory, reading):
                 "bring you home, as you cannot drive or go home alone after a general "
                 "anaesthetic.")
     if any(word in line for word in _ITS_A_BLOOD_TEST):
+        # "how long do i need to fast before a blood test" asks for the hours, and there are none
+        # in this card: it stands aside and the fasting row answers, where the visit and the counts
+        # were given to a line that asked how long.
+        if _the_line_wants_a_length(line, reading):
+            return None
         return ("Only fast if the letter or the person who booked it told you to: most blood tests "
                 "need no fasting at all, and water is fine even when they do. Wear something with "
                 "a short or loose sleeve so the arm is easy to get at, and keep your hands warm on "

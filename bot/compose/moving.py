@@ -32,7 +32,7 @@ A_MOVE = re.compile(
     r"\b(?:i|we|they|he|she|im|i'm|we're|were|were)\s*(?:'m|'re|am|are|is)?\s*"
     r"(?:just\s+|finally\s+|now\s+|soon\s+|actually\s+|been\s+|have\s+|had\s+)?"
     r"mov(?:e|ed|ing)\s+"
-    r"(?:out|house|household|flat|home|abroad|in\b|into\b|back\s+(?:in\s+)?with|away)",
+    r"(?:out|houses?|household|flats?|home|abroad|in\b|into\b|back\s+(?:in\s+)?with|away)",
     re.I)
 # The same said the other way round ("the move is next month", "we have a move coming up").
 A_MOVE_NOUN = re.compile(
@@ -104,7 +104,7 @@ def reads_as_a_move_cheered(text):
     if not reads_as_a_move(clean):
         return False
     try:
-        return bool(goodnews.reads_as_news_to_come(clean))
+        return bool(goodnews.ahead_of_now(clean))
     except Exception:  # noqa: BLE001 - a reading that fails claims no turn
         return False
 

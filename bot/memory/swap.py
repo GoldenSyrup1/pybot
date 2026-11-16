@@ -85,6 +85,17 @@ ASKS_A_THING = re.compile(
 # about "the smell in the freezer". The tail is the words that only say it is a follow-up.
 TAIL_OFF = re.compile(r"[\s,]*(?:\b(?:too|as well|also|instead|then|now|though|please|thanks)\b"
                       r"[\s,.!?]*)+$", re.I)
+# The word that says how sure they are about the thing is theirs, not part of its name. Left in,
+# the frame that hands the earlier answer to the new thing says it out loud - "a labrador
+# probably" after the dog question came back "The same goes for the labrador probably: ...", and
+# "what about the freezer maybe" "The same goes for the freezer maybe: ..." - which is their
+# hesitation in a noun slot. Only the tail is read, because "probably a labrador" is not how an
+# answer gets handed to a thing in the first place.
+HEDGE_OFF = re.compile(
+    r"[\s,]*(?:\b(?:probably|maybe|perhaps|possibly|definitely|likely|obviously|actually|"
+    r"really|sure|suppose|supposedly|hopefully|honestly|frankly)\b"
+    r"|\b(?:i|we)\s+(?:think|guess|suppose|reckon|imagine|hope)\b"
+    r"|\bof course\b|\bfor now\b|\bright\b|\bok(?:ay)?\b)[\s,.!?]*$", re.I)
 # Words that point at something already said rather than naming a thing.
 DEICTIC = frozenset((
     "it", "its", "it's", "that", "this", "them", "they", "those", "these", "him", "her",
@@ -152,6 +163,13 @@ def thing(text):
     # "and in the freezer too" / "what about the freezer as well": the words after the thing only
     # say it is a follow-up, and the words in front only say it is one too.
     rest = TAIL_OFF.sub("", rest.strip(" ?!.,")).strip(" ?!.,")
+    # And the hesitation comes off before the name is read: "a labrador probably" names the
+    # labrador, and the "probably" is the person being unsure, which the reply has no slot for.
+    for _ in range(3):
+        hedged = HEDGE_OFF.sub("", rest).strip(" ?!.,")
+        if hedged == rest:
+            break
+        rest = hedged
     if not rest or len(rest.split()) > 4:
         return None
     found = THING.match(rest)

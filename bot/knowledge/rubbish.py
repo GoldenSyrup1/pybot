@@ -18,6 +18,8 @@ thing on its way out.
 What to do with an item nobody here knows is its own entry: rather than a shrug, it says the
 three routes a thing usually takes and asks which item it is.
 """
+import re
+
 from .dishes import cook_ask
 from .lookup import A_HOURS_ASK, entry
 
@@ -30,7 +32,16 @@ ANSWERS = ("home-and-diy", "technology")
 
 # The words that say "I want this gone". They name the ask, never the thing, so the same tuple
 # belongs on every item below and the item's own word decides which route is meant.
+# Passing a thing on is the commonest ask of all and it is the same shape as the bin: the
+# item, and a word that says it is leaving the house. "how do i donate clothes", "how do i
+# donate a bike" and "where can i donate toys" were all a shrug or a search hedge, because the
+# ask words only ever said throw away. "charity" is here rather than in one row because it is
+# an ask and never an item: a line with no thing in it ("how do i raise money for charity")
+# still matches nothing below.
 RID = ("get rid", "rid of", "dispose", "disposal", "throw away", "throw out", "throwing away",
+       "donate", "donated", "donating", "donation", "donations", "give away", "giving away",
+       "gave away", "charity", "charity shop", "charity shops", "free ad", "free ads",
+       "freecycle", "pass on",
        "where do i take", "where can i take", "where do i put", "where can i put",
        "drop off", "get shot of", "throw", "throwing", "toss",
        "chuck", "chuck out", "chucking out", "bin", "bins", "the tip", "to the tip", "tip it",
@@ -137,7 +148,15 @@ ITEMS = (
      "you do not need to explain. Don't flush them and don't bin them - they reach the water "
      "supply, and a child or a pet can find them. Leave them in their packet with the label on, "
      "and put a used inhaler in with them rather than in the bin.",
-     ("can i take", "should i take", "safe to take", "ok to take", "take one", "take two",
+     # A plan to stop, skip or change a dose is not a bag of unwanted tablets: "im going to skip
+     # my tablets tonight" was told to take them back to a pharmacy for safe disposal. The row is
+     # for medicines nobody wants any more, so the words that say the person still takes them
+     # stand it down.
+     ("im going to", "going to", "gonna", "plan to", "skip", "skips", "skipping", "stopped",
+      "stopping", "stop taking", "come off", "coming off", "cut down", "cutting down", "halve",
+      "halving", "half", "reduce", "reducing", "increase", "increasing", "double", "doubling",
+      "extra dose", "change my dose", "my dose", "taper", "wean", "instead of",
+      "can i take", "should i take", "safe to take", "ok to take", "take one", "take two",
       "take them", "take it", "take with", "take for", "still taking", "dose", "dosage",
       "side effect", "side effects", "how many", "overdose", "missed", "forgot", "forget",
       # "how do i get rid of a headache without pills" is a line about the headache, and "get rid
@@ -265,7 +284,12 @@ ITEMS = (
       "clean the")),
     ("clothes",
      ("clothes", "clothing", "old clothes", "shoes", "trainers", "coats", "jumpers", "textiles",
-      "rags", "bedding", "duvet", "pillows", "towels"),
+      "rags", "bedding", "duvet", "pillows", "towels",
+      # the list stopped at jumpers and a person's old socks went to a card about tiredness:
+      # "what can i do with worn out socks" and "what do i do with old underwear" are the same
+      # ask as the shoe one, and the textile bank takes them all
+      "socks", "sock", "pants", "underwear", "knickers", "bras", "gloves", "scarves", "hats",
+      "sheets", "curtains", "fabric", "linen", "blankets", "slippers", "boots", "sandals"),
      "Charity shops, the clothes banks in car parks and the textile skip at the tip take anything "
      "wearable. Worn-out fabric still earns its place in a textile bank, where it becomes rags or "
      "stuffing, so a bag of split trousers is not waste. Wash it first, put shoes in pairs, and a "
@@ -273,7 +297,20 @@ ITEMS = (
      ("dog", "dogs", "cat", "cats", "pet", "pets", "died", "dies", "passed away", "gone",
       "kid", "kids", "child", "children", "baby", "hospital", "his", "her bed",
       "wash", "washing", "shrink", "shrank", "stain", "stains", "iron", "ironing", "fit", "size",
-      "wear", "smell", "smells", "dry", "drying", "hole", "holes", "repair", "refashion",
+      # "wear" on its own is the word in "clothes i dont wear", which is the commonest way to
+      # ask this row's question, and it stood the row down on five phrasings of it ("how do i
+      # get rid of clothes i dont wear", "what to do with clothes i dont wear", "clothes i never
+      # wear"). The wearing words are the phrases instead, so a line about putting clothes on
+      # still keeps its own card.
+      # "wearing" cannot be listed here: an avoid word is matched loosely, so its stem "wear"
+      # is the word in "clothes i dont wear" and it took the row down again. The phrases below
+      # are the ones that mean putting clothes on.
+      # "worn out" cannot be here either: a worn-out shoe is this row's own subject - the reply
+      # says worn-out fabric goes to a textile bank - and two readers found "what do i do with
+      # worn out shoes" going to a card about being tired. "wear it", "wear them" and "to wear"
+      # are the phrases that mean putting clothes on, which is the other question.
+      "wear it", "wear them", "to wear",
+      "smell", "smells", "dry", "drying", "hole", "holes", "repair", "refashion",
       "style", "outfit", "what to wear",
       # the garments are what they are made of, not what to do with them: static and moths both
       # reached this row ("how do i get rid of static in clothes", "how do i get rid of clothes
@@ -309,6 +346,54 @@ ITEMS = (
       "clean", "cleaning", "stain", "stains", "smell", "smells", "upstairs", "delivery",
       "assemble", "assembling", "flat pack", "cover", "repair", "buy", "buying", "best",
       "which", "arrange", "layout", "small room")),
+    # Books and toys came out of the same ask as the clothes: a house being thinned out has a
+    # shelf of each, and "how do i get rid of books" was answered with the card for a stain on
+    # paper while "how do i get rid of toys" was a hedge. A charity shop takes both, but not a
+    # car load at once, so the route names the people who do want them.
+    ("books",
+     ("book", "books", "old books", "paperback", "paperbacks", "novels", "textbooks",
+      "magazines", "comics", "encyclopaedias", "encyclopedias", "cookbooks", "book shelf",
+      "bookshelf", "bookcase full of books"),
+     "Ring the charity shop before you load the car: most take a bag or two of books and say no "
+     "to a bootful, and a book bank at the tip or a supermarket car park takes as many as you "
+     "have. Paperbacks go down well at a hospital, a care home or a phone box library, and a "
+     "school fair clears children's books. Anything mouldy, damp or water-damaged goes in the "
+     "paper recycling, not to a shop.",
+     # "booking" and "booked" cannot be listed: an avoid word is matched loosely, so their stem
+     # "book" is the word in "books" and the row stood down on every phrasing of its own question.
+     # A line that books something reaches nothing here anyway, because a route word has to be in
+     # it too.
+     ("book a", "book the", "reserve", "reservation", "table", "hotel",
+      "flight", "flights", "train", "tickets", "appointment", "read", "reading", "reads",
+      "recommend", "recommendation", "recommendations", "what book", "which book", "good book",
+      "best book", "books for", "book for", "kindle", "e reader", "e-reader", "audiobook",
+      "library", "borrow", "store", "storage", "shelf", "shelves", "display")),
+    ("toys",
+     ("toy", "toys", "old toys", "lego", "duplo", "playmobil", "teddy", "teddies",
+      "cuddly toys", "soft toys", "dolls", "action figures", "train set", "board games",
+      "jigsaws", "puzzles", "childrens toys", "kids toys"),
+     "Charity shops take toys only if they are complete and clean, so a nursery, a sure start "
+     "centre or a refuge will take what a shop will not, and a free-ad site clears a box of lego "
+     "in a day. Wash what you have and put the pieces back in their boxes first. A car seat or a "
+     "cot is the exception: charity shops cannot take them, so it goes to the tip unless a "
+     "friend wants it, and broken plastic is general waste.",
+     ("buy", "buying", "best", "which", "for a 3", "for a 2", "for a 4", "for a 5",
+      "year old", "years old", "gift", "present", "birthday", "christmas", "play with",
+      "clean", "cleaning", "sterilise", "wash", "smell", "recall", "safety", "choking",
+      "store", "storage", "tidy", "organise", "floor")),
+    # A bike is the one item here that is worth money in any state, and the word is also a verb
+    # and a sport, so its own avoid keeps riding, buying and mending out of it.
+    ("bikes",
+     ("bike", "bikes", "bicycle", "bicycles", "old bike", "kids bike", "childs bike",
+      "mountain bike", "push bike"),
+     "A bike project or a charity that refurbishes them takes one that does not ride: Re-Cycle "
+     "and most city bike workshops want frames and parts, and a free-ad listing marked "
+     "collection only clears one in a day. A scrap dealer buys the frame by weight, and the tip "
+     "takes it with the metal. Charity shops rarely take bikes, so ring the project first.",
+     ("ride", "riding", "rider", "buy", "buying", "which", "best", "cheap", "repair",
+      "fix", "mend", "puncture", "tyre", "tyres", "chain", "brakes", "gears", "saddle",
+      "lock", "helmet", "lights", "electric", "e-bike", "how far", "how long", "train",
+      "lose weight", "fitness", "commute", "storage", "store", "shed", "carrier")),
     ("polystyrene",
      ("polystyrene", "styrofoam", "packaging", "packing peanuts", "bubble wrap"),
      "The white beaded stuff (expanded polystyrene) is not collected at the kerbside in most "
@@ -648,13 +733,79 @@ def _not_a_cook_ask(understood):
     return not cook_ask(understood)
 
 
+
+# Main read "where do i put the salt in the dishwasher" as a disposal line, because the removal
+# words include the bare phrase "where do i put" and a person says it just as often about a thing
+# on its way out as about a place for a thing that stays. The preposition after the verb is what
+# tells the two apart: a line that puts something *into* an item this domain knows is placing it,
+# and the item named is where it goes, not the waste. "where do i put the old fridge" keeps its
+# route, and so does every line without a place in it.
+_CONTAINERS = sorted({name for item in ITEMS for name in item[1]}, key=len, reverse=True)
+PUT_INTO = re.compile(
+    r"\b(?:put|puts|putting|place|places|placing|keep|keeps|keeping|store|stores|storing|add|"
+    r"adding|load|loading|pour|pouring|stick|sticking|poke|poking|stand|standing)\b"
+    r"[^.;?!]{0,40}?\b(?:in|into|inside|on|onto|under|behind|beside|near)\s+"
+    r"(?:the\s+|my\s+|our\s+|a\s+|an\s+|your\s+|its\s+)?(?:%s)\b"
+    % "|".join(re.escape(name) for name in _CONTAINERS))
+
+
+def _said(understood):
+    """The line as typed, then the reading's own text - what a word match here looks at."""
+    if not isinstance(understood, dict):
+        return ""
+    return str(understood.get("plain") or understood.get("clean")
+               or understood.get("norm_text") or "")
+
+
+def _not_a_container(understood):
+    """False when the item named holds what the line is putting into it."""
+    return not PUT_INTO.search(_said(understood).lower())
+
+
+# "Where do i put the salt" is a placement question, and the removal words include "where do i
+# put" and "where can i put" because that is also how a person asks where something goes on its
+# way out of the house. What tells the two apart is the thing: a consumable that goes *in* a
+# machine - salt, tablets, powder, rinse aid - is being placed, and "where do i put dishwasher
+# tablets" was answered with which shop takes the old machine. An item of furniture or an
+# appliance still reads as disposal, which is its usual question ("where do i put a mattress").
+PLACEMENT = re.compile(
+    r"\bwhere\s+(?:do|does|can|could|should|shall|would)\s+(?:i|we|you|it)\s+put\b"
+    r"|\bwhere\s+to\s+put\b|\bwhere\s+i\s+put\b")
+# Two kinds of consumable word. "Rinse aid", "fabric softener" and "descaler" are only ever put
+# into a machine, so the ask alone is enough. "Tablets", "salt" and "powder" are just as often
+# medicine, food or water-softening salt: "where do i put the tablets" is the pharmacy's question
+# and the disposal rows must keep it, so those need a machine named in the line as well. Azure-spoon
+# found this on the review: with the bare word enough, the pharmacy route lost the line.
+ONLY_A_MACHINE = ("rinse aid", "rinse-aid", "fabric softener", "descaler")
+A_MACHINE = re.compile(r"\b(?:dishwasher|dish washer|washing machine|washer|washer dryer|"
+                       r"washer-dryer|dishdrawer|dish drawer|tumble dryer|tumble drier|dryer)\b")
+CONSUMABLE = ("salt", "tablet", "tablets", "powder", "detergent", "rinse aid", "rinse-aid",
+              "pod", "pods", "capsule", "capsules", "softener", "descaler")
+
+
+def _a_consumable_is_placed(understood):
+    """True only when the line asks where to put something that goes in a machine."""
+    said = _said(understood).lower()
+    if not PLACEMENT.search(said):
+        return False
+    if any(word in said for word in ONLY_A_MACHINE):
+        return True
+    return bool(A_MACHINE.search(said)) and any(word in said for word in CONSUMABLE)
+
+
+def _disposal_guard(understood):
+    """False when this line is another row's question: a cook ask, a container or a placement."""
+    return (_not_a_cook_ask(understood) and _not_a_container(understood)
+            and not _a_consumable_is_placed(understood))
+
+
 # `bias` leans an entry over a neighbour of the same rank. A white good is the one item here whose
 # rival ("is a tumble dryer worth it") scores as high on the same line, and the item on its way out
 # is the question when the line says "get rid of".
 ENTRIES = [
     entry("dispose-" + item[0], (item[1], RID), item[2],
           avoid=item[3] + CURING_ASIDE + NOT_RUBBISH,
-          bias=item[4] if len(item) > 4 else 1, guard=_not_a_cook_ask,
+          bias=item[4] if len(item) > 4 else 1, guard=_disposal_guard,
           # a sixth element is the item's own ask, for a row that would otherwise answer the
           # question a person asks about a symptom rather than about the thing
           ask=item[5] if len(item) > 5 else ())
@@ -673,7 +824,10 @@ ENTRIES = [
     entry("bin-day", BIN_DAY_KEY, BIN_DAY, avoid=BIN_DAY_AVOID, bias=2),
     entry("dispose-tip-visit",
           (("the tip", "a tip", "to the tip", "tip run", "recycling centre", "household waste site",
-            "the dump"),
+            "the dump",
+            # the council runs the place, so people name it that way: "what about the council tip"
+            # was answered "it is fine not to tip in the UK", by the money table's tipping row
+            "council tip", "council dump", "council recycling centre", "council recycling center"),
            # "Should i go to the tip or is there a collection" asks whether to make the trip at
            # all, and the ask words were all about what to bring once there: on "the tip" plus
            # "go" or "collection" the row scored nothing, the money table's tipping row took the
@@ -686,7 +840,12 @@ ENTRIES = [
     # "nearest" off the visit row. The location is a different question from the trip: the trip
     # asks what to bring, this one asks which site and how to find it.
     entry("find-your-tip",
+          # the council is who runs it, so "where is the council tip" is the same lookup: the
+          # place is named as a place, which keeps the bare follow-up ("what about the council
+          # tip") on the visit row, where what to bring is what they want
           (("local tip", "my local tip", "nearest tip", "closest tip", "tip near me",
+            "council tip near me", "where is the council tip", "wheres the council tip",
+            "where is my council tip", "the council tip near me",
             "the tip near me", "tip local to me", "where is the tip", "where is my tip",
             "where is the dump", "the dump near me", "local dump", "nearest dump",
             "local recycling centre", "local recycling center", "nearest recycling centre",

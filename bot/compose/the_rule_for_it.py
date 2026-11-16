@@ -74,6 +74,116 @@ PRICE_ASK = re.compile(
     r"|\bhow much (?:is|are|was|were)\b(?!\s*(?:enough|too\b|left|more|of\b|in\b|there\b|"
     r"it\b|that\b|this\b|going\b))",
     re.I)
+# A verdict asked of a thing, with no figure and no verb of costing in it: "is the train to
+# cornwall expensive", "are taxis dear here", "are flights to spain pricey in august", "is it
+# expensive to park in town". The figure is the same one nobody can see and the ask is the same
+# ask - it turns on which one, where, and the day - but the grammar is only a thing and an
+# adjective, so these reached the shrug while "how much is a train to york" got the fares answer.
+#
+# Only money adjectives count, and `dear` is read as a degree or a comparison, or after a thing
+# ("are taxis dear here"), never as the word people put on the end of a greeting: "how are you
+# dear" and "thanks dear" name no thing and are not this.
+#
+# The subject fence on the first arm keeps `you` out, the same way the last arm already did: "are
+# you expensive to hire" is somebody joking about the bot, not a thing whose price is being asked,
+# and it was given the two-sellers answer about buying something (gentle-wagon, trim-candle on
+# #13445). A possessive is still a thing - "is your car insurance expensive" is the car's.
+PRICE_VERDICT = re.compile(
+    r"\b(?:is|are|was|were|will|would|does|do)\b(?!\s*(?:you|u)\b)[^?.!,]{0,40}?"
+    r"\b(?:expensive|pricey|costly|spenny|overpriced)\b"
+    r"|\b(?:is|are|was|were)\b[^?.!,]{0,40}?\b(?:too|so|very|quite|really|that|a bit|dead|"
+    r"bloody)\s+dear\b"
+    r"|\bdear(?:er)?\s+than\b"
+    r"|\b(?:is|are)\s+(?!you\b|she\b|he\b|they\b|we\b|i\b)(?:[a-z']+\s+){1,3}(?:too\s+)?"
+    r"dear\b", re.I)
+# `dear` as a name, not a degree: "is my dear mum coming", "is the dear little thing coming",
+# "is my dear friend around". The possessive or article directly before it makes it the word for
+# somebody they love, and the price rule ("a job is priced by the quote") has nothing to do with
+# it. `is that dear` and `are taxis dear here` name no person and keep the verdict.
+A_DEAR_AS_A_NAME = re.compile(
+    r"\b(?:my|your|our|his|her|their|the|a|an)\s+dear\b", re.I)
+# A thing you buy to get somewhere, or to eat and sleep once you are there. Its price is set by
+# the day rather than by the seller, which is what makes it worth its own pool: "are flights to
+# spain pricey in august" and "are taxis dear here" are not answered by two sellers compared on
+# the same spec, because the same seat on a Tuesday is not the same price as on a Monday.
+#
+# A room is not a fare, though it is bought the same way: "are hotels in york dear" and "is a
+# hotel dear in august" have no seat and no off-peak Tuesday, and the fare pool told them about
+# one. A room and a shelf both turn on which one and when, which is what `PRICE_RULE` says.
+A_FARE_OR_A_TICKET = re.compile(
+    r"\b(?:trains?|flights?|buses|coach|ferry|tubes?|parking|park|"
+    r"tickets?|entry|admission|petrol|fuel|diesel|delivery|shipping|car hire|hire car)\b", re.I)
+# The fare, as against the thing on the shelf. The number is on the operator's page and it moves
+# with the day, so the useful half is which day and how far ahead, and the sums afterwards.
+FARE_PRICE_RULE = (
+    "The day is what sets that one, not the seller: the same trip off-peak on a Tuesday can be a "
+    "fraction of the peak on a Monday, and booking further ahead is nearly always cheaper than "
+    "booking late. The operator's own page has today's figure - bring it back and I will work out "
+    "what it comes to for you.",
+    "Booked far enough ahead, a fare is a different number from the one a week before, so compare "
+    "the same journey on the day you actually go rather than the first figure you see. Tell me "
+    "the route and the dates and I will do the sums against the money you have.",
+    "That price turns on the day, the time and how far ahead you book, and on a fare it is the "
+    "time of day that moves it most. The figure is on the operator's own page; bring it back "
+    "with what you can spend and I will tell you whether it stacks up.",
+)
+# A cab is a fare that is not a fare. The meter is the price, so it moves with the clock and the
+# traffic rather than with how far ahead you booked, and a firm will usually fix a quote if you ask
+# - which is the opposite advice to "book further ahead" and "the same trip off-peak on a Tuesday".
+# The rail pool said that to `are taxis dear here`, a confident wrong answer about a thing the bot
+# had just named, which is worse than the hedge it replaced (trim-candle on #13445).
+A_CAB_OR_A_LIFT = re.compile(
+    r"\b(?:taxis?|cabs?|minicabs?|private hire|black cab|ubers?|lyft|a cab|a taxi)\b", re.I)
+CAB_FARE_RULE = (
+    "A cab is metered, so it is the clock and the traffic that set the price, not the seller: the "
+    "same trip at 8 in the morning and at 11 at night are different numbers. Ring the firm with "
+    "the pickup, the drop-off and the time and ask for a fixed quote - most will give one, and "
+    "that quote is the number worth comparing.",
+    "A taxi fare is the meter, so the time of day and the traffic move it; there is nothing to "
+    "book further ahead. Ask two firms for a fixed price for your trip and compare those, and ask "
+    "whether the quote covers waiting and the return.",
+)
+# A verdict asked of a thing names no job and often nothing on a shelf: "are hotels in york dear",
+# "is a tattoo expensive", "is a McDonald's expensive". `PRICE_RULE` carries the job line ("a job
+# is priced by the quote ... a thing on a shelf is the seller's own page"), and the pool is picked
+# by hash rather than by the line, so a verdict could be answered with the one frame that is false
+# of it - a room is neither a job nor on a shelf (umber-desk and azure-cable on #13445). This pool
+# holds only what is true of any priced thing, and the verdict arm uses it; the ask arm keeps
+# `PRICE_RULE`, where the line usually does name a job.
+PRICE_VERDICT_RULE = (
+    "Whether that is dear depends on which one and where from: the same thing is a different "
+    "number in two places and on two days. Two prices, all in, is the comparison - bring them "
+    "back and I will tell you which one leaves you better off at the end of the month.",
+    "There is no one price for it. What it comes to turns on the size, the seller and the day, so "
+    "the useful thing is two quotes for the same thing with everything included. Tell me the two "
+    "figures and I will work out what each leaves you.",
+    "That is impossible to call from one number: what it costs moves with which one you pick, "
+    "where you get it and when. Find two prices for the same thing, all in, and the difference "
+    "between them is the part worth acting on.",
+)
+# An occasion is priced by the head and by the day, not by two sellers on the same spec and not by
+# a quote for a job. "is a wedding expensive", "is a funeral expensive" and "is eating out
+# expensive these days" all landed on `PRICE_RULE`'s job line - "a job is priced by the quote, not
+# by a list ... a thing on a shelf is the seller's own page" - which is neither of the two things
+# those asks are about (azure-cable on #13445). What is true of every one of them is the count, the
+# date and what the price includes; the figures are on the venue's or the caterer's own page.
+A_AN_OCCASION = re.compile(
+    r"\b(?:weddings?|funerals?|christenings?|baptisms?|namings?|birthdays?|birthday party|"
+    r"part(?:y|ies)|anniversar(?:y|ies)|honeymoons?|stag do|stag night|hen do|hen night|"
+    r"graduations?|receptions?|eating out|eating away|meals out|meal out|dinner out|"
+    r"restaurants?|takeaways?|catering|caterers?)\b", re.I)
+OCCASION_PRICE_RULE = (
+    "That one is priced by the head and by the day rather than by the seller: how many people, "
+    "which day, and what is inside the price - the meal, the drinks, the extras. Two quotes on "
+    "the same numbers is the only comparison worth making; tell me yours and I will do the sums.",
+    "What it comes to turns on the count and the date, so fix the guest list and the day first, "
+    "then ask two or three places for the same thing all in. Bring the figures back and I will "
+    "work out what it leaves you a month.",
+    "Every one of these is quoted per person and moves with the day of the week, so one figure "
+    "from one place says little on its own. The same count and the same extras asked of two "
+    "places is the comparison - and the venue's own page has today's numbers.",
+)
+
 # The lines a price ask is really about something else: their own account, a payment, a rate.
 NOT_ABOUT_A_PRICE = re.compile(
     r"\bmy (?:account|balance|bill|invoice|statement|payment|direct debit|order|parcel|quote|"
@@ -255,6 +365,23 @@ TIME_ASK = re.compile(
 # A how-long question that is about a person, a wait out in the world, or the past is not this one.
 TIME_NOT_THIS = re.compile(
     r"\b(?:ago|been|queue|waiting list|on hold|does it keep|how long have)\b", re.I)
+# A cooking time is asked of a joint, a bird, a cake - "how long should the lamb go in" - and the
+# answer is a weight times a heat, which is a card ("a leg of lamb is 25 minutes per 500g at
+# 200C"). The rule read the same words and answered with the arithmetic in the abstract: "Time is
+# the part I can work out but cannot know: the size of the job, times the rate it goes at", which
+# is a lecture about a roast rather than the time it goes in. Where a food is named with an oven
+# word or a cooking verb, this stands down: the cooking cards keep the turn when they can take it,
+# and the fallback says the one thing that decides it - the weight and the heat - when they cannot.
+A_COOKING_TIME = re.compile(
+    r"\b(?:roast|roasting|cook|cooking|bake|baking|boil|boiling|simmer|fry|frying|grill|grilling|"
+    r"steam|steaming|poach|oven|go in|goes in|be in|sit in|stay in|rest|barbecue|bbq|"
+    r"air fryer|slow cooker|pressure cooker|pan)\b", re.I)
+A_FOOD = re.compile(
+    r"\b(?:lamb|beef|chicken|turkey|duck|goose|pork|ham|gammon|bacon|sausages?|mince|steak|"
+    r"joint|bird|casserole|stew|pie|tart|cake|sponge|bread|loaf|scones?|biscuits?|pudding|"
+    r"potatoes?|chips?|veg|vegetables?|carrots?|parsnips?|onions?|rice|pasta|lasagne|lasagna|"
+    r"eggs?|fish|salmon|trout|cod|prawns?|tofu|halloumi|mushrooms?|tomatoes?|peppers?"
+    r"|dough|batter|pastry)\b", re.I)
 
 
 def the_rule_for_it(clean, repaired=None):
@@ -284,9 +411,24 @@ def the_rule_for_it(clean, repaired=None):
                 return AMOUNT_COVER_RULE
             if FEEDING.search(said):
                 return AMOUNT_FEEDING_RULE
+        if (PRICE_VERDICT.search(said) and not NOT_ABOUT_A_PRICE.search(said)
+                and not A_DEAR_AS_A_NAME.search(said)):
+            if A_CAB_OR_A_LIFT.search(said):
+                return CAB_FARE_RULE  # the meter, not the day: no seat and nothing to book ahead
+            if A_AN_OCCASION.search(said):
+                return OCCASION_PRICE_RULE  # per head, by the day: not a job and not a fare
+            if A_FARE_OR_A_TICKET.search(said):
+                return FARE_PRICE_RULE
+            return PRICE_VERDICT_RULE  # a verdict names no job: only what is true of any price
         if PRICE_ASK.search(said) and not NOT_ABOUT_A_PRICE.search(said):
+            if A_CAB_OR_A_LIFT.search(said):
+                return CAB_FARE_RULE
+            if A_AN_OCCASION.search(said):
+                return OCCASION_PRICE_RULE
             return PRICE_RULE
         if TIME_ASK.search(said) and not TIME_NOT_THIS.search(said):
+            if A_COOKING_TIME.search(said) and A_FOOD.search(said):
+                return COOKING_TIME_RULE  # a joint and an oven: the weight and the heat
             return TIME_RULE
     return None
 
@@ -318,5 +460,23 @@ A_MONEY_WORD = re.compile(
 # long do i cook them", a turn after "200g of plain flour for four people", was given the time
 # rule instead of "they take a minute a side in a hot pan". A rule is what is said when nothing
 # else can be, so it is classed with the hedges it stands in for, and every real answer beats it.
-RULE_POOLS = (PRICE_RULE, AMOUNT_FEEDING_RULE, AMOUNT_COVER_RULE, STILL_GOOD_RULE, TIME_RULE)
+# A cooking time is one number and one question: minutes per 500g at a heat. Everybody publishes
+# it - on the pack, in the recipe, in a book on the shelf - so the useful thing to say is where it
+# is and what to bring, not the formula about jobs and rates, and not a shrug either. The cards
+# take this line whenever they know the cut; this pool is what is left when they do not.
+COOKING_TIME_RULE = (
+    "Oven times go by weight and heat: minutes per 500g at a set temperature, and both are on the "
+    "pack or in the recipe. Tell me the weight and the heat and I will work out the clock time for "
+    "you.",
+    "That one is a minutes-per-500g job at a set heat, and the figure for the thing you are "
+    "cooking is on the pack, the recipe or the book. How heavy is it, and what heat are you "
+    "using?",
+    "The weight and the oven heat decide it, and the rate for that joint or bird is written down "
+    "somewhere you already have - the pack, the recipe, or the shop's own guide. Bring me the "
+    "weight and I will do the arithmetic.",
+)
+RULE_POOLS = (PRICE_RULE, PRICE_VERDICT_RULE, FARE_PRICE_RULE, CAB_FARE_RULE,
+              OCCASION_PRICE_RULE,
+              AMOUNT_FEEDING_RULE,
+              AMOUNT_COVER_RULE, STILL_GOOD_RULE, COOKING_TIME_RULE, TIME_RULE)
 RULE_HEADS = tuple(line[:40] for pool in RULE_POOLS for line in pool)

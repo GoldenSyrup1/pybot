@@ -23,11 +23,12 @@ from ..understanding.topics import IDIOM_PHRASES, THE_PEOPLE, is_a_machine_word
 from . import (A_STEP_ASK, DOUBT, DOUBTED, LINGERED_LINE, NEARLY, says_it_has_lingered,
                step_when_low, turned, turns_round)
 from . import (badnews, circumstance, draft, finding_out, goodnews, handoff, harm, leaving, loss,
-               no_eyes, onething, pick, prices, quantity, reaction as answer_reaction, remark,
-               trouble, unseen, why, worn)
+               no_eyes, onething, outlook, pick, prices, quantity, reaction as answer_reaction,
+               remark, stepwords, trouble, unseen, why, worn)
 from .postcode import a_postcode_lookup
 from .urgent import reads_as_a_story
-from .badnews import (reads_as_a_closed_door, reads_as_an_award_lost, reads_as_bad_news,
+from .badnews import (DEATH_SAID as SAID_AS_A_DEATH,
+                      reads_as_a_closed_door, reads_as_an_award_lost, reads_as_bad_news,
                       reads_as_heavy_news, reads_as_news_with_a_name,
                       reads_as_pregnancy_bleeding, reads_as_the_leaving,
                       reads_as_a_leaving_already_gone, reads_as_a_pet_condition,
@@ -40,9 +41,13 @@ from .goodnews import (reads_as_an_occasion, reads_as_a_win_nobody_noticed,
                        reads_as_recovery,
                        reads_as_settled, worry_on_the_table)
 
+from .not_knowing import (NAMES_WHERE_TO_ASK, POINTER_HEDGE, _an_ask_with_no_subject,
+                          _asks_about_this_chat, _the_lead_and_the_route)
 from .fallback_data import (
     A_DISMISSAL,
     A_FREE_TIME_ASK,
+    A_LOVE_FOR_PEOPLE,
+    A_LOVE_FOR_SOMEONE,
     A_SORRY_ON_ITS_OWN,
     ABOUT,
     ABOUT_ITSELF_KINDS,
@@ -83,6 +88,8 @@ from .fallback_data import (
     ASK_ONLY,
     ASK_OUT_ANSWER,
     AT_IT_EXTRA,
+    BECOMING,
+    BECOMING_STATE,
     AT_IT_NOT,
     AXIS_MIN,
     A_BIRTHDAY_STILL_TO_COME,
@@ -378,6 +385,7 @@ from .fallback_data import (
     JUDGE_NO_PLAN_MAD,
     JUDGE_NO_PLAN_MIND,
     JUDGE_ONLY_A_PLAN,
+    JUDGE_PLAN_HAS_A_HOLE,
     JUDGE_PLAN_STOP,
     JUDGE_SANE,
     JUDGE_SANE_PLAIN,
@@ -412,6 +420,7 @@ from .fallback_data import (
     LIVE_ROADS_NOT,
     LIVE_ROAD_WORDS,
     LIVE_SETTING,
+    LIVE_SITE_THING,
     LIVE_SKY,
     LIVE_SKY_OFF,
     LIVE_SKY_WHY,
@@ -452,6 +461,8 @@ from .fallback_data import (
     MY_PICK_NOTE,
     MY_BILL_LINES,
     MY_RECORDS,
+    OFFICE_RECORD_LINES,
+    AT_THE_TILL,
     POINTS_LINES,
     MY_WORKINGS,
     NAMED_NEGATIVE,
@@ -465,6 +476,7 @@ from .fallback_data import (
     NETWORK_WORDS,
     NEUTRAL,
     NEVER_MIND,
+    A_CORRECTION_TAKEN,
     NEWS_TO_COME,
     NOT_AN_ANSWER,
     NOT_A_FORM,
@@ -561,7 +573,7 @@ from .fallback_data import (
     RULED_OUT_DETERMINER,
     RUMINATION_REPLIES,
     SAFETY_WORDS,
-    SAME_AGAIN,
+    SAME_AGAIN, SAME_AGAIN_WITH_THE_ANSWER,
     SCHOOL_TROUBLE,
     SCHOOL_WHO,
     SCHOOL_WORDS,
@@ -1044,22 +1056,104 @@ DITHER_OPEN = re.compile(r"\bwhat to do\b|\bwhat (?:i|you) (?:should|can|ought t
 # is not two sides to pick between - and what was left answered them with the echo ("I'm
 # listening - say more if it helps") or the nod. The person is in the line, so the one helpful
 # thing a fallback can do is ask about them.
+# The person said with the words that describe them: "my teenage son", "our eldest daughter",
+# "my 14 year old son", "my elderly mum". Those were named in the line and the pool asked about
+# nobody ("I dont know enough... a quick search online"), because the reading expected the person
+# straight after "about". Up to three words of description are allowed, and the tail check below
+# keeps the pool off a line whose subject is a thing ("my sons school", "my child benefit").
 STUCK_ON_A_PERSON = re.compile(
     r"\b(?:what to do|what (?:i|you) (?:should|can|ought to) do|"
     r"what (?:do|should|shall|can|could) (?:i|you|we) do)\s+(?:about|with)\s+"
+    r"(?P<who>"
+    r"(?:(?:my|our)\s+(?:[a-z0-9']+\s+){0,3})?"
     # The in-law forms come first: "mother" alone would take "my mother in law" and ask about
     # a mother the person never mentioned.
-    r"(?P<who>(?:my|our) (?:mother in laws?|father in laws?|sister in laws?|brother in laws?|"
+    r"(?:mother in laws?|father in laws?|sister in laws?|brother in laws?|"
     r"son in laws?|daughter in laws?|in laws|inlaws|husband|wife|partner|boyfriend|girlfriend|"
     r"brother|sister|son|"
     r"daughter|child|kid|boy|girl|baby|mum|mom|mother|dad|father|nan|gran|grandma|grandad|"
-    r"grandpa|friend|mate|boss|colleague|neighbour|neighbor|in laws|inlaws|teenager|family|"
-    r"teacher|carer|relative|cousin|uncle|aunt|nephew|niece|stepson|stepdaughter|ex))\b")
+    r"grandpa|grandmother|grandfather|grandparents|grandson|granddaughter|friend|mate|boss|"
+    r"colleague|neighbour|neighbor|in laws|inlaws|teenager|family|"
+    r"teacher|carer|relative|cousin|uncle|aunt|nephew|niece|stepson|stepdaughter|ex)|"
+    # A child named only by age is still a person: "our 2 year old", "my 18 month old". This is
+    # read after the described form, so "my 14 year old son" keeps the son, and the tail check
+    # stands the pool down when the age belongs to a thing ("our 2 year old car").
+    r"(?:my|our)\s+\d+\s+(?:year|month|week)s?\s+old)"
+    # The person must end a word: without this, "my son that school expelled" read the "ex" in
+    # "expelled" as the person ("What is going on with your son that school ex at the moment?").
+    r"(?![a-z0-9])"
+    r"(?P<rest>.*)$")
+# What may follow the person without changing who the line is about: "my ex now", "my son
+# though", "my mum at the moment", or a second person named with them ("my son and my daughter").
+# The tail is read as phrases from the front, not as a bag of single words: "at the moment",
+# "at the minute", "right now" and "these days" are how the commonest forms of the question are
+# said, and every one of them is more than one word (handy-lily's read). Read as single words,
+# "what do i do about my mum at the moment" lost the answer the bare "my mum" already had.
+STUCK_PERSON_TAIL_PHRASE = re.compile(
+    r"^(?:"
+    r"at the moment|at the minute|at the mo|at present|at this point|as it stands|"
+    r"right now|just now|these days|nowadays|currently|"
+    r"and thats it|thats it|i mean|i suppose|i guess|of all things|"
+    r"now|today|tonight|though|then|please|anymore|any more|first|just|still|about|too|"
+    r"either|really|honestly|seriously|actually|like|again|lately|all|eventually|so|and|"
+    r"or|ok|okay|basically|thanks|cheers|please|now though|then though)"
+    r"(?![a-z0-9])", re.I)
+# A comma clause is about the same person when it says something of them rather than of a thing
+# of theirs: "my boy, he is 15", "my daughter, she started school", "my son, 15". The subject
+# has to be the person (he, she, they) or an age; "my son, his school" names a thing and stands
+# the pool down, the same way the bare "my sons school" does.
+STUCK_A_CLAUSE_ABOUT_THEM = re.compile(
+    r"^,\s*(?:"
+    r"(?:he|she|they|him|her|them)\b[ a-z0-9']{0,48}"
+    r"|(?:aged|age)\s+\d{1,3}"
+    r"|\d{1,3}\b[ a-z0-9']{0,24}"
+    r")$")
+STUCK_AND_ANOTHER_PERSON = re.compile(
+    r"^(?:,\s*)?(?:and|or)\s+(?:(?:my|our)\s+)?[a-z0-9']+(?:\s+[a-z0-9']+){0,3}$")
+# A tail that says more about the same person is still about them: "my ex that keeps texting me",
+# "my partner of ten years", "my mum who wont go to the doctor". The words describe who they are
+# to the person talking, not a thing of theirs, so the pool that asks about them is the right
+# reply and standing it down was a regression (it used to ask "What is going on with your ex?").
+STUCK_DESCRIBES_THE_PERSON = re.compile(
+    r"^(?:,\s*)?(?:"
+    r"(?:that|which|who|whose|whos|who's)\b[ a-z0-9']{0,40}"
+    r"|(?:of|been|together|married)\b[ a-z0-9']{0,24}"
+    r")$")
+
+
+def _the_person_ends_the_ask(rest):
+    """True when what follows the person is about the person, not a thing of theirs."""
+    # Only the punctuation at the end is dropped: a comma at the front is the clause's own
+    # opening ("my boy, he is 15") and `STUCK_A_CLAUSE_ABOUT_THEM` reads it.
+    rest = str(rest or "").lstrip(" ").rstrip(" ?.!,")
+    if not rest.strip(" ,?!."):
+        return True
+    if STUCK_AND_ANOTHER_PERSON.match(rest):
+        return True
+    if STUCK_DESCRIBES_THE_PERSON.match(rest):
+        return True
+    if STUCK_A_CLAUSE_ABOUT_THEM.match(rest):
+        return True
+    left = rest
+    while True:
+        found = STUCK_PERSON_TAIL_PHRASE.match(left)
+        if not found:
+            break
+        left = left[found.end():].lstrip(" ,?!.")
+    return not left
+
 
 def _the_person_they_are_stuck_on(clean):
     """The person named in "i dont know what to do about my mum", faced back at them."""
     found = STUCK_ON_A_PERSON.search(clean)
-    return _yours(found.group("who")) if found else ""
+    if not found or not _the_person_ends_the_ask(found.group("rest")):
+        return ""
+    who = _yours(found.group("who"))
+    # `_yours` faces "my" back at the person but leaves "our": "what do i do about our son" came
+    # back as "our son", which is the pair's child said by the wrong one of them.
+    if who.lower().startswith("our "):
+        who = "your " + who[4:]
+    return who
 
 
 # A line that is nothing but the stuck phrase: "i dont know what to do", "no idea what to do
@@ -1314,23 +1408,49 @@ HEALTH_MODIFIER = re.compile(r"\b(?:hospital|doctors?|surgery|clinic|vets?)\s+"
                              r"uniform|policy|department|ward)\b")
 
 
-def _reads_as_dither(clean):
-    """True when the line says a decision is unresolved, rather than asking which way to go."""
-    if FACT_BETWEEN.search(clean):
-        return False
-    if (PERSON_NOT_A_DECISION.search(clean) or PRONOUN_NOT_A_DECISION.search(clean)
-            or HELP_SERVICE.search(clean)):
-        return False
-    return bool(DITHER.search(clean)) and bool(DITHER_STRONG.search(clean)
-                                              or DITHER_SUBJECT.search(clean))
+def _reads_as_dither(clean, repaired=None):
+    """True when the line says a decision is unresolved, rather than asking which way to go.
+
+    The line is read as it was typed and then with its words put right. "i dont no what to do
+    about my job" is "dont know" with a word typed for the sound of it, and only the repaired
+    line spells "know": read as typed the doubt was invisible, so the line went past every pool
+    to the neutral nod ("Thanks for telling me - I'm here if you want to dig into any of that")
+    while the same line typed with "know" answered it. The refusals are per spelling, so a line
+    that is not a doubt either way stays as it was.
+    """
+    lines = [clean]
+    if repaired and repaired != clean:
+        lines.append(repaired)
+    for line in lines:
+        if FACT_BETWEEN.search(line):
+            continue
+        if (PERSON_NOT_A_DECISION.search(line) or PRONOUN_NOT_A_DECISION.search(line)
+                or HELP_SERVICE.search(line)):
+            continue
+        if DITHER.search(line) and (DITHER_STRONG.search(line) or DITHER_SUBJECT.search(line)):
+            return True
+    return False
 
 
 # A decision question opens with the decision ("should I", "is it worth"). "What should I know",
 # "when should I plant tulips" ask for information, so they stay with the fact pool.
+#
+# "Do I <say / tell / ask / text / call ...>" is the same decision in the present tense: "do i
+# accept the offer" and "do i say yes" are asking the bot to pick a side, and the search hedge
+# ("I'm not sure about that one, sorry - a quick search will get you a solid answer") is no help
+# with a choice that is the person's own. Only the verbs that name an act of their own are here,
+# and only straight after "do i": "do i need to tell the council" is a question about the rules
+# and keeps its hedge, which is why nothing may come between "do i" and the verb. "go" and
+# "write" are out on purpose - "do i go" names nothing at all, and the pools behind it guess an
+# evening out ("an evening out costs less than the regret"), while "do i write to them" reaches
+# the drafting pool and assumes a draft nobody said they had.
 DECIDE_OPENING = re.compile(r"(?:^|[,.!?;]\s*|\b(?:so|but|then|and|ok|okay)\s+)"
-                            r"(?:should i|is it worth|is it better|would it be better|"
+                            r"(?:should (?:i|we)|shall (?:i|we)|is it worth|is it better|"
+                            r"would it be better|"
                             r"which (?:one )?should i|(?:do |)(?:you|u|ya) (?:think|reckon) i should|"
                             r"what would you do|"
+                            r"do i (?:say|tell|ask|mention|reply|text|call|ring|accept|"
+                            r"send|bring)\b|"
                             r"would you)\b")
 # A decision is also asked the other way round, as a check on the asker's own sanity: "would
 # moving closer be mad", "would it be weird to go back to college at 40", "is it stupid to buy a
@@ -2359,9 +2479,23 @@ def _thread_names_a_machine(memory, look_back=4):
     return False
 
 
+# The line's own candidate: "is it my shoes", "could it be my trainers", "maybe it's my age". The
+# pronoun is in the line, but the line is not only pointing at the thread - it puts something of
+# its own up as the cause, which is a question about that thing and not about the thread.
+_A_CANDIDATE_OF_ITS_OWN = re.compile(
+    r"\b(?:it|its|it['\u2019]s|this|that|these|those|they)\b[^.?!,;]{0,24}?"
+    r"\b(?:my|our|his|her|their)\s+[a-z]")
+
+
 def _the_ask_is_the_threads(clean, understood):
     """True when the line asks something about a thing it only points at."""
     if not (ASK_SHAPE.search(clean) and _LEANS_ON_THE_THREAD.search(clean)):
+        return False
+    # A line that names a thing of its own is asking about that thing, not about the thread: on
+    # "my knees hurt after 10 mins" then "is it my shoes", the thread is a body and this reader
+    # answered it with the GP's line - "ring 111 or your surgery" - which is the one answer a
+    # question about a pair of trainers must not get.
+    if _A_CANDIDATE_OF_ITS_OWN.search(clean.lower()):
         return False
     return (understood or {}).get("topic") in _BODY_TOPICS
 
@@ -2504,6 +2638,82 @@ def _a_small_social_decide(clean, words):
     if said & _A_SOCIAL_THING and _GOING.search(clean) and not _NOT_INVITED.search(clean):
         return GO_ANSWER
     return None
+
+
+# A method asked for in the person's own voice: "how do i practise", "where should i hang my
+# washing", "when do i start". Read on the opening only. Everything with an entry has already had
+# its turn before this is read (it stands in for the search hedge at the bottom of the fallback),
+# so a line naming a thing the bot has a card for never reaches it.
+# "how" and "where" only: a "when should i ..." ask is about timing, and the answer to it is a date
+# or a season ("when should i plant tulips" is a calendar question with sources), not a method.
+METHOD_OPENING = re.compile(r"^(?:so |ok |okay |and |but )?"
+                            r"(?:how|where) (?:do|does|should|shall|can|could|would|might) i\b")
+# Two shapes that look like a method ask and are not one, so they keep the answer they had.
+#
+# "how do i know if im ovulating" asks how to tell something about their body, which is a symptom
+# card or a doctor's question, not a method with steps they have tried.
+#
+# "where can i get my brakes fixed round here" asks for a place: the bot cannot see who is near
+# them, and the line it had ("I can't recommend anyone - I've no way to see who's near you...")
+# says so and hands them the one thing that works. What have you tried so far is no help at all
+# for a car with no brakes, so an ask that names something to obtain or a place to find it keeps
+# its own pool.
+HOW_TO_TELL = re.compile(r"\b(?:know|tell|check|find\s+out) "
+                         r"(?:if|whether|the|a|an|my|your|his|her|its|it's|that|this|which|"
+                         r"apart|the\s+difference)\b")
+# A method asked about a product - a thing with a manual or a settings menu - is a lookup: "how do i
+# take a screenshot on a windows laptop" has guides, and "what have you tried so far" is no way into
+# it. The machine words are the ones the rest of the file already reads as things to be serviced;
+# the software words are their company. "washing" alone is the laundry in the basket and not the
+# machine, so "where should i hang my washing" stays the person's own evening.
+_A_PRODUCT = _THREAD_MACHINES | frozenset(
+    "router wifi broadband windows android iphone ipad ios mac app apps settings browser email "
+    "excel word powerpoint gmail outlook instagram facebook whatsapp tiktok password account".split())
+_A_PRODUCT = _A_PRODUCT - frozenset(("washing",))
+NOT_A_METHOD = re.compile(
+    r"^(?:so |ok |okay |and |but )?(?:how|where) (?:do|does|should|shall|can|could|would|might) "
+    r"i (?:get|find|buy|hire|rent|book|order|locate|pick\s+up|put|keep|store)\b"
+    # "how should i get ready", "how do i get up earlier", "how do i get better at drawing" are
+    # methods; only a thing obtained is left out, so the phrasal and the comparative stay in.
+    # "put", "keep" and "store" are the same shape as a thing obtained: "where do i put the bin
+    # bags" wants a place somebody decides for you, and the bins and permits card has it, so the
+    # placement ask keeps its own answer. Hanging washing is not that - nobody decides where it
+    # goes but the person - and it stays a method.
+    r"(?!\s+(?:up|better|going|started|through|on|out|round|back|dressed|ready|organised|there|"
+    r"in|to)\b)"
+    r"|\b(?:round here|near me|nearby|in my area|locally)\b"
+    # A question about the bot itself ("how do i know you are telling the truth") is the bot's own
+    # to answer, and "what have you got so far" is as much of a non sequitur as the search hedge:
+    # it is left to the readings that answer questions about the bot.
+    r"|\b(?:you|your|yourself)\b")
+
+
+def method_ask_pool(clean, memory=None):
+    """The pool for a method asked for when nothing else could answer it, else None.
+
+    "how do i practise", "how do i start running" and "where should i hang my washing" got the
+    search hedge - "I'm not sure about that one, sorry - I'd rather not guess. A quick search
+    online will get you a solid answer" - which is the one answer that helps nobody: the person is
+    asking how to do a thing of their own, and there is nothing to look up about it. What a friend
+    says is what they have tried so far, which is also the only way the bot can help.
+
+    The hedge is right for a question about the world, so this only takes a line nothing else
+    answered, and only one that asks for a method in the person's own voice: a line with no
+    "how/where/when ... i" at its front is not read here at all.
+    """
+    if not METHOD_OPENING.match(str(clean or "")):
+        return None
+    if HOW_TO_TELL.search(clean) or NOT_A_METHOD.search(clean):
+        return None
+    if set(re.findall(r"[a-z']+", str(clean or ""))) & _A_PRODUCT:
+        return None
+    if _DEFINITION.search(clean):
+        return None
+    # After the bot's own answer, the thing the ask is about is that answer, so asking what they
+    # have tried about it is a non sequitur: the way in points at the part that did not land.
+    if _answered_already(memory if isinstance(memory, dict) else {}):
+        return HELP_ALREADY
+    return TIPS_LINES
 
 
 def unknown_pool(clean, words=()):
@@ -3243,14 +3453,11 @@ def the_lost_ask_reply(memory, clean, repaired=None):
 # The wear pool asks and does not dress anybody: a bare "what should i wear" has not said the
 # day, and a line that assumes one ("standing about, sitting on grass, a long service") answers
 # a wedding nobody mentioned and walks straight past `its cold out`, which is the one thing the
-# person did say. What is left is the question a friend asks first.
-BARE_PICK_WEAR = (
-    "It comes down to the day and the weather. Where are you going, and what is it doing outside?",
-    "Tell me what the day is - work, a meal out, a long walk - and what the weather is doing, "
-    "and I will say what to put on.",
-    "Where are you off to, and how long will you be out? That decides more of it than the "
-    "clothes do.",
-)
+# person did say. What is left is the question a friend asks first. The pool itself lives in
+# `fallback_data` with the hot, cold and wet ones, and is imported above: a second definition
+# here shadows that import, and `BARE_PICK_KIND` hands back the imported tuple, so the
+# `pool is BARE_PICK_WEAR` tests below were comparing two different objects and the weather
+# pools could never fire.
 # The weather the person already told the listener decides more of it than the mirror does, and
 # `its cold out / what should i wear` ignoring the cold is the reply of somebody who was not
 # listening. Only a weather line counts, not a body: "i have a cold" and "i feel hot" are the
@@ -3357,6 +3564,45 @@ def _an_occasion_above(memory):
     return any(OCCASION_ABOVE.search(str(turn.get("user") or "")) for turn in turns[-2:])
 
 
+# The pool asks what the day is. A line that has already said - in the clause in front of its ask -
+# which day it is, or has named an occasion, has answered that question, and asking it back reads as
+# a bot that was not listening: "i start at the new place on monday, what should i wear" was offered
+# "tell me what the day is - work, a meal out, a long walk". Nothing is added to what the pool can
+# answer here: the line stands down, and whatever it had without the pool it still has.
+THE_DAY_IS_NAMED = re.compile(
+    r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|"
+    r"\b(?:next|this|that|the) (?:week|weekend)\b|"
+    r"\b(?:tomorrow|tonight|today)\b|"
+    r"\b(?:in|on|by|for|until) (?:january|february|march|april|may|june|july|august|september|"
+    r"october|november|december)\b", re.I)
+
+
+# The same occasions as `OCCASION_ABOVE`, plus the ways a thread names one without the word:
+# "my sister is getting married in june" and "im going to be a bridesmaid" are a wedding, and the
+# four-turn window needs them to see it. Read only by the branch below, so a word that is not here
+# costs nothing but the day the pool would have asked about.
+AN_OCCASION_AHEAD = re.compile(
+    r"\b(?:wedding|funeral|christening|baptism|interview|party|dinner|date|work|office|"
+    r"conference|concert|festival|exam|graduation|church|meal out|night out|"
+    r"getting married|get married|got married|marrying|engaged|engagement|"
+    r"bridesmaid|bridesmaids|best man|maid of honour)\b", re.I)
+
+
+def _an_occasion_in_the_thread(memory, back=4):
+    """An occasion named a few turns back, which the pool's own question would ask about again.
+
+    `_an_occasion_above` is the two-turn window the wear pool has always used. A thread that
+    opened the occasion and then talked about something else has still had it: "my sister is
+    getting married in june" / "im going to be a bridesmaid" / "what should i get her" / "back to
+    the wedding, what should i wear" was asked where the day is, which the conversation said
+    four turns earlier.
+    """
+    if not isinstance(memory, dict):
+        return False
+    turns = [turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)]
+    return any(AN_OCCASION_AHEAD.search(str(turn.get("user") or "")) for turn in turns[-back:])
+
+
 # A trip in the thread is the one case where the packing line is the right answer to a bare ask:
 # a place, a holiday, a flight or a night away, and "im going to cornwall in july", which names
 # no trip word at all. A going-to followed by a verb ("going to have a bath", "going to try
@@ -3412,9 +3658,46 @@ def _a_subject_above(memory):
             return True
     return False
 
+# The ask is the last thing on the line, and everything in front of it is the setting. The
+# pattern above is anchored to the whole line so that a line naming its own subject keeps its own
+# answer, and a subject sits in front of an ask as easily as behind it: "what should i wear to a
+# wedding" has an entry of its own and never reaches here, while a clause saying what the person
+# has been doing - "for the first time in years, what should i wear", "in years, what should i
+# wear" - was shrugged at, though the ask in it is as bare as the seven words that get the pool.
+# A friend reads the clause and then answers the ask, so the pool is tried on the whole line and,
+# when the line put something in front of the ask, on the ask it ends with. Nothing new is read:
+# the reading hands the ask over as `focus`, and the clause split is only worked out again when
+# the caller has no reading to hand (a test, or a repaired line).
+_AFTER_A_CLAUSE = re.compile(
+    r"(?:[,;:]\s+|\s+(?:and|but|so|because|though|although|while|when|now)\s+)"
+    r"((?:what|which|how|where|who|when)\b[^,;:?!]*)\s*\??\s*$", re.I)
+
+
+def _the_ask_clause(clean, memory=None):
+    """The ask a line ends with when something sits in front of it, or "" when nothing does."""
+    said = " ".join(str(clean or "").lower().split())
+    if not said:
+        return ""
+    ask = ""
+    reading = memory.get("understood") if isinstance(memory, dict) else None
+    if isinstance(reading, dict):
+        focus = " ".join(reading.get("focus") or []).split()
+        if len(focus) >= 3 and said.endswith(" ".join(focus)) and " ".join(focus) != said:
+            ask = " ".join(focus)
+    if not ask:
+        found = _AFTER_A_CLAUSE.search(said)
+        ask = " ".join(found.group(1).split()) if found else ""
+    return ask if len(ask.split()) >= 3 else ""
+
+
 def _bare_pick(clean, memory=None):
     """The pool for a line that asks the bot to choose and names nothing to choose between."""
     found = BARE_PICK.match(clean)
+    from_the_clause = False
+    if not found:
+        ask = _the_ask_clause(clean, memory)
+        found = BARE_PICK.match(ask) if ask else None
+        from_the_clause = found is not None
     if not found:
         return None
     if found.group(0).strip().lower().startswith("which"):
@@ -3422,6 +3705,21 @@ def _bare_pick(clean, memory=None):
         return BARE_PICK_WHICH
     verb = " ".join(found.group("verb").lower().split())
     pool = BARE_PICK_KIND.get(verb, BARE_PICK_DO)
+    if from_the_clause and (OCCASION_ABOVE.search(str(clean or ""))
+                            or THE_DAY_IS_NAMED.search(str(clean or ""))
+                            or _an_occasion_in_the_thread(memory)):
+        # The pool asks where the person is going, and the line or the thread has already said:
+        # "back to the wedding, what should i wear" was asked where the day is, when the wedding
+        # was the day. Asking again reads as a bot that was not listening, so a line that came to
+        # the pool through its own clause stands down where the ask it carries already answers
+        # the question the pool would ask.
+        return None
+    if from_the_clause and pool is BARE_PICK_DO:
+        # "what should i do" with no object is answered by asking what has gone on, and the clause
+        # in front has just said it: "i havent written a cv in ten years, what should i do" is a
+        # person asking about the cv, and "tell me what has gone on" asks them to say it again.
+        # The widest ask keeps its whole-line answer for a line that names nothing.
+        return None
     if verb in BARE_PICK_NEEDS_THE_THING and _a_subject_above(memory):
         # the thing was named a turn ago, so this is the follow-up's turn, not the ask's
         return None
@@ -3577,7 +3875,13 @@ HAND_ASK = re.compile(
     r"|help(?: me)?(?: out)?"
     r"|give me a hand"
     r")"
-    r"(?: (?:with|about) (?:something|anything|a thing|stuff|it))?(?: here)?(?: please)?$")
+    r"(?: (?:with|about) (?:something|anything|a thing|stuff|it))?"
+    # A time word after the ask says when the hand is needed, not what for: "i need help now",
+    # "can you help me today". Left out, the ask did not match and the line went to whatever read
+    # the time word - "i need help now" was answered "Bye for now!" by the leaving reader, a
+    # farewell to somebody asking for a hand.
+    r"(?: (?:here|please|now|today|tonight|asap|urgently|quick(?:ly)?|straight away))?"
+    r"(?: (?:right )?now)?(?: please)?$")
 
 
 def _asks_for_help(clean, understood=None):
@@ -3684,6 +3988,35 @@ TRUST_ASK = re.compile(
     r"|\bdo\s+(?:you|u)\s+(?:ever\s+)?(?:lie|guess|make\s+(?:things|stuff|that|it|this|them)\s+up|"
     r"make\s+up\s+(?:things|stuff|answers|facts))\b"
     r"|\bare\s+(?:you|u)\s+(?:making|inventing)\s+(?:that|this|it|things|stuff)\s+up\b", re.I)
+# Where the person stands with this chat, asked in the words people use for it. "is this between
+# us" is not a promise asked for - that is "keep this between us", which the secret reading
+# answers with a yes - it is the person checking, and the bot's own privacy answer is the only
+# thing that can tell them. All five of these went to the search hedge, which offered to look up a
+# fact about the world: "is this between us", "is this just between us", "are we private here",
+# "is what i say between us" and "what happens to what i tell you".
+#
+# The subject is what keeps it narrow. The line has to ask about the chat ("this", "it", "we") or
+# about the words ("what i say"), so "is the gap between us too big" and "what happens to my
+# details if i switch supplier" are somebody's own business and keep their answers. The words arm
+# names the person as the one saying them, which is why "what happens to my messages" is left to
+# the privacy shapes that already read it.
+BETWEEN_US_ASK = re.compile(
+    # "is this between us", "is this chat just between us", "is this between us or what". The line
+    # asks about the chat itself, so nothing of the world may sit between the "this" and the
+    # "between us": "is this seat between us" is not this question.
+    r"\b(?:is|are|was|were|will|would|does|do|can)\s+(?:this|that|it)\s+"
+    r"(?:(?:chat|conversation|thread|session)\s+)?(?:just\s+|really\s+)?"
+    r"between\s+(?:us|you\s+and\s+me)\b"
+    # The words rather than the chat: "is what i say between us", "is everything i say between us".
+    r"|\b(?:is|are)\s+(?:what|everything)\s+i\s+(?:say|tell|tell\s+you|type|write)\s+"
+    r"(?:just\s+)?between\s+(?:us|you\s+and\s+me)\b"
+    # "are we private here", "are we private on this" - "we" is the chat and the person together.
+    r"|\bare\s+(?:we|you)\s+(?:private|confidential|anonymous)\s+(?:here|on\s+this|in\s+this)\b"
+    # "is this anonymous", and the same of the chat by name.
+    r"|\bis\s+(?:this|it)\s+(?:chat\s+)?anonymous\b"
+    # The same check asked as what happens to the words: "what happens to what i tell you".
+    r"|\bwhat\s+(?:happens|happened)\s+to\s+(?:what|everything)\s+i\s+(?:say|tell|type|write|send)\b",
+    re.I)
 SECRET_ASK = re.compile(
     r"\bcan\s+(?:you|u)\s+keep\s+(?:a\s+)?secret\b"
     r"|\bare\s+(?:you|u)\s+good\s+at\s+keeping\s+(?:a\s+)?secret\b"
@@ -3853,12 +4186,68 @@ DATE_GIVEN = re.compile(
     r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", re.I)
 
 
+# A warm line about somebody else's day is a remark about their news, and the only things it can
+# know are the words of the line: whose day it is, and when. Two of the lines above guessed past
+# that. "Lovely. Are you seeing them for it?" said to "my daughters 7th birthday is in three
+# weeks" puts the daughter in another house - the person may be with her every day - and "them" is
+# three people where the line named one. Same rule as DETAILS_IN_A_WARM_LINE: a detail is said only
+# when the line carries it.
+#
+#   1. A line that places the other person somewhere ("seeing them", "off to see", "go over") is
+#      used only when the line says they are apart: away, visiting, over there, back home, at uni.
+#   2. "them" is said of one person only when the line names no one: a wife is "her", a son "him".
+_APART = re.compile(
+    r"\b(?:away|apart|elsewhere|abroad|miles|far\s+away|over\s+there|back\s+home|visiting|"
+    r"visit|stay(?:ing)?\s+with|lives?\s+(?:in|near|abroad|away)|living\s+(?:in|near|abroad|away)|"
+    r"uni|university|college|the\s+other\s+side|different\s+(?:town|city|country)|"
+    r"in\s+(?:london|manchester|birmingham|leeds|glasgow|edinburgh|cardiff|belfast|dublin|"
+    r"paris|spain|france|italy|america|australia|canada|germany|portugal|greece|"
+    r"scotland|wales|ireland|england))\b", re.I)
+
+_PLACES_THEM = re.compile(
+    r"\b(?:seeing\s+them|see\s+them|off\s+to\s+see|go\s+and\s+see|going\s+to\s+see|"
+    r"visit\s+them|visiting\s+them|go\s+over|going\s+over|drive\s+(?:up|down)|"
+    r"travell?ing\s+(?:to|up|down))\b", re.I)
+
+# Who the day belongs to, in the words the line used: "her" for a wife or a daughter, "him" for a
+# son or a father. A line naming both, or nobody, keeps "them".
+_SHE = frozenset("""wife mum mom mother mummy daughter sister gran granny nan nana grandma
+    grandmum grandmother aunt auntie niece stepmum stepmother stepdaughter motherinlaw
+    sisterinlaw daughterinlaw fiancee girlfriend missus mrs""".split())
+_HE = frozenset("""husband dad father daddy son brother grandad granddad grandpa granddad
+    grandfather uncle nephew stepdad stepfather stepson fatherinlaw brotherinlaw soninlaw
+    fiance boyfriend mr""".split())
+
+
+def _the_pronoun(clean):
+    """her or him for the one person the day belongs to, "" when the line names none or both."""
+    words = re.findall(r"[a-z']+", str(clean or "").lower().replace("\u2019", "'"))
+    she = he = False
+    for word in words:
+        stem = word[:-1] if word.endswith("s") and word[:-1] in (_SHE | _HE) else word
+        if stem in _SHE:
+            she = True
+        elif stem in _HE:
+            he = True
+    if she and not he:
+        return "her"
+    if he and not she:
+        return "him"
+    return ""
+
+
 def _occasion_pool(occasion, clean):
     """The lines for this occasion, without the ones that look forward to today's occasion."""
     if goodnews.someone_elses_occasion(clean):
         pool = SOMEONE_ELSES_DAY.get(occasion)
         if pool:
-            return pool
+            apart = bool(_APART.search(str(clean or "")))
+            kept = [line for line in pool
+                    if apart or not _PLACES_THEM.search(line)]
+            pronoun = _the_pronoun(clean)
+            if pronoun:
+                kept = [re.sub(r"\bthem\b", pronoun, line) for line in kept]
+            return tuple(kept or pool)
     pool = OCCASION[occasion]
     # Each line that asks a question the line has already answered stands aside: the forward line
     # for a day that is today, the "how far off is it" line for a date the person just gave.
@@ -4349,14 +4738,19 @@ def _a_cost_somebody_asks(clean):
 # or the entry that can actually answer it.
 DAY_WORDS = {
     "cold": frozenset("""cold freezing chilly bitter baltic parky nippy frost frosty icy ice snow
-        snowing snowy sleet slush snap""".split()),
+        snowing snowy sleet slush snap frozen raw perishing taters nithered""".split()),
     "rain": frozenset("""rain raining rains rainy wet pouring drizzle drizzling drizzly showers
-        shower chucking tipping pelting bucketing downpour soaked sodden damp mizzle mizzling"""
+        shower chucking tipping pelting bucketing downpour soaked sodden damp mizzle mizzling
+        lashing lash hosing drenched drenching soaking soaked-through"""
                      .split()),
     "wind": frozenset("""wind windy gale gales gusty blustery storm stormy squall blowing blow blows
         blowing""".split()),
     "hot": frozenset("""hot boiling scorching roasting sweltering baking heat heatwave muggy humid
-        sticky close clammy stifling""".split()),
+        sticky close clammy stifling scorcher sizzling sizzler""".split()),
+    # The day with nothing wrong with it, named as such: "mild one today" was answered "Noted:
+    # mild one today." because no pool held the word, so the pools were read as not about the day
+    # at all. Same kind as the ruling-out answer, and a line can name it either way.
+    "mild": frozenset("""mild milder balmy clement""".split()),
     "fog": frozenset("""fog foggy mist misty haze hazy murk""".split()),
     "grey": frozenset("""grey gray gloomy dull overcast dark dreich dreary murky miserable grim
         cloudy horrible rotten rubbish depressing drizzly""".split()),
@@ -4374,10 +4768,40 @@ DAY_GLUE = frozenset("""it its it's is are was were be been being feels feel fee
     afternoons evening evenings week end weather coming for of with to getting got get turned
     s gone going outside one ones not lots load loads plenty ton tons bucket buckets thick heavy
     dense meant due supposed forecast tomorrow later weekend weekends sunday monday tuesday wednesday
-    thursday friday saturday next""".split())
+    thursday friday saturday next
+    innit init aint ay arent aren't no never hardly even though tho anymore
+    proper right dead bare bloody damn awful
+    rn atm tn 2nite tmoz""".split())
+# The day that met the person on the way: "i got soaked walking in", "we got drenched on the way
+# home", "i got caught in the rain". The first person and the errand are how the day arrived, not
+# what the line is about; take them off and the day is what is left. Without this the line opened
+# on "i", which is a person doing something with their day, and got an echo of itself back.
+DAY_MET_ME = re.compile(
+    r"^(?:i|we|they)\s+(?:got|was|were|am|have been|ve been|waited|stood|queued|walked"
+    r"|sheltered)\s+")
+DAY_ON_THE_WAY = ("walking in", "walking home", "walking to work", "walking the dog",
+                  "on the way home", "on the way in", "on the way to work", "on my way home",
+                  "on my way in", "on the school run", "coming home", "going to work",
+                  "caught in the", "caught out in the",
+                  "on the platform", "at the bus stop", "at the station", "at the stop",
+                  "waiting for the bus", "waiting for a bus", "waiting for the train",
+                  "waiting for a train", "waiting for my bus", "waiting for my train",
+                  "for a bus", "for the bus", "for a train", "for the train")
+# A kind of day named to be ruled out: "not cold today", "isn't raining", "not too hot". The
+# negation can be a word or two away from the day word ("not TOO hot", "not THAT cold"), so the
+# words in between are skipped. Only the day words left after that are what the line says.
+NEGATIONS = frozenset("""not isnt isn't arent aren't wasnt wasn't aint ain't no never hardly
+    nothing""".split())
+NEGATION_SOFTENERS = frozenset("that too so even very all at much really quite bit".split())
 # "windy as anything", "cold as hell": the day said with the strength of it on the end. The words
 # on their own say nothing, so the phrases are listed and taken off the line before it is read.
 DAY_AS_ANYTHING = ("as anything", "as hell", "as can be", "as ever", "as fuck", "as all hell")
+# The day said as an idiom, which names no word the pools know: "brass monkeys out there" and
+# "brass monkey weather" are the cold and nothing else. It is written over with the word it
+# stands for before the line is read, so the rest of the reading - the glue, the "not" in front
+# of it, the day that met the person - works on it as it does on the plain word: "its not brass
+# monkeys today" is the same ruling-out as "its not freezing today".
+DAY_SAID_AS_A_KIND = (("brass monkeys", "freezing"), ("brass monkey", "freezing"))
 
 
 # The words that put the day in the future: "its meant to be snowy tomorrow" is a forecast, and
@@ -4411,7 +4835,14 @@ DAY_THEIR_OWN_DAY = frozenset("""been spent spend sat stood had i im i'm ive i'v
 # Phrases of the day's words that are about something else entirely: "all clear" is a test result
 # and "all done" is a job finished, and the words alone cannot tell them from a clear blue sky.
 DAY_NOT_THE_DAY = ("all clear", "all done", "all good", "all right", "all set", "all over",
-                   "all in", "too warm", "too cold")
+                   "all in", "too warm", "too cold",
+                   # "out cold" is a person who is unconscious, and the words around it are all
+                   # words the day pools know, so "i was out cold all night" was answered with the
+                   # cold day ("Bit parky, isn't it") instead of the safety reader's question
+                   # about how long they were out. A night's sleep is the one form of it that
+                   # carries no other word to fence it ("for two hours" and "last night" already
+                   # reached the safety reader), so the phrase itself stands the day pools down.
+                   "out cold", "out for the count")
 # A line that opens on one of these is added to something said before it ("and heat", after "i've
 # tried stretching") and not a remark about the day at all.
 DAY_JOINED_ON = frozenset("and also plus then but because".split())
@@ -4444,8 +4875,19 @@ def _the_day_described(clean):
     line = " ".join(str(clean or "").lower().split())
     if not line or "?" in line:
         return None
+    # "what a scorcher", "what a downpour": "what" opens a question, but "what a" opens an
+    # exclamation about the day, and the words after it are the remark. Without this the line was
+    # read as a question nothing here can answer, and "what a downpour" got the search hedge.
+    line = re.sub(r"^what\s+an?\s+", "", line)
+    if DAY_MET_ME.match(line):
+        line = DAY_MET_ME.sub("", line)
+        for phrase in DAY_ON_THE_WAY:
+            line = re.sub(r"\b" + r"\s+".join(phrase.split()) + r"\b", " ", line)
+        line = " ".join(line.split())
     for phrase in DAY_AS_ANYTHING:
         line = re.sub(r"\b" + r"\s+".join(phrase.split()) + r"\b", " ", line)
+    for phrase, word in DAY_SAID_AS_A_KIND:
+        line = re.sub(r"\b" + r"\s+".join(phrase.split()) + r"\b", word, line)
     line = " ".join(line.split())
     words = [word.strip(".,!;:'\u2019\"") for word in line.split()]
     words = [word for word in words if word]
@@ -4479,15 +4921,33 @@ def _the_day_described(clean):
             and all(word in DAY_VERDICTS for word in day_words) \
             and not any(word in DAY_TO_COME for word in words):
         return None
+    def ruled_out(index):
+        """True when the day word at `index` is named to be ruled out, not to be reported."""
+        back = index - 1
+        while back >= 0 and words[back] in NEGATION_SOFTENERS:
+            back -= 1
+        return back >= 0 and words[back] in NEGATIONS
+
     best, best_count = None, 0
+    ruled, ruled_count = None, 0
     for kind, pool in DAY_WORDS.items():
         # A kind word the person has just said "not" in front of is the kind they are ruling out:
         # "its raining not sunny" is a wet day and not a sunny one.
         count = sum(1 for index, word in enumerate(words)
-                    if word in pool and words[index - 1:index] != ["not"])
+                    if word in pool and not ruled_out(index))
         if count > best_count:
             best, best_count = kind, count
+        cleared = sum(1 for index, word in enumerate(words)
+                      if word in pool and ruled_out(index))
+        if cleared > ruled_count:
+            ruled, ruled_count = kind, cleared
     if not best:
+        # Every kind of day in the line was ruled out: "not cold today", "not too hot", "isn't
+        # raining". The person has said what the day is not, which is still a remark about it,
+        # and the pools for the kind they named would contradict them - "not too hot today" was
+        # answered "Boiling, isn't it". The mild pool agrees with the ruling and claims nothing.
+        if ruled:
+            return THE_DAY.get("mild")
         return None
     if any(word in DAY_TO_COME for word in words) \
             or any(phrase in line for phrase in DAY_TO_COME_PHRASES):
@@ -5004,10 +5464,55 @@ def reads_as_a_narrowing(clean):
     Only a line that is the constraint and nothing else comes here: "not too far" and "under 20
     minutes" are this, and "is it cheaper in june" and "the car is cheap but it needs work" name a
     subject of their own and keep the readers that can answer those.
+
+    Two limits in one line - "cheap and not too far", "not too far and cheap", "under 20 minutes and
+    easy" - are read by `the_limits_said`, which puts the part that carries a bound first: a line
+    joined by "and" matched neither pattern and was said back ("Got it - cheap and not too far"),
+    which gives the person nothing to answer and does not cut the answer above either. This returns
+    the first axis of that reading, which is the one the reply starts with.
+    """
+    limits = the_limits_said(clean)
+    return limits[0][0] if limits else ""
+
+
+# The words that join two limits into one line. A line with a part that is not a limit ("cheap and
+# cheerful", "something not too far from the station") is not only a limit, and keeps whatever the
+# composers after this one make of it.
+NARROW_JOIN = re.compile(r"\s*(?:,|&|\band\b|\bplus\b)\s*", re.I)
+
+
+def the_limits_said(clean):
+    """The limits a line of joined limits names, in the order a reply should try them.
+
+    "cheap and not too far" and "under 500 pounds and not too far" are one line with two limits in
+    it, and the reply has to pick one to ask about. The part that carries a bound comes first: the
+    person has already answered the question that part asks - "under 500 pounds" - so saying it
+    back and pointing it at the things on the screen is the most the reply can do. The other parts
+    follow, the last said first, because the limit said last is the one the next answer has to
+    meet. The parts are tried in that order against the answer above, and the first one the answer
+    can be cut on is the one the reply asks about: "under 500 pounds each and not too far" after
+    four destinations that quote no prices is a distance to cut, not a price.
+
+    Returns [(axis, part), ...] and nothing when the line is not only limits - a line with a part
+    that is not one ("cheap and cheerful", "something not too far from the station") keeps
+    whatever the composers after this one make of it.
     """
     line = " ".join(str(clean or "").strip().split())
     if not line or line.rstrip().endswith("?") or len(line.split()) > NARROW_WORDS:
-        return ""
+        return []
+    parts = [part for part in NARROW_JOIN.split(line) if part]
+    if not parts:
+        return []
+    axes = [_one_axis(part) for part in parts]
+    if not all(axes):
+        return []
+    with_bound = [(axis, part) for axis, part in zip(axes, parts) if the_bound_said(part)]
+    without = [(axis, part) for axis, part in zip(axes, parts) if not the_bound_said(part)]
+    return with_bound[::-1] + without[::-1]
+
+
+def _one_axis(line):
+    """The one axis a piece of a line narrows on, or ""."""
     for axis, pattern in NARROW_AXES:
         if pattern.match(line):
             return axis
@@ -5755,6 +6260,17 @@ def _thing_done_pool(clean):
     Chosen by the verb and never by the noun: a thing seen to, a thing bought, a walk, and the
     rest of the made things, because the question a friend asks depends on which of those it was.
     """
+    # A slip of the person's own is not a thing done. "i made a daft mistake at work" and "made a
+    # stupid mistake today" have the shape of an afternoon - a past tense and something after it -
+    # so the pool asked how it had gone: "What made you start on that?", "Nice - how did it go?".
+    # The noun that carries the meaning is further along than the words after the verb, so the
+    # thing-done reading cannot see it and the confession reader already does: `fallback_chain`
+    # answers it with "That's the kind of thing that sits on you. Do you want to talk it
+    # through?", and this only stands aside so that reader gets the turn. Imported here because
+    # the two modules import each other at the end of the file.
+    from .fallback_chain import _a_thing_they_regret
+    if _a_thing_they_regret(clean):
+        return None
     shape, done_verb = _thing_done_scan(clean)
     if not shape:
         return None
@@ -5892,6 +6408,9 @@ def _thing_done_scan(clean):
     at_it = AT_IT.search(text)
     if at_it and (at_it.group(1) in DONE_ING or at_it.group(1) in AT_IT_EXTRA):
         rest = text[at_it.end():]
+        # "im getting fat" is a state, not a job under way: see BECOMING in fallback_data.
+        if at_it.group(1) in BECOMING and (rest.split() or [""])[0] in BECOMING_STATE:
+            return None, ""
         if (_a_thing_after(rest) and not HABIT_TIME.search(rest)
                 and not any(word in AT_IT_NOT for word in re.findall(r"[a-z']+", rest))):
             return ("soon" if FUTURE_TIME.search(rest) else "at"), at_it.group(1)
@@ -5998,6 +6517,20 @@ DONE_ING = _done_ing()
 HARM_NAMED = re.compile(
     r"\b(?:pills?|tablets?|paracetamol|ibuprofen|painkillers?|meds|medication|overdosed?|"
     r"dose|wound|blood|bleeding|bled|bleach|ammonia|antifreeze|poison\w*)\b")
+# A person who says they hurt themselves is never having a day that went neither way, and the
+# cheerful day pool ("Good to hear. What was the best bit?") is the worst reply the bot could give
+# it. `HARM_ON_ME` below needs a body part, so the ordinary case is caught by the safety band and
+# the figurative one was not: "i cut myself from society" was congratulated, while its own sibling
+# "i cut myself off from everyone" is answered by the friendship reading. Read by shape, so every
+# wording of it stands the day question down - and "i cut myself a slice", "i cut myself some
+# slack" give the person something rather than take it, so those are not this.
+A_HURT_MYSELF = re.compile(
+    r"\b(?:i|i've|ive)\b\s*(?:just\s+|almost\s+|nearly\s+|really\s+|actually\s+)?"
+    r"(?:cut|cutting|hurt|hurting|harm|harmed|harming|burn|burned|burnt|burning|hit|hitting|"
+    r"punish|punished|punishing|starve|starved|starving|poison|poisoned|poisoning)\s+myself\b"
+    # "i cut myself a slice", "i cut myself some slack" hand the person something rather than take
+    # it, so a quantity in front of the object means this is not that.
+    r"(?!\s+(?:a|an|the|some|another|either|neither|one|two|three)\b)")
 # The verb alone is not enough - "i chopped the onions", "i burnt the toast" are a supper - so a
 # verb of harm only counts when the line says it landed on the person.
 HARM_ON_ME = re.compile(
@@ -6279,9 +6812,42 @@ def _yours(thing):
     return DISLIKE_OWN.sub("your", DISLIKE_OWN_SELF.sub("yourself", thing))
 
 
+# The same taste with the "i" left out: "not 2 keen on the new place", "not a fan of the open
+# plan", "not too fussed about the colour". People drop the subject in a chat, and the store
+# reads a taste from a first person verb, so the subject-less line gave nothing to object to:
+# "not 2 keen on the new place" got "Got it. Is there anything you'd like a hand with?" and
+# "not too keen on it" got "I'm listening - say more if it helps", while "im not keen on the new
+# place" was asked about the place. The thing is the same thing and the question is the same.
+DISLIKE_WITHOUT_AN_I = re.compile(
+    r"^\W*(?:(?:and|but|so|oh|also|well|yeah|yep|ok|okay|right|alright|honestly)\W+)*"
+    r"(?:not|n't)\s+(?:(?:really|that|too|2|very|so)\s+)?(?:(?:much|a\s+bit)\s+of\s+)?"
+    r"(?:a\s+)?(?:keen|fan|fond)\s+(?:of|on|about|for)\s+(?P<thing>[^?.!]+)$", re.I)
+# A pronoun is not a thing to ask about: "not a fan of it" points at what was already said, and
+# the composer answers that from the thread, not from the line.
+NOT_A_THING_ASKED = frozenset("""it its it's that this these those them him her you me
+    everything anything something nothing""".split())
+
+
 def the_dislike_ask(clean, memory):
     """A question about the thing the person has just said they do not like, or None."""
     thing = obstacle.the_thing(clean)
+    if not thing:
+        found = DISLIKE_WITHOUT_AN_I.match(" ".join(str(clean or "").split()))
+        if found:
+            thing = found.group("thing").strip(" ,.;:-")
+            if not thing or thing.lower() in NOT_A_THING_ASKED:
+                return None
+            # The line is the person's own words, so a tail that only softens it ("the commute
+            # already", "the open plan really") stays off the question.
+            thing = DISLIKE_TAIL.sub("", thing).strip(" ,.;:-")
+            if not thing or len(thing.split()) > DISLIKE_TOO_LONG:
+                return None
+            if DISLIKE_HAS_TWO_HALVES.search(thing):
+                return None
+            thing = _yours(thing)
+            options = [frame.format(thing=thing, Thing=thing[:1].upper() + thing[1:])
+                       for frame in DISLIKE_ASKS]
+            return _choose(options, memory, clean)
     if thing:
         thing = _yours(DISLIKE_TAIL.sub("", thing).strip(" ,.;:-"))
     if not thing or len(thing.split()) > DISLIKE_TOO_LONG:
@@ -6583,6 +7149,134 @@ PLAN = (
     "Nice one. Let me know how it goes.",
     "That sounds sensible. Shout if it does not go to plan.",
 )
+
+# A next step that changes a medicine is not a next step to bless: the pool above reads every
+# "i'm going to ..." as a decision somebody has taken, and a prescription is the one kind of
+# decision that waits for the person who wrote it. "im going to skip my medication for a week"
+# came back "That sounds sensible. Shout if it does not go to plan.", and "im going to cut down
+# my insulin" the same.
+#
+# The rule is about the change, not about the medicine, so it is written as two shapes and a
+# window between them rather than as a list of sentences:
+#
+#   a verb of changing what is taken  ...  a word for what is taken
+#   a word for what is taken          ...  a change in how much is taken ("an extra dose",
+#                                          "two instead of one")
+#
+# The verb list is the ordinary English for it - stop, quit, give up, leave off, come off, cut,
+# reduce, halve, double, increase, raise, lower, skip, miss, drop, ditch, bin, knock off, wean,
+# taper, flush, switch, swap, change - because every one of them came up in a real line and each
+# was blessed before. What keeps them safe is the second half: "cut the grass", "cut down on
+# sugar", "drop the kids at school", "give up the booze", "take two weeks off work" and "change my
+# mind" name nothing that is taken, so they keep their own answers. The negative lookahead keeps
+# a walk past the chemist out of it: "stop at the chemist for my tablets" is a place to go, not a
+# dose.
+_MEDICINE_WORD = (
+    r"\b(?:medication|medications|meds|medicine|medicines|tablet|tablets|pill|pills|"
+    r"dose|doses|dosage|insulin|insulin injections|inhaler|inhalers|steroids|antibiotics|"
+    r"antidepressants|anticoagulants|blood\s+thinners?|blood\s+pressure\s+tablets|epipen|"
+    r"epipens|statins?|beta\s+blockers?|thyroxine|levothyroxine|metformin|warfarin|"
+    r"prednisolone|painkillers|sleeping\s+tablets|epilepsy\s+tablets|hormones?|"
+    r"prescription|prescriptions|treatment)\b")
+# What a clinic does to you is not a medicine either: "my gym sessions", "three sessions with the
+# physio", "my counselling sessions", "my therapy approach" are all plans, and a word for a
+# session beside a verb of stopping or changing read as a dose. Nothing the caution is for is
+# said as a session, so the word is out and a line that names one keeps its own answer.
+# The verbs that can be followed by a place ("stop at the chemist", "drop in on mum", "cut
+# through the park") get a lookahead, because a place is where the person is going, not what they
+# take. The rest cannot take one, so "taper off my steroids" and "come off my antidepressants"
+# are read with no lookahead in the way.
+_VERB_AT_A_PLACE = (
+    r"\b(?:stop|stopping|drop|dropping|cut|cutting|pop|popping|skip|skipping|miss|missing)\b"
+    r"(?!\s+(?:at|by|in|on|off|for|to|past|outside)\b)")
+# The change itself, said as a verb.
+_CHANGE_VERB = (
+    r"\b(?:quit|quitting|give\s+up|giving\s+up|leave\s+off|leaving\s+off|come\s+off|"
+    r"coming\s+off|go\s+off|going\s+off|reduce|reducing|halve|halving|half|halfing|double|"
+    r"doubling|increase|increasing|raise|raising|lower|lowering|ditch|ditching|bin|binning|"
+    r"knock\s+off|knocking\s+off|wean|weaning|taper|tapering|flush|flushing|switch|switching|"
+    r"swap|swapping|change|changing)\b")
+# Splitting a tablet is the one change to a medicine with its own answer, and it is a better one:
+# `science.cut-or-crush-a-tablet` says to check whether it is a modified-release tablet before
+# anything is cut, and "i want to cut my pills in half to make them last" was that card on main
+# and the pharmacist line here. A split is about the tablet in the person's hand, not about the
+# prescription, so the caution stands down for it and the card answers.
+_SPLITTING_A_TABLET = re.compile(
+    r"\b(?:cut|cutting|split|splitting|break|breaking|halve|halving|half)\b[^.?!]{0,20}"
+    r"\b(?:tablets?|pills?|capsules?)\b[^.?!]{0,14}\b(?:in\s+half|in\s+two|in\s+quarters?|"
+    r"down\s+the\s+middle)\b"
+    r"|\b(?:tablets?|pills?|capsules?)\b[^.?!]{0,14}\b(?:in\s+half|in\s+two|in\s+quarters?)\b",
+    re.I)
+# The change said as an amount: "an extra one", "two instead of one", "three tonight".
+_AMOUNT = (
+    r"\b(?:take|taking|have|having|pop|popping|swallow|swallowing)\s+(?:an?\s+)?"
+    r"(?:extra|two|three|four|double|twice|\d+)\b")
+PLAN_MEDICINE = re.compile(
+    r"(?:" + _VERB_AT_A_PLACE + r"|" + _CHANGE_VERB + r")[^.?!]{0,40}" + _MEDICINE_WORD
+    + r"|" + _MEDICINE_WORD + r"[^.?!]{0,30}" + _AMOUNT
+    + r"|" + _AMOUNT + r"[^.?!]{0,40}" + _MEDICINE_WORD,
+    re.I)
+# The medicine that causes real trouble stopped suddenly is named, because that is what makes the
+# wait worth it. The ones that are usually reduced in steps over weeks are their own list, so a
+# line that names none of them is not read the longest sentence in the pool.
+PLAN_MEDICINE_SLOW = re.compile(
+    r"\b(?:antidepressants?|steroids?|prednisolone|insulin|blood\s+pressure|blood\s+thinners?|"
+    r"anticoagulants?|warfarin|epilep\w*|beta\s+blockers?|statins?|thyroxine|levothyroxine)\b",
+    re.I)
+PLAN_MEDICINE_REPLY = (
+    "Do not change a prescribed dose on your own, even for a week: a pharmacist can tell you "
+    "today, free, whether to skip it, take less, take more or come off it, and how slowly to go. "
+    "If you have stopped it already and feel unwell, ring 111.",
+    "Ask a pharmacist before you change a dose, skip it or come off it, even for a week: they "
+    "know whether it is safe and how slowly to do it. If you have stopped it already and feel "
+    "unwell, ring 111.",
+)
+PLAN_MEDICINE_SLOW_REPLY = (
+    "Do not change a prescribed dose on your own, even for a week: a pharmacist can tell you "
+    "today, free, whether to skip it, take less, take more or come off it, and how slowly to go. "
+    "Antidepressants, steroids, insulin, blood pressure tablets and blood thinners are the ones "
+    "that cause real trouble stopped suddenly. If you have stopped it already and feel unwell, "
+    "ring 111.",
+    "Ask a pharmacist before you change a dose, skip it or come off it, even for a week: they "
+    "know whether it is safe and how slowly to do it, and antidepressants, steroids, insulin, "
+    "blood pressure tablets and blood thinners are the ones that are usually reduced in steps "
+    "over weeks. If you have stopped it already and feel unwell, ring 111.",
+)
+# Two things have to be true before the caution above is the right answer, and both were wrong
+# when the rule was only the regex. The change has to be the person's own decision, and it has to
+# be a decision rather than a question:
+#
+#   my gp is stopping my tablets        -> the doctor decided, so "ask a pharmacist before you
+#                                          skip it" is advice about nothing
+#   can i stop my medication            -> the knowledge base answers this one well ("keep taking
+#                                          it until a pharmacist, nurse or GP tells you to stop"),
+#                                          and a question is not a plan
+#
+# So the reading the pools ask is `reads_as_a_change_of_medicine`, not the regex on its own: the
+# words of the rule in one place, so the three pools that cheer a plan cannot drift apart.
+_A_QUALIFIED_PERSON_DOES_IT = re.compile(
+    r"\b(?:my|our|the|his|her|their)?\s*\b(?:gp|doctor|dr|consultant|psychiatrist|specialist|"
+    r"surgeon|nurse|pharmacist|midwife|psychologist|dietitian|anaesthetist)\b[^.?!]{0,30}"
+    r"\b(?:is|are|was|were|has|have|had|keeps|kept|stopping|stopped|reducing|reduced|changing|"
+    r"changed|taking|took|wants|wanted|told|said|thinks?|advised|suggested|switched|put)\b",
+    re.I)
+_A_QUESTION = re.compile(
+    r"(?:^\s*(?:can|could|should|shall|would|will|is|are|do|does|did|am|what|how|when|where|"
+    r"why|which|who)\b)|\?\s*$", re.I)
+
+
+def reads_as_a_change_of_medicine(text):
+    """Is this line the person's own plan to change what they take? Read by the plan pools."""
+    flat = str(text or "")
+    if not PLAN_MEDICINE.search(flat):
+        return False
+    if _SPLITTING_A_TABLET.search(flat):
+        return False
+    if _A_QUESTION.search(flat.strip()):
+        return False
+    return not _A_QUALIFIED_PERSON_DOES_IT.search(flat)
+
+
 # The reply to a feeling said in the shape of a plan. Short and warm, and it asks for the story,
 # because the person is telling one.
 IDIOM_SHY = (
@@ -7523,6 +8217,26 @@ def _unframed(clean):
     return line.strip()
 
 
+# A refusal in front of the pair is a constraint, not a question of which: "i dont want pasta or
+# rice tonight" was answered "I dont want pasta. I'd take that and not think about it again" -
+# the bot picking one of the two things the person had just turned down - and "not pizza or
+# curry" was quoted back as an option ("If you were hoping I'd say 'not pizza'"). The person has
+# ruled both out, so there is nothing to pick between; the refusal and the domain cards answer it.
+CHOICE_REFUSED = re.compile(
+    r"^\s*(?:no|not|never|without|neither)\b"
+    r"|\b(?:dont|don'?t|do not|doesnt|doesn'?t|didnt|didn'?t|cant|can'?t|cannot|won'?t|"
+    r"wouldnt|wouldn'?t|shouldnt|shouldn'?t)\s+(?:\w+\s+){0,2}?"
+    r"(?:want|wants|like|likes|love|eat|eating|have|having|drink|wear|do|doing|need|use|"
+    r"fancy|stand|bother|manage)\b"
+    r"|\ballergic\b|\bhate\b|\bcant have\b")
+
+
+def _refuses_the_pair(clean):
+    """True when the line turns both things down instead of asking which to take."""
+    head = str(clean or "").split(" or ")[0]
+    return bool(CHOICE_REFUSED.search(head))
+
+
 def _is_a_choice(clean):
     """True for a bare "x or y" that names two things, not a question with a clause in it."""
     # "early or late" is one scale about one thing, not two things to pick between: "is easter
@@ -7531,7 +8245,8 @@ def _is_a_choice(clean):
     # so this and the `choice` ask agree on what a choice is.
     asked = CHOICE.match(clean) or CHOICE.match(_unframed(clean))
     return (bool(asked) and not CHOICE_WORRY.search(clean)
-            and not two_ends_of_one_scale(clean))
+            and not two_ends_of_one_scale(clean)
+            and not _refuses_the_pair(clean))
 
 
 # "Which would you pick?" is a different question from "cats or dogs?": the choice is on the
@@ -7853,12 +8568,80 @@ RECORD_STATE = re.compile(
 # is, so the noun is not the record the person is asking about.
 RECORD_QUALIFIED = re.compile(r"\s+(?:of|that|which)\b")
 
+# The records nobody wrote down: "is my visa approved", "has my offer been accepted", "has my
+# interview been arranged". The families in `MY_RECORDS` are the things people ask about most and
+# each has a line that names where it lives; a noun no table holds fell through them all and got
+# the search hedge, which is the one answer that is always wrong for a thing only an office can
+# see. The state is what makes it that office's: approved, accepted, arranged, issued, registered
+# are not states the person's own eyes settle, which is what keeps "is my cake done", "is my
+# washing still wet" and "is my dinner ready" out of here.
+OFFICE_STATE = re.compile(
+    r"\b(?:approved|approval|accepted|arranged|booked|scheduled|confirmed|issued|granted|"
+    r"refused|rejected|declined|registered|processed|dealt\s+with|signed\s+off|finalised|"
+    r"finalized|paid\s+out|put\s+through|agreed|arrived|come\s+back|sent|posted|returned)\b")
+# "my visa", "my new passport", "my second interview": the possessive is what makes it theirs,
+# and up to two words may sit between it and the thing.
+MY_ANY_THING = re.compile(r"\b(?:my|our)\s+(?:[a-z']+\s+){0,2}([a-z]+)")
+# The thing after the possessive is what the state belongs to, and a person is never a thing an
+# office holds: "has my sister arrived yet", "have my parents returned", "has my son arrived at
+# school" are questions only the person asking can answer, and the office line answered them with
+# letters and reference numbers. The last noun is read, not the presence of a person, because "has
+# my sister's visa been approved" is still the visa's state and is the office's.
+_A_MY_PERSON = None
+
+
+def _a_person_is_the_thing(clean):
+    """True when the person is the subject of the state, not the owner of a record.
+
+    "has my sister arrived yet" puts a person in the state; "has my sister's visa been approved"
+    puts a visa in it. The word after the person decides: a state, a place or the end of the clause
+    makes the person the subject, and another noun makes them the owner.
+    """
+    global _A_MY_PERSON
+    if _A_MY_PERSON is None:
+        from .loss import PEOPLE
+        kinds = "|".join(sorted((re.escape(word) for word in PEOPLE), key=len, reverse=True))
+        _A_MY_PERSON = re.compile(
+            r"\b(?:my|our|his|her|their|the)\s+(?:" + kinds + r")(?:\'s|s\')?"
+            r"(?=\s*(?:$|[,.!?;]|(?:has|have|had|is|are|was|were|did|does|do|not|never|just|now|"
+            r"still|yet|already|arrived|arrive|arrives|coming|come|came|returned|returns|got|"
+            r"gotten|been|being|at|home|there|back|in|out|safe|ok|alright|fine|well|on|off|to|"
+            r"from|away|left|gone|late|early|waiting)\b))", re.I)
+    return bool(_A_MY_PERSON.search(clean or ""))
+
+
+# A thing handed over the counter, where the state was not an office's either: "have i been given
+# the wrong change", "i got short changed at the shop". `MY_OWN_STATE` reads "have i been given"
+# as a record and sent it to the paperwork line, and a till receipt is the answer to it.
+A_TILL_ASK = re.compile(
+    r"\b(?:wrong|right|short|extra|too\s+much|too\s+little|double)\s+(?:change|amount)\b|"
+    r"\bshort[-\s]?changed\b|\bchange\s+back\b|"
+    r"\b(?:overcharged|undercharged|charged\s+twice)\b")
+# A thing the person puts in a state themselves, or one nobody can see but them: the home, the
+# kitchen and the body are not offices, and an office line over them would be the same confident
+# wrong answer the hedge was.
+NOT_AN_OFFICE = re.compile(
+    r"\b(?:cake|cakes|bread|dough|sourdough|pastry|dinner|tea|lunch|breakfast|supper|roast|"
+    r"soup|sauce|stock|washing|laundry|wash|load|hair|nails|beard|leg|legs|arm|arms|back|knee|"
+    r"shoulder|eyes|ears|teeth|skin|tattoo|car|cars|bike|bikes|van|boiler|heating|fence|shed|"
+    r"plant|plants|garden|lawn|wall|walls|roof|paint|grout|silicone|sealant|floor|tiles|shelf|"
+    r"door|window|gutter|drive|pond|allotment|chickens|hens|dog|cat|baby|nappy|sleep|diet)\b")
+
 # "check my gift card balance", "can you check my order", "confirm my booking": the ask said with
 # the verb in front, and no state word, so the record pool never saw it. An imperative "check my
 # ..." is the same question as "where is my ..." and has the same answer - the record is not here,
 # and this is where it lives. The line still has to name one of the record things, so "check my
 # tyre pressure" and "check my spelling" are left to whatever knows them.
 RECORD_CHECK = re.compile(r"\b(?:check|checking|confirm|look\s+up|track|trace)\b")
+# Half of the same asks name no thing at all: the person is the subject, so there is no noun for a
+# table to hold - "have i been paid yet", "am i registered", "have i been shortlisted". Every one
+# is about their own record rather than the world, and every one of them had the search hedge.
+MY_OWN_STATE = re.compile(
+    r"\b(?:have|has)\s+i\s+been\s+(?:paid|approved|accepted|registered|booked|confirmed|"
+    r"granted|refused|rejected|shortlisted|interviewed|offered|told|sent|given|taken\s+on|"
+    r"picked|placed|invited|added|approved\s+for)\b|"
+    r"\bam\s+i\s+(?:on\s+the\s+list|in\s+the\s+running|registered|booked\s+in|signed\s+up|"
+    r"enrolled|shortlisted|selected)\b")
 RECORD_THINGS = tuple(thing for _, things, _ in MY_RECORDS for thing in things)
 # The card's own two states are not the balance: a line asking whether it still works wants the
 # expiry date, and a line saying it is worth something wants a resale answer.
@@ -7875,6 +8658,11 @@ CARD_BALANCE_ASK = re.compile(r"\b(?:how\s+much|balance|left|remaining|still\s+o
 CARD_NOT_A_BALANCE = re.compile(r"\b(?:worth|value|declined|refused|cloned|stolen|blocked|"
                                 r"cancel|replace|expire|expires|expired)\b")
 MY_CARD_ROW = next((options for name, things, options in MY_RECORDS if name == "card"), None)
+# Two of the families answer a line that names no thing of its own: wages are the money row's, and
+# a yes or a no about being picked is the application row's.
+MY_MONEY_ROW = next((options for name, things, options in MY_RECORDS if name == "money"), None)
+MY_APPLICATION_ROW = next((options for name, things, options in MY_RECORDS
+                           if name == "application"), None)
 
 # A points, stamps or voucher balance is the person's own and only the scheme holds it. The name
 # of the scheme is what makes it theirs: "how many points do i have" on its own is a quiz, a
@@ -7942,6 +8730,36 @@ CARD_RECORD_THINGS = ("gift card", "gift cards", "voucher", "vouchers", "prepaid
                       "store card", "loyalty card", "loyalty points", "card")
 
 
+def _an_office_record(clean, asking):
+    """The honest line for a record only an office can see, or None.
+
+    Two shapes reach here. A thing of the person's own that no family names, put into a state
+    only an institution can put it in - "is my visa approved", "has my offer been accepted" - and
+    the same ask with the person as the subject and no thing to hold at all: "have i been paid
+    yet", "am i registered", "have i been shortlisted". Both were met with the search hedge, and
+    no search can see a visa either.
+
+    The state word is what makes it an office's, and the homes and bodies that also have one are
+    in `NOT_AN_OFFICE`: "is my cake done" and "is my washing still wet" keep their own answers,
+    and the person can settle those themselves.
+    """
+    if not asking or NOT_AN_OFFICE.search(clean):
+        return None
+    if A_TILL_ASK.search(clean):
+        return AT_THE_TILL
+    if _a_person_is_the_thing(clean):
+        return None
+    if OFFICE_STATE.search(clean) and MY_ANY_THING.search(clean):
+        return OFFICE_RECORD_LINES
+    if MY_OWN_STATE.search(clean):
+        if _has(clean, ("paid", "pay", "wages", "salary", "money", "expenses")):
+            if MY_MONEY_ROW is not None:
+                return MY_MONEY_ROW
+        if MY_APPLICATION_ROW is not None:
+            return MY_APPLICATION_ROW
+    return None
+
+
 def _their_own_record(clean, asking):
     """The honest line for one of the person's own records, or None."""
     # Half of what a person asks about their own life names no record at all: the person is the
@@ -7969,7 +8787,10 @@ def _their_own_record(clean, asking):
     if validity:
         return CARD_VALIDITY
     if not (RECORD_STATE.search(clean) or checking):
-        return None
+        # A state only an office can see, on a thing no table names: "has my interview been
+        # arranged" holds no word the gate above knows, and the search hedge is the one answer
+        # that is always wrong for a thing only an office can look up.
+        return _an_office_record(clean, asking)
     # A card with money on it is the card's row even when the ask is written with a balance word:
     # "check my gift card balance" matched the money row first ("my gift card balance"), and the
     # reply was about a bank account the person had not mentioned.
@@ -7988,7 +8809,9 @@ def _their_own_record(clean, asking):
     if phrase and not RECORD_QUALIFIED.match(clean, phrase.end()):
         if _has(clean, HEALTH_WORLD):
             return HEALTH_RECORD_LINES
-    return None
+    # The named families are read first and keep their own lines - a booking is in a confirmation,
+    # a balance in the bank's app - and only a thing no table holds comes to the office line.
+    return _an_office_record(clean, asking)
 
 
 # The person's own day, said with a day behind it: "what did i do yesterday", "where did i go last
@@ -8586,7 +9409,8 @@ JUDGE_ASK_BARE = re.compile(
     r"(?:\s+(?P<bare_noun>" + JUDGE_NOUN + r"))?$")
 JUDGE_PLAN_OPENING = re.compile(
     JUDGE_LEAD +
-    r"(?:im|i am|i)\s+(?:going to|gonna|planning to|planning on|thinking of|thinking about"
+    r"(?:im|i am|i)\s+(?:going to|gonna|off to|out to|away to|heading to|heading off to"
+    r"|planning to|planning on|thinking of|thinking about"
     r"|about to|want to|wanna|might|will|intend to|intending to|decided to|have decided to"
     r"|plan to|hoping to|hope to|looking to|keen to|aiming to|thinking i(?:d| would) like to"
     r"|think i(?:ll| will)|reckon i(?:ll| will))\s+(?P<plan>\S.{1,58})$"
@@ -8653,6 +9477,14 @@ JUDGE_ACT_AT_SOMEONE = re.compile(
 # after it is still this turn's. "Yes, once, and make it easy to answer" is caught by the "yes".
 JUDGE_ANSWERS_FIRST = re.compile(
     r"^\W*(?:yes|no|nope|not|don'?t|never|definitely|probably|only)\b", re.IGNORECASE)
+# A card that opens on its own heading - "Yes: an easy hour on a bike burns roughly 300 to 400
+# calories", "No: a dog left alone all day will chew" - has ruled on the question the card answers,
+# not on the plan the person has put down since. The colon is how this bot's knowledge cards open,
+# and reading it as a spoken "Yes," is how a plan put down for a verdict was answered with nothing:
+# "i plan to cycle 100 miles with no training" / "is that daft" got the search hedge, because the
+# card above it began "Yes:" and the verdict stood down as already given. A spoken ruling keeps its
+# comma ("Yes, once, and make it easy to answer"), so only the heading is read here.
+JUDGE_A_CARD_HEADING = re.compile(r"^\W*(?:yes|no)\s*:\s", re.IGNORECASE)
 # An act against somebody, something illegal, or harm to their own body is not a plan to bless,
 # whatever the words: "i want to drink a bottle of wine every night", "smoke weed every day", "lie
 # on my cv", "stop paying tax" all walked through the fence the harm words had.
@@ -8712,10 +9544,39 @@ JUDGE_JUDGES_A_NOUN = re.compile(
 # what it thinks the person should do: a reply that ends on a step ("Ask when you will hear back")
 # has given advice, not a verdict, and the turn is still this one's.
 JUDGE_DECISION_LEAD = re.compile(r"^(?:if|unless|so|then|otherwise|either|worth)\b", re.IGNORECASE)
+# A hole of the person's own body or their own medicine is not a plan to weigh: the answer there
+# is the health one, and a friend does not say "that is the part to answer for" about a week off
+# somebody's tablets.
+JUDGE_HOLE_SAFETY = re.compile(
+    r"\b(?:skip|skipping|stop|stopping|pause|pausing|come\s+off|coming\s+off)\s+"
+    r"(?:my|the|your)?\s*(?:medication|meds|tablets|pills|insulin|treatment|doses?)\b"
+    r"|\bmeds\b|\bmedication\b", re.IGNORECASE)
+# The faces that ask for a ruling on a plan and nothing else, so the hole in the plan can be
+# answered rather than deferred to an entry that has no word to match.
+JUDGE_ASKING_FOR_A_CAUTION = frozenset("""stupid daft dumb silly idiotic thick bad terrible awful
+    dreadful wrong good great sensible wise smart clever reasonable mad crazy insane nuts mental
+    unhinged""".split())
 JUDGE_JUDGEMENT = re.compile(
     r"\b(?:is|would be)\s+(?:a\s+)?(?:good|bad|fine|great|sensible|wise)\s+idea"
     r"|\bworth\s+(?:doing|it|a\s+(?:go|try))\b|\bnot\s+worth\b"
     r"|\bgo for it|\bhold off\b", re.IGNORECASE)
+
+
+
+
+
+# The plan openings that put either a step or a place after the "to": "im going to learn
+# spanish" and "im going to the gym". Every other opening of a plan ("want to", "thinking of",
+# "planning to") is an infinitive, so what follows its "to" is a verb.
+JUDGE_MOVING_TO = re.compile(r"\b(?:" + stepwords.MOVING_TO + r")\s*$", re.IGNORECASE)
+
+
+def _the_opening_before(match):
+    """The words of the line in front of the plan the opener matched: "im going to"."""
+    for group in ("plan", "plan2", "plan3", "plan9"):
+        if match.group(group):
+            return match.string[:match.start(group)]
+    return ""
 
 
 def _a_gerund(word):
@@ -8760,6 +9621,11 @@ def _a_plan_phrase(said):
             return ""
         if _a_gerund(words[0]):
             return _yours(phrase)  # "getting a rescue dog" is already the shape a sentence wants
+        if JUDGE_MOVING_TO.search(_the_opening_before(match)) and not stepwords.a_step(words[0]):
+            # "im going to the gym", "im going to spain in may", "im going to bed early tonight":
+            # the words after the "to" are where they are going, not a step, and "wanting to the
+            # gym" is not a sentence. They go back behind their own "going to".
+            return _yours("going to " + phrase)
         return _a_plan_said_back(phrase)
     match = JUDGE_SHOULD_OPENING.search(text)
     if match:
@@ -8852,6 +9718,10 @@ def _the_reply_above_judged(memory, past_a_question=False):
     said = (last_bot(memory) or "").strip()
     if not said:
         return False
+    if JUDGE_A_CARD_HEADING.match(said):
+        # "Yes: butter is mostly fat ..." is a card's heading, not a ruling on the plan that came
+        # after it. The verdict is still this turn's to give.
+        return False
     if said.endswith("?") and not past_a_question:
         # The bot asked them something ("what's the part that's under your skin?"): that question
         # is what this turn is for, and a verdict pasted over it ignores what the bot just said.
@@ -8905,11 +9775,23 @@ def _a_place_asked_about(clean, memory):
     appointment is not a place (`NOT_A_PLACE`), and neither is an evening at the cinema or the
     theatre: `is it any good` there asks about the film or the play, which the card answers, so
     the card keeps the turn.
+
+    A price verdict on a thing you buy to get there, or to eat and sleep once you are there, is
+    not a verdict on the place: "we are thinking of going to cornwall in july" then "is the train
+    expensive that far" was given "No first-hand knowledge of the place, sorry. Are you going for
+    the sights, the food or the peace?" - a question about a trip's own pleasures, asked of a
+    fare. The trip in the thread sets the scene; the thing in the line is what is asked about,
+    and a fare is a price (bot/compose/the_rule_for_it.py, FARE_PRICE_RULE).
     """
     said = _matchable(clean).rstrip(" ?.!,")
     if not said or len(said.split()) > 6:
         return None
     if not PLACE_EVALUATIVE.search(said):
+        return None
+    from .the_rule_for_it import A_FARE_OR_A_TICKET, PRICE_VERDICT  # the pools load later
+    if A_FARE_OR_A_TICKET.search(said) and PRICE_VERDICT.search(said):
+        # The fare, the flight, the hotel: a thing with a price of its own, asked about as a
+        # price. The trip the thread named is only where it goes.
         return None
     if not (PLACE_OPENER.match(said) or "?" in str(clean or "")):
         return None
@@ -8971,6 +9853,21 @@ def _a_verdict_on_their_plan(clean, memory, past_a_question=False):
         # "skip my medication for a week", "put all my savings in bitcoin", "drive with no sleep":
         # the line names the part that makes it risky, so the verdict has nothing to judge and the
         # topic's own entry - the health one, the money one - is the answer that knows what to say.
+        #
+        # ...which holds only where an entry can answer. The ask here is the judgement and nothing
+        # else ("is that daft"), so it says no word the entry could match, and standing down leaves
+        # the floor: "i plan to cycle 100 miles with no training" / "is that daft" was told "I'd
+        # rather not guess, a quick search online will get you a solid answer", and "im going to
+        # put all my savings in bitcoin" / "is that a stupid idea" was told the same about the
+        # person's own savings. The hole is the part a friend pushes back on, so the verdict names
+        # it as the part to answer for instead of blessing the plan (`JUDGE_WORTH` would say
+        # "Nothing daft in wanting to put all my savings in bitcoin") - except where the hole is
+        # their own medicine or their own body, which is nobody's to weigh from here.
+        if JUDGE_HOLE_SAFETY.search(plan_line) or JUDGE_HOLE_SAFETY.search(plan or ""):
+            return None
+        if face in JUDGE_ASKING_FOR_A_CAUTION:
+            return [line.format(plan=plan, Plan=plan[:1].upper() + plan[1:])
+                    for line in JUDGE_PLAN_HAS_A_HOLE]
         return None
     # The wish itself, before the pool is chosen: "is that a stupid idea" after "i want to key my
     # exs car" is not a plan to weigh up, and "is that a good idea" after "i want to stop eating"
@@ -9534,11 +10431,141 @@ LIVE_SKY_WORDS = LIVE_SKY_NOUNS | frozenset(
     "days now later outside out there any much could might should please tell me know".split())
 
 
+# A place is not a keyword to keep out of the shape above: "weather in manchester tomorrow" is the
+# same ask as "weather tomorrow" with the place said out loud, and the old test dropped it for the
+# one word that was not a sky word or a piece of time. So after a preposition the line may name
+# where - one or two words of it - and still be the ask. Two, because "the weather in the peak
+# district" is a place and three words in a row is usually a subject.
+LIVE_SKY_PLACE = frozenset("in at near around for of".split())
+
+
 def _the_sky_and_nothing_else(clean):
-    """True when every word of the line is the sky, a piece of time or the shape of the ask."""
-    words = re.findall(r"[a-z']+", clean)
-    return bool(words) and _has(clean, LIVE_SKY_NOUNS) and all(
-        word.strip("'") in LIVE_SKY_WORDS for word in words)
+    """True when every word of the line is the sky, a piece of time, the shape of the ask, or the
+    place the person is asking about."""
+    words = [word.strip("'") for word in re.findall(r"[a-z']+", clean)]
+    if not words or not _has(clean, LIVE_SKY_NOUNS):
+        return False
+    unknown = 0
+    after_place = False
+    for word in words:
+        if word in LIVE_SKY_PLACE:
+            after_place, unknown = True, 0
+            continue
+        if word in LIVE_SKY_WORDS:
+            continue
+        # "the weather in the oven" is the oven: an indoor thing after a preposition is the
+        # thing, not the place, and the reading above answers the thing.
+        if not after_place or word in LIVE_INDOOR:
+            return False
+        unknown += 1
+        if unknown > 2:
+            return False
+    return True
+
+
+# The words for traffic on a road, read with a road's name: "any jams on the a1 north" carries no
+# ask and none of the strong live words ("any traffic" is one, "any jams" is not), so the asking
+# gate dropped it and the person got the nod - "I'm listening - say more if it helps" - to a
+# question about their drive this morning.
+ROAD_TRAFFIC_WORDS = frozenset("""
+    jam jams traffic busy closed closure closures shut roadworks accident accidents
+    delay delays delayed diversion diversions queue queues queuing
+""".split())
+
+
+# A line that tells you what already happened on a road is not asking what the roads are doing.
+# "i got stuck in a jam on the a1 this morning" is a person's morning, and "the m6 was closed last
+# night" is news about their evening: the note about how a jam clears where "Rotten luck" belonged
+# reads as a lecture. The same fault as the one above, one tense over, so the reader has to know
+# whether the line is an ask at all.
+# A report is not one phrase: it is a time already past, or a verdict on a day already had. "the
+# m25 was shut last night" carries the time, but "the traffic was awful on the m25" carries only
+# the verdict, and "my morning was a nightmare" only the mood - and both of those were still read
+# as asks about right now. So the verb's own tense is read too: "was awful", "was a nightmare",
+# "took ages" and "sat in traffic" are things that have happened, while "is the m6 shut" and
+# "was the m6 shut" keep their ask (the asking gate and LIVE_STRONG hold those), and "was it busy"
+# is still a question because the order is inverted.
+A_REPORT_OF_WHAT_HAPPENED = re.compile(
+    r"\b(?:yesterday|last night|this morning|earlier|we sat|i sat|got stuck|was closed|were bad|"
+    r"there were|there was|it took us|took me|sat in|stuck for|queued for|took ages|"
+    r"took forever|took hours|missed the (?:train|bus|ferry|flight)|"
+    r"(?:was|were) (?:awful|terrible|horrendous|grim|hell|murder|chaos|a mess|a joke|a nightmare|"
+    r"bad|shut|rammed|chocka|packed)|(?:awful|terrible|horrendous|grim) (?:this morning|earlier|"
+    r"yesterday|last night))\b")
+
+
+def _a_road_named_with_traffic(clean):
+    """True when the line names a road and asks what the traffic on it is doing."""
+    if not LIVE_ROAD_NAME.search(clean):
+        return False
+    if A_REPORT_OF_WHAT_HAPPENED.search(clean):
+        return False
+    return bool(set(clean.split()) & ROAD_TRAFFIC_WORDS)
+
+
+THEIR_OWN_COUNT_WORDS = ("traffic", "footfall", "foot traffic", "visitors", "hits",
+                         "analytics", "viewers", "stats")
+
+# The ask, when the question mark is missing: "how much web traffic does my site get", "where do i
+# see my footfall", "is my shop up or down this month".
+A_COUNT_ASKED = re.compile(
+    r"\b(?:how\s+(?:many|much|often)|whats?\s+(?:my|the)|what\s+is\s+my|where\s+(?:do|can)\s+i\s+"
+    r"(?:see|find|check)|is\s+my\b.*\b(?:up|down)|how\s+is\s+my)\b")
+
+# What happened, rather than what they want to know: "my shop had footfall all day", "my website
+# had 200 visitors yesterday", "traffic to my etsy shop is down". A busy day is a thing to say
+# something about, and a figure they already have is theirs, so "it lives in your analytics" is
+# pointing away with nothing given - the same fault as a report of a road.
+THEIR_OWN_COUNT_HAPPENED = re.compile(
+    r"\b(?:had|has|got|fell|dropped|went|rose|doubled|halved|visited|bought|sold|shipped)\b")
+THEIR_OWN_COUNT_REPORT = re.compile(
+    r"\b(?:yesterday|last\s+(?:night|week|month|year)|this\s+(?:morning|week|month)|all\s+day|"
+    r"so\s+far|today|down|up)\b")
+
+
+def _their_own_count(clean):
+    """True when the line asks for a number of the person's own with the question left off.
+
+    "how much web traffic does my site get" and "where do i see my footfall" are asks, and the
+    asking gate would drop them to the nod because the verb is not in front. The number is in
+    their own analytics, so it is read here and answered by the site-stats note rather than by
+    the nod.
+
+    A line that says how the day went, or names the figure they already have, is not asking where
+    the figure lives: "my shop had footfall all day" wants a word about the day, not a note
+    pointing at the analytics page.
+    """
+    if not _has(clean, LIVE_SITE_THING) or not _has(clean, THEIR_OWN_COUNT_WORDS):
+        return False
+    if A_COUNT_ASKED.search(clean):
+        return True
+    return not (THEIR_OWN_COUNT_HAPPENED.search(clean)
+                or THEIR_OWN_COUNT_REPORT.search(clean))
+
+
+# A fall, said rather than asked: "traffic to my etsy shop is down", "visitors dropped last
+# month", "sales have gone quiet". It reports their own numbers and asks nothing, so the asking
+# gate would turn it into a nod and the site-stats note would send them to a page without saying
+# anything first. A fall has ordinary explanations, and those come before the page.
+A_COUNT_FELL = re.compile(
+    r"\b(?:down|fell|falling|dropped|dropping|slowed|slowing|stalled|quiet|quietened|"
+    r"nose\s?dived|collapsed|stopped|lower|fewer|half|dead|gone\s+quiet|went\s+quiet)\b")
+
+
+def _their_own_thing(clean):
+    """True when the number is one of theirs: their site, their shop, their till."""
+    return _has(clean, ("my", "our", "mine", "the shop", "the site")) or bool(
+        A_COUNT_ASKED.search(clean))
+
+
+def _their_own_count_fell(clean):
+    """True when the line reports a fall in a number of the person's own, and asks nothing."""
+    if A_COUNT_ASKED.search(clean):
+        return False
+    return (_has(clean, LIVE_SITE_THING)
+            and _has(clean, THEIR_OWN_COUNT_WORDS + ("sales", "orders"))
+            and bool(A_COUNT_FELL.search(clean)))
+
 
 
 def _live(clean, asking, memory=None):
@@ -9553,6 +10580,16 @@ def _live(clean, asking, memory=None):
         return place
     if _has(clean, LIVE_NOT):
         return None
+    # A question whose answer does not change with the day is not live information, whatever
+    # word in it matched a live kind: "what's the tallest building in the world" and "the biggest
+    # city in the world" both reached the news note through "the world", which is a settled
+    # question answered as though it were today's news. The reading says which kind it is
+    # (`understood["over_time"]`, see bot/understanding/kinds.py), and only a `False` stands this
+    # down - `None` keeps every line exactly as it was, and `True` is what the rest of this
+    # function is for.
+    understood = (memory or {}).get("understood") if isinstance(memory, dict) else None
+    if isinstance(understood, dict) and understood.get("over_time") is False:
+        return None
     # A fact that belongs to the person's postcode is not live information and does not need a
     # question mark ("my poll card hasnt come"). It has its own narrow reading, so it is checked
     # before the asking gate.
@@ -9563,10 +10600,19 @@ def _live(clean, asking, memory=None):
     # met with the nod ("Thanks for telling me") as though the person had told the bot something.
     if clean.strip(" ?!.") in ("news", "the news", "and the news"):
         return LIVE_NEWS_LINES
+    # The same ask with a few more words in it: "anything in the news", "the headlines", "news
+    # about the strike". It is the shape of the line that says so, and the asking gate below
+    # would drop a line with no question mark in it.
+    from . import news_ask
+    if news_ask.reads_as_an_ask_for_the_news(clean):
+        return LIVE_NEWS_LINES
     if (not asking and not _has(clean, LIVE_STRONG)
             and not LIVE_ANY_ACCIDENT.search(clean)
             and not LIVE_A_BARE_WINNING.search(clean)
-            and not _the_sky_and_nothing_else(clean)):
+            and not _the_sky_and_nothing_else(clean)
+            and not _a_road_named_with_traffic(clean)
+            and not _their_own_count(clean)
+            and not _their_own_count_fell(clean)):
         # "check my gift card balance", "check my order", "confirm my appointment": an ask with
         # the verb in front and no question mark, so the asking gate above would drop it and the
         # person got "Got it. Is there anything you'd like a hand with?" - the placeholder this
@@ -9584,6 +10630,18 @@ def _live(clean, asking, memory=None):
     if mine:
         return mine
     for kind, phrases, options in LIVE_KINDS:
+        if kind in ("site-stats", "site-stats-down"):
+            # The counting words are common ones - "traffic", "visitors" - so the kind reads only
+            # a line that names a thing of the person's own: their site, their shop, their
+            # listing. "is there traffic near the shops" is a road question and keeps the roads
+            # pool, and a line about their own numbers never reaches an app that cannot see them.
+            if kind == "site-stats-down":
+                if _their_own_count_fell(clean) and _their_own_thing(clean):
+                    return options
+                continue
+            if _their_own_count(clean) and _their_own_thing(clean):
+                return options
+            continue
         if kind == "weather":
             # Something in the house ("the oven", "the room") makes it a setting, not a forecast.
             if _has(clean, LIVE_INDOOR) and not _has(clean, LIVE_WEATHER_WORDS):
@@ -9631,6 +10689,16 @@ def _live(clean, asking, memory=None):
                 return options
             continue
         if kind == "prices":
+            # A rate in the line with a judgement on it ("its 45 a month, is that a lot") is a
+            # question about that rate, and which reading answers it depends on one thing the line
+            # itself says. A rate whose thing is *in* the line ("my mortgage is 900 a month, is
+            # that normal") is judged by comparing that thing with the same thing elsewhere, which
+            # is what the two readings below do, so the sum goes under them. A rate with no thing
+            # in it names nothing to compare, and the sum it comes to over a year is the only
+            # answer about what the person said, so it goes above them.
+            rate = quantity.the_rate_they_asked_about(clean, memory)
+            if rate and not quantity.the_thing_they_pay_for(clean):
+                return (rate,)
             # A sum asked to be judged is not a live price: nothing is being looked up, and today's
             # figure is not what the person asked for ("is that a lot of money" after a quote).
             verdict = _a_price_wants_a_verdict(clean, memory)
@@ -9642,6 +10710,8 @@ def _live(clean, asking, memory=None):
             priced = prices.the_price_reply(clean, phrases, before.lower(), options)
             if priced:
                 return priced
+            if rate:
+                return (rate,)
             continue
         if kind == "hours":
             if _has(clean, LIVE_NOT_HOURS):
@@ -10461,7 +11531,44 @@ def _forecast_pool(clean, repaired, memory):
 
 def _unknown(understood, memory, clean):
     from .fallback_pools import _unknown as _moved
-    return _moved(understood, memory, clean)
+    reply = _moved(understood, memory, clean)
+    a_hedge = _is_a_hedge(reply)
+    # "how long have we been talking" is the bot's own to answer, and on today's main it is read
+    # as a date on a document instead. The bot-about reader waits behind the hedge below, so a
+    # card that misreads the line kept its turn: it now runs for a line about this chat itself,
+    # whatever the pools made of it, and nothing else is let past that gate.
+    if a_hedge or _asks_about_this_chat(clean):
+        # The pools have all had the line and what came back was the search hedge. Three things
+        # the bot can do better than a hedge, in order, each of them only a hedge replaced.
+        about_me = _a_question_about_the_bot(clean, memory)
+        if about_me:
+            # A hedge is the last thing a person asking the bot about itself should get: it is
+            # the one question the bot can answer from where it stands.
+            return about_me
+        if not a_hedge:
+            return reply
+        stuck = _what_to_do_about(clean, memory)
+        if stuck:
+            # "what should i do about the holiday i booked in august" was offered better sources
+            # for a holiday nobody else has booked. The question about the thing they named is
+            # the floor under the hedge, and only the hedge.
+            return stuck
+        no_subject = _an_ask_with_no_subject(clean, memory)
+        if no_subject:
+            # "whats the first step" names nothing of its own: the kind of help it wants can be
+            # given anyway, and that is more use than a tip to go and search for the answer.
+            return no_subject
+        # A reply that already names somebody to ask keeps its turn: the lead may only take the
+        # place of a bare search tip, never of a pointer with a name in it.
+        lead = (_the_lead_and_the_route(clean, memory)
+                if POINTER_HEDGE.search(reply or "")
+                and not NAMES_WHERE_TO_ASK.search(reply or "") else "")
+        if lead:
+            # A search tip on its own hands the whole question back. What can be said without the
+            # answer - what settles this kind of question, and what to have in front of you - comes
+            # first, and where the rest lives comes after it.
+            return lead
+    return reply
 
 
 # A definition wants a definition, not a person to ring: "what does a mortgage broker do" and
@@ -10590,6 +11697,196 @@ FLOOR_COURTESY = re.compile(
     r"no\s+problem|you'?re\s+welcome|that'?s\s+what\s+i'?m\s+here\s+for|"
     r"i'?d\s+rather\s+hear\s+it\s+than\s+not)$", re.I)
 
+
+# "what should i do about the holiday i booked in august" is the same stuck line as "i dont know
+# what to do about the holiday": the thing is named, the choice is theirs, and no search settles
+# it - yet it got the hedge, which offered to find better sources for a holiday nobody else has
+# booked. The pools that answer a decision want a doubt ("im not sure whether to move in with
+# her"); this is the same choice asked straight, so it gets the same three questions about the
+# part that will not move. Everything that knows the thing keeps its turn: it sits at the floor,
+# after the knowledge base, the routes and the store.
+# The health words that arrive wearing another ending: "the tiredness", "the anxiety", "the
+# sleeplessness". A stem test catches them, and a question about the part that will not move is
+# not what a person who cannot sleep needs.
+HEALTH_STEMS = ("tire", "exhaust", "sleep", "insomnia", "anxi", "depress", "stress", "panic",
+                "symptom", "sick", "unwell", "nause", "dizzi", "swell", "inflam")
+
+
+WHAT_TO_DO_ABOUT = re.compile(
+    r"^\W*(?:(?:and|but|so|oh|ok|okay|well|right|alright|honestly|anyway|also)\W+)*"
+    r"what(?:'?s|\s+is)?\s+(?:should|shall|can|could|would|do|did|will|am\s+i)\s+"
+    r"(?:i\s+)?(?:do|say|tell)\s+about\s+(?P<thing>[^?.!]+)$", re.I)
+# A line that names a body, a blow or a death is somebody else's turn - the safety module and the
+# urgent readings answer those, and a question about the part that will not move is not for them.
+NOT_WHAT_TO_DO_ABOUT = re.compile(
+    r"\b(?:die|died|dying|death|kill\w*|suicid\w*|hurt\w*|harm\w*|abus\w*|hit|hits|hitting|"
+    r"beaten|chest|breath\w*|bleed\w*|overdose\w*|emergency|999|111)\b", re.I)
+
+
+# The thing a stuck line named, with the tail that only says when or which cut away, so the
+# question reads "the holiday" and not "your holiday i booked in august".
+THING_TAIL = re.compile(
+    r"\s+(?:i|i've|ive|im|i'm|we|i\b.*|that|which|who|he|she|they|you|my|me|it)\b.*$", re.I)
+
+
+def _the_thing_alone(thing):
+    """The thing as it can be said back: "the holiday i booked in august" -> "the holiday"."""
+    said = _yours(" ".join(str(thing or "").split()).strip(" ,.;:-"))
+    cut = THING_TAIL.sub("", said).strip(" ,.;:-")
+    return cut or said
+
+
+# One question about the thing they named, which is what a friend asks. The stock "weigh the
+# parts" questions say nothing about the holiday, the deposit or the job; these name it.
+WHAT_TO_DO_ABOUT_FRAMES = (
+    "{thing} - what's the bit of it you'd want to sort first?",
+    "Where would you want to start with {thing}?",
+    "{thing} - what's the part that's bothering you most?",
+    "{thing} - what would you want to change first?",
+)
+
+
+def _what_to_do_about(clean, memory=None):
+    """The questions for a "what should i do about X" line, or ""."""
+    line = " ".join(str(clean or "").split())
+    found = WHAT_TO_DO_ABOUT.match(line)
+    if not found:
+        return ""
+    thing = found.group("thing").strip(" ,.;:-")
+    if not thing or NOT_WHAT_TO_DO_ABOUT.search(line):
+        return ""
+    words = set(re.findall(r"[a-z']+", line.lower()))
+    if (words & SYMPTOM_WORDS or words & BODY_PARTS or words & HEALTH_WORDS
+            or any(w.startswith(HEALTH_STEMS) for w in words)):
+        # A body, a symptom or a doctor is the health readings' turn: they say who can look, and
+        # a "where would you want to start with the pain" would talk over them.
+        return ""
+    if thing.lower().split()[0] in NOT_A_THING_ASKED:
+        # "what should i do about it myself" is still a pronoun, however it is dressed.
+        # "what should i do about it" points at what was just said, and the thread answers that
+        # better than any stock question: a sore knee then "what should i do about it" is the
+        # health reading, not a weighing. Only a thing named in the line is asked about here.
+        return ""
+    if len(thing.split()) > DISLIKE_TOO_LONG:
+        return ""
+    named = _capital(_the_thing_alone(thing))
+    if not named or named.lower().split()[0] in NOT_A_THING_ASKED:
+        return _choose(DITHER_OPEN_LINES, memory, clean)
+    lines = tuple(frame.format(thing=named if frame.startswith("{thing}") else named.lower())
+                  for frame in WHAT_TO_DO_ABOUT_FRAMES)
+    return _choose(lines, memory, clean)
+
+
+# "how are you feeling about the move" asks the bot about itself and then names something of
+# theirs, and the two halves together left every reader standing: main offered to search the web
+# for a better source on a move the bot is not making. A question put to the bot about the bot is
+# answered by saying what the bot actually is, and then turning to the thing they named, because
+# that is the part worth talking about. Only a hedge is replaced here - the module that answers a
+# bot-about line already has its turn, and a line it answers never reaches this.
+ABOUT_THE_BOT_NAMED = re.compile(
+    r"^\W*(?:(?:and|but|so|oh|ok|okay|well|right|alright|honestly|anyway|also)\W+)*"
+    r"(?:how\s+(?:are|do)\s+(?:you|u|ya)\s+feel(?:ing)?"
+    r"|what\s+do\s+(?:you|u|ya)\s+(?:make|think)\s+of)"
+    r"\s+(?:about|of|with|on)\s+(?P<thing>[^?.!]+)$"
+    r"|^\W*(?:(?:and|but|so|oh|ok|okay|well|right|alright|honestly|anyway|also)\W+)*"
+    r"how\s+do\s+(?:you|u|ya)\s+find\s+(?P<thing2>[^?.!]+)$", re.I)
+# The same ask with nothing named - "how are you feeling about it", "how do you feel about all
+# this" - is answered by the bot-about reader and never gets here, so a pronoun arriving here has
+# no thing to be said back and the line keeps whatever reply it had.
+ABOUT_THE_BOT_BORN = re.compile(
+    r"^\W*(?:(?:and|but|so|oh|ok|okay|well|right)\W+)*"
+    r"(?:where\s+(?:were|are)\s+(?:you|u|ya)\s+(?:from|born)"
+    r"|(?:were|are)\s+(?:you|u|ya)\s+(?:born|raised|brought\s+up)"
+    r"(?:\s+(?:here|there|locally|in\s+this\s+country))?)"
+    r"(?:\s+originally)?[ ?!.,;]*$", re.I)
+# What the bot can honestly say about a feeling it does not have, and the door back to the person.
+BOT_FEELING_NAMED_LINES = (
+    "No feelings on my side at all, and no view on {thing} worth having - I am a program. How are "
+    "you finding it?",
+    "I have no feelings about it - I am a program, so there is nothing in me for {thing} to land "
+    "on. What do you make of it?",
+    "No view worth having, and no moods to have one with. You are the one living with {thing} - "
+    "how is it going?",
+)
+BOT_BORN_LINES = (
+    "There is no born for me - I am a program, so no hometown and no childhood. Where are you "
+    "from, if you do not mind me asking?",
+    "Not born, and not from anywhere: I started as a program and stayed one. Are you far from "
+    "where you grew up?",
+)
+# "is there a limit to how long we can talk" is a question about this conversation, and the one
+# thing the bot can answer from where it stands - there is no clock on it. It was sent to a search
+# engine instead, which is the one place that answer is not. Both ends are anchored and the talk
+# itself has to be named, so "how long can i keep the leftovers" and "how long should i boil an
+# egg" keep the answers they have.
+_THE_TALK_ITSELF = r"(?:talk|chat|talking|chatting|keep\s+going|keep\s+you\s+here)"
+ABOUT_THE_BOT_TALK = re.compile(
+    r"^\W*(?:(?:and|but|so|oh|ok|okay|well|right|sorry|quick|just|question|one\s+question|quick\s+question|first\s+question|random\s+question)\W+)*"
+    r"(?:"
+    r"(?:is|are)\s+there\s+(?:a|any)\s+(?:time\s+)?limit(?:\s+(?:to|on)\s+"
+    r"(?:(?:how\s+long|the\s+time)\s+)?(?:(?:we|i)\s+can\s+)?(?:"
+    + _THE_TALK_ITSELF + r"|this|it|the\s+chat|our\s+chat))?"
+    r"|(?:how\s+much\s+time\s+(?:do|have|did)\s+(?:we|i)\s+(?:have|got)\s+left)"
+    r"|(?:do|have)\s+(?:we|you|i)\s+(?:have|got)\s+(?:a\s+|any\s+)?(?:time\s+)?limit"
+    r"|(?:how\s+long|how\s+much\s+time)\s+(?:(?:can|could)\s+(?:we|i)\s+)?"
+    r"(?:(?:have|has)\s+(?:we|you\s+and\s+i)\s+been\s+)?(?:" + _THE_TALK_ITSELF + r")"
+    r"|(?:are|do)\s+(?:we|i)\s+(?:out\s+of|running\s+out\s+of|short\s+of)\s+time"
+    r"|(?:do|should)\s+i\s+(?:need\s+to\s+)?hurry(?:\s+up)?"
+    r"|(?:can|could|will)\s+(?:we|i|you\s+and\s+i)\s+(?:talk|chat|keep\s+going)\s+for\s+long"
+    r"|have\s+(?:we|i|you\s+and\s+i)\s+got\s+long"
+    r")(?:\s+(?:with|for)\s+(?:you|this|me|now)|\s+for|\s+much)?[ ?!.,;]*$", re.I)
+# The same ask with a tally in it: "how long have we been talking" wants a number, and the honest
+# answer is that the bot does not keep one.
+ABOUT_THE_BOT_CLOCK = re.compile(
+    r"^\W*(?:(?:and|but|so|oh|ok|okay|well|right|sorry|quick|just|question|one\s+question|quick\s+question|first\s+question|random\s+question)\W+)*"
+    r"(?:how\s+(?:long|much\s+time)\s+(?:have|has|did)\s+(?:we|i|you|you\s+and\s+i)\s+been\s+"
+    r"(?:" + _THE_TALK_ITSELF + r")"
+    r"|how\s+long\s+has\s+this\s+been\s+going\s+on)"
+    r"(?:\s+(?:to|with)\s+(?:you|me))?[ ?!.,;]*$", re.I)
+BOT_TALK_LIMIT_LINES = (
+    "No limit I know of on my side - I stay as long as you keep going, and nothing runs out. "
+    "What do you want to get to?",
+    "Nothing cuts this short at a set time as far as I know: the chat lasts while you are in it. "
+    "Where would you like to take it?",
+)
+BOT_TALK_CLOCK_LINES = (
+    "I don't keep a clock, so I can't put a number on it - but we have been going a while, and I "
+    "am in no hurry.",
+    "No clock on my side, sorry: I hold the words, not the minutes. There is plenty of time as "
+    "far as I am concerned.",
+)
+
+
+def _a_question_about_the_bot(clean, memory=None):
+    """What the bot can say when the line puts a feeling or a start to the bot itself, or ""."""
+    line = " ".join(str(clean or "").split())
+    if not line:
+        return ""
+    if ABOUT_THE_BOT_CLOCK.match(line):
+        return _choose(BOT_TALK_CLOCK_LINES, memory, clean)
+    if ABOUT_THE_BOT_TALK.match(line):
+        return _choose(BOT_TALK_LIMIT_LINES, memory, clean)
+    if ABOUT_THE_BOT_BORN.match(line):
+        return _choose(BOT_BORN_LINES, memory, clean)
+    found = ABOUT_THE_BOT_NAMED.match(line)
+    if not found:
+        return ""
+    raw = (found.group("thing") or found.group("thing2") or "").strip(" ,.;:-")
+    if raw.lower().split()[:1] and raw.lower().split()[0] in ("your", "ur", "you", "yourself"):
+        # "how do you feel about your job" is the bot's own job, and the bot has none: the
+        # bot-about reader above answers it, and a frame about the person's thing would be about
+        # somebody else's job.
+        return ""
+    thing = _the_thing_alone(raw)
+    if not thing or thing.lower().split()[0] in NOT_A_THING_ASKED:
+        # "how are you feeling about it" points at something of theirs the bot cannot see, and
+        # naming nothing back is better than a sentence about an unnamed thing.
+        return ""
+    if len(thing.split()) > DISLIKE_TOO_LONG:
+        return ""
+    said = thing.lower()
+    lines = tuple(frame.format(thing=said) for frame in BOT_FEELING_NAMED_LINES)
+    return _choose(lines, memory, clean)
 
 def _only_the_floor(said):
     """True when every part of the line is the floor or a courtesy on its way to it."""
@@ -10790,6 +12087,18 @@ HEDGE_PREFIXES = tuple(line.split("{")[0] for pool in HEDGE_POOL for line in poo
 from .the_rule_for_it import RULE_HEADS as _RULE_HEADS  # noqa: E402 - after the pools
 
 HEDGE_HEADS = HEDGE_HEADS + _RULE_HEADS
+
+
+# The reply that asks a person to say which bit they mean. It is not a hedge: it says the bot did
+# not follow the line rather than that nobody has written the answer down. A chat that is already on
+# a card can answer the follow-up instead of asking the question back.
+def _is_an_ask_which_bit(said):
+    """True when a reply is the "tell me which bit" line rather than an answer or a hedge."""
+    head = (said or "").strip()
+    return bool(head) and head in BARE_FOLLOW_UP_REPLIES
+
+
+is_an_ask_which_bit = _is_an_ask_which_bit
 
 
 def _is_a_hedge(said):
@@ -12088,7 +13397,8 @@ def _about(clean, understood=None):
     # read with the bot's own pronouns (`_self_line`), so "who can see this chat" and "can anyone
     # see what i say" are the same ask.
     _self = _self_line(clean)
-    if (PRIVACY_ASK.search(_self) or PRIVACY_SHAPES.search(_self)) \
+    if (PRIVACY_ASK.search(_self) or PRIVACY_SHAPES.search(_self)
+            or BETWEEN_US_ASK.search(_self)) \
             and not NOT_WHAT_I_SAID.search(_self):
         return "privacy"
     # After privacy: "can you keep a secret" and "will you judge me" are the same promise from a
@@ -12107,7 +13417,12 @@ def _about(clean, understood=None):
     # either, so a search hedge went where the bot itself is the only thing that knows. The food
     # and medicine words hold both reads off, since "is this safe to eat" is about the thing in
     # their hand and has an answer of its own.
-    if PRIVACY_ASK.search(clean) and not PRIVACY_NOT_THIS.search(clean):
+    # The same fence the branch above applies: "is this private healthcare worth it" matches
+    # `PRIVACY_ASK` on the "is this private" shape, and `NOT_WHAT_I_SAID` is the reading of
+    # "private" as the kind of thing ("private school", "private rented", "keep my receipts").
+    # Without it here the second branch answered the question nobody asked.
+    if PRIVACY_ASK.search(clean) and not PRIVACY_NOT_THIS.search(clean) \
+            and not NOT_WHAT_I_SAID.search(clean):
         return "privacy"
     if TRUST_ASK.search(clean) and not PRIVACY_NOT_THIS.search(clean):
         return "trust"
@@ -12731,7 +14046,7 @@ THE_THING_ITSELF_LOOKS_FINE = re.compile(
 RED_FLAG_SHARED = re.compile(
     r"\b(?:arm|arms|jaw|neck|shoulder|shoulders|back|chest|sweat\w*|clammy|breathless\w*|"
     r"breath|breathing|lip|lips|grey|gray|blue|faint\w*|passed\s+out|collaps\w*|rest|resting|"
-    r"sitting|speech|slurr\w*|numb\w*|drow\w*|floppy|seizure|fits?|vomit\w*|blood|pale|"
+    r"sitting|speech|slurr\w*|numb(?:ness|ed|ing|s)?|drow\w*|floppy|seizure|fits?|vomit\w*|blood|pale|"
     r"dizz\w*)\b", re.I)
 
 
@@ -13148,6 +14463,34 @@ def _after_safety(memory, clean, understood=None):
         advice = _asks_about_the_advice(clean, last)
         if advice:
             return _choose(advice, memory, clean)
+    # The outcome asked about - "does it get better", "will i always feel like this" - has no
+    # answer in any pool: the shape is a pronoun and a word about how it turns out, so the floor
+    # guessed at it ("Say what you are asking about and I'll answer it properly rather than
+    # guess") or reached for a search. It is read here, before the thread gate below, because the
+    # gate reads "better" as a subject of its own and lets the emergency go. The abuse card has
+    # its own pool, because "will things get better" there is about the relationship and not about
+    # a symptom. See `bot/compose/outlook.py`.
+    if outlook.asks_the_outlook(clean):
+        # Read from every safety answer still in the thread, not from the last one: the module
+        # answers a fear line itself ("I'm here. You're doing the right thing by staying with
+        # them"), and that continuation names the number without the card's own words, so a
+        # reading of the last reply alone took a calling-999 thread for a first-aid one and told
+        # the person "it should be easing, not getting worse - give it a day".
+        cards = _the_safety_cards(turns)
+        in_a_crisis = any(word in card for card in cards for word in CRISIS_WORDS)
+        told_to_call = any(_the_answer_asked_them_to_call(card) for card in cards)
+        abuse = any(_the_answer_was_an_abuse_card(card) for card in cards)
+        pool = outlook.the_pool(in_a_crisis, _somebody_is_coming(turns, clean), told_to_call,
+                                abuse=abuse)
+        if pool is None:
+            # First aid, or a card that named an appointment: the forecast pool already answers
+            # "will it get better" in a thread the bot has just answered with first aid, and that
+            # line was written for exactly this talk, so the shapes it does not read get the same
+            # line rather than a second voice. It works for a condition as well as an injury, which
+            # "most of these settle in a day or two" does not: the card for sight that has always
+            # been like that is not a burn.
+            pool = [phrase.format(who="you") for phrase in FORECAST_AFTER_SAFETY]
+        return _choose(pool, memory, clean)
     # From here the pools are chosen, and two of them have to know who is in danger. A crisis
     # answer about "my sister" is continued in the carer's words, not the person's own.
     them = _about_somebody_else(safety, memory)
@@ -13339,6 +14682,15 @@ def _after_safety(memory, clean, understood=None):
             return _choose(BURN_BLISTER, memory, clean)
         if BURN_ON_IT.search(clean) or (BURN_THING.search(clean) and BURN_ASK.search(clean)):
             return _choose(BURN_AFTER, memory, clean)
+    if them and SAID_AS_A_DEATH.search(clean):
+        # The emergency was somebody else's and it is over: "my friend shot himself" and then "he
+        # didnt make it", or a heart attack and then "she died". What is left is a bereavement, and
+        # the loss module answers those - it answered this one on main, because no emergency card
+        # had started the thread; with the card on the line before it, the emergency pool said
+        # "stay in touch with them and say if anything gets worse" to somebody whose friend had
+        # just died. Only when the person in danger is somebody else: after "i took too many pills",
+        # "he died didnt he" is a question asked by a body that still needs the 999 hold.
+        return None
     if any(word in last for word in CRISIS_WORDS):
         # In a crisis the continuation names the crisis line, and it says more about staying
         # safe tonight than "two of you is better than one" does; a person arriving is a good
@@ -13395,6 +14747,26 @@ def _is_a_hazard(last):
     cooling the skin, so the pools for a hurt person stay.
     """
     return bool(HAZARD_LINE.search(str(last or "").lower()))
+
+
+def _the_safety_cards(turns):
+    """The safety answers still in the thread window, newest last.
+
+    The thread can run several turns and the safety module answers some of them itself, so the
+    card is not always the last reply: the one that started the thread is what says whether this
+    is a crisis line, a call to make now, or somebody being hurt.
+    """
+    return [str(turn.get("bot") or "").lower() for turn in list(turns or [])[-THREAD_TURNS:]
+            if str(turn.get("module") or "") == "safety"]
+
+
+def _somebody_is_coming(turns, clean):
+    """True when the person has rung, or help is with them, anywhere in the thread."""
+    for turn in list(turns or [])[-THREAD_TURNS:]:
+        said = str(turn.get("user") or "").lower()
+        if said and (ALREADY_RANG.search(said) or _someone_is_arriving(said)):
+            return True
+    return bool(ALREADY_RANG.search(clean)) or bool(_someone_is_arriving(clean))
 
 
 def _the_answer_was_an_abuse_card(last):
@@ -13669,8 +15041,16 @@ def _short_ack(words):
 # "i had a lovely day" is left to the ordinary pools, because that line is about them and the
 # good news and feeling replies know what to do with it.
 GOOD_TIME_SUBJECT = re.compile(
-    r"\b(?:everyone|everybody|all of them|the (?:party|wedding|meal|trip|holiday|gig|match|game|"
-    r"concert|night|day|weekend|evening|dinner|barbecue|bbq|do|bash|hen|stag))\b")
+    r"\b(?:everyone|everybody|all of them|"
+    # An event belongs to somebody as often as it is "the" event: "my sister's wedding was lovely"
+    # and "the kids' match was great" are the same good half of a chat as "the wedding was lovely",
+    # and the possessive in front of the word kept them out of it - they reached the pool that
+    # answers nothing ("Thanks for telling me - I'm here if you want to dig into any of that") and,
+    # on the first of them, "I'm listening - say more if it helps".
+    r"(?:the|my|our|his|her|their|your|\w+'s?)"
+    r"(?:\s+\w+){0,2}\s+"
+    r"(?:party|wedding|meal|trip|holiday|gig|match|game|concert|night|day|weekend|evening|"
+    r"dinner|barbecue|bbq|bash|hen|stag))\b")
 GOOD_TIME_OURS = re.compile(
     r"\bwe (?:had|have had) (?:a |such a )?(?:great|lovely|brilliant|good|amazing|wonderful|"
     r"fantastic|smashing)\b")
@@ -13681,7 +15061,12 @@ GOOD_TIME_OURS = re.compile(
 # either. So the line has to say it happened to them ("i had...") or say how the day went
 # ("today was..."), and never just name it.
 GOOD_DAY_OURS = re.compile(
-    r"^(?:(?:i|we|ive|i've|weve|we've)\s+)?(?:had|have had|ve had|has been having|am having|"
+    # A good day had by somebody the person knows is a good day too: "the kids had a lovely time"
+    # and "my mum had a good day" were answered with the neutral pool, the line a person gives when
+    # they were not listening. The subject is the person or the group, so the same words that say
+    # "i had" say "the kids had".
+    r"^(?:(?:i|we|ive|i've|weve|we've|(?:my|our|the|his|her|their)(?:\s+\w+'s)?"
+    r"(?:\s+\w+){0,2})\s+)?(?:had|have had|ve had|has been having|am having|"
     r"are having)\s+(?:a\s+|such a\s+|a really\s+|a proper\s+|a pretty\s+)?"
     r"(?:really\s+|properly\s+|pretty\s+|so\s+|such\s+|super\s+)?"
     r"(?:good|great|lovely|nice|brilliant|amazing|wonderful|lush|smashing|fantastic)\s+"
@@ -14390,6 +15775,35 @@ def _sorry_for_asking(clean):
     """True when the line is an apology for asking and nothing else."""
     text = clean.lower()
     return bool(SORRY_ASKING.search(text)) and _only_manners(text, MANNERS_ONLY)
+
+
+# The same manners without the apology word in front: the person checks that they are not a
+# nuisance instead of apologising for it. "am i bothering you", "am i bugging you", "am i asking
+# too much", "do you mind me asking", "should i stop asking", "is this a waste of your time".
+# It is one social move, so it gets the one pool the apology gets. Without this the line reached
+# the search shrug - "That's beyond what I know well, sorry. Searching for it will turn up better
+# sources" - which searches the web for whether the bot minds being asked.
+AM_I_A_NUISANCE = re.compile(
+    r"(?<![a-z])(?:am|are|is)\s+(?:i|we|this|it)(?![a-z])[^.?!]{0,25}?"
+    r"(?<![a-z])(?:bother\w*|bugging|annoy\w*|irritat\w*|pester\w*|in the way|too much|"
+    r"a waste of|taking (?:up )?(?:too much|your)|keeping you|too many questions|"
+    r"asking a lot)(?![a-z])"
+    r"|(?<![a-z])(?:do|would|will|did)\s+you\s+mind(?![a-z])[^.?!]{0,25}?"
+    r"(?<![a-z])(?:me asking|my asking|if i ask|i ask)(?![a-z])"
+    r"|(?<![a-z])(?:should|shall|do) i (?:stop|quit) asking(?![a-z])")
+# Every word such a line can be made of without naming anything of its own. "am i bothering you
+# about the boiler" is the boiler's line, and this set is what keeps it out.
+NUISANCE_ONLY = MANNERS_ONLY | frozenset("""
+    am are is was were bugging bug annoy annoying annoyed irritating irritated irritate
+    pester pestering way waste mind minding stop quit should shall if ask asking
+    taking take up long much many too lot lots questions question time in way at all
+    """.split())
+
+
+def _am_i_a_nuisance(clean):
+    """True when the line only checks whether the person is being a nuisance."""
+    text = " ".join(str(clean or "").lower().split())
+    return bool(AM_I_A_NUISANCE.search(text)) and _only_manners(text, NUISANCE_ONLY)
 
 
 # "thanks", "thank you", "cheers", "ta" - and the word people put in front of it when they mean it
@@ -15402,11 +16816,17 @@ def _is_rumination(clean):
     return bool(RUMINATION.search(clean))
 
 
-# The same line said with a part that has no answer of its own as its subject: "my nose is cold",
-# "my ears are freezing". A hand or a foot being cold is circulation, and the answers entry says so
-# better ("warm the whole body, not just the hands"), so those parts are not read here - and
-# "my head is hot" is a fever question and a different answer.
-BODY_PART = re.compile(r"\bmy\s+(?:nose|ears?)\s+(?:are|r|is)\s+(?P<rest>.+)$")
+# The same line said with a part of the person as its subject: "my nose is cold", "my ears are
+# freezing", "my hands are clammy", "my face is pale". A state said of a part of me is a state of
+# me - the same cold sweat and the same pallor whether the person says "im clammy" or "my hands
+# are clammy" - and the pools are written to answer either ("Is it just your hands, or all
+# over?"). Only a part that has no answer of its own comes here: a hand or a foot being cold is
+# circulation, and the answers entry says so better ("warm the whole body, not just the hands"),
+# and "my head is hot" is a fever question, so those keep their own readings. Nothing above this
+# in the chain has refused the line already, which is what keeps the part's own card first.
+BODY_PART = re.compile(
+    r"\b(?:my|our)\s+(?:nose|ears?|face|cheeks?|skin|hands?|lips?|forehead|arms?|back)\s+"
+    r"(?:are|r|is|feels?|looks?|go|goes)\s+(?P<rest>.+)$")
 
 
 def _opens_a_question(words):
@@ -15457,13 +16877,15 @@ from .fallback_chain import (
     _a_small_day, _a_state_in_the_past, _a_thing_happened, _a_thing_they_regret,
     _a_things_state, _act_asked_of_me, _acts_for_me, _answers_the_correction,
     _asks_the_bot, _body_state, _choose, _cue_negated,
-    _flat_habit_stated, _habit_is_a_problem, _just_asked_about_the_day, _mixed_seed,
+    _flat_habit_stated, _habit_is_a_problem, _just_asked_about_the_day, _loves_people,
+    _loves_someone, _mixed_seed,
     _mood, _options_already_up, _reads, _reads_as_a_bad_stretch,
     _reads_value, _repaired_of, _reply_for, _restated, _routine_pool,
     _somebody_elses_day_in_thread, _somebody_hurt, _state_from, _the_birthday_said_back,
     _the_clock_pool, _the_crowd_is_ahead, _the_morning_has_a_clock, _the_person_named_a_list,
     _the_state, _the_store_has_the_recall, _the_time_said, _the_win_is_someone_elses,
     _words, reads_as_a_flat_habit, reply_for, takes_as_it_comes,
+    _a_part_in_a_state,
 )
 
 # Every line this composer says as an outcome of the advice it gave. Kept together so a reader of

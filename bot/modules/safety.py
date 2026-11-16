@@ -21,6 +21,10 @@ import re
 
 from ..compose import pick
 from ..compose.fallback import BLACKED_OUT_SIGHT
+try:  # the reading of a dream, so a dream of the thing is not the thing
+    from ..memory import dream as _dream
+except Exception:  # noqa: BLE001 - a reading that cannot be imported just adds no rule
+    _dream = None
 from ..understanding import respell_urgent
 from ..understanding import lexicon
 # The words the reader already repairs are these; a word of them is never replaced by the
@@ -68,6 +72,10 @@ from .safety_cards import (
     PET_NAIL,
     PET_OWNS_THE_WOUND,
     PET_WOUND,
+    PET_PASSES_BLOOD,
+    PET_ANIMAL_HURT,
+    PET_OWNS_A_THING,
+    HUMAN_OWN_INJURY,
     RING_STUCK,
     SCORCHED_A_PERSON,
     SIGHT_EVER,
@@ -82,7 +90,24 @@ from .safety_cards import (
     MY_OWN_PART,
     PET_WEAK,
 )
-from .safety_cards import (BITE_DONE, PERSON_HANGING, HEAD_OUT_COLD, STRUCK_NOT_NOW, SELF_HARM_HABIT, HEAL_TIME, HEAD_REPLIES, HUMAN_BITTEN, HIT_IN_FUN_HARD, WATER_DANGER, MILD, SCALD, HYPERBOLE_WISH, PURSUIT_PLACE_HOME, INJURY_HOW, LIPS_SWELL_BARE, DOG_ATTACK, HYPO_SIGN, SUGAR_READING_LOW, SELF_HARM_REPEAT_CAUSE, FOLLOW_UP, LIMP_ONGOING, SHOULD_I_CALL, NOT_JUST_A_NEAR_THING, LIMP_PERSON, PURSUIT_FINE, LIMB_IS_A_THING)
+# The tables for the arms below. `safety.py` has to stay under the publisher's 1 MiB, so the
+# patterns live in safety_tables.py with the rest of them and are imported by name.
+from .safety_tables import (SELF_HARM_OWN_PART, POISON_SAID, A_HURT_OF_A_BODY_PART,
+                            A_WORKOUT_CUE, A_PLAN_SAID, A_PLAN_ORDINARY)
+from .safety_cards import (BITE_DONE, BAT_BITE, WILD_BITE, ALLERGY_NOW, ALLERGY_SIGN_NAMED,
+                            COUNTERFACTUAL_WISH, COUNTERFACTUAL_IDIOM, STRUCK_BY_A_VEHICLE,
+                            STRUCK_MY_BIKE, NEAR_HIT_ON_A_ROAD,
+                            NEAR_HIT_ON_A_ROAD_PLACE,
+                            STRUCK_BY_A_VEHICLE_NOT, EFFORT_BEFORE,
+                            EFFORT_DIED, COME_OFF_IT, EFFORT_DOING, EFFORT_NOT_AN_ACCIDENT,
+                            INSECT_BITE, INSECT_BITE_NEEDS_A_LOOK, TICK_BITE, TICK_ALREADY, GRATER_CUT, PERSON_HANGING, HEAD_OUT_COLD, STRUCK_NOT_NOW, SELF_HARM_HABIT, HEAL_TIME, HEAD_REPLIES, HUMAN_BITTEN, HIT_IN_FUN_HARD, WATER_DANGER, MILD, SCALD, HYPERBOLE_WISH, PURSUIT_PLACE_HOME, INJURY_HOW, LIPS_SWELL_BARE, DOG_ATTACK, HYPO_SIGN, SUGAR_READING_LOW, SELF_HARM_REPEAT_CAUSE, FOLLOW_UP, LIMP_ONGOING, SHOULD_I_CALL, NOT_JUST_A_NEAR_THING, LIMP_PERSON, PURSUIT_FINE, LIMB_IS_A_THING)
+
+# The four effort patterns are compiled here, not in the table file, so the cards stay plain data
+# with no `re` of their own - one import, one place, nothing for a rebase to double.
+_EFFORT_BEFORE = re.compile(EFFORT_BEFORE)
+_EFFORT_DIED = re.compile(EFFORT_DIED)
+_COME_OFF_IT = re.compile(COME_OFF_IT)
+_EFFORT_DOING = re.compile(EFFORT_DOING)
 
 PRIORITY = 9000  # above the answer modules: an emergency is never outvoted
 
@@ -112,6 +137,8 @@ from .safety_tables import (
     ABUSE_KIDS_CARD,
     ABUSE_PARENT_REFUSAL,
     ABUSE_PARENT_REFUSAL_HARD,
+    ANY_REFUSAL_TO_GO,
+    A_HAND_ON_THE_PERSON,
     ABUSE_PLAY,
     ABUSE_PLAY_HARD,
     ABUSE_QUARREL,
@@ -124,9 +151,11 @@ from .safety_tables import (
     AFTER_EXERCISE,
     AGE_PERSON,
     ALARM_NUISANCE,
+    AMBULANCE_CASES,
     ANIMAL_KICK,
     APPLIANCE_SMOKE,
     ASKS_ABOUT_THE_INJURY,
+    ASKS_GO_BARE,
     ASKS_IF_CALL,
     ASKS_IF_GOING,
     ASK_CALL_REPLIES,
@@ -146,6 +175,7 @@ from .safety_tables import (
     BATTERY_FIRE,
     BITE_ON_ANIMAL,
     BLACKOUT_A_THING,
+    BLACKOUT_BREATH,
     BLACKOUT_EFFORT,
     BLACKOUT_FLOOR,
     BLACKOUT_OFF,
@@ -214,6 +244,7 @@ from .safety_tables import (
     CHRONIC_BREATH,
     CLEANABLE_SURFACE,
     COLD_ILLNESS,
+    COLLAPSE_HINT,
     CONFUSED_THING,
     COUGH_BLOOD,
     CO_GOING_OFF,
@@ -300,6 +331,10 @@ from .safety_tables import (
     FEVER_REPORT,
     FICTION_NOW,
     FIRE,
+    FIRE_DRILL,
+    NEAR_FIRE,
+    NEAR_FIRE_OVER,
+    NEAR_THING_OVER,
     FIRE_ELSEWHERE,
     FIRE_NOW,
     FIRE_OUT,
@@ -334,11 +369,14 @@ from .safety_tables import (
     GAS_SMELL,
     GIVING_UP_GROUP,
     GIVING_UP_HELD_ON,
+    GO_IN_NOT_ABOUT_IT,
+    GO_IS_A_CALL,
     GRUNTING_FINE,
     HAIR_SCORCH,
     HAIR_SCORCH_ANSWER,
     HANGED_LONG_AGO,
     HANGING,
+    HARD_TO_WAKE,
     HEADACHE_BAD,
     HEADACHE_STORY,
     HEADACHE_SUDDEN,
@@ -388,6 +426,7 @@ from .safety_tables import (
     MILD_CHOKE,
     MILD_PRODUCT_SMALL,
     MILD_SWALLOWED,
+    MORNING_ROUTINE,
     MOUTH_BLEED_NOW,
     NAMED_SICK_FINE,
     NEWBORN,
@@ -459,6 +498,7 @@ from .safety_tables import (
     RESTRAINT_BESIDE,
     RING_DANGER,
     RING_NOT_WORN,
+    ROUTINE_REASON,
     ROUTINE_WAKE,
     SAFE_NOW,
     SAID_AS_IT_HAPPENS,
@@ -471,6 +511,7 @@ from .safety_tables import (
     SELF_HARM_DELIBERATE_ACT,
     SELF_HARM_DESERVE,
     SELF_HARM_LOOKALIKE,
+    AN_ITCH_LOOKALIKE,
     SELF_HARM_NOT_EATING,
     SELF_HARM_REASON,
     SELF_HARM_SCARS,
@@ -498,6 +539,7 @@ from .safety_tables import (
     SOMEONE_ELSES_DESPAIR,
     SOMEONE_ELSE_OWN,
     SOME_OF_IT,
+    SPELL_RED,
     SPIKED,
     SPINE_BACK_WORK,
     SPINE_BREAK,
@@ -549,7 +591,9 @@ from .safety_tables import (
     VEHICLE_FIRE,
     VEHICLE_FIRE_OVER,
     VIOLENT_THREAT,
+    VISIT_OR_TIME,
     WAKE_RED,
+    WAKE_UP_SOMEONE,
     WATER_DROWNING_FINE,
     WATER_DROWNING_NOW,
     WATER_FINE,
@@ -586,7 +630,10 @@ from .safety_tables import (
     WITHDRAWAL_STOP,
     WITHDRAWAL_STRONG,
     WITHDRAWAL_SYMPTOM,
+    WONT_COME_ROUND,
     WORDS_OUT_OCCASION,
+    WOUND_STREAK,
+    WOUND_STREAK_FEVER,
     WORLD_QUESTION,
     _AGREEMENT,
     _AWAY_TAIL,
@@ -597,6 +644,7 @@ from .safety_tables import (
     _SMOKE_THING,
     _STRUCK_RELATIVE,
     _THIRD,
+
 )
 MALE_WORDS = (r"\bdad\b", r"\bfather\b", r"\bhusband\b", r"\bboyfriend\b", r"\bbrother\b",
               r"\bson\b", r"\blittle\s+boy\b", r"\bboy\b", r"\buncle\b", r"\bgrandad\b",
@@ -828,12 +876,12 @@ def _fit(reply, line, case=None):
 # breth", "my boy is chokng", "i took an overdse", "my cheast hurts", "my babys lips are going blue
 # and shes flopy" were all a shrug on main. Each is the plain word the patterns below already look
 # for, so the repair only has to put the letters back.
-CRITICAL = ("seizure", "unconscious", "anaphylaxis", "bleeding")
+CRITICAL = ("seizure", "unconscious", "anaphylaxis", "bleeding", "myself", "suicide")
 # The words that already have a route, and that a line was lost without: "i cant breth", "my boy is
 # chokng", "i took an overdse", "my cheast hurts". Two letters out is too far for these - "chopping"
 # is two from "choking" and "overdone" is one from "overdose" - so they get a single slip only.
 CRITICAL_ONE = ("breath", "breathe", "breathing", "choking", "overdose", "chest",
-                 "floppy")
+                 "floppy", "kill", "killing")
 
 
 def _letters_apart(word, target):
@@ -855,6 +903,17 @@ def _near_miss(word, target):
     if word[:2] != target[:2] or word[-1] != target[-1]:
         return False
     return _letters_apart(word, target) <= 2
+
+
+def _leet_made_whole(text):
+    """A letter swapped for the character that looks like it, inside a word: "k!ll", "k1ll".
+
+    Only a stand-in with a letter on each side of it is one - "wow!" keeps its exclamation, and
+    "1pm" keeps its digit. Reading it before the understanding engine's repair is the point:
+    "k!ll" is otherwise read as "k" and "ll", and "k" is folded to "ok", so the wish arrives at
+    every pattern as "ok!ll" (snow-mirror, #safety 137216).
+    """
+    return re.sub(r"(?<=[a-z])[!1|](?=[a-z])", "i", text)
 
 
 def _fold_critical(line):
@@ -1030,6 +1089,23 @@ FIGURATIVE = (
     r"\b(?:collaps(?:e|ed|es|ing)|went\s+down|doubled\s+over|fell\s+about|fell\s+over)"
     r"\s+(?:laughing|giggling|in\s+(?:a\s+)?(?:fit|stitches|hysterics)|with\s+laugh\w*|"
     r"helpless\s+with\s+laugh\w*)\b",
+)
+
+# A body that will not wake is never the figure of speech. "he collapsed laughing and wouldnt
+# wake", "she laughed so much she couldnt be woken" and "my dad collapsed laughing and he is out
+# cold" were all read as a joke landing, so the 999 stood down and the reply was "Ha - that good?
+# Tell me the best bit." The real sign outranks the idiom, the way FIRE_NOW outranks it at the fire
+# card. "isnt waking me up" is somebody's sleep rather than a body, and "i wont wake up in time for
+# work" is an alarm that did not go off, so both of those stay ordinary.
+NOT_WAKING_BESIDE = (
+    r"\b(?:wouldn'?t|wouldnt|won'?t|wont|didn'?t|didnt|never)\s+(?:wake|woke)\b"
+    r"(?!\s+(?:up\s+)?(?:to\s+)?(?:for\s+(?:work|school|college)\b|in\s+time\b|on\s+time\b|"
+    r"to\s+an?\s+alarm\b))",
+    r"\b(?:couldn'?t|couldnt|can'?t|cant)\s+be\s+woken\b",
+    r"\b(?:isn'?t|isnt|not)\s+waking\b(?!\s+(?:me|us)\b)",
+    r"\bout\s+cold\b",
+    r"\bunresponsive\b",
+    r"\bnot\s+responding\b",
 )
 
 
@@ -1229,6 +1305,12 @@ SELF_HARM_INTENT = (
     # else, and main's test keeps it ordinary.
     r"\bi\s+deserve[sd]?\s+to\s+(?:die|suffer|be\s+punished|feel\s+pain|hurt)\b",
 ) + WANTED_TO_HARM + WANTED_TO_BARE + (
+    # "i want to kms" is the wish written as the shorthand people use for it, and the goal card
+    # answered it with "Kms - fair enough. What's stopped it happening so far?" (snow-mirror,
+    # #safety 137216). The wish verb in front is what keeps it out of "100 kms on the clock".
+    r"\b(?:want|wanna|wanting|wanted|need|needed|feel\s+like|feeling\s+like|"
+    r"thinking\s+(?:of|about)|about\s+to|going\s+to)\s+(?:to\s+)?(?:kms|kys)\b"
+    r"\s*(?:$|[.?!;,]|\b(?:tbh|rn|now|soon|tonight|again|so\s+bad|so\s+much|pls|lol)\b)",
     r"\bi\s+(?:want|wanted|wanting|need|needed)\s+to\s+(?:die|kill\s+my\s*self|hurt\s+my\s*self|"
     r"cut\s+my\s*self|burn\s+my\s*self|end\s+it(?!" + END_IT_WITH + r")|hang\s+my\s*self)\b",
     r"\b(?:wants?|wanted|wanting)\s+to\s+(?:die|kill\s+(?:him|her|them)\s*self|kill\s+them\s*selves|"
@@ -1550,6 +1632,13 @@ WISH_BE_DEAD = (
     # A person who wants to sleep and not wake up is not asking about sleep.
     r"\b(?:want|wants|wanted|wanting|wanna)\s+to\s+(?:sleep|go\s+to\s+sleep|be\s+asleep|"
     r"stay\s+asleep)\b[^.?!]{0,25}\b(?:not|never|nor)\s+wake\s+up\b",
+    # The passive wish said as a hope ("i hope i dont wake up" was the greeting), and only when
+    # what follows "wake up" ends the line: "... late", "... early tomorrow" are mornings.
+    r"\b(?:really\s+|honestly\s+|just\s+|sometimes\s+)?(?:hope|hoping|wish|wishing)\s+"
+    r"(?:that\s+)?(?:i|id|i'd)\s+(?:just\s+)?(?:don'?t|dont|do\s+not|never|wouldn'?t|"
+    r"would\s+not|didn'?t|did\s+not)\s+(?:have\s+to\s+|ever\s+)?wake\s+up\b"
+    r"(?=(?:\s+(?:tomorrow(?:\s+morning)?|today|tonight|again|at\s+all|in\s+the\s+morning))?"
+    r"\s*(?:$|[.,!?;]))",
     # "i would rather be dead" was a shrug. "i would rather die than speak in public" is the
     # figure of speech, so the comparison stands the wish down: only a "rather" with no "than"
     # behind it is the wish.
@@ -1602,10 +1691,53 @@ def _a_pet_hurting_itself(line):
     return not _matches(FIRST_PERSON_WISH, line) and not _own_wish(line)
 
 
+def _a_wish_that_is_theirs(line):
+    """True when the wish in the line is a third person's, so the speaker's card stands down.
+
+    The words are the speaker's own ("i want to be dead", "i dont want to be here anymore"), which
+    is why the arm that reads them fired for whoever was named. The speaker's own wish in the same
+    line keeps every card - "my brother wants to be dead and so do i" is the speaker too - and a
+    plan with a way of doing it in it belongs to the card that names them.
+    """
+    if not _matches(THIRD_PERSON_WISH, line):
+        return False
+    if _ends_it_with_a_method(line):
+        return False
+    if _matches(FIRST_PERSON_WISH, line) or _own_wish(line) or _matches(SO_I_TOO, line):
+        return False
+    return True
+
+
+def _a_pet_wants_out(line):
+    """True when the animal is the one who has had enough, so the crisis cards stand down.
+
+    "my dog wants to die" is a vet's question and the owner's grief, not the speaker's own night:
+    the days before a pet's death is the answer, and bot/compose/loss.py reads the same line left
+    to itself. A wish of the speaker's own in the same line keeps every card, and so does a person
+    in it: "my dog wants to die and so do i" is about both of them.
+    """
+    if not _matches(PET_WANTS_OUT, line):
+        return False
+    if _matches(HUMAN_TOO, line) or _matches(THIRD_PERSON_ACTOR, line):
+        return False
+    if _matches(SO_I_TOO, line):
+        # "my dog wants to die and so do i": the same wish said of the speaker is in the line, and
+        # _own_wish does not read the "so do i" form.
+        return False
+    return not _matches(FIRST_PERSON_WISH, line) and not _own_wish(line)
+
+
 def _self_harm_intent(line):
     """True when the line says the hurt was wanted, not just how it happened."""
     if _a_pet_hurting_itself(line):
         # "the cat keeps scratching herself raw" is a skin question with a habit-shaped verb in it.
+        return False
+    if _a_pet_wants_out(line):
+        # "my dog wants to die", "my cat has no quality of life": the animal's last days, not the
+        # speaker's night.
+        return False
+    if _a_wish_that_is_theirs(line):
+        # "my dad wants to be dead": his wish, and the card that names him is the answer.
         return False
     if _habit_explained(line):
         return False
@@ -1826,6 +1958,20 @@ WISH_FRAME = (
     r"\b(?:i\s+)?wis?h(?:ed)?\s+i\s+could\b",
     r"\b(?:i\s+)?wis?h(?:ed)?\s+i\s+(?:was|were)\b",
 )
+
+
+def _a_wish_for_their_own_body(line):
+    """`SELF_HARM_OWN_PART`, minus the sore arms of a workout.
+
+    "i want to hurt my arms at the gym" is a training goal and the gym's own answer says so, so
+    the part after `hurt` with a workout in the same line is not the wish. A blade keeps the
+    card whatever else the line says ("i want to cut my arms at the gym"), and the guard only
+    ever comes off `hurt` and `harm` - the two verbs the training line uses and that a blade
+    does not need.
+    """
+    if not _matches(SELF_HARM_OWN_PART, line):
+        return False
+    return not (re.search(A_HURT_OF_A_BODY_PART, line) and re.search(A_WORKOUT_CUE, line))
 
 
 def _idiom(line):
@@ -2075,9 +2221,78 @@ DESPAIR = (
     + _FLAT_WISH_TAIL,
 )
 
+# The verbs that hurt a body, in one list because the same gap showed up in three places on the
+# same day. The person's own wish: "i want to shoot myself" was answered "Shoot yourself — fair
+# enough. What's stopped it happening so far?" (and "i want to strangle myself" the same). A
+# relative's wish: "my sister wants to poison herself" was filed as a fact - "Noted: your sister
+# wants to poison herself." An act a relative reports: "my friend shoots herself" and "my brother
+# has been stabbing himself", both "Noted:". Every pattern in this file writes its own verbs out,
+# and kill, hurt, cut, hang and overdose were the ones written down. Shooting, stabbing, poisoning
+# and strangling were in no list at all, so the bot read the line as a choice somebody was
+# describing rather than as a body somebody was in danger of.
+A_BODY_HURTING = (
+    r"(?:kill|kills|killing|killed|murder|murders|murdering|murdered|hurt|hurts|hurting|harm|"
+    r"harms|harming|harmed|cut|cuts|cutting|starve|starves|starving|starved|shoot|shoots|"
+    r"shooting|shot|stab|stabs|stabbing|stabbed|hang|hangs|hanging|hung|hanged|strangle|"
+    r"strangles|strangling|strangled|choke|chokes|choking|choked|poison|poisons|poisoning|"
+    r"poisoned|burn|burns|burning|burnt|burned|drown|drowns|drowning|drowned|overdose|overdoses|"
+    r"overdosing|overdosed|slit|slits|slitting|smother|smothers|smothering|smothered)")
+# The verb alone is not the thing: "shoot hoops", "a film to shoot", "strangle a yawn" and "i
+# could murder a curry" carry it and no reflexive, and the myself/himself is what makes the line
+# about a body. A verb with no reflexive keeps the answer it has today.
+# Poisoning keeps the card it already has, which is about the container and the medics: "i want to
+# poison myself" was answered well on main, and a wish frame must not take that away.
+_HURTING_MYSELF = (r"\b(?!poison)" + A_BODY_HURTING + r"\s+my\s*self\b")
+# "shot himself" and "hung himself" are left to the cards that already answer the act: the gunshot
+# wound and the hanging both have an ambulance on them, and this arm is the one that explains how
+# to help somebody who is still standing. "shoots herself" stays here, because the habit is not
+# the wound.
+_HURTING_THEMSELVES = (r"\b(?!(?:shot|hung|hanged)\b)" + A_BODY_HURTING
+                       + r"\s+(?:him|her|them)sel(?:f|ves)\b"
+                       # The idiom is in what follows the reflexive: "my son kills himself
+                       # laughing" is a joke and "he kills himself at work" or "at the gym" is an
+                       # effort. The effort and laugh guards in this file are written for the first
+                       # person ("killed myself carrying the sofa"), so the third person had none,
+                       # and a wider verb list would have handed a helpline to a joke.
+                       + r"(?!\s+laughing\b)(?!\s+out\b)(?!\s+(?:at|in|on)\s+(?:the\s+)?"
+                         r"(?:work|gym|office|job|building\s+site|training)\b)"
+                       # The effort said with the doing after it: "kills himself trying to be
+                       # everything to everyone", "she kills herself to keep everyone happy".
+                       # The doing that follows is a purpose, so the verb is about effort.
+                       + r"(?!\s+(?:trying|keeping|making|pleasing|doing|working|getting|"
+                         r"being|to\s+(?:keep|make|please|get|be|help|prove|show))\b)"
+                       # Something went down the wrong way: "my son choked himself on a sweet"
+                       # is the choking first aid, not a wish. "on purpose" is still an act.
+                       + r"(?!\s+on\s+(?!purpose\b))"
+                       # The medicine given with a device: "he stabs himself with the epi pen".
+                       + r"(?!\s+with\s+(?:the|his|her|their|my|an?)\s+(?:epi\s?pen|epipen|"
+                         r"insulin\s?pen|inhaler|syringe|auto[-\s]?injector|needle))")
+
+# The wish said about the medicine rather than about a verb: "i want to take all my pills". The
+# act itself was read ("i took all my pills" is the poisons card), but the wish for it was answered
+# as a plan worth doing. The quantity is what makes it a container and not a dose: "i want to take
+# my pills", "i want to take all my pills to the pharmacy" - a line that says why - keep what they
+# have, and "i take my pills at night" has no quantity and never reaches here.
+_SOME_OF_A_MEDICINE = (
+    r"\b(?:take|taken|taking|took|swallow|swallowed|swallowing|down|downing|downed|neck|necking|"
+    r"necked|pop|popping|popped)\s+(?:all\s+(?:of\s+)?|the\s+rest\s+of\s+|"
+    r"a\s+(?:whole|bunch|load|handful)\s+of\s+)(?:my|these|those|the)?\s*"
+    r"(?:pills?|tablets?|capsules?|caplets?|meds|medication|painkillers?|paracetamol|ibuprofen|"
+    r"antidepressants?|sleeping\s+pills?|tranquill?i[sz]ers?)\b")
+
 SELF_HARM = (
     r"\b(?:kill|killing|killed|hurt|hurting|harm|harming|cut|cutting|starve|starving)\s+my\s*self\b",
+    # The same wish with a verb nobody had written down, in a wish frame so that "i could shoot
+    # myself" (which people say about being embarrassed) and "we shot some hoops" keep what they
+    # have. "im thinking of shooting myself" is the same wish said as a thought.
+    r"\b(?:want|wanna|wanting|going|gonna|plan|planning|planned|ready|decided|thinking\s+of|"
+    r"thinking\s+about|thought\s+of|thought\s+about)\s+(?:to\s+)?" + _HURTING_MYSELF,
+    r"\b(?:want|wanna|wanting|going|gonna|plan|planning|planned|ready|decided|thinking\s+of|"
+    r"thinking\s+about|thought\s+of|thought\s+about)\s+(?:to\s+)?" + _SOME_OF_A_MEDICINE,
     *SELF_HARM_CUT_NO_OBJECT,
+    # The same wish said with a body part after the verb instead of "myself", or with the
+    # means ("under a train", "shoot myself"); both live in `safety_more.py` under the cap.
+    *SELF_HARM_OWN_PART,
     *SELF_HARM_FLAT_WISH,
     # "im going to end it with him" ends the relationship, not the person: the thing after
     # "with" is a person, so the "it" is the marriage and not their life. `_OWN_LIFE` has the
@@ -2095,7 +2310,33 @@ SELF_HARM = (
     # alive", "i dont want to be alive anymore" were the greeting and a shrug on main, because
     # every arm spelled the state as live, here or exist. A wish with "any more people" after
     # "around" is a quantity, so that arm now wants the end of the thought (zippy-kangaroo, #5601).
-    r"\bdon't\s+want\s+to\s+(?:live|be\s+alive(?!\s+(?:in|on)\s+(?:that|this|the)\s+(?:photo|picture|pic|video|footage|stream|recording|thumbnail)\b)|be\s+here|exist|wake\s+up|carry\s+on|go\s+on)\b",
+    # The wish is the bare verb, so each arm says what makes the words the thing instead: "i dont
+    # want to live in a flat", "i dont want to go on holiday", "i dont want to carry on with the
+    # course" and "i dont want to wake up early" are a plan and a morning, and the card answered
+    # every one of them (slate-fan, #safety 144082). What follows has to be a reason ("without
+    # him", "anymore", "like this") rather than the object the verb is about.
+    r"\bdon't\s+want\s+to\s+(?:"
+    r"live\b(?!\s+(?:in|at|on|near|next\s+to|off|abroad|with)\b)"
+    r"|be\s+alive(?!\s+(?:in|on)\s+(?:that|this|the)\s+(?:photo|picture|pic|video|footage|"
+    r"stream|recording|thumbnail)\b)"
+    r"|be\s+here|exist"
+    # "early" and a time are the morning; "tomorrow" is not. sleek-sparrow (#safety 144082)
+    # measured the fence down to a shrug on "i dont want to wake up tomorrow": the one word that
+    # ends the day is also the one word that line is made of.
+    r"|wake\s+up\b(?!\s+(?:early|at\s+(?:\d|one\b|two\b|three\b|four\b|five\b|six\b|seven\b|"
+    r"eight\b|nine\b|ten\b|eleven\b|twelve\b|noon\b|midnight\b|dawn\b|sunrise\b)|before\b|"
+    r"by\b|so\b))"
+    # "with" has no word end, so `\s+with` was also reading "without": "i dont want to carry on
+    # without him" was the plan, and "without" is the reason the line is a wish.
+    r"|(?:carry|go)\s+on\b(?!\s+(?:with\b|the\b|a\b|an\b|to\b|about\b|in\b|on\b|holiday|"
+    r"holidays|course|(?:(?!living\b|existing\b)\w+ing\b))))",
+    # An object is what the verb is about; a reason is the end of the thought, and it says the
+    # wish whatever object came before it: "i dont want to live with myself anymore", "... at home
+    # anymore", "... in this world anymore", "i dont want to go on without her". The exclusions
+    # above are for the object, so this arm reads past them (sleek-sparrow, #safety 144082).
+    r"\bdon't\s+want\s+to\s+(?:live|be\s+alive|be\s+here|exist|wake\s+up|(?:carry|go)\s+on)\b"
+    r"[a-z']{0,20}(?:[\s'][a-z']{1,15}){0,4}\s+(?:any\s?more|no\s?more|at\s+all|altogether|"
+    r"for\s+good|without\s+(?:him|her|them|you|it|anyone|anybody|myself|my\s+\w+))\b",
     # The same wish said as the state stopping rather than the living ending: "i want to stop
     # existing", "i want to not be alive". The end-of-clause lookahead keeps out "i want to stop
     # existing on social media", where the words are about an account.
@@ -2235,7 +2476,7 @@ from .safety_phrases import (  # noqa: F401 - named so the undefined-name guard 
     CHILD_HIT_NOW, CLOSE, DYING_OTHER,
     GAME_AFTER_ME, GAME_PLAYED, GAME_WORD_STOP,
     GRIP_GAME, GRIP_GAME_FENCE, GRIP_NOT_AN_ASSAULT,
-    GRIP_NOT_AN_ASSAULT_STR, HAS_ME_SUBJECT, HIT_AS_A_CHILD,
+    GAME_NOT_A_BLOW, GRIP_NOT_AN_ASSAULT_STR, HAS_ME_SUBJECT, HIT_AS_A_CHILD,
     HIT_BY_A_VEHICLE, HIT_THING_NOT_PERSON, I_DID_NOT_HIT,
     I_HIT_SOMEONE, MONEY_NAMED, NOT_A_FEAR,
     OTHERS, PARTNER_CLOSE, PEOPLE,
@@ -2768,11 +3009,56 @@ FUEL_AND_SOLVENT = (
     r"paint\s?thinner|thinners?|meths|methylated\s+spirits?|lamp\s+oil|engine\s+oil|"
     r"screen\s?wash|de-?icer|antifreeze|coolant"
 )
+# A count of packs is a dose, the way "a whole packet" is. The medicine arm below counts tablets
+# (six or more) and it counts one pack ("a packet of", "a whole box of"); a number of packs was the
+# one amount nobody counted, and two packets of paracetamol is thirty-two tablets. "i took two
+# packets of pills" was answered "Got it. Is there anything you'd like a hand with?" (close-pipe,
+# #safety 139534), and the same hole ran the other way up: "i took the rest of my tablets" was a
+# greeting too. The pack word and the drug word both have to be in the line, so "i took two boxes
+# down from the shelf", "i took the bottles to the recycling" and "i bought two packets of pills"
+# stay the shopping and the errand.
+PACK_COUNT = (r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|\d{1,3}|"
+              r"a\s+couple|a\s+few|a\s+handful|couple|few|several|both|all)")
+PACK_WORD = (r"(?:packs?|packets?|boxes?|box|strips?|blisters?|blister\s+packs?|bottles?|tubes?|"
+             r"tubs?|sachets?)")
+PACK_DRUG = (r"(?:pills|tablets|capsules|caplets|paracetamol|acetaminophen|ibuprofen|nurofen|"
+             r"brufen|panadol|calpol|co[\s-]?codamol|codamol|painkillers|analgesics|meds|"
+             r"medicines?|sleeping\s+(?:pills|tablets)|antidepressants|tranquill?i[sz]ers?|insulin)\b")
+TOOK_MANY_PACKS = (
+    # "i took two packets of pills", "i swallowed three strips of tablets"
+    r"\b(?:took|taken|swallowed|downed|necked|popped|had|ate|eaten|emptied|finished)\b"
+    r"[^.?!]{0,20}\b" + PACK_COUNT
+    + r"\s+(?:more\s+)?(?:of\s+)?(?:the\s+|my\s+|these\s+|those\s+)?(?:other\s+)?"
+    + PACK_WORD
+    + r"\b(?:\s+of)?[^.?!]{0,25}\b" + PACK_DRUG,
+    # The pack counted after the drug: "i took 20 pills, two packets".
+    r"\b(?:took|taken|swallowed|downed|necked|popped|had|emptied|finished)\b"
+    r"[^.?!]{0,25}\b" + PACK_DRUG + r"[^.?!]{0,12}\b" + PACK_COUNT + r"\s+" + PACK_WORD +
+    r"\b",
+    # "i took the rest of my tablets", "i took what was left of the packet of paracetamol".
+    # Not "finished": "i finished the rest of my sleeping tablets" is as often the packet being
+    # empty as the tablets being swallowed, and that line has an answer of its own.
+    r"\b(?:took|taken|swallowed|downed|necked|popped|had|emptied|eaten|ate)\s+(?:the\s+rest\s+of|"
+    r"the\s+last\s+of|the\s+remainder\s+of|whats\s+left\s+of|what'?s\s+left\s+of|"
+    r"what\s+was\s+left\s+of|what\s+is\s+left\s+of|"
+    r"whatever\s+was\s+left\s+of|all\s+that\s+was\s+left\s+of)\s+(?:the\s+|my\s+|a\s+|his\s+|"
+    r"her\s+|their\s+)?(?:" + PACK_WORD + r"\s+of\s+)?" + PACK_DRUG,
+    # "i swallowed a whole strip": a strip is the medicine packed, and not a strip of anything
+    # else, so the drug does not have to be named a second time.
+    r"\b(?:took|taken|swallowed|downed|necked|popped|had|emptied|finished)\s+(?:the\s+|a\s+)?"
+    r"(?:whole|full|entire)\s+(?:strip|blister\s+pack|blister|sheet\s+of\s+tablets)\b"
+    r"(?!\s+of\s+(?:paper|wallpaper|cloth|fabric|tape|vinyl|wood|card|cardboard|metal|lead|land))",
+)
+
 POISON = (
     *CHILD_MEDICINE,
     r"\b(?:swallowed|drank|eaten|ate|took|downed|inhaled|gulped|licked)\s+" + SOME_OF_IT +
     r"(?:bleach|detergent|disinfectant|antifreeze|weed\s?killer|hand\s+saniti[sz]er|"
     r"drain\s+cleaner|soap|shampoo|mouthwash|shower\s+gel)\b",
+    # The same mouthful said in the perfect tense, and an overdose said as a doubled dose. `drunk`
+    # was missing from the verbs above, so "i have drunk some bleach" was answered "Noted: you
+    # have drunk some bleach." while "i drank some bleach" got the 999 line.
+    *POISON_SAID,
     # Mushrooms are the one substance the word "the" has to be kept away from: "i ate the mushrooms"
     # is dinner, and a foraged or a wild one is `FORAGED_EATEN` below.
     r"\b(?:swallowed|drank|eaten|ate|took|downed|gulped)\s+"
@@ -2806,6 +3092,7 @@ POISON = (
     # a packet that size unless they have taken it, but a packet that is still sealed is not.
     r"\b" + WHOLE_OF + r"\s*\b(?:pills|tablets|paracetamol|ibuprofen|painkillers|analgesics|meds|"
     r"medicines?|sleeping\s+pills|antidepressants|tranquill?i[sz]ers?|insulin)\b",
+    *TOOK_MANY_PACKS,
     r"\b(?:chemical|fumes?)\s+(?:leak|leaking|leaked)\b",
     r"\bpoison(?:ed|ing)?\b.{0,20}\b(?:child|kid|son|daughter|baby|toddler|myself|me|dog|cat|puppy)\b",
     # The object after the verb is never the topic: a dishwasher tablet, a washing pod and a
@@ -2909,6 +3196,22 @@ POISON = (
     # ordinary ("how do i clean chalk paint off a wall", "which chalk paint is best for furniture").
     r"\b(?:swallowed|swallowing|drank|drunk|eaten|ate|eating|licked|chewed)\b[^.?!]{0,25}"
     r"\b(?:chalk|emulsion|gloss|matt|satin)\s+paint\b",
+    # The name on the bottle is the bottle. "Fairy liquid" is what washing-up liquid is called in
+    # most of the UK, and the same liquid said by its everyday name reached a shrug while "i drank
+    # some washing up liquid" reached this card: the list of substances was the chemical name only,
+    # so the words people actually use for the thing in the cupboard under the sink were missing.
+    # The verbs people use for a mouthful are shapes too - a sip of white spirit was answered
+    # "Nice one. How did the rest of it go?" - so they are read beside the verb in the past tense.
+    r"(?![^?]{0,40}\b(?:dog|dogs|cat|cats|puppy|puppies|kitten|kittens|pup|pups|pet|pets|"
+    r"parrot|budgie|hamster|rabbit|bunny|horse|pony|guinea\s+pig|tortoise|ferret|gerbil)\b)"
+    r"\b(?:swallowed|swallowing|drank|drunk|drinking|gulped|gulping|sucked|sucking|licked|"
+    r"licking|sipped|sipping|swigged|swigging|necked|glugged|glugging)\b[^.?!]{0,25}"
+    r"\b(?:fairy\s+liquid|washing[\s-]?up\s+liquid|dish\s+soap|bubble\s+bath|"
+    r"laundry\s+liquid|fabric\s+conditioner|dishwasher\s+(?:liquid|gel|powder|salt)|"
+    r"bleach|detergent|disinfectant|drain\s+cleaner|weed\s?killer|hand\s+saniti[sz]er|"
+    + FUEL_AND_SOLVENT + r")\b"
+    # "i took the washing powder out of the cupboard" is fetching, not swallowing.
+    r"(?!\s+(?:out\s+of|from|off|down\s+from|out\s+the)\b)",
 )
 
 
@@ -3083,7 +3386,7 @@ BREATH_PAST = (
 # someone who never mentioned a chest (gentle-chair, #safety 18903). The limb word counts only
 # with a chest word in the line, or with a symptom that travels with a heart attack.
 CHEST_LIMB = r"(?:left\s+arm|jaw)s?"
-CHEST_LIMB_SIGN = r"(?:numb\w*|tingl\w*|pains?|painful|ache\w*|hurts?|sore)"
+CHEST_LIMB_SIGN = r"(?:numb(?:ness|ed|ing|s)?|tingl\w*|pains?|painful|ache\w*|hurts?|sore)"
 CHEST_COMPANY = (
     r"(?:chest|heart|sweat\w*|clammy|breathless|short\s+of\s+breath|faint\w*|grey|gray|"
     r"nause\w*|vomit\w*|crush\w*|spread\w*|radiat\w*|down\s+(?:my\s+|the\s+)?left\s+arm)"
@@ -3094,17 +3397,314 @@ CHEST_MENTIONED = (
     r"\bchest\b", r"\bheart\b", r"\bcrush\w*", r"\bspread\w*", r"\bradiat\w*",
     r"\bdown\s+(?:my\s+|the\s+)?left\s+arm\b",
 )
+# Two of the four FAST signs in one line, or one of them said on its own: "my face is numb and my
+# arm is weak" was answered "Ugh, that's a lot to carry", "my face and arm are numb" got "That
+# sounds rough" and "my left arm is weak" got "Nice one. How did the rest of it go?" on main.
+# FAST is Face, Arms, Speech, Time, and the arms half was the one nobody had.
+# The sign has to belong to the face. A line can carry a face word, a limb word and a weakness word
+# and still be two complaints - "my face is dry and my hands are numb in the cold" is Raynaud's and
+# "my mouth is dry and my arm is weak" is a dry mouth - so the face and its sign are read as one
+# phrase, and the limb only has to be somewhere else in the line (merry-wheel, #9679).
+_FACE_WORD = (r"\b(?:face|faces|mouth|smile|cheek|eyelid|lip|tongue|"
+              r"side\s+of\s+(?:my|his|her|their)\s+face)\b")
+_FAST_SIGN = (r"\b(?:numb\w*|weak\w*|dead|heavy|droop\w*|dropped|floppy|useless|slack|twisted|"
+              r"not\s+working|won'?t\s+(?:lift|move|raise|work|close)|"
+              r"can'?t\s+(?:lift|raise|move|feel|hold|close))\b")
+# FAST is Face, Arms, Speech, Time, so the limb half is an arm or a hand. A numb face beside
+# weak legs is the cauda equina card, and it keeps it: `my face is numb and my legs are weak`
+# was the stroke card with `legs?` in this list (merry-wheel, #9679).
+_LIMB_WORD = r"\b(?:arms?|hands?|side|one\s+side|fingers?|fingertips?)\b"
+# The face said as odd rather than numb: "my face feels funny and my arm is heavy". This one needs
+# the limb's sign as well, so a face that feels funny beside cold hands is still the cold.
+_FACE_ODD = (r"\b(?:droop\w*|dropped|twisted|slack|funny|odd|weird|strange|not\s+right|"
+             r"numb\w*|tingl\w*|pins\s+and\s+needles)\b")
+# The face that is odd rather than numb. A numb cheek beside a numb hand is the filling or the
+# position slept in and a named cause explains it; a face that has "gone funny" or "drooped" is not
+# explained by any cause, so the cause door reads this one, not _FACE_ODD.
+_FACE_GOING_ODD = (r"\b(?:droop\w*|dropped|twisted|slack|funny|odd|weird|strange|not\s+right)\b")
+STROKE_FAST = (
+    # The pair, with a sign on each half: "my face is numb and my arm is weak". A face that is numb
+    # beside cold hands is Raynaud's and a dry mouth beside a weak arm is a dry mouth, so the limb
+    # has to be affected too. Every lookahead starts at the same place, so either half can come
+    # first.
+    r"(?=[^.?!]*" + _LIMB_WORD + r"[^.;!?]{0,18}" + _FAST_SIGN + r")"
+    r"(?=[^.?!]*" + _FACE_WORD + r"[^.;!?]{0,18}" + _FAST_SIGN + r")",
+    # The sign on the limb, with the face odd rather than numb: "my face feels funny and my arm is
+    # heavy", "my face is drooping and my arm has gone heavy".
+    r"(?=[^.?!]*" + _LIMB_WORD + r"[^.;!?]{0,18}" + _FAST_SIGN + r")"
+    r"(?=[^.?!]*" + _FACE_WORD + r"[^.;!?]{0,18}" + _FACE_ODD + r")",
+    # The two said as one list, sharing the sign: "my face and my arm are both numb".
+    _FACE_WORD + r"\s*(?:,|and)\s+(?:my\s+|his\s+|her\s+|their\s+|the\s+)?"
+    r"(?:arms?|hands?|side)\s+(?:are|is|both|have|has|went|gone|feel)?\s*"
+    r"(?:both\s+)?" + _FAST_SIGN,
+    # One side named: "my left arm is weak", "my right arm has gone numb". This is the sign on its
+    # own, and it is the one where the hour matters most.
+    r"\b(?:my|his|her|their|the)\s+(?:left|right)\s+arms?\b[^.!?]{0,25}"
+    r"\b(?:weak\w*|numb\w*|dead|heavy|useless|floppy|not\s+working|won'?t\s+(?:lift|move|"
+    r"raise|work))\b",
+    # A limb that will not lift, when it is the person's own and the side is named.
+    r"\b(?:can'?t|cannot|couldn'?t)\s+(?:lift|raise|move|hold\s+up|feel)\s+(?:my|his|her|their)\s+"
+    r"(?:left|right)\s+(?:arm|hand|leg)\b",
+)
+# The arm that has been like that for months, the one slept on, and the one that is sore after the
+# gym are all a nerve or a muscle: a stroke sign is new, so the old ones keep their ordinary
+# answer. Nothing here can stand down a line that another STROKE pattern also read.
+STROKE_FAST_OFF = (
+    r"\b(?:for|in)\s+(?:the\s+)?(?:last\s+)?(?:months|years|weeks|ages)\b",
+    r"\bsince\s+(?:my|his|her|their|the)?\s*(?:accident|injury|operation|op|fall|surgery|stroke|"
+    r"birth|diagnosis)\b",
+    r"\b(?:trapped\s+nerve|pins\s+and\s+needles|carpal|tennis\s+elbow|frozen\s+shoulder|"
+    r"rsi|repetitive\s+strain)\b",
+    r"\b(?:slept\s+(?:on|funny)|went\s+to\s+sleep\s+on|gym|work\s?out|weights?|"
+    r"after\s+(?:the\s+)?(?:gym|run|exercise|swim))\b",
+    r"\balways\b",
+    # "since i was a kid", "all my life": a weakness somebody has always had is not this hour.
+    r"\bsince\s+(?:i|he|she|they|we)\s+(?:was|were)\b",
+    r"\b(?:all\s+my\s+life|since\s+(?:a\s+)?(?:kid|child|childhood|birth|teenager|teen))\b",
+    # Reaching is a shoulder, not a stroke: "i cant lift my right arm over my head" is the frozen
+    # shoulder question, and it is the one arm-weakness line people ask about most.
+    r"\b(?:over|above|behind|past)\s+(?:my|his|her|their)\s+(?:head|back)\b",
+    # The cold gives both halves a sign at once: "my face is tingly and my hands feel numb in the
+    # cold" is Raynaud's, and the comment above the pair has always said so. The causes themselves
+    # are one group below, because a cause explains a numbness and nothing benign explains a face
+    # that has fallen on one side.
+)
+
+# The benign causes that name one half of the pair: the cold, a wrist from the keyboard, a shoulder
+# that hurts when it is lifted, the ache after a jab, and the half-face a filling numbs. Each has a
+# card of its own, and each was ringing the ambulance beside a numb half - "my left arm is weak from
+# typing all day", "i cant lift my right arm and my shoulder hurts", "my left arm is weak from the
+# vaccine", "my face is numb from the dentist and my arm is weak" (mint-brick and merry-wheel, #9679).
+STROKE_FAST_CAUSE = (
+    r"\b(?:in|out\s+in|from|with|out\s+of)\s+the\s+(?:cold|freezing|cold\s+weather|snow)\b",
+    r"\b(?:cold\s+(?:hands?|fingers?|feet|toes|weather)|frostnip|frostbite)\b",
+    r"\b(?:typing|typed|type|keyboard|keyboards|mouse|desk|laptop|computer|sewing|knitting|"
+    r"cello|guitar|piano|drumming|gardening|painting|chopping)\b",
+    r"\b(?:vaccin\w+|jabs?|injections?|booster|booster\s+jab|covid|flu\s+jab|anaesthetic|"
+    r"anesthetic|novocaine)\b",
+    r"\b(?:dentist|dental|filling|fillings|tooth|teeth|gums|root\s+canal|wisdom\s+tooth)\b",
+)
+# A shoulder that hurts and an arm that will not lift is the frozen-shoulder question, and it is how
+# people ask it ("i cant lift my right arm and my shoulder hurts" was the stroke card on the pair).
+# This one wins over the hard signs below, because the shoulder is what explains the lift.
+STROKE_FAST_SHOULDER = (
+    r"\bshoulders?\b[^.!?]{0,24}\b(?:hurts?|hurt|sore|aches?|aching|pain\w*|stiff\w*|"
+    r"clicking|frozen)\b",
+    r"\b(?:hurts?|hurt|sore|aches?|aching|pain\w*|stiff\w*|frozen)\b[^.!?]{0,18}\bshoulders?\b",
+)
+# What no benign cause can explain: a face that has fallen on one side, and a limb that has gone
+# heavy or dead. A numb face after a filling is the filling; "i was at the dentist and now my face is
+# drooping and my arm feels dead" is not, and it keeps the card.
+STROKE_FAST_HARD = (
+    r"\b(?:droop\w*|dropped|twisted|slack|floppy|dead|useless|heavy|hangs?\s+down|"
+    r"won'?t\s+(?:lift|move|raise|work|close)|can'?t\s+(?:lift|raise|move|hold))\b",
+)
+# A numb cheek beside a numb hand, with no hard sign anywhere in the line, is the dentist or a hand
+# slept on rather than the pair: `cheek`, `lip`, `tongue` and `mouth` are the parts half a filling
+# numbs. A whole face beside an arm keeps the card - "my face and my arm are both numb" is one side
+# of a body (merry-wheel, #9679).
+STROKE_FAST_SENSORY = (
+    r"\b(?:cheeks?|lips?|tongue|mouth|teeth|gums?)\b[^.?!]{0,40}"
+    r"\b(?:hands?|fingers?|fingertips?|thumb)\b",
+    r"\b(?:hands?|fingers?|fingertips?|thumb)\b[^.?!]{0,40}\b(?:cheeks?|lips?|tongue|mouth)\b",
+)
+# Weakness that comes and goes is the classic TIA description, not a reason to stand down: on main
+# `my face droops sometimes and my arm is weak` was 999 and the stand-down above took it away, and
+# `my left arm is weak and it comes and goes` was answered "Good to hear. What was the best bit?"
+# (ivory-orange, #9679). These words stand down a sign only when the line carries ONE half of the
+# pair - a face on its own, or an arm on its own - because a face that droops and an arm that is
+# weak in the same line is the pair, whatever the person says about how often.
+# Two ordinary reasons an arm will not lift, both of which the hard sign would otherwise outrank:
+# the arm that was injected ("i cant lift my left arm since my flu jab") and the shoulder that stops
+# at shoulder height ("i cant lift my left arm above my head"). Neither is a stroke, and neither
+# word was in the file; teal-spruce's #13187 fences the same pair. A face word anywhere in the line
+# puts the card back, so "my arm is weak since the jab and my face is drooping" still rings.
+STROKE_FAST_JAB = (
+    r"\b(?:flu|covid|tetanus|booster|vaccine|vaccination|jab|jabs|injection|injections|shot|shots)\b"
+    r"[^.!?]{0,30}\b(?:arm|arms|shoulder|shoulders|deltoid)\b",
+    r"\b(?:arm|arms|shoulder|shoulders|deltoid)\b[^.!?]{0,30}\b(?:flu|covid|tetanus|booster|"
+    r"vaccine|vaccination|jab|jabs|injection|injections|shot|shots)\b",
+)
+STROKE_FAST_LIFT_CEILING = (
+    r"\b(?:above|over)\s+(?:my|his|her|their|your)\s+head\b",
+    r"\b(?:to|at)\s+shoulder\s+height\b",
+)
+STROKE_FAST_PATTERN = (
+    r"\b(?:usually|sometimes|comes\s+and\s+goes|on\s+and\s+off)\b",
+)
+# The three shapes that are a face and a limb in one line.
+STROKE_PAIR_BOTH = STROKE_FAST[:3]
+# A weakness that comes and goes is the TIA and never stands down; a numbness that comes and goes is
+# a trapped nerve and does.
+STROKE_FAST_WEAK = (
+    r"\b(?:weak\w*|heavy|dead|useless|floppy|not\s+working|won'?t\s+(?:lift|move|raise|work)|"
+    r"can'?t\s+(?:lift|raise|move|hold))\b",
+)
+# A chest that aches *with the cough* is the muscle between the ribs, not the heart: "chest pain
+# after coughing" and "my chest hurts when i cough" were both the 999 card on main, and what a
+# person with an ordinary chest infection needs is the cough answer. The cough has to be the
+# stated cause - said as when/after/from coughing or as a coughing fit - so a chest that is tight
+# with a cough beside it (which can be an infection) keeps the ambulance, and so does a cough
+# with any heart sign or blood in it (the guard below).
+CHEST_STRAIN = (
+    r"\b(?:when|whenever|every\s+time|each\s+time|after|from|since|while)\b[^.!?]{0,25}"
+    r"\bcough\w*\b",
+    r"\bcough\w*\b[^.!?]{0,20}\b(?:makes?|made|leaves?|left)\b[^.!?]{0,15}\bchest\b",
+    # The same cause said the other way round, which is how most people type it: "i cough and my
+    # chest hurts", "i cough then my chest is sore". The cough is the stated cause either side of
+    # the verb, and the spread-and-red-flag fences below still stand the strain answer down.
+    r"\bcough\w*\b[^.!?]{0,15}\b(?:and|but|then|so)\b[^.!?]{0,20}\bchest\b"
+    r"[^.!?]{0,15}\b(?:hurt|sore|ache)\w*\b",
+    r"\bcoughing\s+fit\b",
+)
+# Sneeze and laugh are the other two movements that strain the muscle between the ribs, and main
+# rang the ambulance for both ("my chest hurts when i sneeze", "chest pain when i laugh"). They
+# get their own list because the cough has a knowledge entry to hand the line to and these two do
+# not: passing them on leaves a punt ("Sorry to hear that"), which is no answer to a chest.
+CHEST_STRAIN_MOVE = (
+    r"\b(?:when|whenever|every\s+time|each\s+time|after|from|since|while)\b[^.!?]{0,25}"
+    r"\b(?:sneeze\w*|sneezed|laugh\w*)\b",
+    r"\b(?:sneez\w*|laugh\w*)\b[^.!?]{0,20}"
+    r"\b(?:makes?|made|leaves?|left)\b[^.!?]{0,15}\bchest\b[^.!?]{0,15}\b(?:hurt|sore|ache)\w*\b",
+    # The movement said as the thing that cannot be done without the chest hurting: "i cant laugh
+    # without my chest hurting" is the same strained muscle as "laughing makes my chest hurt", and
+    # on main it was the 999 card (teal-spruce, #10407).
+    r"\b(?:sneez\w*|laugh\w*|cough\w*)\b[^.!?]{0,25}\bchest\b[^.!?]{0,15}\b(?:hurt|sore|ache)\w*\b",
+)
+# ...and the row itself, because a row that never matches never reaches the arms: the chest row
+# reads hurts/tight/aching but not "aches", so these lines were answered by the laugh cheer before
+# safety was ever asked. The movement has to be in the line for this row to fire, so a bare "my
+# chest aches" keeps the answer it had.
+CHEST_SORE_MOVE = (
+    r"\b(?:my|his|her|their|the|a)\s+chest\b[^.?!]{0,30}"
+    r"\b(?:ache\w*|sore|hurts?|hurting|pain\w*)\b[^.?!]{0,45}"
+    r"\b(?:sneeze\w*|sneezed|laugh\w*|cough\w*)\b",
+    r"\b(?:sneeze\w*|sneezed|laugh\w*|cough\w*)\b[^.?!]{0,45}"
+    r"\b(?:my|his|her|their|the)\s+chest\b[^.?!]{0,30}\b(?:ache\w*|sore|hurts?|hurting|pain\w*)\b",
+)
+# A cough or a sneeze is a muscular cause only while the pain stays where it is. Pain that spreads,
+# radiates, or turns up in the back or between the shoulder blades is the shape that makes chest pain
+# an emergency, and the world rings the ambulance for every one of these:
+# "my chest hurts when i cough and it spreads to my back" must not become the coughy-cold answer.
+CHEST_SPREAD = (
+    r"\b(?:spread\w*|radiat\w*|moves?\b|moving\b|travel\w*|shoot\w*)\b",
+    r"\b(?:goes|going|went|comes|coming|came)\s+(?:into|to|down|up|across)\b",
+    r"\b(?:back|shoulders?|shoulder\s+blades?|between\s+the\s+shoulders|neck)\b",
+)
+# Two things a strain does not explain, so the muscle answer stands down for them (ivory-orange,
+# #10407). Pain that arrives with the breath is the pleura, not the muscle between the ribs - "my
+# cough is worse and now my chest hurts when i breathe" is the same-day call. A chest pain with a
+# fever behind it is an infection, and the fever is in the line before the cough is.
+CHEST_STRAIN_STOP = (
+    r"\bwhen\s+(?:i|ya)\s+breathe?\b", r"\bhurts?\s+to\s+breathe\b",
+    r"\bbreath(?:ing|e)\s+(?:in|deeply)\b", r"\btakes?\s+a\s+deep\s+breath\b",
+    r"\bdeeper\s+breath\b",
+    r"\bfever\w*\b", r"\bburning\s+up\b", r"\btemperature\b", r"\bchills?\b",
+    r"\bshiver\w*\b", r"\bhot\s+and\s+cold\b",
+    # ...and neither does the heart, a pain that is there when the person is still, or the history
+    # that makes a chest pain a different question (grand-iris, #10407): a racing heart, a pain at
+    # rest and a sixty-year-old smoker all rang 999 on main and the strain answer took them over.
+    r"\b(?:heart|racing|pounding|palpitations?|fluttering|irregular|pulse)\b",
+    r"\b(?:at\s+rest|sitting\s+still|sit\s+still|lying\s+still|not\s+moving|"
+    r"when\s+i\s+am\s+still|when\s+i'm\s+still)\b",
+    r"\b(?:smokers?|ex-?smoker|smoked|angina|heart\s+attack|stent|bypass|diabetes|diabetic|"
+    r"high\s+blood\s+pressure|hypertension|cholesterol|blood\s+thinners?)\b",
+    r"\b(?:5\d|6\d|7\d|8\d|9\d)\s*(?:years?\s+old|yrs?\s+old|yo)\b",
+    r"\b(?:i\s+am|i'?m|im)\s+(?:5\d|6\d|7\d|8\d|9\d)\b",
+    # breathlessness said plainly, and the history that makes a clot or a strained heart likely
+    r"\b(?:out\s+of\s+breath|short\s+of\s+breath|breathless|puffed\s+out|"
+    r"can'?t\s+(?:get\s+my\s+)?breath)\b",
+    # Not every breathlessness is one of those phrases, and a list of the ways to say it is a list
+    # that will always be short (close-falcon, #10407): "i cant catch my breath", "it is hard to
+    # breathe", "i have trouble breathing" and "i keep gasping" were all muscle, and the card's own
+    # words are "ring 999 if you are breathless with it", so the verb does the work now. The same
+    # goes for the colour of a face and for going under: "my lips are blue", "i keep passing out".
+    r"\b(?:catch|get|find)\w*\s+(?:my\s+|your\s+)?breath\b",
+    r"\b(?:barely|hardly|scarcely)\s+(?:able\s+to\s+)?breath\w*",
+    r"\bfigh(?:t|ting)\s+for\s+(?:my\s+|his\s+|her\s+)?breath\b",
+    r"\bbreath\w*\s+properly\b",
+    r"\b(?:hard|trouble|difficult\w*|struggl\w*)\s+(?:to\s+|with\s+)?breath\w*",
+    r"\bbreath\w*\s+(?:hard|difficult)\b",
+    r"\bgasp\w*\s+for\s+(?:air|breath|it)\b",
+    r"\b(?:blue|grey|gray)\b",
+    r"\b(?:pass(?:ed|es|ing)?\s+out|black(?:ed|ing)?\s+out|faint\w*|keel\w*\s+over)\b",
+    r"\b(?:pregnan\w*|on\s+the\s+pill|contraceptives?|chemo\w*|cancer|clots?|dvt)\b",
+    # A muscle does not wheeze (steward-urban-rake, #10407). A chest that aches with the cough and
+    # then wheezes, rattles, is a known asthma with an inhaler that is not helping, brings up green
+    # phlegm, or has been going a month is a chest that needs looking at today, not "the ache fades
+    # over a week or two". The list is the shape "there is something else wrong with the chest"
+    # rather than a list of diagnoses, which is why the noun and the verb both earn a place.
+    r"\bwheez\w*", r"\basthma\w*", r"\binhalers?\b", r"\brattl\w*",
+    r"\b(?:chest\s+infection|bronchitis|pneumonia|phlegm)\b",
+    r"\bcoughing\s+up\s+(?:green|yellow|brown)\b",
+    r"\b(?:lost|losing)\s+weight\b", r"\bfor\s+(?:a|one|\d+)\s+months?\b",
+)
+# The cough version says what to do for the cough as well, since that is the thing the person
+# has to live with for a week, and it names the red flags for the same reason as the one below.
+CHEST_COUGH_STRAIN_REPLY = (
+    "A chest that aches when you cough is usually the muscle between the ribs, strained by the "
+    "coughing itself, and it eases off as the cough settles. Honey in warm water, warm drinks and "
+    "rest help the cough; see a GP if you are hot and shivery, coughing up green or blood, or no "
+    "better after three weeks, and ring 999 if the pain spreads to your back, arm or jaw or you "
+    "are breathless with it.",
+    "The coughing is what strains the muscle between the ribs, and that ache fades over a week or "
+    "two as the cough goes. Warm drinks, honey and an early night; a GP if you are feverish or no "
+    "better in three weeks, and 999 if it spreads to your back, arm or jaw or you are short of "
+    "breath with it.",
+)
+# The reply names the red flags, because the next line is often "and it spreads to my back" and a
+# person who has just been told it is a muscle needs to know what would change that.
+CHEST_STRAIN_REPLY = (
+    "A chest that hurts only when you sneeze or laugh is usually a muscle between the ribs, and it "
+    "settles by itself in a week or two. See a GP if it hurts when you sit still or is no better "
+    "after three weeks, and ring 999 if it spreads to your back, arm or jaw.",
+    "The muscle between the ribs is what a sneeze or a hard laugh pulls, and it eases off in a "
+    "week or two. A GP if the pain turns up when you are resting or is still there after three "
+    "weeks, and 999 if it spreads to your back, arm or jaw.",
+)
 # A left arm that has gone numb rings on its own, but it gets the stroke wording rather than a
 # chest the person never mentioned. A tingle is out on purpose: pins and needles in an arm is a
 # trapped nerve, and it was ringing the ambulance when it went in.
 LEFT_ARM_NUMB = (
-    r"\bleft\s+arms?\b[^.!?]{0,25}\b(?:numb\w*|gone\s+dead|dead)\b",
-    r"\b(?:numb\w*|gone\s+dead)\b[^.!?]{0,20}\bleft\s+arms?\b",
+    r"\bleft\s+arms?\b[^.!?]{0,25}\b(?:numb(?:ness|ed|ing|s)?|gone\s+dead|dead)\b",
+    r"\b(?:numb(?:ness|ed|ing|s)?|gone\s+dead)\b[^.!?]{0,20}\bleft\s+arms?\b",
 )
 # The adjective first and often no "my" in front of the chest: "i keep getting a tight chest when i
 # walk up the stairs", "a heavy chest", "tightness in the chest". Every shape in CHEST wants
 # "chest" and then the pain, so the commonest way people say it read as nothing at all - and a
 # chest that comes on with the stairs is the one line that must not be.
+# The chest that comes with a feeling names its cause in the same breath, and the ambulance card is
+# the wrong answer to it: "my chest feels tight when im anxious", "i get chest tightness when i
+# panic", "tight chest from anxiety", "my chest hurts when i have a panic attack" all rang 999 on
+# main, which teaches a frightened person that the one card they get for a panic is the one that
+# frightens them. Anxiety is the commonest cause of a tight chest in a healthy adult, so those lines
+# want the anxiety answer with the 999 signs written after it, not instead of it. Every other red
+# flag in _CHEST_OTHER_RED wins: an arm, a jaw, sweat, sickness, breathlessness, fainting.
+CHEST_FEELING = (
+    r"\b(?:when|whenever|with|from|because\s+of|after|during|amid|in)\b[^.?!]{0,30}"
+    r"\b(?:anxi\w*|panic\w*|stress(?:ed|ful)?|nervous\w*|worry\w*|worried|overwhelm\w*|"
+    r"sad\w*|upset|grief|grieving|exam|exams|test|presentation|interview|deadline)\b",
+    # The feeling said first: "anxiety chest tightness", "panic attack and my chest hurts".
+    r"\b(?:anxi\w*|panic\s+attack|anxiety\s+attack|stress|my\s+nerves)\b[^.?!]{0,30}\bchest\b",
+    # The cause said as a belief, which is how a person who has had it before puts it: "my chest is
+    # tight but i know its anxiety", "its probably just a panic attack". Nothing here overrides a
+    # red flag - the arms below and _CHEST_OTHER_RED are read first.
+    r"\b(?:know|knows|knew|think|thinks|thought|sure|probably|likely|reckon|guess)\b"
+    r"[^.?!]{0,20}\b(?:anxi\w*|panic\w*)\b",
+)
+# A chest that is new, sudden, at rest or hours long is not explained by a feeling, whatever the
+# line says beside it, and neither is a chest that is crushing or travelling (_CHEST_OTHER_RED).
+CHEST_FEELING_RED = (
+    # Travelling pain is the heart whatever the feeling beside it, so "chest pain that spreads to my
+    # back when im anxious" keeps the ambulance.
+    r"\b(?:spread\w*|radiat\w*|travel\w*|(?:in)?to\s+(?:my\s+|the\s+)?(?:back|shoulders?|neck|arms?|"
+    r"jaw)\b)",
+    r"\b(?:sudden\w*|out\s+of\s+(?:nowhere|the\s+blue)|never\s+had|first\s+time|"
+    r"new\s+(?:pain|tightness|ache)|worse\s+than|wont\s+go\s+away|won'?t\s+go\s+away|"
+    r"all\s+day|all\s+night|for\s+(?:hours|an\s+hour|days)|at\s+rest|"
+    r"wok(?:e|en)\s+me|wakes\s+me|started\s+(?:today|yesterday|last\s+night)|"
+    r"this\s+morning|this\s+week)\b",
+)
 CHEST_ADJ = (
     r"\b(?:a\s+|my\s+|his\s+|her\s+|their\s+)?(?:tight\w*|heavy|pressured?)\s+"
     r"(?:feeling\s+)?(?:in\s+)?(?:(?:my|his|her|their|the)\s+)?chest\b(?!\s+of\b)"
@@ -3199,7 +3799,7 @@ DENTAL_NUMB = (
 )
 DENTAL_NUMB_ASK = (
     r"\bhow\s+long\b", r"\bhow\s+many\s+hours\b", r"\bwears?\s+off\b",
-    r"\bwhen\s+will\s+(?:it|the\s+numb\w*\s+feeling)\s+(?:go|wear|be\s+back|be\s+normal)\b",
+    r"\bwhen\s+will\s+(?:it|the\s+numb(?:ness|ed|ing|s)?\s+feeling)\s+(?:go|wear|be\s+back|be\s+normal)\b",
     r"\bhow\s+long\s+does\s+it\s+(?:last|take)\b",
 )
 # The numbing has an end to it, and "how long does it last" is the question the card invites.
@@ -3372,6 +3972,32 @@ SIGHT_WORD = (
 PEOPLE = (r"(?:i|i'm|i've|he|he's|she|she's|they|they're|we|you|someone|somebody|anyone|everyone|"
           r"my\s+" + PERSON + r"|the\s+" + PERSON + r"|" + PERSON + r")")
 
+# A collapse the line itself says is a habit or a hypothetical is not someone going down now.
+# Reading the present tense of the verb put "i collapse when i get up" and "i feel like i might
+# collapse" on "Ring 999 or 911 straight away": dizziness on standing is one of the commonest
+# things people bring, and the GP card it had before is the right envelope for it (brisk-turkey,
+# #14526). What makes it a habit or a hypothetical sits on the collapse itself ("might collapse",
+# "nearly collapse", "feel like ... collapsing") or on the moment it happens ("when i stand up",
+# "every time", "too fast"), so only those shapes stand down - a line saying a person has gone down
+# now, "my mum collapsed", "hes on the floor", keeps the ambulance.
+A_HABITUAL_COLLAPSE = (
+    r"\b(?:might|may|could|would)\s+(?:collapse|collapsed|collapsing|pass\s+out|passed\s+out|passing\s+out|"
+    r"faint|fainted|fainting|go\s+down|went\s+down|going\s+down)\b",
+    r"\b(?:nearly|almost|about\s+to)\s+(?:collapse|collapsed|collapsing|pass\s+out|passed\s+out|"
+    r"passing\s+out|faint|fainted|fainting|go\s+down|went\s+down|going\s+down)\b",
+    r"\bfeel(?:s|ing|t)?\s+like\s+(?:\w+\s+){0,4}(?:collapse|collapsing|passing\s+out|fainting|going\s+down)\b",
+    r"\bwhen(?:ever)?\s+(?:i|we|you|he|she|they|my\s+" + PERSON + r"|the\s+" + PERSON + r")\b"
+    r"(?:\s+\w+){0,4}\s+(?:stand|stands|standing|stood|get|gets|getting|got|sit|sits|sitting|sat)\b",
+    r"\b(?:on|after|from|when)\s+standing\b",
+    r"\b(?:every|each)\s+time\b", r"\bwhenever\b", r"\b(?:sometimes|often|always)\b",
+    r"\btoo\s+fast\b",
+    r"\bin\s+the\s+(?:heat|hot\s+weather)\b",
+    r"\bif\s+(?:i|we|he|she|they)\s+(?:don'?t|dont|didn'?t|didnt|miss|misses|skip|skips)\b",
+)
+# Written once, because the collapse rows below both read the same fence.
+NOT_A_COLLAPSE_NOW = r"(?![\s\S]*(?:" + "|".join(A_HABITUAL_COLLAPSE) + r"))"
+
+
 # Someone else is the one at risk - "my wife wants to kill herself", "my friend has taken an
 # overdose" - which needs a different reply (how to help them) from the user's own crisis.
 OTHERS = (r"(?:he|he's|she|she's|they|they're|him|her|them|someone|somebody|anyone|everyone|"
@@ -3394,6 +4020,10 @@ SOMEONE_ELSE_RISK = (
     r"locked\s+(?:him|her)self\s+in\b.{0,40}\bpills\b)\b",
     r"\b(?:kill|hang)\s+(?:him|her|them)self\b(?!\s+(?:upside|on\s+the\s+(?:bars|swing)|from\s+the\s+bars))",
     r"\b(?:he|she|they)'?s?\s+been\s+(?:self[-\s]?harming|cutting)\b",
+    # Any verb that hurts a body, with the relative as its object: "my sister wants to poison
+    # herself", "my friend shoots herself", "my brother has been stabbing himself". A relative's
+    # cut and burn already answered this way; the verb list is what was missing, not the shape.
+    _HURTING_THEMSELVES,
     # The wish as a habit of thought or a feeling belongs to a relative too: "my son keeps
     # thinking of killing himself", "my mum feels like ending it".
     r"\b" + OTHERS + r"\b.{0,40}\b(?:(?:keeps?|kept)\s+thinking\s+(?:about|of)\s+"
@@ -3408,6 +4038,35 @@ SOMEONE_ELSE_RISK = (
     *TALKS_ABOUT_IT,
 )
 SOMEONE_ELSE_RISK = (*SOMEONE_ELSE_RISK, *HELP_SOMEONE)
+# "Wants to be dead", and the euphemism people use instead of the word, are the two ways somebody
+# reports a relative's wish, and both were read without asking whose wish it was. "my dad wants to
+# be dead" and "my son keeps saying he wants to be dead" handed the *speaker* their own crisis card,
+# with the person at risk sitting in the same room, and "my sister doesnt want to be here anymore"
+# got the greeting and a shrug - the one reply somebody reporting that must not get. Only a person
+# is a subject here, and "going to die" is deliberately not in it: "my dad is going to die" is a
+# terminal illness and the waiting for it, not a wish.
+THIRD_PERSON_WISH = (
+    r"\b" + OTHERS + r"\b[^.?!]{0,30}\b(?:wants?\s+to|keeps?\s+saying\s+(?:he|she|they)\s+wants?\s+to|"
+    r"says?\s+(?:he|she|they)\s+wants?\s+to|told\s+me\s+(?:he|she|they)\s+wants?\s+to)"
+    r"\s+be\s+dead\b",
+    # The euphemism rather than the word, which is how most people say it out loud. A place after
+    # "here" is the party, the school or the office, so that arm stands this one down: it is somebody
+    # who does not want to go somewhere, not somebody at risk.
+    r"\b" + OTHERS + r"\b[^.?!]{0,30}\b(?:doesnt|doesn'?t|does\s+not|didnt|didn'?t|did\s+not|"
+    r"dont|don'?t|do\s+not)\s+want\s+to\s+(?:"
+    # "live" is the risky one: "my mum doesnt want to live here any more" is a house.
+    r"live(?!\s+(?:here|there|with|in|at|on|near|abroad|alone|anywhere|somewhere|off)\b)|"
+    r"be\s+here|be\s+alive|exist|be\s+around\s+(?:any\s?more|no\s?more)|"
+    # "go on" is a trip unless it is the end of the sentence or "any more".
+    r"(?:carry|go)\s+on(?=\s*(?:[.?!]|$)|\s+(?:any\s?more|no\s?more)\b))"
+    r"(?!\s+(?:at|on|for|in|with|to)\b)",
+)
+
+
+# The same two arms answer it: a relative's wish said in either of the ways people report it is the
+# person at risk, and the card that names them is the reply. One pattern raises that card and stands
+# the speaker's own down, so the two can never drift apart.
+SOMEONE_ELSE_RISK = (*SOMEONE_ELSE_RISK, *THIRD_PERSON_WISH)
 # The suicide words with somebody else as their subject: "my dad keeps talking about ending it
 # all", "my neighbour keeps mentioning suicide". They were all getting the reader's own crisis
 # card, which asks the wrong person to ring a helpline. Where the line also says how to help
@@ -3578,20 +4237,64 @@ def _own_wish(line):
                                              and not _matches(SELF_TALK, line))
 
 
+# The ways somebody is said not to wake. Every negative modal, including the past ones, because
+# "she laughed so much she couldnt be woken" and "he collapsed laughing and wouldnt wake" are the
+# same fact as "wont wake" - and they were reaching the small-talk pool ("Ha - that good?").
+NOT_WAKE_MODAL = (r"(?:won'?t|wont|wouldn'?t|wouldnt|couldn'?t|couldnt|didn'?t|didnt|"
+                  r"can'?t|cant|cannot|isn'?t|isnt|is\s+not|not|never)")
+# A professional who has not answered is a message, not a body. "my carer is not responding" is the
+# commonest way of saying the carer has not replied to a text, and it rang the ambulance; the same
+# line about a friend or a husband is a collapse. So the not-responding arms stand down when the
+# only person named is a professional, and anything that puts the body in the room - the floor, the
+# bed, breathing, a colour - brings the call back (teal-spruce, #12389).
+PRO_NOT_ANSWERING = (
+    r"\b(?:my|his|her|their|our|the)\s+(?:carers?|care\s+workers?|support\s+workers?|"
+    r"social\s+workers?|personal\s+assistants?|nurses?|midwives?|midwife|doctors?|gps?|"
+    r"physios?|therapists?)\b[^.?!]{0,30}\b(?:isn'?t|is\s+not|not|hasn'?t|has\s+not|never|"
+    r"no)\s+respond(?:ing|ed|e)?\b",
+    r"\bno\s+response\s+from\s+(?:my|the|our)\s+(?:carer|care\s+worker|support\s+worker|"
+    r"social\s+worker|personal\s+assistant|nurse|doctor|gp|physio|therapist)s?\b",
+)
+# "Unresponsive" is also how people describe somebody's manner, not their body: "my boss was
+# unresponsive to my emails", "my son is unresponsive when hes told off". The adjective alone is not
+# the sign then, so the state stands down - unless something in the line puts the body in the room,
+# which is what BODY_IN_THE_ROOM is for below.
+UNRESPONSIVE_MANNER = (
+    r"\b(?:to|about|on|in)\s+(?:my|his|her|their|the|our|a|an)?\s*\w*\s*"
+    r"(?:texts?|emails?|e-?mails?|messages?|msgs?|calls?|letters?|questions?|requests?|"
+    r"complaints?|invites?|applications?|interviews?|thread|group\s+chat|whatsapp|facebook|"
+    r"social\s+media|feedback|criticism|suggestions?)\b",
+    r"\bwhen(?:ever)?\s+(?:he|she|they|i|we)(?:'s|s|'re|re)?\b[^.?!]{0,25}"
+    r"\b(?:told\s+off|told\s+no|told|ignored|shouted\s+at|ticking\s+off|naughty|"
+    r"in\s+trouble|sulking|sulky|pulling\s+a\s+face)\b",
+    r"\b(?:at\s+(?:work|school|college|uni|university)|in\s+meetings?|on\s+the\s+group)\b",
+)
+# The body in front of the reader: any of these turns the message back into a collapse.
+BODY_IN_THE_ROOM = (
+    r"\b(?:floor|ground|bed|sofa|settee|couch|bath|pavement|street|doorstep)\b",
+    r"\b(?:collapsed|collapsing|fell|fallen|fainted|pass(?:ed)?\s+out|seizure|fitting)\b",
+    r"\b(?:breathing|breath|breathe|pulse|blue|lips|cold|clammy|sweating|eyes|pale|grey|gray)\b",
+    # "unresponsive" is deliberately not here: it is the state being tested, so it would match every
+    # line this fence is meant to read. "out cold" and "on the floor" are body signs, not states.
+    r"\b(?:unconscious|out\s+cold|in\s+front\s+of\s+me|with\s+me|next\s+to\s+me)\b",
+    # A body that does not answer to pain or to its own name is the collapse; a carer who does not
+    # answer a text is the message. "to my texts" is deliberately not here.
+    r"\b(?:to\s+(?:pain|touch|voices?|noise|light|stimulus)|(?:his|her|their)\s+name)\b",
+)
 UNCONSCIOUS = (
     # "unconscious" about a person, not "unconscious bias" or "unconscious mind".
     r"\bunconscious\b(?!\s+(?:bias|biases|mind|thought|thoughts|desire|wish|belief|prejudice|"
     r"process|choice|decision|level))",
-    r"\b(?:won't|wont|isn't|is\s+not|not)\s+waking\s+up\b",
+    r"\b" + NOT_WAKE_MODAL + r"\s+waking\s+up\b",
     # "my husband won't wake up", "my grandad can't wake up". The first person is left out: "i
     # can't wake up in the mornings" is an insomnia complaint, not a collapse.
     r"\b(?:he|she|they|my\s+" + PERSON + r"|the\s+" + PERSON + r")\b(?:\s+\w+){0,3}\s+"
-    r"(?:won't|wont|can't|cant|cannot|isn't|is\s+not|not)\s+wak(?:e|ing)\b",
-    r"\b(?:can't|cant|cannot|won't|wont)\s+wake\s+(?:him|her|them)\b",
+    + NOT_WAKE_MODAL + r"\s+wak(?:e|ing)\b",
+    r"\b" + NOT_WAKE_MODAL + r"\s+wake\s+(?:him|her|them)\b",
     # "my husband is on the floor and wont wake up": the floor says it is happening now, so the
     # words between the person and the verb do not matter.
-    r"\bon\s+the\s+(?:floor|ground)\b.{0,30}\b(?:won't|wont|can't|cant|cannot|not)\s+wak(?:e|ing)\b",
-    r"\b(?:can't|cant|cannot|won't|wont)\s+(?:be\s+)?woken\b", r"\bpassed\s+out\b.{0,20}\b(?:and|not)\b",
+    r"\bon\s+the\s+(?:floor|ground)\b.{0,30}\b" + NOT_WAKE_MODAL + r"\s+wak(?:e|ing)\b",
+    r"\b" + NOT_WAKE_MODAL + r"\s+(?:be\s+)?woken\b", r"\bpassed\s+out\b.{0,20}\b(?:and|not)\b",
     # "he was out cold and wouldnt wake up" is the same collapse told in the past tense, and the
     # past-tense negative is in none of the patterns above: the line was a comfort line. "wouldn't
     # wake up" on its own stays out, because a teenager who would not get up is a grumble - it is
@@ -3608,6 +4311,19 @@ UNCONSCIOUS = (
     r"\b" + PEOPLE + r"\b(?:\s+\w+){0,3}\s+(?:is\s+|isn't\s+|is\s+not\s+)?not\s+responding\b"
     r"(?!\s+(?:well\b|" + RESPOND_SENSE + r"))",
     r"\b(?:he|she|they|my\s+" + PERSON + r")\s+(?:is|'s)\s+not\s+responsive\b",
+    # "my mum is unresponsive" is the shortest way to say it about somebody else, and the file had
+    # the joined pronoun ("hes unresponsive") and "not responsive", but not the plain adjective
+    # after a person: "my mum is unresponsive", "my dad is unresponsive" and "my wife is
+    # unresponsive but breathing" were all a chat nod.
+    r"\b\s?(?:(?:he|she|they)\b|(?:my|his|her|their|our|the)\s+" + PERSON + r"\b)"
+    r"(?:\s+\w+){0,3}\s+(?:is|are|was|were|'s|'re|seems?|looks?|has\s+gone|have\s+gone|now)\s+"
+    r"(?:now\s+)?unresponsive\b"
+    r"(?!\s+(?:to\s+(?:[\w']+))?\s*(?:food|dinner|tea|treats?|name|his|her|their|my)\b)",
+    # A body on the floor that is not responding. The posture is the sign, so no person word is
+    # needed: "the care worker is on the floor and not responding" was answered "Right. What have
+    # you tried so far?" because every arm above wanted "my <person>" or a pronoun in front of the
+    # verb (teal-spruce, #12389).
+    r"\bon\s+the\s+(?:floor|ground)\b[^.?!]{0,40}\b(?:not\s+responding|unresponsive)\b",
     r"\b(?:he|she|they|my\s+" + PERSON + r"|the\s+" + PERSON + r")\b(?:\s+\w+){0,3}\s+"
     r"(?:won't|wont|isn'?t|is\s+not|not)\s+respond(?:ing)?\b(?!\s+(?:well\b|" + RESPOND_SENSE + r"))",
     # The two reports above with the verb joined to the pronoun - "shes unresponsive", "hes not
@@ -3635,8 +4351,14 @@ UNCONSCIOUS = (
     # that line to it rather than taking it with the generic first-aid reply.
     r"(?![\s\S]*\b(?:fever|temperature|sepsis|rigors|shivering|infection)\b)",
     # A person collapses. A cake, a shelf or a market collapses too, so the subject has to be one.
-    r"\b" + PEOPLE + r"\b(?:\s+\w+){0,4}\s+collapsed\b",
-    r"\bcollapsed\b.{0,30}\b(?:and\s+(?:isn't|is\s+not|won't|wont|stopped|not)\s+(?:breathing|waking|responding|conscious)|"
+    # Every form of the verb counts, not only the past tense: "my mum collapsing on the floor just
+    # now" was answered "Ring 111 or your surgery this week rather than waiting it out", because
+    # only `collapsed` was in the pattern - the present tense of the same thing, which is the more
+    # urgent of the two, reached the GP card while "my dad has collapsed" reached the ambulance.
+    # ...and a collapse the line says is a habit or a hypothetical stands down, which is the fence
+    # above: "i collapse when i get up" is the GP card, "my mum is collapsing" is the ambulance.
+    NOT_A_COLLAPSE_NOW + r"\b" + PEOPLE + r"\b(?:\s+\w+){0,4}\s+collaps(?:e|es|ed|ing)\b",
+    NOT_A_COLLAPSE_NOW + r"\bcollaps(?:e|es|ed|ing)\b.{0,30}\b(?:and\s+(?:isn't|is\s+not|won't|wont|stopped|not)\s+(?:breathing|waking|responding|conscious)|"
     r"on\s+(?:the\s+)?(?:floor|ground|pavement|street|kitchen\s+floor|bathroom\s+floor))\b",
     r"\b(?:he|she|they|my\s+" + PERSON + r")\s+(?:is|'s)\s+out\s+cold\b",
     # Something fell on someone: "the roof collapsed on the kids", "the shelf came down on me".
@@ -4056,7 +4778,7 @@ PET_CRISIS = (
     r"\bshort(?:ness)?\s+of\s+breath\b",
     # "my dog is gasping for breath" was reaching the tooth-brushing answer: a pet fighting for
     # air is the same vet-now case as one that cannot breathe.
-    r"\bgasp\w*\b",
+    r"\bgasp\w*\s+for\s+(?:air|breath|it)\b",
     # "My dog is breathing funny" is the same report in the words people use, and it was a shrug
     # while "breathing oddly" got the toothbrushing answer.
     r"\bbreath\w*\s+(?:funny|odd|oddly|strange|strangely|weird|weirdly|noisily|loudly|"
@@ -4277,6 +4999,18 @@ SELF_HARM_BY_OTHER = (*SELF_HARM_BY_OTHER,
     # loss reply ("That's such sad news"), which is the wrong grief for somebody still here.
     r"\b" + OTHER_SUBJECT + r"\b[^.?!]{0,25}\bwish(?:es)?\s+(?:he|she|they)\s+"
     r"(?:was|were|is|are)\s+(?:dead|gone)\b",
+    # A relative's plan with a means, or with a verb a blade does not have. `SELF_HARM_BY_OTHER`
+    # above reads cutting, burning, hurting and starving, so "my brother wants to shoot himself"
+    # was filed as news ("Noted: your brother wants to shoot himself.") and "my son wants to
+    # throw himself under a train" the same, both said as plainly as the cutting lines the arm
+    # does read. The person words are the ones the arm already knows.
+    r"\b" + OTHER_SUBJECT + r"\b[^.?!]{0,30}\b(?:shoot|shooting|hang|hanging|stab|stabbing|"
+    r"poison|poisoning|drown|drowning|strangle|strangling|overdose|overdosing)\s+"
+    r"(?:him|her|them)sel(?:f|ves)\b",
+    r"\b" + OTHER_SUBJECT + r"\b[^.?!]{0,30}\b(?:throw|throwing|jump|jumping|step|stepping|"
+    r"walk|walking)\s+(?:him|her|them)sel(?:f|ves)\s+"
+    r"(?:in\s+front\s+of|under|onto|off)\s+(?:a|an|the)?\s*(?:train|trains|bus|buses|lorry|"
+    r"truck|coach|traffic|platform|tracks?|rails?|bridge|roof|building|cliff|balcony|ledge)\b",
 )
 # A bare "hurt himself" is not the same sentence as "cut himself": it is a playground fall and it
 # is a boy who means it, and the line does not say which. It is asked rather than answered with the
@@ -4352,11 +5086,31 @@ ORDINARY_REFLEXIVE = (
 )
 
 
+# The itch explains a line about scratching, and nothing else: "my son picks at his spots and cuts
+# himself", "my son scratches at night and has a blade", "my son scratches at night and swallowed a
+# packet of pills" are about the other thing in them, and an itch word must not stand the card down.
+# The blade is read here and not in the lookalike table because a razor beside a lookalike is
+# ordinary - "he cut himself shaving with a razor" - and that line is not one of these.
+AN_ACT_BESIDE_THE_ITCH = (
+    r"\b(?:cut|cuts|cutting|cut\s+himself|cut\s+herself|slit\w*|slashed|blade|razor|knife|"
+    r"scalpel|stanley\s+knife|glass|broken\s+glass|burn\w*|scald\w*|burnt)\b",
+    r"\b(?:pills?|tablets?|paracetamol|ibuprofen|overdose[ds]?|od|poison\w*|bleach|"
+    r"kill\w*|die|dying|suicide|end\s+it|end\s+my\s+life|hang\w*|noose|rope)\b",
+    r"\b(?:self[\s-]?harm\w*|hurting\s+himself|hurting\s+herself|hurting\s+themselves|"
+    r"on\s+purpose)\b",
+)
+
+
 def _a_reason_it_was_not_meant(text):
     # ...and the plate, through the helper that reads the tears as well as the wish: the arms are
     # not in SELF_HARM_LOOKALIKE on their own, or "my daughter cuts herself a slice of cake but
     # she is depressed" would be stood down before anybody read the depression.
+    # The itch is read on its own line of reasoning: it explains the scratching and not a blade
+    # beside it, and the same wish fence applies to it.
     return ((_matches(SELF_HARM_LOOKALIKE, text) and not _matches(A_WISH_OR_TALK_OF_IT, text))
+            or (_matches(AN_ITCH_LOOKALIKE, text)
+                and not _matches(A_WISH_OR_TALK_OF_IT, text)
+                and not _matches(AN_ACT_BESIDE_THE_ITCH, text))
             or _an_ordinary_helping(text))
 
 
@@ -4451,8 +5205,13 @@ WISH_DEAD_TAIL = (r"(?=\s*(?:$|[.!?]|any\s?more|any\s+longer|at\s+all|no\s?more|
 # ...and for the "dead"/"gone" arms the test is only that a comma does not introduce the reason.
 # "i wish i was dead i cant do this anymore" is the wish with the next thought run onto it and no
 # punctuation at all, so it has to keep the card; the comma, not the tail, is what names a day.
-WISH_DEAD_NO_REASON = (r"(?!\s*,\s*(?!any\s?more|any\s+longer|at\s+all|no\s?more|now\b|"
-                       r"tonight\b|today\b))")
+# A comma followed by the same thing said again is still the wish: "i wish i was dead, honestly"
+# and ", tbh" were the nod on main. Each word counts only where the line ends, so ", honestly, my
+# exam went badly" is still an exam.
+_SOFTENING = (r"(?:honestly|tbh|for\s+real|seriously|genuinely|no\s+joke|i\s+mean\s+it|"
+              r"really|truthfully|lol)\b(?=\s*(?:$|[.!?]))")
+WISH_DEAD_NO_REASON = (r"(?!\s*+,\s*+(?!any\s?more|any\s+longer|at\s+all|no\s?more|now\b|"
+                       r"tonight\b|today\b|" + _SOFTENING + r"))")
 WISH_DEAD = (
     r"\bi\s+wish\w*\s+i\s+(?:was|were|am)\s+(?:dead|gone|never\s+born)\b"
     # "dead" and "gone" are ordinary words as often as they are the wish, and every phrase below
@@ -4807,6 +5566,28 @@ def _the_laugh(line):
     return _idiom(line) and re.search(_LAUGH_KILL, line) is not None
 
 
+def _an_accident_near_thing(line):
+    """True when "nearly died" is a scare on a bike or a ladder, not a wish.
+
+    The accident is the thing they came off, said before the phrase or after it; a wish, a means
+    or a deliberate act on the same line takes the accident back.
+    """
+    doing = _EFFORT_DOING.search(line)
+    if not (_EFFORT_BEFORE.search(line)
+            or (doing and doing.group("doing") != "laughing"
+                and not HARM_DOING.match(doing.group("doing")))):
+        if not _EFFORT_DIED.search(line) or not _COME_OFF_IT.search(line):
+            return False
+    return (not _matches(EFFORT_NOT_AN_ACCIDENT, line) and not _matches(EFFORT_MEANS, line)
+            and not _rings(line) and not _rest_of_it_rings(line))
+
+
+def _near_thing_key(line):
+    """The near thing's own reply, or the one for the person who watched it happen."""
+    return "near_thing_other" if _person(line) and not _matches((r"\bi\b", r"\bwe\b"),
+                                                                line) else "near_thing"
+
+
 def _the_effort_frame(line):
     """True when "killed myself" is a job they were doing, not a wish.
 
@@ -4815,6 +5596,8 @@ def _the_effort_frame(line):
     crisis number. The key is what comes straight after the phrase, so a wish said anywhere in
     the line - "i nearly killed myself and i want to die" - keeps the card.
     """
+    if _an_accident_near_thing(line):
+        return True
     found = EFFORT_AFTER.search(line)
     if not found:
         return False
@@ -5022,6 +5805,19 @@ PET_SUBJECT_PLURAL = (
     r"\b(?:my|our|the)\s+(?:dogs|cats|puppies|kittens|rabbits|horses|ponies|pets)\b",
 )
 # Moved to safety_cards.py: PET_APPOSITIVE, PET_APPOSITIVE_SUB, PET_BREATH, PET_BREATH_NOW, PET_CANT_SETTLE, PET_EFFORT, _PET_APPOSITIVE
+# "and so do i", "me too" after the animal's wish: the speaker's own wish in the short form, which
+# FIRST_PERSON_WISH (it wants a verb like want or wish) and _own_wish do not read.
+SO_I_TOO = (
+    r"\b(?:so\s+(?:do|will|would|can|does)\s+i|same\s+here|me\s+too|and\s+i\s+do)\b",
+)
+# The wish said about the animal rather than by the speaker: the same pet subject, and one of the
+# ways people say the animal has had enough close behind it in the same sentence.
+PET_WANTS_OUT = (
+    r"\b(?:my|our|the|a)\s+(?:dog|cat|puppy|kitten|pup|pet|parrot|hamster|rabbit|bunny|horse|"
+    r"pony|budgie|guinea\s+pig|tortoise|ferret|gerbil|snake|lizard)\b[^.?!]{0,40}\b(?:"
+    r"wants?\s+to\s+die|no\s+will\s+to\s+live|doesn'?t\s+want\s+to\s+live|"
+    r"does\s+not\s+want\s+to\s+live|no\s+quality\s+of\s+life|has\s+had\s+enough(?!\s+(?:food|water|to\s+eat|dinner)))\b",
+)
 def _any_of(*groups):
     """One alternation from several pattern groups, for the lookahead pairs below."""
     parts = [r"(?:" + part + r")" for group in groups for part in group]
@@ -5088,7 +5884,8 @@ BLACKOUT_STILL_DOWN = (
 )
 # The three ways a blackout is the heart, which is the 999 card, kept apart from the two ways it is a
 # same-day question: a run of them, and somebody else on the floor.
-BLACKOUT_URGENT = BLACKOUT_EFFORT + BLACKOUT_HEART + BLACKOUT_FLOOR + BLACKOUT_STILL_DOWN
+BLACKOUT_URGENT = (BLACKOUT_EFFORT + BLACKOUT_HEART + BLACKOUT_FLOOR + BLACKOUT_STILL_DOWN
+                   + BLACKOUT_BREATH)
 BLACKOUT_RED = BLACKOUT_URGENT + BLACKOUT_REPEAT + BLACKOUT_SOMEONE_DOWN
 BLACKOUT_RED_LINE = _both(BLACKOUT_ANY, BLACKOUT_RED)
 FEVER_SIGN = (
@@ -5103,7 +5900,7 @@ RASH_COMPANY = FEVER_SIGN + (
 )
 # "his temp is 39 and hes drowsy": the person can be named by a possessive or a contraction.
 RED_ANCHOR = HUMAN_ANCHOR + (
-    r"\b(?:his|her|their|hes|shes|theyre|our|your|newborn|infant|toddler|baby)\b",
+    r"\b(?:his|her|their|hes|shes|theyre|our|your|newborn|new\s?born|infant|toddler|baby)\b",
     # The age is the anchor when it is said next to a temperature: "my 6 week old has a fever".
     r"\b\d+\s*(?:days?|weeks?)\s+old\b", r"\b(?:1|2|one|two)[-\s]*months?[-\s]*old\b",
     r"\b(?:is|only|just|nearly)\s+(?:1|2|one|two)\s+months?\b",
@@ -5158,6 +5955,47 @@ PALE_SIGN = (
 # the child, the colour, and the second thing, in whichever order.
 PALE_CHILD = ("(?=.*" + _any_of((CHILD_WORD,)) + ")(?=.*" + _any_of(PALE_SIGN) +
               ")(?=.*" + _any_of(PALE_SECOND) + ") ",)
+# The same colour in a grown-up is a different thing, and the advice is not the child's. A child
+# goes downhill over hours and is kept warm while the doctor comes; an adult who is pale, grey or
+# clammy has lost blood pressure - a bleed, a shock or a heart attack - and is sat down and given
+# to the ambulance. Both were answered by nothing: `my husband is pale and clammy` was "Noted:
+# your husband is pale and clammy" and `i am pale and clammy` was told to open a window and have
+# a cold drink, which is the heat answer and the opposite of what a cold sweat means.
+ADULT_PERSON = (
+    r"\b(?:husband|wife|partner|boyfriend|girlfriend|fianc\w+|mum|mom|mummy|mother|dad|daddy|"
+    r"father|nan|nana|gran|grannie|granny|grandma|grandmother|grandad|grandpa|grandfather|"
+    r"sister|brother|aunt|auntie|uncle|cousin|friend|mate|neighbour|neighbor|colleague|"
+    r"coworker|flatmate|housemate|lodger|carer|he|she|him|her)\b",
+)
+ADULT_ME = (
+    r"\b(?:i|i'm|im|ive|i've|i\s+am|i\s+feel|i\s+look|i\s+went|i\s+have|me|myself|my\s+own)\b",
+)
+# Someone, the colour, and the second thing, in whichever order - and a child is not this row.
+PALE_ADULT = ("(?=.*" + _any_of(ADULT_PERSON + ADULT_ME) + ")(?=.*" + _any_of(PALE_SIGN) +
+              ")(?=.*" + _any_of(PALE_SECOND) + ") ",)
+# Pale and sweaty straight after football is a child who has been running about - the colour is
+# the effort, not the circulation. A hot day is deliberately not in this list: pale and clammy
+# in the sun is heat exhaustion. "my daughter is pale and sweaty after football"
+# was a child going downhill. The red signs below still win: a child who is floppy, wont wake,
+# going blue or grey is the card whatever they were doing.
+# Real exertion: a match, training, a run, the gym, swimming, a bike ride, PE. Sweaty and clammy
+# straight after one of these is sweat, and the cooling answer is the right one. The shape is
+# generic rather than a longer list of nouns, so "after cross country", "after a 3k race", "after
+# the school run" and "after a swimming lesson" are all in it (@magenta-pine's read).
+PALE_EXERTION = (
+    r"\b(?:after|during|at|from|in)\s+(?:(?:a\s+|the\s+)?(?:\w+\s+){0,2}"
+    r"(?:race|run|match|game|session|training|lesson|class|practice|workout|circuit|"
+    r"walk|hike|ride)|"
+    r"cross\s?country|school\s+run|football|rugby|netball|hockey|the\s+gym|sports?\s+day|"
+    r"swimming|a\s+swim|cycling|a\s+bike\s+ride|pe)\b",
+    # A named sport after the cue is the same thing - "after gymnastics", "after tennis" - and so
+    # is "after his lesson".
+    r"\b(?:after|during|at|from|in)\s+(?:his|her|my|their|our|the|a|an)?\s*"
+    r"(?:tennis|badminton|squash|cricket|athletics|gymnastics|dance|dancing|ballet|judo|karate|"
+    r"martial\s+arts|taekwondo|boxing|climbing|rowing|trampolining|skating|skateboarding|"
+    r"snowboarding|skiing|riding|horse\s+riding|sports?|games?|practice|training|workout|walk|"
+    r"walking|hike|hiking|ramble)\b",
+)
 PALE_EFFORT = PALE_EXERTION + PALE_HEAT + (
     r"\b(?:after|during|at|from|in)\s+(?:the\s+)?(?:park|playtime|playground|playing\s+out|"
     r"the\s+beach|nursery|soft\s+play)\b",
@@ -5172,6 +6010,52 @@ PALE_EFFORT_REAL = PALE_EXERTION + (
 PALE_EFFORT_NO = (
     r"\bclammy\b", r"\bcold\b", r"\bfloppy\b", r"\blimp\b", r"\bdrows\w*",
     r"\bsleepy\b", r"\bunresponsive\b", r"\bconfus\w*",
+)
+# The red signs that already have an ambulance answer of their own, so the colour card leaves
+# them alone: floppy, hard to wake, not breathing properly. What is left of PALE_EFFORT_RED is
+# the colour itself - grey, mottled, blue round the lips - which nothing else answers.
+PALE_OTHER_RED = (
+    r"\bfloppy\b", r"\blimp\b", r"\b(?:wont|won't|not|can't|cant|unable\s+to)\s+wake\b",
+    r"\bunresponsive\b", r"\bunconscious\b", r"\bcollapsed\b",
+    # "blue" on its own is the colour this card is for; the lips are the breathing sign that has
+    # its own answer above.
+    r"\bblue\s+(?:round|around)\s+the\s+(?:lips|mouth)\b",
+    r"\bbreathing\s+(?:fast|quickly|hard)\b", r"\bgrunting\b", r"\bnot\s+breathing\b",
+)
+PALE_EFFORT_RED = (
+    r"\bfloppy\b", r"\blimp\b", r"\b(?:wont|won't|not|can't|cant|unable\s+to)\s+wake\b",
+    r"\bunresponsive\b", r"\bunconscious\b", r"\bcollapsed\b", r"\bblue\b",
+    r"\bgrey\b", r"\bgray\b", r"\bmottled\b", r"\bbreathing\s+(?:fast|quickly|hard)\b",
+    r"\bgrunting\b", r"\bnot\s+breathing\b",
+)
+# Pale and clammy hands are nerves, and a line that never says whose hands they are is asked by
+# somebody holding them out: the whole-body version is a person, and this is the fence.
+PALE_ADULT_ITSELF = (
+    r"\b(?:(?:my|his|her|their|your|our|the|both)\s+)?(?:hands?|feet|fingers|toes|palms?)\s+"
+    r"(?:(?:are|is|were|was|feel|feels|felt|go|goes|went|get|gets|got|look|looks)\s+)?"
+    r"(?:\w+\s+){0,2}?(?:pale|grey|gray|white|clammy|cold)\b",
+)
+# ...but only when the hands are the whole of it. "i am pale and clammy and clammy hands" is a
+# person describing themselves and then their hands, and it was stood down by the word "hands".
+PALE_ADULT_WHOLE = (
+    r"\b(?:i|he|she|they|we|you)\s+(?:am|is|are|was|were|look|looks|looked|feel|feels|felt|"
+    r"have\s+gone|has\s+gone|went|got)\s+(?:\w+\s+){0,2}(?:pale|grey|gray|clammy|ashen|"
+    r"white\s+as)\b",
+)
+# What makes a grown-up pale and clammy without being an emergency: the heat, the effort, a night
+# of drinking, a needle, and a fever that has its own answer.
+# The heat and the effort are not in this list: they have their own answer above, and it is a
+# better one than leaving the line to whatever else catches it.
+PALE_ADULT_FINE = (
+    r"\bhangover\w*\b", r"\b(?:been|out)\s+drinking\b", r"\bhung\s?over\b",
+    r"\b(?:after|from|at)\s+(?:my|a|the|his|her)\s+(?:blood\s+test|bloods|jab|injection|"
+    r"vaccine|vaccination|needle|donation|giving\s+blood|blood\s+donation)\b",
+    r"\b(?:with|from|got|has|have|had)\s+(?:an?\s+)?(?:cold|flu|virus|hangover)\b",
+    # Pale and clammy with nerves is a body that is frightened, and it passes: the trembling
+    # hands answer is the one that helps, not an ambulance.
+    r"\b(?:nervous|nerves|anxious|anxiety|panick\w*|panic\s+attack|scared|frightened|"
+    r"terrified|stage\s+fright|worried|exam|interview|dentist|needle\s+phobia)\b",
+    r"\bgave\s+blood\b", r"\bblood\s+donor\b",
 )
 NAMED_SICK = (r"\b(?:meningitis|meningococcal|sepsis|blood\s+poisoning|pneumonia|encephalitis|"
               r"necrotis\w+\s+fasciitis|kawasaki\s+disease)\b")
@@ -5257,6 +6141,36 @@ FEVER_NOT_THE_WEATHER = (
 FEVER_CASES = frozenset(("red_flags", "stiff_neck", "sepsis_signs", "newborn_fever",
                          "named_illness", "high_temp", "rash_headache", "fever_rash",
                          "child_fever"))
+# The two cards that tell a parent how to look after a temperature at home. A disease's name only
+# ever takes these away: a stiff neck, a rash that does not fade and a child who is floppy are
+# red flags whatever the illness is called, so those cards keep the line.
+FEVER_HOME_CARE = frozenset(("child_fever", "high_temp"))
+# Some illnesses are called a fever and nobody in the house has a thermometer out: glandular
+# fever, scarlet fever, yellow fever, dengue. The word is in the name of the disease, so the
+# fever cards read "my daughter has glandular fever" as a child with a temperature and answer
+# a how-many-degrees question nobody asked - a same-day 111 call for a child who wants to know
+# whether she can play netball. What makes a line a temperature is a fever word that is not
+# inside a name: a reading, "hot", "temperature", "burning up".
+_A_DISEASE_CALLED_A_FEVER = (
+    r"\b(?:glandular|scarlet|yellow|dengue|rheumatic|typhoid|paratyphoid|q|lassa|ebola|marburg|"
+    r"crimean-congo|rocky\s+mountain\s+spotted|mediterranean\s+spotted|swine|haemorrhagic|hemorrhagic)"
+    r"\s+fever\b",
+)
+_THE_TEMPERATURE_WORDS = (
+    r"\bfever\w*", r"\bfeverish\b", r"\btemps?\b", r"\btemperatures?\b",
+    r"\bhot\b", r"\bhot\s+to\s+(?:the\s+)?touch\b", r"\bburning\s+up\b",
+    r"\bhigh\s+temperature\b", r"\b\d{2}(?:\.\d)?\s*(?:c\b|degrees)",
+)
+
+
+def _the_only_fever_is_a_disease_name(line):
+    """True when every fever word in the line is inside the name of a disease."""
+    if not _matches(_A_DISEASE_CALLED_A_FEVER, line):
+        return False
+    stripped = line
+    for pattern in _A_DISEASE_CALLED_A_FEVER:
+        stripped = re.sub(pattern, " ", stripped)
+    return not _matches(_THE_TEMPERATURE_WORDS, stripped)
 # The words that put a fever in the present, even when the line also names a time: "a temp of 39
 # since last night", "still burning up", "has had a fever since friday". The story guards use them
 # so a child who is ill now is not read as a child who was ill once.
@@ -5265,14 +6179,81 @@ FEVER_STILL_NOW = SEPSIS_SIGN + (
     r"thursday|this\s+morning|teatime)\b",
     r"\bstill\b", r"\bright\s+now\b", r"\bhas\s+had\b", r"\bstarted\b",
 )
-NEWBORN_TEMP = _both(NEWBORN, FEVER_SIGN)
+# The fever said the way a parent says it, with no word for temperature in it: "my baby is 2 months
+# old and feels hot" was the child-fever card (111 and watch for floppiness) when a baby that small
+# is seen straight away. The baby has to be the one that is hot, so the hot word comes within a word
+# or two of a baby word or of the age said in the line: "my 6 week old feels hot" yes, "the kettle
+# is boiling" and "the bath is hot" no.
+BABY_HOT_SUBJECT = _any_of((
+    r"\b(?:baby|newborn|new\s?born|infant|little\s+one|son|daughter|boy|girl|she|he|they|"
+    # the age with or without the "old", since "baby is 7 weeks and feels very hot" is the same
+    # baby as "my 7 week old feels hot"; NEWBORN still has to match the line as well, so a thing
+    # aged in weeks is not read here.
+    r"\d+\s*(?:days?|weeks?|months?)(?:\s+old)?|under\s+(?:3|three)\s+months?)\b",
+))
+# How small the baby has to be for a hand on the forehead to be the hospital call: under five
+# weeks. A parent's hand is not a thermometer, and "feels hot" at seven or ten weeks is the
+# same-day 111 card this bot already gives it - three readers of #11074 said the same
+# (steward-fleet-blanket, zippy-kangaroo, cream-eel). A stated temperature and a stated strong
+# heat are the hospital call at any age under three months, and that is what stays below.
+TRUE_NEWBORN = _any_of((
+    r"\bnew\s?born\b", r"\bjust\s+born\b", r"\b\d+\s*days?\s*(?:old)?\b",
+    r"\b(?:1|2|3|4|one|two|three|four)\s*weeks?\s*(?:old)?\b",
+    r"\bunder\s+(?:1|one)\s+month\b",
+    r"\b(?:is|only|just|nearly)\s+(?:1|2|3|4|one|two|three|four)\s+weeks?\b",
+))
+# The ages in TINY_AGE that are five weeks and over, so a later line settling the age the other way
+# wins: "my baby is 3 weeks old" then "shes 7 weeks now" is not the newborn's card any more.
+TRUE_NEWBORN_FINE = (
+    r"\b(?:5|6|7|8|9|10|11|12|five|six|seven|eight|nine|ten|eleven|twelve)\s*weeks?\s*(?:old)?\b",
+    r"\b(?:is|only|just|nearly)\s+(?:5|6|7|8|9|10|11|12|five|six|seven|eight|nine|ten|eleven|"
+    r"twelve)\s+weeks?\b",
+    r"\b(?:1|2|one|two)\s*months?\s*(?:old)?\b",
+    r"\b(?:is|only|just|nearly)\s+(?:1|2|one|two)\s+months?\b",
+    r"\b(?:under|less\s+than)\s+(?:3|three)\s+months?\b",
+)
+# A baby named as a baby, or an age used as a noun ("my 3 week old"). A thing is aged with the
+# verb: "my laptop is 3 weeks old and feels hot" is a machine that has been running, and the age
+# there is a description, not a person. So the plain "feels hot" arm wants one of these as well,
+# and the age-as-a-noun arm is only the possessive shape a parent uses.
+BABY_NAMED = _any_of((
+    r"\b(?:baby|newborn|new\s?born|infant|little\s+one|son|daughter|boy|girl|she|he|they)\b",
+    r"\b(?:my|our|his|her|their)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve)\s*(?:days?|weeks?|months?)\s*old\b",
+))
+# The heat words that carry a strong fever in themselves, without a number on a thermometer.
+BABY_BURNING = (r"\bboiling\b", r"\bburning\s+hot\b")
+BABY_IS_HOT = (
+    # A stated strong heat is the hospital call at any age under three months: "my baby is 8 weeks
+    # old and is burning hot" puts the age and the heat a few words apart, so the copula is what
+    # the window is measured from.
+    BABY_HOT_SUBJECT + r"[^.?!]{0,7}\b(?:boiling|burning\s+hot)\b",
+    BABY_HOT_SUBJECT + r"[^.?!]{0,12}\b(?:is|was|got|has\s+gone)\s+"
+    r"(?:really\s+|very\s+|so\s+)?(?:boiling|burning\s+hot)\b",
+    # No hedge here: a parent who says "a bit hot" about a two month old is playing it down, and
+    # that line is already the same-day 111 call. A plain "feels hot" with no number is the
+    # newborn's card only, and the age is taken from the same line.
+    r"(?=.*" + TRUE_NEWBORN + r")(?=.*" + BABY_NAMED + r")(?=.*" + BABY_HOT_SUBJECT +
+    r"[^.?!]{0,7}\b(?:feels?|is|was)\s+(?:really\s+|very\s+|so\s+)?(?:hot|very\s+hot)\b)",
+)
+# The age on its own is not a person: `BABY_HOT_SUBJECT` takes a bare "2 months", so
+# "my laptop is 2 months old and is boiling" and "my boiler is 2 months old and is boiling" were
+# read as a baby with the 999 - the one fence this table exists to hold. Naming the baby as well
+# (`BABY_NAMED`) is the same fence the plain "feels hot" arm already carries, and it is asked
+# here rather than in the arms so that a real baby's age keeps every window below.
+NEWBORN_TEMP = (
+    r"(?=.*" + _any_of(NEWBORN) + r")(?=.*" + BABY_NAMED + r")(?=.*"
+    + _any_of(FEVER_SIGN + BABY_IS_HOT) + r")",
+)
 # A fever said about the baby, with the age coming from the line before it (see TINY_AGE): the
 # arm keeps its own words here and the memory decides whether it is a baby's line at all.
 NEWBORN_NEXT = FEVER_SIGN + (r"\bboiling\b", r"\bburning\s+hot\b", r"\bvery\s+warm\b",
                 # "she feels hot", "he is hot", and fast breathing are how a parent says the same
                 # thing without the word temperature; the age is already in memory, so these are
                 # the tiny baby's lines and nobody else's.
-                r"\bfeels?\s+hot\b", r"\bis\s+hot\b", r"\bbreathing\s+(?:fast|quickly|hard)\b")
+                r"\bfeels?\s+(?:really\s+|very\s+|so\s+)?hot\b",
+                r"\bis\s+(?:really\s+|very\s+|so\s+)?hot\b",
+                r"\bbreathing\s+(?:fast|quickly|hard)\b")
 
 # A hypo is the diabetic emergency people actually send, and the sign they describe is a person
 # who is not themselves - confused, sweating, shaking, slurred, or aggressive out of nowhere.
@@ -5377,6 +6358,11 @@ OLD_DOWN = (
 SHOT_SELF = (
     r"\bi\s+(?:got|gets|was|were|have|had|am|'m|been)\b[^.?!]{0,15}\bshot\b",
     r"\bshot\s+me\b", r"\bthey\s+shot\s+me\b", r"\bi\s+(?:have\s+)?been\s+shot\b",
+    # "i shot myself" is the speaker's own wound, and it had no card at all: the line was answered
+    # "I'm listening — say more if it helps." "my son shot himself" was worse, a fact filed as one -
+    # "Noted: your son shot himself." The verb with a reflexive is the same wound whether it is
+    # first person or third, so SHOT reads it and this says whose it is.
+    r"\bi\s+(?:have\s+|had\s+)?shot\s+my\s*self\b",
 )
 # A bone through the skin is an ambulance and a wound to cover, not a support and a lift.
 BODY_LIMB = (r"(?:arms?|legs?|wrist|ankle|fingers?|thumb|shin|knee|elbow|shoulder|collarbone|"
@@ -5582,7 +6568,41 @@ THROAT_THICK = (
     r"(?:a\s+bit\s+|a\s+little\s+|really\s+|very\s+|so\s+)?thick\b",
 )
 MOUTH_TINGLE = (
-    r"\b(?:tingl\w*|numb\w*|pins\s+and\s+needles|prickl\w*)\b",
+    r"\b(?:tingl\w*|numb(?:ness|ed|ing|s)?|pins\s+and\s+needles|prickl\w*)\b",
+)
+# The tingle card is about the lips, the tongue and the mouth. A face that has gone numb on one
+# side is the stroke answer, and "my face is numb" and "one side of my face is numb" both had it
+# before this arm existed, so the face alone does not get the watch-it card.
+LIPS_TINGLE_MOUTH = (
+    r"\b(?:lips?|tongue|mouth)\b",
+)
+# A lip that has gone *numb* is a nerve sign and not a tingle: Bell's palsy, a stroke and an
+# allergy all start that way, and the cold sore and the toothpaste have nothing to do with a lip
+# that cannot feel. The watch-it card needs a tingle in the word - "my lips are numb" keeps
+# whatever it had (eager-pineapple, #safety 134176).
+LIPS_NUMB = (
+    r"\b(?:numb|numbness|dead|gone\s+dead)\b",
+)
+LIPS_TINGLE_SAID = (
+    r"\b(?:tingl\w*|pins\s+and\s+needles|prickl\w*|fizz\w*|buzz\w*|tingly)\b",
+)
+# ...and when a hand, an arm or a foot is in the line too, the limbs are the story: "my hands and
+# lips are tingling" is Raynaud's, which is a thing to be seen about, not a lip tingle with
+# nothing behind it. The lip card is for the mouth on its own.
+LIPS_LIMB_TOO = (
+    r"\b(?:hands?|fingers?|fingertips?|feet|foot|toes?|arms?|legs?|chest|shoulders?)\b",
+)
+# A mouth that tingles when somebody eats an apple, when they drink a glass of wine or when they
+# come in from the cold has its cause in the line, and the cause gets its own answer (the oral
+# allergy card, the units card) or the listening line it had before. This card is for the tingle
+# with nothing behind it, which is the shape that needs what to watch for.
+LIPS_TINGLE_ELSEWHERE = (
+    r"\b(?:eat|eats|eating|ate|eaten|food|foods|fruit|fruits|raw|drink|drinks|drinking|drank|"
+    r"glass|cup|wine|beer|lager|cider|coffee|tea|fizzy|juice|pineapple|apples?|kiwi|mango|"
+    r"avocado|tomatoes?|strawberr\w*|berries|melon|peach\w*|cherr\w*|bananas?|citrus|oranges?|"
+    r"lemons?|limes?|nuts?|peanuts?|shellfish|prawns?|sushi|curry|spices?|spicy|chilli|chili)\b",
+    r"\b(?:cold|heat|hot|wind|sun|sunburn|freezing|frozen|weather)\b",
+    r"\b(?:sting|stings|stung|bee|bees|wasp|wasp\s+sting|bite|bites|bitten)\b",
 )
 # What a tingle never talks down: a swelling, a swallow that is going, or a breath that is wrong.
 LIPS_TINGLE_BREATH = (
@@ -6006,13 +7026,17 @@ _STRUCK_VEHICLE = (r"(?:car|cars|van|vans|lorry|lorries|truck|trucks|bus|buses|c
 # pedestrian" are the call the rest of this row is for, and the article was the only thing
 # missing, so both fell to the greeting (deft-bear's sweep, #safety 84106). A vehicle has to be
 # doing the striking for the row to be read at all, so "the bus hit a wall" is untouched.
-_STRUCK_PERSON = (r"(?:i|me|he|him|she|her|they|them|us|someone|somebody"
+_STRUCK_PERSON = (r"(?:i|me|he|him|she|her|they|them|us|we|someone|somebody"
                   r"|(?:my|his|her|their|our|the|your|a|an|some)\s+" + _STRUCK_RELATIVE +
                   r"|" + _STRUCK_RELATIVE + r")")
 
 _STRUCK_VERB = (r"(?:hit|hits|hitting|struck|strikes|knocked\s+(?:down|over)"
                 r"|knocks\s+(?:down|over)|ran\s+over|run\s+over|runs\s+over|clipped|clips"
                 r"|mowed\s+down|collided\s+with)")
+
+# The people a blow in the house is about: "my husband nearly hit me in the street" keeps the abuse
+# card, and the road place in the line does not take it away.
+NEAR_HIT_ON_A_ROAD_NOT = (r"\b(?:my|his|her|our|their|your)\s+" + _STRUCK_RELATIVE + r"\b",)
 
 # The part of a person a wheel goes over. "a van ran over my foot" is a foot under a van, and no
 # row read it: the hazard-lights script answered instead, which is for the driver who hit somebody.
@@ -6061,6 +7085,26 @@ STRUCK_BY_VEHICLE = (
     r"(?!\s+(?:the|a|an|my|our|his|her|their|your|some|any|it|this|that|to)\b)",
     r"\b(?:a|an|the|some|one)\s+" + _STRUCK_VEHICLE + r"\b[^.?!]{0,20}\b"
     r"(?:ran|run|runs)\s+over\s+" + _STRUCK_PET + r"\b",
+    # "i almost went under a bus", "he fell under a lorry": a person under a vehicle is the row
+    # even with no verb of its own, and the line was reaching the drowning card on "under".
+    r"\b" + _STRUCK_PERSON + r"\b[^.?!]{0,14}\b(?:went|go|goes|going|gone|fell|falls|falling|"
+    r"ended\s+up|slid)\b[^.?!]{0,12}\bunder\s+(?:a|an|the)\s+" + _STRUCK_VEHICLE + r"\b",
+    # "someone ran me over", "a fella ran my nan down": the doer need not be a vehicle word, and
+    # "ran over" with a person on the end of it is not something a person does on foot. The near
+    # thing reads the same shape with "nearly" in front of it, which is why this is here.
+    r"\b(?:someone|somebody|he|she|they|(?:a|an|the|some|one)\s+(?:driver|man|woman|lad|lass|"
+    r"boy|girl|fella|feller|chap|guy|bloke|person|van|car|lorry|truck|bus|coach|taxi|cab|"
+    r"motorbike|motorcycle|scooter|bike|bicycle))\b"
+    r"[^.?!]{0,10}\b(?:ran|run|runs)\s+" + _STRUCK_PERSON + r"\s+(?:over|down)\b",
+    # "i nearly got mown down on the pavement" - the one verb that says the wheel did it, said
+    # without "down" or "over" after it.
+    r"\b" + _STRUCK_PERSON + r"\b[^.?!]{0,20}\b(?:got|get|gets|was|were|been)?\s*"
+    r"(?:mowed|mown|mow)\b[^.?!]{0,10}\bdown\b",
+    # "i nearly got knocked off my bike this morning": whoever did it need not be named, and a
+    # rider off their bike on a road is the row's person whatever knocked them.
+    r"\b" + _STRUCK_PERSON + r"\b[^.?!]{0,14}\b(?:got|get|gets|was|were|been)?\s*"
+    r"(?:knocked|knocks)\s+off\s+(?:my|his|her|their|our|your)\s+"
+    r"(?:bike|bicycle|motorbike|motorcycle|scooter|moped)\b",
     # "my foot was run over by a van", "he got run over by a lorry".
     r"\b" + _STRUCK_BODY + r"\b[^.?!]{0,20}\b(?:was|were|got|get|gets|been|is|are)\s*"
     r"(?:run|ran|runs)\s+over\s+by\s+(?:a\s+|an\s+|the\s+)?" + _STRUCK_VEHICLE + r"\b",
@@ -6162,6 +7206,156 @@ TRAPPED_NOT_A_WAIT = re.compile(
     r"can'?t\s+get\s+out|locked\s+in)\b")
 
 
+# A parent at the end of their rope: "the baby has been crying for six hours and i feel like
+# shaking him" was answered with a film about crying. The wish to shake is the one thing that must
+# never be carried out, and the person saying it needs a way out now, not a card about crying. The
+# object has to be a child, so "i feel like shaking my head" and "i could shake him" stay ordinary.
+SHAKE_WISH = (
+    r"\b(?:feel\s+like|felt\s+like|want\s+to|wanted\s+to|going\s+to|about\s+to|nearly|"
+    r"close\s+to|tempted\s+to|might|i\s+could|afraid|scared|"
+    # "i keep thinking about shaking her" and "i have thought about it" are the same wish said as
+    # a thought, and they were reaching the tremor card. A bare "him" does not say it is a child,
+    # so the thought still needs the child named or the coping said (SHAKE_CHILD_CONTEXT and
+    # SHAKE_COPING below) before it is this arm's line.
+    r"(?:keep\s+)?think(?:ing)?\s+about|thought\s+about|have\s+thought\s+about|"
+    r"keep\s+wanting)\b[^.?!]{0,30}"
+    r"\b(?:shak(?:e|es|ing)|shook|hurt|hurting|hit|hitting|thump(?:ing)?|smack(?:ing)?)\b"
+    r"[^.?!]{0,26}\b(?:him|her|them|the\s+baby|my\s+(?:son|daughter)|the\s+little\s+one)\b",
+)
+# ...and the child is the one it is about, said either before the wish or after it.
+SHAKE_CHILD_CONTEXT = (
+    r"\b(?:baby|babies|newborn|toddler|the\s+little\s+one|my\s+(?:son|daughter|baby|girl|boy)|"
+    # The child is often carried by the care rather than the word: "i had to put her down",
+    # "the nappies", "the night feeds". Without this the wish read as a tremor or, worse, as
+    # putting a pet down.
+    r"put\s+(?:her|him|them)\s+down|napp(?:y|ies)|night\s+feeds?|feeding|"
+    r"bottle|pram|cot|moses\s+basket|first\s+tooth|sleep\s+(?:regression|training))\b",
+    r"\b(?:cr(?:y|ies|ied|ying)|scream\w*|wont\s+sleep|won'?t\s+sleep|up\s+all\s+night|"
+    r"will\s+not\s+sleep|teething|colic|colicky)\b",
+)
+# The child is often not named at all: "i dont know how much longer i can do this, i want to shake
+# her" is the same line as the one above with the baby left implied, and it reached the weaning
+# card. A coping word on the end of a wish to shake somebody is enough, unless the somebody is a
+# grown-up the line has already named.
+SHAKE_COPING = (
+    r"\b(?:can'?t\s+do\s+this|cant\s+do\s+this|can'?t\s+cope|not\s+coping|no\s+sleep|"
+    r"havent\s+slept|haven'?t\s+slept|not\s+slept|exhausted|so\s+tired|knackered|"
+    r"breaking\s+point|at\s+the\s+end\s+of\s+(?:it|my\s+tether)|desperate|nothing\s+works|"
+    r"nothing\s+helps|"
+    r"(?:dont|don'?t)\s+know\s+how\s+much\s+longer)\b",
+)
+SHAKE_ADULT = (
+    r"\bmy\s+(?:husband|wife|partner|boyfriend|girlfriend|ex|boss|manager|mum|dad|mother|"
+    r"father|sister|brother|nan|grandad|grandma|friend|mate|neighbour|colleague)\b",
+)
+SHAKE_CHILD = SHAKE_WISH
+# The same wish said about the person themselves, or as a joke about a band and a milkshake.
+SHAKE_IDIOM = (
+    r"\b(?:shake|shaking|shook)\s+(?:my|your|his|her)\s+head\b",
+    r"\b(?:shake|shaking)\s+hands?\b",
+    r"\b(?:shake\s+it\s+off|shake\s+things\s+up|shake\s+up)\b",
+    r"\bmilk\s*shake\b",
+    r"\bshak(?:e|ing)\s+with\s+(?:cold|laughter|laughing|fear|nerves)\b",
+    r"\bshak(?:e|ing)\s+some\s+sense\b",
+)
+SHAKE_REPLY = (
+    "Put the baby down somewhere safe - on their back in the cot, even if they are crying - and "
+    "step out of the room for a minute. Never shake a baby, however long it has gone on: put them "
+    "down and ring someone who can take over, Cry-sis on 0800 448 0737, or 111 if you are scared "
+    "of how you feel.",
+    "That is the moment to put the baby down and walk away, not to carry it through: on their back "
+    "in the cot, door shut, two minutes in another room. Shaking a baby hurts them for life. Ring "
+    "Cry-sis on 0800 448 0737, or 111 tonight, and say out loud that you are at the end of it.",
+)
+# "Put the baby down in the cot" is only the right wording when the line says there is a baby in
+# it. A tired parent saying "i want to hit him" about an older child gets the same help without
+# being told to do something that makes no sense for a seven-year-old.
+SHAKE_BABY_WORD = (
+    r"\b(?:baby|babies|newborn|new\s*born|cot|crib|napp(?:y|ies)|feeding|feeds?|bottle|pram|"
+    r"teething|colic|colicky)\b",
+    r"\bput\s+(?:her|him|them)\s+down\b",
+)
+SHAKE_CHILD_REPLY = (
+    "Put them down somewhere safe and step out of the room for a minute - they can cry for two "
+    "minutes and come to no harm. Never shake or hit a child, however long it has gone on: put "
+    "them down and ring someone who can take over. Cry-sis on 0800 448 0737 is for exactly this, "
+    "and 111 if you are scared of how you feel.",
+    "That is the moment to put them down and walk away, not to carry it through: somewhere safe, "
+    "the door shut, two minutes in another room. Shaking or hitting a child hurts them for life. "
+    "Ring someone who can take over tonight - Cry-sis on 0800 448 0737 - and say out loud that you "
+    "are at the end of it.",
+)
+# Being out cold for a night, or until a time, or until somebody found them, is not a nap: "my dad
+# was out cold all night" and "she was out cold until 3am" were answered with a shrug, because the
+# sleep words in OUT_COLD_ASLEEP ("all night", "until", "the whole") stand the knockout arm down.
+OUT_COLD_LONG = (
+    # "until 3am" has no word boundary after the figure, so the clock is matched on its own.
+    r"\bout\s+cold\b[^.?!]{0,24}(?:\b(?:all\s+night|the\s+(?:whole|entire)\s+night|"
+    r"for\s+(?:hours|ages))\b|until\s+\d|later\s+that\s+(?:morning|afternoon|evening)|"
+    r"until\s+(?:the\s+|that\s+)?(?:morning|afternoon|evening|lunchtime|midday|dawn|"
+    r"dusk|nightfall))",
+)
+OUT_COLD_FOUND = (
+    r"\bfound\s+(?:me|him|her|them)\b",
+    r"\b(?:couldn'?t|couldnt|could\s+not)\s+wake\b",
+    r"\bno\s+idea\s+(?:how\s+long|what\s+happened)\b",
+    r"\bcouldn'?t\s+get\s+(?:him|her|them)\s+up\b",
+    r"\bwoke\s+up\s+(?:on\s+the|in\s+the)\b",
+)
+# Somebody who cannot be woken now is the recovery-position card's, and that card already answers
+# it: this one is for the history, not for a person still out.
+OUT_COLD_LEFT_TO_OTHERS = (
+    r"\b(?:can'?t|cant|couldn'?t|couldnt)\s+wake\b",
+    r"\bnot\s+breathing\b",
+    r"\bno\s+pulse\b",
+    r"\bstill\s+(?:not\s+woken|out|unconscious|asleep)\b",
+)
+# The name carries "night" because OUT_COLD_REPLY is already the tables' faint answer, and
+# `from .safety_tables import *` would otherwise have this shadow it for every blackout line.
+# A night out, a night shift, a bottle and a long walk all end in being out cold, and none of them
+# wants an ambulance.
+OUT_COLD_SLEEPY = (
+    r"\b(?:party|night\s+shift|night\s+out|long\s+day|shift|walk|run|hike|gig|flight|"
+    r"jet\s?lag|dinner|meal|feed|bottle|nap|bed|bedtime|asleep|sleep\w*|exhaust\w*|tired|"
+    r"knackered|drunk|pints|beers?|wine)\b",
+)
+OUT_COLD_NIGHT_REPLY = (
+    "That is not a sleep - being out cold that long needs 999 or 911 now, or straight to A&E if "
+    "they are awake and you can get them there. Say how long it went on and whether they came "
+    "round by themselves, and do not leave them alone until someone has seen them.",
+    "Ring 999 or 911 now: nobody is out cold for a night and fine. Tell them how long it lasted and "
+    "anything before it - a bang on the head, a drink, a medicine - and stay with them until help "
+    "comes.",
+)
+# Violence that lands on the room instead of a person: "he is throwing things", "my husband is
+# smashing things up", "my partner punched the wall". Nothing has hit anybody yet, and that is
+# exactly the turn to say it: the person in the next room is already being told what would happen.
+ABUSE_OBJECTS = (
+    r"\b(?:throw(?:s|ing)?|threw|thrown|smash(?:es|ing|ed)?|break(?:s|ing)?|broke|"
+    r"punch(?:es|ing|ed)?|kick(?:s|ing|ed)?|trash(?:es|ing|ed)?|wreck(?:s|ing|ed)?)\b"
+    r"[^.?!]{0,30}\b(?:things|stuff|plates|glasses|crockery|furniture|chairs?|doors?|walls?|"
+    r"windows?|the\s+(?:house|flat|place)|"
+    r"my\s+(?:things|stuff|house|flat|home|place|room|kitchen|bedroom|living\s+room|car))\b",
+)
+# A person has to be doing it: "ive had enough of life throwing things at me" is a figure of
+# speech about a bad year, and the abuse card read that as a home with things being thrown in it.
+ABUSE_OBJECTS_PERSON = (
+    # "hes" and "shes" are how most people type it, and they are not \bhe\b.
+    r"\b(?:he|she|they|hes|shes|theyre|husband|wife|partner|boyfriend|girlfriend|ex|dad|mum|"
+    r"father|mother|stepdad|stepmum|grandma|grandpa|nan|grandad|flatmate|housemate|brother|"
+    r"sister|carer)\b",
+)
+# The same words for a job, a game, a clear-out or a toddler, and for a person nobody lives with.
+ABUSE_OBJECTS_OFF = (
+    r"\bthrowing\s+(?:things|stuff)\s+(?:away|out|in\s+the\s+bin)\b",
+    r"\bthrew\s+my\s+back\s+out\b",
+    r"\bbreak(?:ing)?\s+things\s+off\b",
+    r"\b(?:baby|babies|toddler|toddlers|kids?|children|child)\b[^.?!]{0,24}"
+    r"\b(?:throw|throws|throwing|smash|smashing|broke|breaking)\b",
+    r"\b(?:throwing|smashing|punching)\s+(?:things|stuff|plates)\s+(?:at|in)\s+"
+    r"(?:the\s+)?(?:park|garden|playground|soft\s+play|bouncy\s+castle)\b",
+    r"\b(?:in\s+a\s+(?:film|movie|game|show)|on\s+telly|in\s+the\s+film)\b",
+)
 CASES = (
     # A pregnancy red flag before the words it shares with everything else: "im pregnant and
     # bleeding" is the maternity unit, not the cut-and-press reply.
@@ -6180,6 +7374,8 @@ CASES = (
     ("shot", SHOT, False),
     ("eye_chem", EYE_CHEM, False),
     ("heard_assault", HEARD_ASSAULT, False),
+    # No sign named: ask what you can see, and carry the rule both ways.
+    ("allergy_now", ALLERGY_NOW, False),
     ("lips_swell", LIPS_SWELL, False),
     ("lips_swell_bare", LIPS_SWELL_BARE, False),
     ("lips_tingle", LIPS_TINGLE, False),
@@ -6195,6 +7391,13 @@ CASES = (
     ("torsion", TORSION, False),
     ("unsafe", UNSAFE, False),
     ("intruder", INTRUDER, False),
+    # An insect bite is an itch, a tick a removal and a watch: both reached the wide bite arms.
+    ("insect_bite", INSECT_BITE, False),
+    ("tick_bite", TICK_BITE, False),
+    # A bat is the bite where a mark that barely shows still needs a same-day call.
+    ("bat_bite", BAT_BITE, False),
+    # A fox, a badger or a rat is the small wound the dog's arm alone was answering.
+    ("wild_bite", WILD_BITE, False),
     ("dog_bite", BITE_DONE, False),
     ("dog_attack", DOG_ATTACK, False),
     # A garment alight and a pan alight each have their own answer, and both are the fire's
@@ -6244,9 +7447,22 @@ CASES = (
     ("dental_numb", DENTAL_NUMB, False),
     ("slur_small_child", SLUR_SMALL_CHILD, False),
     ("slur_drink", SLUR_DRINK, False),
+    # A wound with a red line running from it, or redness spreading from it, is lymphangitis: the
+    # infection is in the channels that drain the wound, so it is a same-day call, and the 999 call
+    # once a fever is with it. Read before the limb rows rather than with the first aid ones: "my
+    # cut has a red line going up my arm" and "redness spreading up my arm from a cut" both lost
+    # to a chest-and-arm card, and the answers row calls an infection "two or three days after the
+    # injury". A stroke or a heart attack said in the same line keeps its own card.
     ("stroke", STROKE + STROKE_WEAK, False),
+    ("wound_streak_fever", WOUND_STREAK_FEVER, False),
+    ("wound_streak", WOUND_STREAK, False),
     ("arm_numb", LEFT_ARM_NUMB, False),
-    ("chest", CHEST + CHEST_ADJ, False),
+    ("chest", CHEST + CHEST_ADJ + CHEST_SORE_MOVE, False),
+    # The FAST arm answers after the chest and after the numb left arm, on purpose: both of those
+    # are specific cards for the lines they own ("my chest is tight and my left arm is numb" stays
+    # the chest call, and a numb left arm keeps its stroke wording), and this one is here for what
+    # nothing else read at all.
+    ("stroke", STROKE_FAST, False),
     ("breath_rest", BREATH_REST, False),
     ("breathing", BREATHING, False),
     # Breathless in the night or lying flat: an appointment today, unless it is still happening.
@@ -6257,7 +7473,7 @@ CASES = (
     # A blackout is its own case and it is not the "unconscious" one: that case is somebody who is
     # not responding now, and this is a person who went down and came back.
     ("blackout", BLACKOUT_RED_LINE, False),
-    ("unconscious", UNCONSCIOUS, False),
+    ("unconscious", UNCONSCIOUS + WAKE_UP_SOMEONE + WONT_COME_ROUND + HARD_TO_WAKE, False),
     ("seizure", SEIZURE, False),
     ("drowning", DROWNING, False),
     ("heat", HEAT, False),
@@ -6273,6 +7489,9 @@ CASES = (
     # enough on its own - a child can look pale after a long day - so this wants a sign and a
     # second thing in the same line.
     ("pale_child", PALE_CHILD, False),
+    # The grown-up version of the row below, and the advice is the opposite one: sit them down and
+    # ring the ambulance rather than keep them warm and wait for a doctor.
+    ("pale_adult", PALE_ADULT, False),
     ("newborn_fever", NEWBORN_TEMP, False),
     ("newborn_fever_next", NEWBORN_NEXT, False),
     # A named illness, a number that is too high, a drink the child found, a fit that just
@@ -6330,15 +7549,17 @@ OUT_COLD_WONT_WAKE = (
     r"(?:wake|waking|rouse|come\s+round|coming\s+round|respond|responding)\b",
     r"\bunresponsive\b", r"\bnot\s+responding\b", r"\bout\s+of\s+it\b",
 )
+# Said to whoever had the fit, so the actions in it are ones the reader can take either way:
+# "ring 111 and say what *they* did" was being said to people who had the fit themselves.
 PAST_FIT_WEEK_REPLY = (
     "A fit a week ago still needs looking at today rather than waiting: ring 111 or the GP surgery "
-    "and say when it happened and what they did. If another one starts and does not stop, that is "
-    "an ambulance, with them on their side and nothing in their mouth."
+    "and say when it happened and what it looked like. If another one starts and does not stop, "
+    "that is an ambulance: on the floor on one side, nothing in the mouth."
 )
 PAST_FIT_REPLY = (
     "Mention that to your GP: a fit is looked into even when it only happened once, and they can "
-    "say whether it needs any tests. If one happens again and does not stop, that is an ambulance, "
-    "with them on their side and nothing in their mouth."
+    "say whether it needs any tests. If one happens again and does not stop, that is an ambulance: "
+    "on the floor on one side, nothing in the mouth."
 )
 def _effort_recovery(line):
     """Hard exercise plus a phrase of recovery is a person who has just worked hard.
@@ -6569,6 +7790,42 @@ A_BODY_PART = (
     r"faces?|cheeks?|nose|ears?|eyes?|feet|foot|toes?|legs?|knees?|shins?|chest|backs?|skin|palms?|"
     r"knuckles?|head|scalp|neck|stomach|belly)\b",
 )
+# A hair colour changing is the hair row's answer, not a person short of oxygen: "my beard has
+# gone grey", "the greying at my temples" and "should i dye my grey roots" are all the same
+# colour as cyanosis and none of them is about breathing.
+GREY_HAIR = (
+    r"\b(?:hair|hairs|beard|beards|moustache|mustache|eyebrows?|eyelashes?|roots|greying|graying|"
+    r"greyed|grayed|bald|balding|receding|thinning|wig|dye|dyed|sideburns?)\b",
+)
+GREY_COLOUR = (r"\b(?:grey|gray)\b",)
+# A grey that is arriving is a hair colour; a grey somebody *looked* or *was* is a shut-down. The
+# bare-grey default used to take any grey with no body part in it, and that caught a person as
+# well as a hair: "she looked grey", "my daughter looked grey" and "he looked grey and ill" all got
+# 999 on main and got a shrug once the default was added. Only the progressive and the possessive
+# are hair, so "im going grey", "why am i going grey", "my husband is going grey" and "grey roots"
+# still stand the card down while "looked grey", "seemed grey" and "was grey" keep it.
+GREY_ARRIVING = (
+    # Only a grey that is still arriving is hair: "going grey", "turning grey", "getting grey".
+    # A grey that has finished - "has gone grey", "went grey", "turned grey" - is a change that
+    # happened, and a person who changed colour needs the card: "my son has gone grey", "my dad
+    # has gone grey" and "ive gone grey all over" all rang on main. Where the hair is named, the
+    # GREY_HAIR branch above settles it ("my hair has gone grey", "my beard has gone grey"), and
+    # where a garment is named the science row declines it to the laundry card.
+    r"\b(?:going|goes|go|turning|turns?|getting|gets)\s+(?:\w+\s+){0,2}(?:grey|gray)\b",
+    r"\b(?:grey|gray)\s+(?:hair|hairs|roots|streaks?|patch|patches|temples?)\b",
+)
+# The speaker is a person too: "ive gone grey all over" is not a hair colour.
+GREY_SELF = (r"\b(?:i|im|i'm|ive|i've|me|myself|my\s+own)\b",)
+# The parts a grey shows on when it is not hair.
+GREY_BODY = (*A_BODY_PART, r"\b(?:gums?|gum\s?colou?r|nail\s?beds?|fingertips?)\b")
+# The signs that make a grey a shut-down rather than a hair colour. Anything in here keeps the
+# 999 card, and "blue" and "purple" are in it so a line that says the colour plainly is untouched.
+GREY_ALARM = (
+    r"\b(?:clammy|sweating|sweaty|collapsed?|collapsing|faint(?:ed|ing|s)?|unconscious|"
+    r"passed\s+out|passing\s+out|black(?:ed)?\s+out|breathless|struggling\s+to\s+breathe|"
+    r"can'?t\s+breathe|cannot\s+breathe|blue|purple|mottled|rash|fitting|seizure|"
+    r"unresponsive|limp|floppy|shock|bleeding|blood|vomiting|pulse|911|999)\b",
+)
 # Who can go blue: a body part, a person, or the speaker as the subject of the change. A possessive
 # ("my phone went blue") is not enough, so the phone, the garlic and the screwdriver stand down
 # while "my lips are blue", "her face went blue" and "i went blue" keep the card.
@@ -6683,6 +7940,26 @@ def _tooth_out(line):
     if _matches(TOOTH_CHILD, line) and not _matches(TOOTH_KNOCK, line):
         return False
     return True
+
+
+# What a stroke looks like in a line, said the ordinary way: the mouth, the words, one side gone.
+FALL_STROKE_SIGN = (
+    r"\b(?:slurr\w*|slurs?)\b",
+    r"\bspeech\s+(?:is|was|sounds?|comes\s+out)\b[^.?!]{0,20}\b(?:slurr\w*|thick|strange|odd)\b",
+    # "his words came out strange" is the same sign said about the words rather than the speech.
+    r"\bwords?\s+(?:came|come|comes|coming)\s+out\b[^.?!]{0,14}"
+    r"\b(?:strange|odd|wrong|thick|slurr\w*)\b",
+    r"\b(?:face|mouth)\s+(?:is\s+|has\s+)?(?:droop\w*|dropping|gone\s+on\s+one\s+side|twisted)\b",
+    r"\bone\s+side\s+(?:of\s+)?(?:his|her|their|the)\s+(?:body|face|arm)\b[^.?!]{0,24}"
+    r"\b(?:gone|weak|numb|heavy|wont|won'?t|not\s+working)\b",
+    r"\bcant\s+lift\s+(?:his|her|their)\s+arm\b",
+    r"\bcan'?t\s+lift\s+(?:his|her|their)\s+arm\b",
+)
+# The dentist's injection, the pints, a gig review: the words a slurred phrase shares with a stroke.
+SLUR_NOT_A_STROKE_WORDS = (
+    r"\b(?:dentist|filling|injection|anaesthetic|numb\s+lip|pints?|drunk|drinking|beers?|"
+    r"pub|gig|singer|song|lyric|wine)\b",
+)
 
 
 def _fall_with_sign(line):
@@ -6837,6 +8114,27 @@ MILD_BODY_ESCALATION = (
 _MINOR_REPLIES = {name: replies for name, _patterns, replies in MINOR}
 
 
+# The MINOR rows that hand out a person's first aid. An animal that owns the injury must not get one
+# of these, whatever the injury is - see the fence in the MINOR loop - so they are named once here.
+PET_FIRST_AID_ROWS = frozenset((
+    "bleeding", "cut", "burn", "sunburn", "mouth_burn", "splinter", "nosebleed", "part_off",
+    "broken",
+))
+
+
+def _pet_first_aid(line):
+    """The animal's own card for an injury the animal owns: a burn, a wound, or the vet-day card.
+
+    The reply pools are returned unpicked, like every other row in `_first_aid`, so the caller that
+    knows the chat can pick the one that fits.
+    """
+    if _matches(BURN_OR_SCALD_WORD, line):
+        return REPLIES["pet_burn"]
+    if _matches(PET_WOUND, line):
+        return _MINOR_REPLIES["pet_wound"]
+    return REPLIES["pet_hurt"]
+
+
 # The injury a chat is already on, for the follow-up that names none: "i have a burn on my hand"
 # then "how long will it take to heal" - the second line has no injury word in it, so the first-aid
 # card that says the burn settles in a week to ten days was never reached and the turn went to a
@@ -6844,6 +8142,8 @@ _MINOR_REPLIES = {name: replies for name, _patterns, replies in MINOR}
 # follow-up is about is the injury the chat is on, so the chat's own subject is lent to the line
 # for this one reading. It is only a subject, and only when the line asks about the injury: the
 # figure the card gives is what a person means by "how long will it take to heal" a turn later.
+BURN_OR_SCALD_WORD = (r"\bburn(?:s|t|ed|ing)?\b", r"\bscald\w*\b")
+
 THE_INJURY_NAMED_BEYOND_A_QUESTION = frozenset((
     "burn", "burns", "burnt", "burned", "scald", "scalds", "scalded", "cut", "cuts",
     "gash", "graze", "sprain", "sprains", "sprained", "blister", "blisters", "sunburn",
@@ -6975,6 +8275,11 @@ def _first_aid(line):
                 continue
             if re.search(words, line):
                 return HEAL_TIME[name]
+    # A grater takes a knuckle as often as a knife takes a finger, and main had no verb for it:
+    # "i grated my knuckle on the cheese grater" got "How was it, overall?". The cut card is this
+    # line's answer, and a recipe - "how do i grate cheese" - names no body part, so it stays out.
+    if _matches(GRATER_CUT, line):
+        return _MINOR_REPLIES["cut"]
     for name, patterns, replies in MINOR:
         if name == "burn" and (thing_burnt or burner_thing or friction or razor
                                or food_burnt):
@@ -7035,6 +8340,27 @@ def _first_aid(line):
         if name in ("tooth_out", "tooth_chipped") and _matches(PET_TOOTH, line) \
                 and _matches(patterns, line):
             return REPLIES["pet_tooth"]
+        # An animal's wound is the animal's, but only when the animal is the one hurt: "my dog bit
+        # my hand and it is bleeding" and "my cat scratched me and it is bleeding" have the animal
+        # and a bleeding in them and belong to the person's first aid, so a person in the line keeps
+        # the human card. This row now reads "bleeding" as well as "cut", so it needs that fence.
+        if name == "pet_wound" and (_matches(HUMAN_TOO, line)
+                                    or _matches(HUMAN_BITTEN, line)):
+            continue
+        # An animal that owns an injury is the vet's, and the person's first-aid rows are the wrong
+        # card for it however the injury is worded: "my dog cut his paw and it is bleeding a bit" and
+        # "my dog has a bit of bleeding from his paw" got a card ending "if it's still going after
+        # twenty minutes or they go pale or dizzy, that's 999"; "my dog burnt his paw" got the burn
+        # card about a person's face, hands and joints; "my cat has a splinter in her paw" got warm
+        # water and tweezers for a hand; and "my dog grazed his knee" got a card that ends "a nurse
+        # or A&E". The animal's own cards are the ones to reach. A person hurt in the same line keeps
+        # the person's card: "my dog bit my hand and it is bleeding" names the person's hand.
+        if name in PET_FIRST_AID_ROWS and _matches(PET_ANIMAL_HURT, line) \
+                and not _matches(HUMAN_TOO, line) and not _matches(HUMAN_BITTEN, line) \
+                and not _matches(HUMAN_OWN_INJURY, line) \
+                and not _matches(PET_PASSES_BLOOD, line) \
+                and not _matches(PET_OWNS_A_THING, line):
+            return _pet_first_aid(line)
         if name == "tooth_out" and not _tooth_out(line):
             continue
         if name == "tooth_chipped" and (_matches(TOOTH_CHIPPED_FINE, line) or _tooth_out(line)):
@@ -7233,6 +8559,28 @@ def _name_the_person(reply, line, memory):
     return reply
 
 
+def _true_newborn(memory):
+    """A baby under five weeks, from what was typed before: the age a "feels hot" alone is for.
+
+    Same walk as _tiny_baby, with the ages that have grown past the newborn's own card settling it
+    the other way: "my baby is 3 weeks old" then "shes 7 weeks now" then "she feels hot" is the
+    same-day call.
+    """
+    if not isinstance(memory, dict):
+        return False
+    for turn in reversed((memory.get("turns") or [])[-4:]):
+        if not isinstance(turn, dict):
+            continue
+        said = str(turn.get("user") or "")
+        if not said:
+            continue
+        if _matches(TRUE_NEWBORN_FINE, said):
+            return False
+        if _matches(TRUE_NEWBORN, said):
+            return True
+    return False
+
+
 def _tiny_baby(memory):
     """An earlier line said a baby under three months, so a fever now is that baby's fever.
 
@@ -7265,19 +8613,117 @@ def _last_said(memory):
     return ""
 
 
+# "Should I turn it off" after "the plug socket is sparking" is not a personal decision to weigh
+# up: it is the one thing every fire service says, and handing it back ("That's your call, not
+# mine") or answering about a phone that shuts itself down leaves someone standing next to a
+# sparking socket. The hazard is in the person's own words a turn earlier, so the act question is
+# read against what they already said, not against the line on its own - which carries no hazard
+# word at all and so reached nothing above.
+# The verb is what the act is done to the thing with, and "use" is deliberately not one: "should i
+# use cream" on a sunburn is the same shape as "should i unplug it" and wants a pharmacist, not a
+# plug. "Keep" and "go on" only count with "using" after them, which is the act again.
+_AN_ACT_OR_NOT = (
+    r"(?:\b(?:should|shall|do|can|could|ought|may)\s+(?:i|we)\b|"
+    r"\b(?:is|would)\s+it\s+(?:be\s+)?(?:ok(?:ay)?|alright|all\s+right|safe|fine)\s+to)\b"
+    r"[^.?!]{0,40}?"
+    r"(?:\b(?:turn|switch|shut|plug|unplug|disconnect|stop|leave|touch|kill|put|pour|throw|run|stay|"
+    r"move|carry|open|cover|smother|fan)\b|"
+    r"\b(?:keep|go\s+on|carry\s+on)\s+using\b|\buse\s+it\s+again\b)")
+_A_LIVE_HAZARD = (
+    r"\b(?:spark(?:s|ing|ed)?|fizz(?:ing|ed)?|smok(?:e|ing|y)|smoulder(?:ing)?|smolder(?:ing)?|"
+    r"burn(?:ing|t)?|scorch(?:ed|ing)?|melt(?:ing|ed)?|buzz(?:ing)?|on\s+fire|caught\s+fire|"
+    r"too\s+hot\s+to\s+touch|red\s+hot)\b")
+
+# The other half of the same question, and the one that follows the first answer: "can i turn it
+# back on" is not a decision either, and a thing that has sparked once does it again.
+BACK_ON = (
+    "Not yet - leave it off and unplugged until someone has looked at it. Whatever sparked or "
+    "smoked once will do it again, and the next time nobody may be in the room.",
+    "I would not. Keep it out of use until it has been checked: the fault that sparked it has not "
+    "gone away by itself, and a fire is a lot harder to put out than a plug is to leave alone.",
+)
+# The hazard word alone does not make the thing in hand a socket. "i burnt my hand on the oven"
+# names a burn on a person, and the act question after it ("should i cover it", "should i put
+# anything on it") is a burn question: it was answered with the switch-it-off-at-the-wall card,
+# which is an electric instruction for a hand. A line that hurt somebody is not the thing that
+# sparked, so it is read out of the hazard the act question is about. "the wire burnt me" is that
+# line too - what a burn on skin wants is cool water, not an unplugged appliance.
+_A_BURNT_PERSON = (
+    r"\b(?:hand|hands|arm|arms|finger|fingers|thumb|thumbs|skin|wrist|wrists|foot|feet|leg|legs|"
+    r"knee|knees|shoulder|shoulders|chest|face|eyes?|head|hair|lip|lips|tongue|mouth|neck|ears?|"
+    r"blister(?:s|ed|ing)?|myself|himself|herself|themselves|me)\b")
+_A_WANTS_IT_ON = (
+    r"\b(?:back\s+on|on\s+again|switch\s+it\s+on|turn\s+it\s+on|plug\s+it\s+(?:back\s+)?in|"
+    r"use\s+it\s+again|start\s+it\s+(?:up\s+)?again)\b")
+
+# The first sentence is the answer, because "should I?" wants a yes before it wants reasoning.
+SWITCH_OFF = (
+    "Yes - switch it off at the wall, and unplug it if you can reach the plug without touching "
+    "anything hot or wet. Leave it out of use until someone has looked at it.",
+    "Off, and unplugged if you can do that safely. Whatever sparked or smoked is not safe to use "
+    "again until it has been checked - and if it is burning or smoking now, get out and ring 999 "
+    "rather than stay with it.",
+    "Switch it off at the wall and unplug it, without touching the metal or anything wet, then "
+    "keep it out of use. A thing that has sparked once does it again, and this one wants looking "
+    "at before it goes back on.",
+)
+
+
 def _follow_up(line, memory):
     """A reply to a follow-up asked while an emergency reply is still the last thing said."""
+    # The act question after a live hazard. Read first, because it is the one where a wrong answer
+    # costs somebody: the pool that answered it ("That's your call, not mine") is for a choice with
+    # two sides, and there is only one side to a socket that is sparking.
+    hazard = _said_before(memory, 2) if isinstance(memory, dict) else ""
+    if isinstance(memory, dict) and _matches(_AN_ACT_OR_NOT, line) \
+            and _matches(_A_LIVE_HAZARD, hazard) \
+            and not _matches(_A_BURNT_PERSON, hazard) \
+            and not _matches(_A_LIVE_HAZARD, line):
+        # A pan of oil and a person alight have their own ten seconds, and neither answer is "a
+        # socket": the card that was just given already carries the one thing not to do (water on
+        # fat, running, carrying it), so it is the answer to the act question as well as to the
+        # fire, and it is served again rather than replaced with a narrower rule.
+        case = str(_last_case(memory) or "")
+        if case in ("pan_fire", "clothes_fire"):
+            _note(memory, "fire" if case == "pan_fire" else case)
+            return _fit(pick(REPLIES[case], memory), line, case)
+        _note(memory, "fire")
+        if _matches(_A_WANTS_IT_ON, line):
+            return _fit(pick(BACK_ON, memory), line, "fire")
+        return _fit(pick(SWITCH_OFF, memory), line, "fire")
     # The crisis card holds the thread while the person is still saying how it would happen. A
     # plan, a note, the means, a date - "i have a plan", "i wrote a note", "how long till that" -
     # carry no harm word of their own, so nothing above read them and the fallback answered a
     # suicide disclosure with "Nice - how did it go?" or "That's coming up. What do you want to
     # get right?". The shapes that turn towards help keep their own answers (the AFTER pool, "i
     # rang the line", "im ok now"), which is what the OFF list is for.
+    # The turn after a near miss with fire: "no it didnt catch, i caught it in time" was answered
+    # "I'm listening - say more if it helps", which leaves someone still watching a pan.
+    if isinstance(memory, dict) and memory.get("safety_case") == "near_fire" \
+            and any(isinstance(t, dict) and t.get("module") == "safety"
+                    for t in (memory.get("turns") or [])[-2:]) \
+            and _matches(NEAR_FIRE_OVER, line) \
+            and not _says_something_is_burning(line):
+        return _fit(pick(REPLIES["near_fire_over"], memory), line)
+    # The turn after a road scare is still that scare: "it was a white van" after "someone nearly
+    # hit me at the crossing" was answered "Good to hear. What was the best bit?".
+    if isinstance(memory, dict) and memory.get("safety_case") in ("near_thing", "struck_my_bike") \
+            and any(isinstance(t, dict) and t.get("module") == "safety"
+                    for t in (memory.get("turns") or [])[-2:]) \
+            and _matches(NEAR_THING_OVER, line):
+        return _fit(pick(REPLIES["near_thing_over"], memory), line)
     if str(_last_case(memory) or "") in WISH_FRAMES + ("self_harm_other", "poison") \
             and _matches(HELD_CRISIS_DETAIL, line) and not _matches(HELD_CRISIS_OFF, line) \
             and not _matches(CRISIS_PLAN_ORDINARY, line):
         _note(memory, "self_harm")
         return _fit(pick(REPLIES["self_harm"], memory), line, "self_harm")
+    # A plan said on its own, in the first turn as much as the third: "my plan is to jump", "the
+    # plan is to take all of them", "i know how id do it", "im going to do it" with nothing after
+    # it. No wish word, so nothing below reads it and the person gets "Worth doing. What would you
+    # like help with first?". The plan card is the right card: a person in the room, means away.
+    if _matches(A_PLAN_SAID, line) and not _matches(A_PLAN_ORDINARY, line):
+        _note(memory, "self_harm")
+        return pick(CRISIS_PLAN_REPLY, memory)
     # The numbing is the one card whose follow-up is a duration, and it is settled here rather
     # than in the waiting table, so an ordinary line after it ("will he be ok for school") is not
     # answered as if an ambulance were coming.
@@ -7632,14 +9078,110 @@ def _withdrawal(line):
 # The cases the crisis card stands for, so a plan that arrives afterwards is still the same chat.
 WISH_FRAMES = ("self_harm", "overdose", "crisis", "despair")
 
+# A fire that nearly started is not a fire, and the rule is the near word rather than the wording:
+# every fire word in the line has to sit inside a "nearly/almost/close to" clause for the fire's
+# cards to stand down. One fire word outside a clause keeps them, the way round that costs least.
+# "i nearly set the kitchen on fire" was the building card, "leave straight away and call 999",
+# and "i nearly set my sleeve on fire" was stop, drop and roll with nothing alight, while "i
+# nearly set the kitchen on fire and it's still burning" has to stay a fire.
+_FIRE_WORD = re.compile(
+    r"\b(?:fire|fires|flames?|flaming|alight|ablaze|blazing|burning|burn|burnt|burned|"
+    r"catch|caught|catchin(?:g)?|smoke|smoking|smouldering|smoldering|torched?|torching|"
+    r"caught\s+light|took\s+light)\b")
+# "The curtains almost went up" says a fire in the one way that has no fire word in it, and "went
+# up" on its own is also the rent and the price of a pint. So it only counts as a fire word when a
+# thing that burns is what went up, and the position that matters is the "went up".
+_BURNS_UP = re.compile(
+    r"\b(?:curtains?|carpets?|rugs?|sofas?|settee|armchair|chairs?|bed|bedding|mattress|pillow|"
+    r"shed|garage|house|flat|kitchen|room|pan|pans|oil|chip\s+pan|grill|oven|hob|toaster|toast|"
+    r"towels?|tea\s?towel|dish\s?towel|cloth|sleeve|shirt|coat|dressing\s+gown|dressing\s+robe|"
+    r"apron|hair|beard|bins?|wheelie\s+bin|tree|wreath|paper|newspaper|cardboard|wood|logs?|"
+    r"firewood|car|van|tent|rubbish|hay|straw|leaves)\b[^.?!]{0,30}?"
+    r"\b(went|go|goes|going|gone)\s+up\b")
+_NEAR_WORD = re.compile(r"\b(?:nearly|almost|close\s+to|about\s+to)\b")
+# Something that is alight right now, in any word for it, for the turn after a near miss: "no it
+# didnt catch and now the curtains are alight" says both "didnt catch" and a fire, so it does not
+# get the after-a-near-miss answer; "it was just smoke, no flames" says the opposite, so a burning
+# word behind no/just/only does not count.
+_BURNING_NOW = re.compile(
+    r"\b(?:alight|ablaze|on\s+fire|caught\s+fire|flames?|smoking|smoke|smoulders?|burning|"
+    r"burnt|smell\s+of\s+burning)\b")
+_NEGATED_BEFORE = re.compile(r"\b(?:no|not|just|only|without|none|never)\b[^.]{0,14}$")
+
+
+def _says_something_is_burning(line):
+    """True when a burning word in the line is not one the line is talking down."""
+    for match in _BURNING_NOW.finditer(line):
+        if not _NEGATED_BEFORE.search(line[max(0, match.start() - 18):match.start()]):
+            return True
+    return False
+
+
+# A near word and a fire word have to be in the same clause, or "i nearly died and then the house was
+# on fire" reads as a near miss because the two words sit forty characters apart.
+_CLAUSE_BREAK = re.compile(
+    r"[.?!,;:]|\b(?:and|but|then|so|because|when|while|before|after|until|till|if)\b")
+
+
+def _fire_words_in(line):
+    """Every place in the line that names a fire, including "the curtains went up"."""
+    words = list(_FIRE_WORD.finditer(line))
+    words += [_Where(m.start(1)) for m in _BURNS_UP.finditer(line)]
+    return words
+
+
+class _Where:
+    """A position in the line, so a place and a match can be read the same way."""
+
+    def __init__(self, start):
+        self._start = start
+
+    def start(self):
+        return self._start
+
+
+def _a_fire_that_did_not_happen(line):
+    """True when the only fire in the line is one the near word says was avoided.
+
+    A near word has to sit in front of every fire word, in the same clause and within forty
+    characters: forty covers "set the kitchen on fire" and "so close to the curtains going up",
+    and the clause covers "i nearly died and then the house was on fire". A fire word with no near
+    word in front of it - the same line going on to say it is still burning, a smoke alarm, a
+    second fire - is a fire.
+    """
+    near = [m.start() for m in _NEAR_WORD.finditer(line)]
+    fire_words = _fire_words_in(line)
+    if not near or not fire_words:
+        return False
+    breaks = [m.start() for m in _CLAUSE_BREAK.finditer(line)]
+
+    def close(start, fire_start):
+        if not 0 < fire_start - start <= 40:
+            return False
+        return not any(start < b < fire_start for b in breaks)
+
+    return all(any(close(start, m.start()) for start in near) for m in fire_words)
+
 
 def respond(text, memory):
     """An emergency reply, a first-aid reply for a small injury, or None to pass."""
+    # A character standing in for a letter inside a word is that letter, read before the engine
+    # below takes the line apart: `k!ll` arrives as three words, one of which the engine folds to
+    # `ok`, so the wish was handed on as "ok!ll" and no pattern could see it.
+    text = _leet_made_whole(text) or text
     # The emergency words are the one place a misspelt word costs the person the right answer:
     # "my son swalowed a coin" folded to "Noted: your son swalowed a coin". The understanding
     # engine repairs those words in place, so this reads the line with them put right; every
     # other word, and the punctuation, is exactly what the person typed.
     line = _norm(_repaired(text, memory))
+    # A dream is not happening now. "i dreamt my baby stopped breathing" was the infant CPR card,
+    # "i dreamt i was being attacked" the assault card, "i dreamt my teeth fell out" the knocked-
+    # out-tooth card and "i had a nightmare that i swallowed a bottle of pills" the overdose card -
+    # four emergencies nobody in the line is having. The words of a dream are the words of the
+    # thing, so the frame is what separates them, and anything that says it is happening now
+    # ("still bleeding", "woke up", "right now", "i can smell smoke") keeps its card.
+    if _dream is not None and _dream.a_dream_is_not_happening(text):
+        return None
     # A face pushed into cake, snow or mud is a mess, not an assault: answer it lightly and let
     # the rest of the bot alone. A blow, a hold or a breath word in the line keeps the card.
     if _matches(SOFT_FACE_PUSH, line) and not _matches(SOFT_FACE_STOP, line):
@@ -7648,6 +9190,26 @@ def respond(text, memory):
     # Remember who the emergency is about, so the third turn can still say "him".
     if isinstance(memory, dict) and _person(line):
         memory["safety_person"] = _person(line)
+    # A parent who says out loud that they might shake the baby is the one line that cannot wait
+    # for the next arm: it is read here, before everything, and it is answered with a way out.
+    if _matches(SHAKE_CHILD, line) and not _matches(SHAKE_IDIOM, line) \
+            and (_matches(SHAKE_CHILD_CONTEXT, line)
+                 or (_matches(SHAKE_COPING, line) and not _matches(SHAKE_ADULT, line))):
+        _note(memory, "abuse")
+        return pick(SHAKE_REPLY if _matches(SHAKE_BABY_WORD, line) else SHAKE_CHILD_REPLY, memory)
+    # A long time out cold, or one somebody found them in, before the rows that read "all night"
+    # and "until three" as sleep.
+    if _matches(OUT_COLD_LONG, line) and not _matches(OUT_COLD_SLEEPY, line) \
+            and not _matches(OUT_COLD_LEFT_TO_OTHERS, line) \
+            and (_matches(OUT_COLD_FOUND, line) or not _matches(FIRST_PERSON, line)):
+        _note(memory, "general")
+        return pick(OUT_COLD_NIGHT_REPLY, memory)
+    # Things thrown, smashed or punched in the room a person lives in, before the cards that read
+    # the same words as a hobby or a clear-out.
+    if _matches(ABUSE_OBJECTS, line) and _matches(ABUSE_OBJECTS_PERSON, line) \
+            and not _matches(ABUSE_OBJECTS_OFF, line):
+        _note(memory, "abuse")
+        return pick(REPLIES["abuse"], memory)
     # The plan that arrives a turn later is the same emergency: the crisis card has been given,
     # and "i wrote a note" or "i have the pills" has no wish word of its own to be read. Only
     # inside that frame, and only when the note, the date or the tablets are not an errand.
@@ -7705,6 +9267,12 @@ def respond(text, memory):
             _note(memory, "abuse")
             return _fit(pick(REPLIES["abuse"], memory), line, "abuse")
         return None
+    # A near thing on a bike outranks the arm the same line wants, unless somebody is hurt now.
+    if _an_accident_near_thing(line) and not _matches(
+            FALL_RED + STILL_GOING + DESPAIR + WISH_INTENT + SELF_HARM_INTENT
+            + CRISIS_PLAN_SAID, line) and not _matches(COUNTERFACTUAL_WISH, line):
+        _note(memory, "near_thing")
+        return _fit(pick(REPLIES[_near_thing_key(line)], memory), line, "near_thing")
     # A near thing with a heavy object, and a joke about laughing, are the two ways "killed
     # myself" is ordinary. Neither is a crisis and neither deserves a shrug, so they get their own
     # line here - above the old-story return, which was eating "i was killing myself laughing
@@ -7718,7 +9286,7 @@ def respond(text, memory):
                         if name != "self_harm"):
         if _the_effort_frame(line):
             _note(memory, "near_thing")
-            return _fit(pick(REPLIES["near_thing"], memory), line, "near_thing")
+            return _fit(pick(REPLIES[_near_thing_key(line)], memory), line, "near_thing")
         if _the_laugh(line):
             _note(memory, "laughing_kill")
             return _fit(pick(REPLIES["laughing_kill"], memory), line, "laughing_kill")
@@ -7745,6 +9313,12 @@ def respond(text, memory):
     # either, so this one shape carries its own gate.
     _scars_seen = _matches(SELF_HARM_SCARS, line) \
         and not _matches(SELF_HARM_SCARS_NOT, line)
+    # A wish said as a thing that nearly happened carries no date and needs none.
+    if _matches(COUNTERFACTUAL_WISH, line) and not _matches(ANIMAL, line) \
+            and not _matches(PAST_WISH_NOT, line) \
+            and not _matches(COUNTERFACTUAL_IDIOM, line):
+        _note(memory, "self_harm")
+        return _fit(pick(REPLIES["self_harm"], memory), line, "self_harm")
     if (_said_an_attempt or _said_a_past_wish or _scars_seen) and (
             _matches(OLD_TIME, line) or _matches(RECENT_TIME, line) or _mine_and_undated
             or _scars_seen or _matches(TEEN_AGE, line)) \
@@ -7787,7 +9361,8 @@ def respond(text, memory):
                 and not _matches(HIT_THING_NOT_PERSON, _norm(text)):
             _note(memory, "abuse")
             return _fit(pick(REPLIES["abuse_own"], memory), line, "abuse_own")
-        if _matches(HIT_AS_A_CHILD, line) and not _matches(CHILD_HIT_NOW, line):
+        if (_matches(HIT_AS_A_CHILD, line) and not _matches(CHILD_HIT_NOW, line)
+                and not _matches(GAME_NOT_A_BLOW, line)):
             _note(memory, "abuse")
             return _fit(pick(REPLIES["abuse_past"], memory), line, "abuse_past")
     # A hanging that already happened is a death, not a rescue: "my grandad hung himself" got
@@ -8275,6 +9850,7 @@ def respond(text, memory):
         _note(memory, "alcohol_withdrawal")
         return pick(REPLIES["alcohol_withdrawal"], memory)
     if (_matches(MILD, line) or _matches(FIGURATIVE, line)) and not _matches(FIRE_NOW, line) \
+            and not _matches(NOT_WAKING_BESIDE, line) \
             and not _matches(DESPAIR + WISH_INTENT, line):
         # What clears the idiom here is the break still going on, not the word "today": in
         # "this heat is killing me today, i broke my leg years ago" the today belongs to the heat,
@@ -8305,7 +9881,12 @@ def respond(text, memory):
             # himself badly on glass" is a boy and a pane, not a boy who means it.
             and not _a_reason_it_was_not_meant(line)
             # ...and the animal hurting itself is the vet's, not a person to be watched tonight.
-            and not _a_pet_hurting_itself(line)):
+            and not _a_pet_hurting_itself(line)
+            # ...and a reflexive verb with its ordinary object after it is the plate, the biscuits
+            # or the workload: "my daughter cuts herself a slice of cake", "my son burns himself out
+            # at work". The same guard the first-aid row uses, because the wider verb list reads
+            # those words too.
+            and not _an_ordinary_helping(line)):
         if _matches(HUMAN_ANCHOR, line) or _matches(PERSON_WORD, _person_before(memory)):
             _note(memory, "self_harm")
             return _fit(pick(REPLIES["someone_else"], memory), line, "someone_else")
@@ -8479,6 +10060,26 @@ def respond(text, memory):
                 return _fit(pick(REPLIES["pet_hurt"], memory), line, "pet_hurt")
             _note(memory, name)
             return _fit(pick(REPLIES[name], memory), line, name)
+    # A road scare is not a shove: "someone nearly hit me at the crossing" reached the abuse card,
+    # which sends the person to 999 for a blow that never landed. The road place or the vehicle is
+    # what makes it the road's, and a person the speaker lives with keeps it the abuse card's.
+    if _matches(NEAR_HIT_ON_A_ROAD, line) \
+            and (_matches(NEAR_HIT_ON_A_ROAD_PLACE, line)
+                 or _matches((_STRUCK_VEHICLE + r"\b",), line)) \
+            and not _matches(NEAR_HIT_ON_A_ROAD_NOT, line):
+        _note(memory, "near_thing")
+        return _fit(pick(REPLIES[_near_thing_key(line)], memory), line, "near_thing")
+    # A bike a vehicle struck is the rider's accident, not a bike to carry: "a car hit my bike this
+    # morning" reached the answer about strapping a bike to roof bars. A person struck as well
+    # keeps the 999 card, and a near miss keeps the near thing's, so those are read first.
+    if _matches(STRUCK_MY_BIKE, line) and not _matches(STRUCK_BY_VEHICLE, line) \
+            and not _matches(STRUCK_HYPOTHETICAL, line):
+        # "my bike nearly got hit by a van" is the same scare as the rider's, not a bike to carry.
+        if _matches(STRUCK_NOT_NOW, line):
+            _note(memory, "near_thing")
+            return _fit(pick(REPLIES[_near_thing_key(line)], memory), line, "near_thing")
+        _note(memory, "struck_my_bike")
+        return _fit(pick(REPLIES["struck_my_bike"], memory), line, "struck_my_bike")
     for name, patterns, needs_person in CASES:
         if not _matches(patterns, line):
             if not (name == "red_flags" and _glass_test_line(line, before)):
@@ -8487,6 +10088,12 @@ def respond(text, memory):
         # the pronoun stands the self-harm row down here, the same way it does for the first aid.
         if name == "self_harm" and _an_ordinary_helping(line):
             continue
+        # A heart attack said in the same breath as a red line is still the heart attack: the
+        # spreading redness is a doctor today, and the chest is the ambulance.
+        if name in ("wound_streak", "wound_streak_fever") \
+                and _matches((r"\bchest\b", r"\bheart\b", r"\bbreastbone\b"), line) \
+                and _matches(CHEST + CHEST_ADJ, line):
+            continue
         # Not this call: a near miss, a what-if, a collision years ago, a shunt between two cars,
         # a car or a fence that was hit rather than a person, and a pet under a wheel.
         # Something heavy coming down on a person: the line names the collapse, the person under
@@ -8494,13 +10101,45 @@ def respond(text, memory):
         if name == "crush":
             if _matches(CRUSH_OFF, line) and not _matches(CRUSH_HARD, line):
                 continue
+        # Somebody described as unresponsive in manner is not a body on the floor either, and the
+        # words after the adjective are what say which it is.
+        if (name == "unconscious" and _matches(UNRESPONSIVE_MANNER, line)
+                and not _matches(BODY_IN_THE_ROOM, line)):
+            continue
+        # A professional who has not replied to a message is not a body on the floor.
+        if (name == "unconscious" and _matches(PRO_NOT_ANSWERING, line)
+                and not _matches(BODY_IN_THE_ROOM, line)):
+            continue
             _note(memory, "crush")
             return _fit(pick(REPLIES["crush"], memory), line, "crush")
         if name == "struck_by_vehicle" and (
                 _matches(STRUCK_NOT_NOW, line) or _matches(STRUCK_HYPOTHETICAL, line)):
+            # A near miss with a vehicle is a scare with its own answer, and standing down left
+            # "i nearly got run over on my bike" to "Sounds alright. Anything good in it?" and
+            # "i almost went under a bus" to the drowning card. The question, the story and the
+            # shunt still stand down: only the near word and the vehicle's own verb are answered.
+            if _matches(STRUCK_BY_A_VEHICLE, line) \
+                    and not _matches(STRUCK_BY_A_VEHICLE_NOT, line) \
+                    and not _matches(STRUCK_HYPOTHETICAL, line) \
+                    and not _matches(STILL_GOING + DESPAIR + WISH_INTENT + SELF_HARM_INTENT
+                                     + CRISIS_PLAN_SAID, line):
+                _note(memory, "near_thing")
+                return _fit(pick(REPLIES[_near_thing_key(line)], memory), line, "near_thing")
             continue
+        # A fire that nearly started is not a fire, for every card in the fire's family: the
+        # building's card, stop-drop-roll and the car's card all stand down together, and the
+        # near thing is answered as itself rather than left to whatever else reads the line.
+        if (name in ("fire", "clothes_fire", "vehicle_fire")
+                and _a_fire_that_did_not_happen(line)
+                and not _matches(FIRE_DRILL, line) and not _minor(line, memory)):
+            _note(memory, "near_fire")
+            return _fit(pick(REPLIES["near_fire"], memory), line, "near_fire")
         # A jam, a child seat and being kept in a car by a person are not a crash: see
         # TRAPPED_VEHICLE_NOT_NOW.
+        # A bite on a hand, a face or over a joint is the wide bite card's, which says to get it
+        # seen today: the itch card is a downgrade there ("the spider bit my hand").
+        if name == "insect_bite" and _matches(INSECT_BITE_NEEDS_A_LOOK, line):
+            continue
         if name == "trapped_vehicle" and _matches(TRAPPED_VEHICLE_NOT_NOW, line):
             continue
         if name == "trapped_vehicle" and TRAPPED_HELD_BY_A_PERSON.search(line):
@@ -8581,7 +10220,11 @@ def respond(text, memory):
                 and not _matches(DESPAIR + WISH_INTENT, line) and not _own_wish(line)):
             return _fit(pick(REPLIES["pet_loss"], memory), line, "pet_loss")
         # ...and a wish the speaker has just denied: "im not suicidal", "i would never kill myself".
-        if name == "self_harm" and (thing_dying or other_dying or suicide_elsewhere
+        # "i feel like cutting my arms" was read as a garden line: `cuttings?` in PLANT_WORDS
+        # matches "cutting", so the plant word alone made thing_dying true and stood the card
+        # down. A wish to cut the speaker's own body part is not about a plant.
+        if name == "self_harm" and ((thing_dying and not _a_wish_for_their_own_body(line))
+                                   or other_dying or suicide_elsewhere
                                    or denied_wish or topic_talk):
             continue
         # Flames out of a phone or a laptop are the battery answer, not the building card: water
@@ -8675,6 +10318,13 @@ def respond(text, memory):
         # "how do i build up without hurting myself": the harm is what they mean to avoid.
         if name == "self_harm" and _avoided(line, SELF_HARM):
             continue
+        # Sore arms after a session is the training answer: "i want to hurt my arms at the gym" was
+        # the crisis card on a head that read `hurt my arms` as the wish. A blade keeps the card
+        # whatever the rest of the line says, so this only ever takes the line that has the verb
+        # `hurt` or `harm` and a workout in it.
+        if name == "self_harm" and re.search(A_HURT_OF_A_BODY_PART, line) \
+                and re.search(A_WORKOUT_CUE, line):
+            continue
         # A short week is not the end of one: where the line has named the money, the `nothing
         # left` clause is the money, so this case stands down - unless something else in the list
         # rings, so a real wish said next to money keeps the card.
@@ -8723,7 +10373,11 @@ def respond(text, memory):
                 _note(memory, "pet_weak")
                 return _fit(pick(REPLIES["pet_weak"], memory), line, "pet_weak")
             continue
-        if name == "stroke" and not _matches(STROKE, line) and _matches(STROKE_WEAK_OFF, line):
+        # The FAST pair outranks the wide stand-down: `dentist`, `cold` and `slept on` are in it,
+        # so "my face is numb from the dentist and my arm is weak" was stood down here and never
+        # reached the pair below. A pair is the pair whatever else is in the line.
+        if name == "stroke" and not _matches(STROKE, line) and _matches(STROKE_WEAK_OFF, line) \
+                and not _matches(STROKE_FAST, line):
             continue
         # An old pet going blind is not a person having a stroke: "my dog is 12 and going blind"
         # rang 999 because "going blind" is one of the stroke signs. The pet has to be the subject,
@@ -8969,9 +10623,15 @@ def respond(text, memory):
         # swallows a blow with it: "my dad wont let me out and he hit me", "my dad hit me and he
         # wont let me leave the house" and "my dad wont let me out and he punched me" are a rule
         # and a hand on the body in the same breath, and a parent's no is not an answer to those.
+        # ...and the same is true whoever is saying no. This was the parent's exemption alone, so
+        # "my boss wont let me go home and he grabbed my arm" lost the card to a rule about a rota
+        # while the same sentence about a husband kept it: the refusal is who it is, the hand is
+        # what is happening (deck row saf-pc-ref-22).
         if name == "abuse" and _matches(ABUSE_FINE, line) \
                 and not (_matches(ABUSE_PARENT_REFUSAL, line)
-                         and _matches(PARENT_REFUSAL_BLOW, line)):
+                         and _matches(PARENT_REFUSAL_BLOW, line)) \
+                and not (_matches(ANY_REFUSAL_TO_GO, line)
+                         and _matches(A_HAND_ON_THE_PERSON, line)):
             continue
         # A nickname and a family who tease each other are the same words without the habit: only
         # the put-down aimed at the speaker in the lines above keeps the card.
@@ -9215,6 +10875,14 @@ def respond(text, memory):
             continue
         # A cold sore, chapped lips or a new piercing swells too, and a line about last summer is a
         # story; neither is anaphylaxis.
+        # A sign named, or a reaction already over, is another card's: this one is only for the
+        # line that says "a reaction" and stops there.
+        if name == "allergy_now" and (hypothetical or _matches(ALLERGY_SIGN_NAMED, line)):
+            continue
+        # A tick the person has already found and taken off has its own answer; this card is for
+        # the bite and the one still attached.
+        if name == "tick_bite" and _matches(TICK_ALREADY, line):
+            continue
         if name == "lips_swell" and _matches(LIPS_SWELL_OFF, line):
             continue
         # A cold sore, a bitten lip, a piercing and "what if my lips swell" are not a swelling that
@@ -9247,6 +10915,26 @@ def respond(text, memory):
             if (_matches(SPICY_MOUTH, line) and not _matches(LIPS_TINGLE_BREATH, line)
                     and not _matches(SWELLING_NOW, line)):
                 continue
+            # A tingle with no cause at all is the commonest shape of all ("my lips are
+            # tingling", "my tongue is tingling", "my lips are numb") and it was the listening
+            # line. It is not the food card, which has nothing to stop eating here, and it is not
+            # nothing: the answer says what it usually is and what change means 999.
+            # ...and a lip that has gone numb, or a tingle that is in the hands as well, is a
+            # nerve sign or a limb: neither is this card.
+            if (_matches(LIPS_NUMB, line) and not _matches(LIPS_TINGLE_SAID, line)
+                    and not _matches(SWELLING_NOW, line)):
+                continue
+            # ...but a sting, a nut or a reaction in the line is the cause, and a lips tingle
+            # after a bee sting is the airway being watched whatever the hand is doing.
+            if (_matches(LIPS_LIMB_TOO, line) and not _matches(LIPS_TINGLE_BREATH, line)
+                    and not _matches(LIPS_TINGLE_TRIGGER, line)):
+                continue
+            if (not (_matches(LIPS_TINGLE_TRIGGER, line) or _matches(LIPS_TINGLE_RED, line)
+                     or _matches(LIPS_TINGLE_FOOD, line))
+                    and _matches(LIPS_TINGLE_MOUTH, line)
+                    and not _matches(LIPS_TINGLE_ELSEWHERE, line)):
+                _note(memory, "general")
+                return _fit(pick(REPLIES["lips_tingle_alone"], memory), line, "lips_swell")
             if not (_matches(LIPS_TINGLE_TRIGGER, line) or _matches(LIPS_TINGLE_RED, line)
                     or _matches(LIPS_TINGLE_FOOD, line)):
                 continue
@@ -9314,6 +11002,12 @@ def respond(text, memory):
         # card is asked after this loop, so "my dad fell and he isnt making sense" got the bruising
         # question here and never reached it. The older-fall arm stands down the same way.
         if name == "fall_check" and _matches(HEAD_BANG, line):
+            continue
+        # A fall and then a stroke sign is the 999 stroke call, not the bruising question: "my dad
+        # fell and now his speech is slurred" was asked "is it just bruising?" on main. The stroke
+        # row is read further down the list, so this stands the fall row down and lets it.
+        if name == "fall_check" and _matches(FALL_STROKE_SIGN, line) \
+                and not _matches(SLUR_NOT_A_STROKE_WORDS, line):
             continue
         if name == "fall_check" and _fall_with_sign(line):
             continue
@@ -9574,8 +11268,17 @@ def respond(text, memory):
         # A pale child with a red sign is the ambulance, and the red list is the fence on the whole
         # arm, not just on the effort branch: `my son is pale and limp` and `...clammy and wont
         # wake up` are 999 on main and were "going downhill, ring 111" with the pale-child row.
+        # A red sign on a pale child is an ambulance, not the 111 card and not nothing: the row
+        # used to skip the child entirely, and "my son is mottled and cold" fell through to the
+        # cold-in-a-child answer. The rows above catch most of these; this is the belt.
         if name == "pale_child" and _matches(PALE_EFFORT_RED, line):
-            continue
+            # The signs that are a whole 999 answer of their own - floppy, wont wake, not
+            # breathing fast and blue - keep the row above; the colour words are the ones that
+            # had nothing behind them, and they are what this card is for.
+            if _matches(PALE_OTHER_RED, line):
+                continue
+            _note(memory, "pale_child")
+            return _fit(pick(REPLIES["pale_child_now"], memory), line, "pale_child")
         # A child who is pale and sweaty because they have been playing football is hot, not
         # shocked: the effort words take the heat answer instead of the downhill one, unless a
         # red sign is in the line too.
@@ -9585,6 +11288,26 @@ def respond(text, memory):
             _note(memory, "pale_child")
             said = "pale_child_heat" if _matches(PALE_HEAT, line) else "pale_child_effort"
             return _fit(pick(REPLIES[said], memory), line, "pale_child")
+        # The grown-up colour row. A child in the line is the child's row above; hands and feet on
+        # their own are nerves; the heat, the effort, a hangover, a needle or a fever that already
+        # has an answer all explain the colour, so this row passes and they keep their own reply.
+        if name == "pale_adult" and (
+                _matches(CHILD_WORD, line) or _matches(PALE_ADULT_FINE, line)
+                or (_matches(PALE_ADULT_ITSELF, line)
+                    and not _matches(PALE_ADULT_WHOLE, line))):
+            continue
+        # At the gym, in the sun, straight after a run: the colour is the effort, and this is the
+        # cooling answer rather than the ambulance.
+        if name == "pale_adult" and _matches(PALE_EFFORT, line) and not _matches(
+                PALE_EFFORT_RED, line):
+            _note(memory, "pale_adult")
+            return _fit(pick(REPLIES["pale_adult_effort"], memory), line, "pale_adult")
+        # Whose colour it is decides whose advice it is: the speaker gets "sit down", somebody
+        # else gets "sit them down".
+        if name == "pale_adult":
+            said = "pale_adult" if _matches(ADULT_PERSON, line) else "pale_adult_self"
+            _note(memory, said)
+            return _fit(pick(REPLIES[said], memory), line, "pale_adult")
         # Three months old and over is a doctor-today question, not this call.
         if name == "newborn_fever" and _matches(NEWBORN_FINE, line) and not _matches(
                 SEPSIS_SIGN, line):
@@ -9610,6 +11333,14 @@ def respond(text, memory):
                                    r"\bafter\s+(?:football|rugby|sport|training|a\s+run|pe)\b"),
                                   line)
                      or _matches((r"\b(?:temperature|temp|fever|feverish)\b",), line))):
+            continue
+        # A disease with the word in its name is not a temperature reading. "my daughter has
+        # glandular fever" and "scarlet fever" are named infections with their own cards, and a
+        # line with no reading, no "hot" and no "temperature" besides the name is not a child to
+        # ring 111 about today. A real temperature beside the name keeps the card, because the
+        # fever word then survives the name being taken out.
+        if name in FEVER_HOME_CARE and _the_only_fever_is_a_disease_name(line) and not _matches(
+                SEPSIS_SIGN, line):
             continue
         if name == "child_fever" and _matches(FEVER_ASK, line) and not _matches(
                 FEVER_REPORT, line):
@@ -9655,6 +11386,13 @@ def respond(text, memory):
         # speaker's own temperature is an adult's line, and a line that names somebody else (a
         # grandmother, a neighbour) is not the three-week-old.
         if name == "newborn_fever_next" and not _tiny_baby(memory):
+            continue
+        # The age came in an earlier line and it is five weeks or more: a plain "she feels hot"
+        # with no number is the same-day card for that baby, as it is when the age is in the line,
+        # and only a stated strong heat is the hospital call. (see TRUE_NEWBORN)
+        if name == "newborn_fever_next" and not (
+                _matches(BABY_BURNING, line) or _matches(FEVER_SIGN, line)) and not (
+                _true_newborn(memory)):
             continue
         if name == "newborn_fever_next" and (_matches(NEWBORN, line) or _matches(
                 TINY_AGE_FINE, line)):
@@ -9730,6 +11468,25 @@ def respond(text, memory):
         # went blue is a screen, a kitchen or an electrical question, and main sent every one of
         # them to 999. Only a body part, a person, or a person as the subject of the change keeps it.
         if name == "blue" and not _matches(BLUE_HUMAN, line):
+            continue
+        # "Grey" is a hair colour before it is cyanosis. The person-side alternative in BLUE only
+        # needs a subject and a colour change, so "im going grey", "why am i going grey" and "my
+        # husband is going grey" were all told that a colour change is a 999 call - and every one
+        # of them was the grey-hair answer's line. A hair word settles it; without one, a bare
+        # grey with no body part, no blue and none of the signs of a real shut-down is hair by
+        # default. A grey that names a body part - grey lips, a grey face, grey fingertips, grey
+        # gums - is still the card, and so is "he went grey and clammy" or "she went grey and
+        # passed out", because those are the signs the card exists for.
+        if (name == "blue" and not _matches(GREY_ALARM, line)
+                and not _matches(BLUE_LIPS_FACE, line)
+                and not _matches(BLUE_TINGE, line)
+                and (_matches(GREY_HAIR, line)
+                     or (_matches(GREY_ARRIVING, line)
+                         and not _matches(GREY_BODY, line))
+                     or (_matches(GREY_COLOUR, line)
+                         and not _matches(GREY_BODY, line)
+                         and not _matches(BLUE_HUMAN, line)
+                         and not _matches(GREY_SELF, line)))):
             continue
         # Cold hands, a blue tongue from a slushie, dye on the skin: the colour of a thing, or of a
         # limb that has not changed, is not a person short of oxygen.
@@ -9838,6 +11595,9 @@ def respond(text, memory):
             continue
         if name == "old_fall" and _matches(HEAD_BANG, line):
             continue
+        if name == "old_fall" and _matches(FALL_STROKE_SIGN, line) \
+                and not _matches(SLUR_NOT_A_STROKE_WORDS, line):
+            continue
         if name == "old_fall" and _fall_with_sign(line):
             continue
         if name == "old_fall" and (_matches(HEAD_KNOCKOUT, line)
@@ -9887,6 +11647,13 @@ def respond(text, memory):
                 PERSON_WORD + (r"\b(?:newborn|infant|toddler|little\s+one|baby|babies)\b",),
                 line) else "red_flags"
             return _fit(pick(REPLIES[key], memory), line, "red_flags")
+        if (name == "chest" and _matches(CHEST_FEELING, line)
+                and not _matches(_CHEST_OTHER_RED, line)
+                and not _matches(CHEST_FEELING_RED, line)
+                and not _matches(AFTER_EXERCISE, line)):
+            # The feeling is the cause the person already has, so the answer is the anxiety one and
+            # the 999 signs come after it rather than in place of it.
+            return _fit(pick(REPLIES["chest_anxiety"], memory), line, "chest")
         if (name == "chest" and _matches(CHEST_ADJ, line)
                 and not _matches(CHEST, line)
                 and not _matches(AFTER_EXERCISE, line)):
@@ -9909,6 +11676,22 @@ def respond(text, memory):
             continue
         # "cant wake up for school/work" is a routine grumble unless something red follows.
         if name == "unconscious" and _matches(ROUTINE_WAKE, line) and not _matches(WAKE_RED, line):
+            continue
+        # "my friend isnt coming round after all" is a visit and "he hasnt come round yet" is a person
+        # still out. The visit words are only believed when nothing in the line says what happened.
+        if name == "unconscious" and _matches(WONT_COME_ROUND, line) \
+                and not _matches(UNCONSCIOUS, line) and not _matches(WAKE_UP_SOMEONE, line) \
+                and _matches(VISIT_OR_TIME, line) and not _matches(COLLAPSE_HINT, line):
+            continue
+        # A person who is hard to wake in the mornings is a grumble, unless the line says more.
+        if name == "unconscious" and _matches(HARD_TO_WAKE, line) \
+                and not _matches(UNCONSCIOUS, line) and not _matches(WAKE_UP_SOMEONE, line) \
+                and _matches(MORNING_ROUTINE, line) and not _matches(COLLAPSE_HINT, line):
+            continue
+        # A reason to be up early is the whole story of "i cant wake my mum up for work". The routine
+        # words are open-ended, so this is a list of reasons rather than a fence on each shape.
+        if name == "unconscious" and _matches(ROUTINE_REASON, line) \
+                and not _matches(WAKE_RED + COLLAPSE_HINT + SPELL_RED, line):
             continue
         if name in ("chest",) and _asking_about_the_world(line) and not _matches(
                 (r"\bright\s+now\b", r"\bnow\b", r"\bsudden(?:ly)?\b"), line):
@@ -9998,6 +11781,30 @@ def respond(text, memory):
             continue
         # Numbness in one arm is a chest when the chest is named in the same line, and a stroke
         # question when it is not.
+        # The FAST pair is the one thing in this file that must not be reasoned away, so the
+        # stand-down is narrow on purpose: it only reaches a line the FAST arm alone caught, and
+        # only with an old cause, an over-use cause or a settled pattern in it.
+        if name == "stroke" and _matches(STROKE_FAST, line) and not _matches(STROKE, line):
+            # The injected arm and the shoulder that stops at shoulder height keep their own
+            # answers: `cant lift` is a hard sign, so a cause alone does not stand them down. No
+            # face word in the line is what makes it the arm rather than the stroke.
+            if not _matches(_FACE_WORD, line) and (
+                    _matches(STROKE_FAST_JAB, line) or _matches(STROKE_FAST_LIFT_CEILING, line)):
+                continue
+            if _matches(STROKE_FAST_OFF, line) or _matches(STROKE_FAST_SHOULDER, line) or (
+                    _matches(STROKE_FAST_PATTERN, line)
+                    and not _matches(STROKE_PAIR_BOTH, line)
+                    and not _matches(STROKE_FAST_WEAK, line)) or (
+                    not _matches(STROKE_FAST_HARD, line)
+                    # ...except that a jab explains the arm and never the face that went with it:
+                    # "my left arm is weak since my covid jab and my face feels funny" is a pair
+                    # with a cause on one half. Numb is left out of _FACE_GOING_ODD on purpose, so
+                    # "hands numb from the cold and my face is numb" keeps the cause it had.
+                    and not (_matches(STROKE_FAST_JAB, line)
+                             and _matches(_FACE_GOING_ODD, line))
+                    and (_matches(STROKE_FAST_CAUSE, line)
+                         or _matches(STROKE_FAST_SENSORY, line))):
+                continue
         if name == "arm_numb" and _matches(CHEST_MENTIONED, line):
             continue
         if name == "chest" and _matches(CHEST_WORK, line) and not _matches(CHEST_URGENT, line):
@@ -10006,6 +11813,31 @@ def respond(text, memory):
         if name == "chest" and _matches(CHEST_SLOW, line) and not _matches(CHEST_URGENT, line):
             _note(memory, "chest_slow")
             return _fit(pick(REPLIES["chest_slow"], memory), line, name)
+        # A chest that hurts with the cough is a strained muscle, not a heart attack. Any heart
+        # sign, blood, or a line that says it is happening now keeps the ambulance above.
+        if (name == "chest" and _matches(CHEST_SORE_MOVE, line)
+                and not _matches(CHEST_URGENT, line)
+                and not _matches(CHEST_RED_FLAGS, line)
+                and not _matches(CHEST_SPREAD, line)
+                and not _matches(CHEST_STRAIN_STOP, line)
+                and not _matches((r"\bblood\b", r"\bbleed\w*", r"\bright\s+now\b"), line)):
+            if _matches((r"\bcough\w*",), line):
+                return _fit(pick(CHEST_COUGH_STRAIN_REPLY, memory), line)
+            return _fit(pick(CHEST_STRAIN_REPLY, memory), line)
+        if (name == "chest" and _matches(CHEST_STRAIN_MOVE, line)
+                and not _matches(CHEST_URGENT, line)
+                and not _matches(CHEST_RED_FLAGS, line)
+                and not _matches(CHEST_SPREAD, line)
+                and not _matches(CHEST_STRAIN_STOP, line)
+                and not _matches((r"\bblood\b", r"\bbleed\w*", r"\bright\s+now\b"), line)):
+            return _fit(pick(CHEST_STRAIN_REPLY, memory), line)
+        if (name == "chest" and _matches(CHEST_STRAIN, line)
+                and not _matches(CHEST_URGENT, line)
+                and not _matches(CHEST_RED_FLAGS, line)
+                and not _matches(CHEST_SPREAD, line)
+                and not _matches(CHEST_STRAIN_STOP, line)
+                and not _matches((r"\bblood\b", r"\bbleed\w*", r"\bright\s+now\b"), line)):
+            return _fit(pick(CHEST_COUGH_STRAIN_REPLY, memory), line)
         # A jaw or an arm that aches with no chest in the line is still the ambulance, but the
         # reply must not describe a chest the person never mentioned.
         if name == "chest" and not _matches(CHEST_MENTIONED, line):
@@ -10051,10 +11883,21 @@ def respond(text, memory):
         # bleeding is what hurts them in the next ten minutes. The self_harm case comes before the
         # first aid cases, which is why the crisis reply owned this line, and a bare "i cut myself"
         # keeps the support reply it has.
-        if name == "self_harm" and _matches(SELF_CUT, line) and (
+        # ...unless the line is the wish and not the act: `cut my thighs` is a method phrase the
+        # bleeding row reads, and "press on it for ten minutes" is the wrong reply to somebody
+        # who has not cut anything yet.
+        if name == "self_harm" and not _a_wish_for_their_own_body(line) \
+                and _matches(SELF_CUT, line) and (
                 _matches(BLEEDING, line) or _matches(CUT_NOT_STOPPING, line)):
             _note(memory, "bleeding")
             return _fit(pick(REPLIES["self_cut_bleeding"], memory), line, "self_cut_bleeding")
+        # The fit said by the person who had it: "i had a fit" was told to lie *themselves* on
+        # their side and to time it on their phone, which the reader cannot do to themselves. Same
+        # rule as the electric shock above - whose body it was decides the wording - and a fit
+        # somebody else had keeps the card it has.
+        if name == "recent_fit" and not (_person(line) or _matches(OTHER_BODY, line)):
+            _note(memory, "recent_fit_self")
+            return _fit(pick(REPLIES["recent_fit_self"], memory), line, "recent_fit_self")
         _note(memory, name)
         return _for_the_person(_fit(pick(REPLIES[name], memory), line, name), line, name)
     # Cold hands and feet that go white, then blue, then red and sore are Raynaud's: common, a GP
@@ -10133,7 +11976,43 @@ def respond(text, memory):
     if _matches(ASKS_IF_CALL, line) and not _matches(CALL_HAS_A_SIGN, line):
         _note(memory, "general")
         return pick(ASK_CALL_REPLIES, memory)
+    # A card that ordered an ambulance has already answered "should i go to hospital", and the
+    # answer is the call. The A&E rule of thumb below is for a person deciding about a morning's
+    # appointment; after a chest-pain card it was a downgrade inside a live emergency.
+    if not _matches(CALL_HAS_A_SIGN, line) and (
+            _matches(ASKS_IF_GOING, line) or _matches(ASKS_GO_BARE, line)):
+        was_case = _last_case(memory)
+        live = not (isinstance(memory, dict) and memory.get("safety_safe"))
+        if was_case in AMBULANCE_CASES and live and not _matches(GO_IN_NOT_ABOUT_IT, line):
+            _note(memory, was_case)
+            wait = WAITING.get(was_case) or WAITING["general"]
+            return _fit(pick(GO_IS_A_CALL, memory)
+                        + pick(wait if isinstance(wait, tuple) else (wait,), memory), line, was_case)
     if _matches(ASKS_IF_GOING, line) and not _matches(CALL_HAS_A_SIGN, line):
         _note(memory, "general")
         return pick(ASK_GO_REPLIES, memory)
+    # A near miss the fire's own cards never saw - "i nearly burnt the house down", "i nearly had a
+    # fire but it was fine" - is still a fright, and this is the last place to say so: it comes
+    # after every card and after the small injuries, so a burn or a toaster that is smoking is
+    # answered by what it is, and only a bare near miss lands here. A fire drill is not a fire.
+    if _matches(NEAR_FIRE, line) and not _matches(FIRE_DRILL, line) \
+            and not _minor(line, memory):
+        if _a_fire_that_did_not_happen(line):
+            _note(memory, "near_fire")
+            return _fit(pick(REPLIES["near_fire"], memory), line, "near_fire")
+        # A fire word outside the near clause is a fire: "i nearly died and then the house was on
+        # fire" was reaching the general fallback, because FIRE does not read "the house was on
+        # fire" at all - it wants "is on fire". Here the near word has already said a fire is worth
+        # a card, so the fire's card is the answer rather than an accident of wording. A line with
+        # no fire word in it at all is neither - "prices almost went up" is not a fire - and is
+        # left where it was.
+        if _fire_words_in(line):
+            _note(memory, "fire")
+            return _fit(pick(REPLIES["fire"], memory), line, "fire")
     return _follow_up(line, memory)
+
+from ..memory import again as _never_twice  # noqa: E402 - applied once the module is defined
+
+# Whatever this module answers, the last thing that happens to it is the earlier-turn
+# check (bot/memory/again.replied): `answers` alone served a card again on 59 deck turns.
+respond = _never_twice.replied(respond)

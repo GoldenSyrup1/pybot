@@ -31,8 +31,10 @@ _STATE_SOURCE = (r"(?:im|i am|were|we are)\s+(?:just\s+)?(?:so\s+)?(?:lost|stuck
                  r"(?:\s+(?:in\s+a\s+rut|on|with|about)\s+(?:this|it|that))?")
 _STATE = re.compile(r"^\W*(?:" + _STATE_SOURCE + r")\s*(?:\?|\.|!)*\s*$")
 
-STUCK = re.compile(
-    r"^\W*(?:(?:and|but|so|well|oh|honestly|then|i mean|like|just|seriously|really)\s+)*"
+# The small words a person puts in front of an ask, and the ask itself with no anchors on it, so
+# the same shape can be read as the whole line and as the end of a longer one.
+_LEADS = r"(?:(?:and|but|so|well|oh|honestly|then|i mean|like|just|seriously|really)\s+)*"
+_ASK_BODY = (
     r"(?:"
     r"(?:i|we)(?:'ve| have|'m| am)?\s+(?:just\s+|really\s+|still\s+|honestly\s+|actually\s+)*"
     r"(?:dont|don'?t|do not|doesnt|does not)\s+know\s+what\s+to\s+do" + _NOTHING_ELSE +
@@ -45,7 +47,60 @@ STUCK = re.compile(
     r"|what\s+(?:do|should|shall|can|could)\s+(?:i|we)\s+do" + _NOTHING_ELSE +
     r"|what\s+(?:am|are)\s+(?:i|we)\s+supposed\s+to\s+do" + _NOTHING_ELSE +
     r"|(?:" + _STATE_SOURCE + r")"
-    r")\s*(?:\?|\.|!)*\s*$")
+    r")")
+
+STUCK = re.compile(r"^\W*" + _LEADS + _ASK_BODY + r"\s*(?:\?|\.|!)*\s*$")
+
+# The ask does not have to be the whole line. "that sounds hard, what should i do" is a comment on
+# what was just said and then the ask, and the pool never saw it: the comment was read as the subject
+# and the knowledge base answered the word "sound" ("Sound is a pressure wave travelling through
+# air"). The ask at the end of a line is the ask, and the clause before it is the person's reaction,
+# which says nothing the pool has to read - so the pool reads the ask and the line before it, which
+# is what it reads for every other stuck line.
+AN_ASK_AT_THE_END = re.compile(
+    r"(?:^|[\s,;:.!?\u2014-]+)" + _LEADS + _ASK_BODY + r"\s*(?:\?|\.|!)*\s*$")
+# The frame a reaction is said in: a pronoun pointing at the last thing said, and a word or two
+# about it ("that sounds hard", "this tastes odd", "thats hard", "that must be hard").
+REACTION_FRAME = re.compile(
+    r"^(?:(?:oh|well|god|wow|yeah|ok|okay|hmm|blimey|cor|ah|yes|no)\s+)*"
+    r"(?:that sounds|this sounds|that looks|this looks|that seems|that feels|that must be"
+    r"|that must have been|thats|that's|this is|that is|it is|its|it's|sounds|looks|seems|feels"
+    r"|that|this|it)\s+"
+    r"(?P<about>(?:[a-z']+\s*){1,3})$", re.I)
+# A reaction says how it landed, so nothing in it names a thing: "that sounds like my printer" is
+# about the printer and the ask after it is not the whole of the line.
+NAMES_A_THING = re.compile(
+    r"\b(?:like|as|than|a|an|the|my|your|his|her|their|our|some|any|this|that|these|those"
+    r"|one|two|three)\b", re.I)
+
+
+def _a_reaction_to_what_was_said(lead):
+    """Whether a clause in front of the ask is only the person's reaction to the last turn."""
+    text = " ".join(str(lead or "").split()).strip(" ,;:.!?-\u2014")
+    if not text:
+        return False
+    found = REACTION_FRAME.match(text)
+    if not found:
+        return False
+    return not NAMES_A_THING.search(found.group("about"))
+
+
+def the_ask_in(low):
+    """The ask in the line: the whole of it, or the ask at the end of a reaction to the last turn.
+
+    "" when the line is not a stuck ask at all, which is most lines.
+    """
+    text = " ".join(str(low or "").split())
+    if STUCK.match(text):
+        return text
+    found = AN_ASK_AT_THE_END.search(text)
+    if not found:
+        return ""
+    lead = text[:found.start()].strip(" ,;:.!?-\u2014")
+    if lead and not _a_reaction_to_what_was_said(lead):
+        return ""
+    return found.group(0).strip(" ,;:.!?-\u2014")
+
 
 # The thing before it, by the kind of news it was. A death is not a problem to solve, money is; a
 # relationship ending runs on the next forty-eight hours, a diagnosis on one question for a doctor.
@@ -317,11 +372,12 @@ def pool(text, memory):
     """The pool of next steps for a stuck line, or None when the line is not that or nothing hard
     came before it."""
     low = " ".join(str(text or "").lower().replace("\u2019", "'").split())
-    if not STUCK.match(low):
+    ask = the_ask_in(low)
+    if not ask:
         return None
     before = _before(memory)
     if not before:
-        if _START_ASK.match(low):
+        if _START_ASK.match(ask):
             return _not_said_again(HARD, memory)
         if _STATE.match(low):
             # "im stuck" / "i am so lost" as the first thing said: the state has its own answers

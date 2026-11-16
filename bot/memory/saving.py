@@ -22,7 +22,11 @@ import re
 # The words that make a line about putting money by, and the words that make a sum a goal rather
 # than the price of something they are buying ("i want to save 200 on my car insurance" is not a
 # goal, so a sum followed by "on" or "off" is a saving on a bill, not a pot).
+# "putting by" is the phrase, but people put the money inside it - "im putting 300 a month by for
+# a deposit" - and the word order broke the reader, so the sum went with it and the line read as a
+# rate about nothing. The object is allowed a few words, not a clause.
 SAVING = re.compile(r"\b(?:save|saves|saving|saved|savings|saving up|putting by|putting away|"
+                    r"putting\b[^.?]{0,18}?\b(?:by|away|aside)|put\b[^.?]{0,18}?\b(?:by|away|aside)|"
                     r"setting aside|stashing|put by|put away|set aside|stash|pot|fund)\b", re.I)
 # A sum of money, with the way people write it: "£2,000", "2000 pounds", "2k", "2 grand".
 SUM = re.compile(r"(?:£|\$|\u20ac)\s*(\d[\d,]*(?:\.\d+)?)\s*(k|grand|thousand)?"
@@ -58,7 +62,11 @@ END_OF = r"(?:(?:at\s+)?the\s+end\s+of\s+|end\s+of\s+)?"
 DATE = re.compile(r"\b(?:by|before|until|till|for|in|at the end of|end of)\s+" + END_OF +
                   r"(?:next\s+|this\s+|early\s+|late\s+)?(" + WHEN_WORDS + r")\b", re.I)
 # A correction of the date said a turn or two ago: "actually make that by april", "no, by june".
-CORRECTING = re.compile(r"^\s*(?:(?:actually|no|sorry|nope|rather|instead|oh)\b[\s,]*|"
+CORRECTING = re.compile(r"^\s*(?:(?:actually|no|sorry|nope|rather|instead|oh)\b[\s,]*"
+                        # A correction that names its subject first: "actually its 20 thousand",
+                        # "no thats 20000". The figure is the whole of what follows, so the
+                        # pronoun-verb is part of the correction and not of the sum.
+                        r"(?:(?:its|it's|it\s+is|it\s+was|thats|that's|that\s+is)\b[\s,]*)?|"
                         r"(?:make|change)\s+(?:that|it)\s+(?:to\s+)?|i\s+mean\b[\s,]*)*", re.I)
 # What a line that is nothing but a date looks like once the correction and the lead are taken off.
 # A relative one is the same date as "the end of <month>" said without a month: "by the end of
@@ -254,17 +262,251 @@ POT_REPORTED = re.compile(r"\b(?:this\s+(?:month|year|week)|last\s+(?:month|year
                           r"to\s+date)\b", re.I)
 
 
+# The pot said with the word "already" instead of a saving verb: "i already have 1500", "we have
+# got 2000 already". HELD_SAID needs a word like saved or set aside beside the figure, so a line
+# whose only saving word is "already" was not a pot at all - and a chat that had said
+# "i already have 1500" was told, two turns later, how long the whole 5,000 takes.
+ALREADY_HELD = re.compile(r"\b(?:already|so far)\b[^.!?]{0,24}?\b(?:have|has|got|hold|put)\b"
+                          r"\s*(?:£\s*)?(\d[\d,]*(?:\.\d+)?)\s*(k|grand|thousand)?\b", re.I)
+ALREADY_AFTER = re.compile(r"\b(?:have|has|got|hold)\b\s*(?:£\s*)?(\d[\d,]*(?:\.\d+)?)\s*"
+                           r"(k|grand|thousand)?\s*(?:pounds?|quid)?\s+(?:already|so far)\b", re.I)
+
+
+# A line that says what it is aiming at is not only a pot, even with a "have" in it: "i want to
+# have 500 quid saved by december" was read as £500 already held, and the figure-by-a-date answer
+# that the rest of the chat needed was lost. The date on the end is the clearest sign of all - a
+# pot is money now, so nothing already saved is "by December".
+AIM_AT_A_SUM = re.compile(r"\b(?:want|wants|wanting|need|needs|hope|hoping|goal|aim|aiming|plan|"
+                          r"planning|trying|like)\b[^.!?]{0,30}?"
+                          r"\b(?:have|save|saved|set\s+aside|put\s+by|reach|get\s+to|afford)\b",
+                          re.I)
+BY_A_DATE = re.compile(r"\bby\s+(?:next\b|the\s+end\b|\d|january|february|march|april|may|"
+                       r"june|july|august|september|october|november|december|christmas|"
+                       r"spring|summer|autumn|winter|xmas|easter|payday|then\b)", re.I)
+
+
 def the_pot_said_alone(text):
     """The money the line says is already saved, when the line is only that, else 0."""
     line = str(text or "")
-    if not line.strip() or FURTHER_SAID.search(line) or POT_REPORTED.search(line):
+    if not line.strip() or FURTHER_SAID.search(line):
+        return 0
+    if AIM_AT_A_SUM.search(line) or BY_A_DATE.search(line):
         return 0
     held = HELD_SAID.search(line)
-    if not held:
+    if held and not POT_REPORTED.search(line):
+        if INTENT.search(line) and not re.search(r"\b(?:have|has|got|got\s+\w+)\b", line, re.I):
+            return 0
+        return _pounds(held.group(1), held.group(2))
+    for pattern in (ALREADY_HELD, ALREADY_AFTER):
+        found = pattern.search(line)
+        if not found:
+            continue
+        pot = _pounds(found.group(1), found.group(2))
+        # A small figure beside "already have" is not a pot: "we already have 2 kids" is a family,
+        # and a couple of pounds saved is not a saving plan. Money people hold is said in tens.
+        if pot >= 50:
+            return pot
+    return 0
+
+
+# The pot as a position rather than a report: "im on 4 thousand", "im at 4k", "ive got 4000
+# towards it", "we're up to 3000". A person tracking a goal says where they are, and on main every
+# one of these lines was answered by the greeting pool as an echo ("On 4 thousand, then.") while
+# the goal beside it - "i need 20 thousand" - went on being the goal still unfilled.
+AT_A_FIGURE = re.compile(
+    r"\b(?:im|i'?m|i\s+am|we'?re|we\s+are|ive|i'?ve|i\s+have|we'?ve|we\s+have)\s+"
+    r"(?:now\s+|only\s+|just\s+|already\s+)?"
+    r"(?:on|at|up\s+to|got(?:\s+to)?|onto|standing\s+at)\s+"
+    r"(?:about\s+|around\s+|nearly\s+|just\s+)?"
+    r"(?:£\s*)?(\d[\d,]*(?:\.\d+)?)\s*(k|grand|thousand)?\b", re.I)
+
+
+def the_pot_they_are_on(text):
+    """The money the line says the person is on their way to, when that is what the line says.
+
+    "im on 4 thousand" against a goal of 20 thousand is £4,000 of the way there. Only a line that
+    says nothing but where they are counts: a line naming what they earn ("im 29 and on about
+    30k") is a salary, not a pot, and a line naming a goal ("im on 4 thousand a month") is a rate.
+    """
+    line = str(text or "")
+    if not line.strip() or NOT_A_PRICE.search(line) or _a_rate(line):
         return 0
-    if INTENT.search(line) and not re.search(r"\b(?:have|has|got|got\s+\w+)\b", line, re.I):
+    match = AT_A_FIGURE.search(line)
+    if not match:
         return 0
-    return _pounds(held.group(1), held.group(2))
+    if NOT_A_POT.match(line[match.end():]):
+        return 0
+    return _pounds(match.group(1), match.group(2))
+
+
+# A rate is a figure with "a month", "a week", "each month" after it: the same words as a pot, and
+# the two are told apart by what the line is doing with the figure.
+A_RATE = re.compile(r"\b(?:a|per|each|every)\s+(?:month|week|year|fortnight|pay\s*day|"
+                    r"payday|payslip)\b", re.I)
+
+
+def _a_rate(line):
+    """True when the figure in the line is a rate rather than a sum."""
+    return bool(A_RATE.search(str(line or "")))
+
+
+def _the_pot_they_are_on(memory):
+    """The last position the person said they were on towards the goal, or 0."""
+    turns = [t for t in ((memory or {}).get("turns") or []) if isinstance(t, dict)]
+    for turn in reversed(turns[-6:]):
+        pot = the_pot_they_are_on(str(turn.get("user") or ""))
+        if pot:
+            return pot
+    return 0
+
+
+# The ask for the gap rather than for a date, a rate or a length: "how far off am i", "how much
+# more do i need", "how much have i got left to go". On main "how far off am i" after a pot and a
+# goal was answered by the countdown reader as a date - "That's about 3 weeks away - Friday 4
+# December" - because "on 4 thousand" had filed the 4th of the month as a date, and the question
+# about money got a day of the week.
+HOW_FAR_OFF = re.compile(
+    # Not "how far along am i": that is the pregnancy question, and it is a different turn.
+    r"\bhow\s+far\s+(?:off|away)\b|"
+    r"\bhow\s+much\s+(?:more\s+)?(?:do\s+i\s+need|have\s+i\s+(?:got\s+)?left|is\s+left)\b|"
+    r"\bhow\s+much\s+(?:more|left)\s+to\s+go\b|"
+    r"\bwhat'?s\s+left\s+(?:to\s+go|on\s+it)\b", re.I)
+
+
+# The goal said as what they need, once the chat has said what they are saving for: "im saving for
+# a house deposit" / "i need 20 thousand". The goal reader above wants the saving word on the same
+# line as the figure, and people split it - the purpose in one turn, the money in the next - so
+# the figure that fills a goal already named is the goal, and the gap question has two figures to
+# work between instead of one.
+NEED_A_FIGURE = re.compile(
+    r"\b(?:need|needs|need\s+to\s+(?:get\s+to|reach|have|save|find)|"
+    r"have\s+to\s+(?:find|reach|save)|should\s+have|aiming\s+for|target\s+is)\b", re.I)
+
+
+def _the_goal_they_need(memory):
+    """The sum the chat says they need, when the chat has already said what they save for."""
+    turns = [t for t in ((memory or {}).get("turns") or []) if isinstance(t, dict)]
+    lines = [str(t.get("user") or "") for t in turns[-6:]]
+    # A rate said beside the thing they are putting by still names the thing: "im putting 300 a
+    # month by for a deposit" says both what the money is for and how fast it grows, and read as
+    # a line with a figure on it, the purpose was dropped and "i need 20 thousand" had no goal to
+    # fill.
+    if not any(SAVING.search(line) and (not _a_sum(line) or _a_rate(line)) for line in lines):
+        return 0
+    for line in reversed(lines):
+        if the_pot_they_are_on(line) or the_pot_said_alone(line) or _a_rate(line):
+            continue
+        if NEED_A_FIGURE.search(line):
+            wanted = _a_sum(line)
+            if wanted:
+                return wanted
+    return 0
+
+
+def asks_how_far_off(text):
+    """True when the line asks how far off the goal the person is."""
+    return bool(HOW_FAR_OFF.search(str(text or "")))
+
+
+def the_gap_left(text, memory):
+    """The money between the pot and the goal, said back, or "".
+
+    The two figures are the chat's own: the goal it named and the position it last heard. Only
+    when both are held and the pot is short of the goal - a gap of nothing is not a gap, and a
+    pot past the goal is a different answer ("you're there").
+    """
+    line = str(text or "")
+    if not asks_how_far_off(line) or _a_sum(line) or _a_rate(line):
+        return ""
+    goal, pot = the_goal_and_the_pot(memory)
+    if not goal:
+        return ""
+    if not pot or pot >= goal:
+        # No pot said yet, or the pot already past the goal: both are a different answer, and the
+        # gap question is only the gap.
+        return ""
+    said = _the_gap_said(goal, pot)
+    if _the_gap_was_just_said(said, memory):
+        return _the_gap_again(goal, pot, memory)
+    return said
+
+
+def _the_gap_said(goal, pot):
+    """The two figures side by side: what is left, and how much of it is already there."""
+    left = goal - pot
+    share = int(round(100.0 * pot / goal))
+    return ("£%s to go of £%s - you're £%s in, %d%% of the way there."
+            % (format(left, ","), format(goal, ","), format(pot, ","), share))
+
+
+def _the_gap_was_just_said(said, memory):
+    """True when the bot's own last line was this same sentence.
+
+    The position line and the question after it both want the gap, so asking the question straight
+    after the position would hand the person the same sentence twice in a row - the one thing a
+    reply must never do.
+    """
+    turns = [t for t in ((memory or {}).get("turns") or []) if isinstance(t, dict)]
+    if not turns:
+        return False
+    return " ".join(str(turns[-1].get("bot") or "").split()) == " ".join(said.split())
+
+
+def _the_gap_again(goal, pot, memory):
+    """The same gap said another way: the length at the rate they settled on, else a restatement.
+
+    A rate the chat has already settled on ("i can put by 300 a month") is the thing that turns the
+    gap into a date, which is the next thing a saver wants and not a number they have just read.
+    """
+    rate = _the_rate_in_the_chat(memory)
+    if rate:
+        # The length is about the money still to find, and the pot is already in hand: £20,000 at
+        # £300 a month is 67 months, but £16,000 is 54, and the 67 argues with the gap just given.
+        said = _the_length_at_that_rate(goal - pot, rate, "month", pot)
+        if said:
+            return said
+    return ("Still £%s to go - you've £%s of the £%s in the pot."
+            % (format(goal - pot, ","), format(pot, ","), format(goal, ",")))
+
+
+def the_goal_and_the_pot(memory):
+    """(goal, pot) as the chat holds them, the goal from whichever reader knows it. (0, 0) else."""
+    goal = (_the_goal_in_the_chat(memory) or _the_goal_said_as_a_price(memory)
+            or _the_goal_they_need(memory))
+    if not goal:
+        return 0, 0
+    pot = _the_money_already_held(memory) or _the_pot_they_are_on(memory)
+    return goal, pot
+
+
+def the_pot_position(text, memory):
+    """The gap said back when the line reports the position itself, or "".
+
+    "i need 20 thousand" / "im on 4 thousand" is the same pair of figures the gap question asks
+    about, said without a question: on its own the line was answered with an echo ("On 4
+    thousand, then.") which told the person nothing they had not just typed.
+    """
+    if not the_pot_they_are_on(text) or asks_how_far_off(text) or _a_sum_that_is_a_goal(text):
+        return ""
+    if the_pot_said_alone(text):
+        # "i have 1000 saved already" is the same fact with a report on it, and that turn has an
+        # answer of its own ("£2,000 still to find: ...") which this one must not take away.
+        return ""
+    goal, pot = the_goal_and_the_pot(memory)
+    # The position is in the line being read, and the turn's own line is not in memory["turns"]
+    # yet when a reply is chosen, so it is read from the line first.
+    pot = the_pot_they_are_on(text) or pot
+    if not goal or not pot or pot >= goal:
+        return ""
+    return _the_gap_said(goal, pot)
+
+
+def _a_sum_that_is_a_goal(text):
+    """True when the line carries a goal of its own, so it is not only a position."""
+    line = str(text or "")
+    if _a_rate(line):
+        return False
+    return bool(NEED_A_FIGURE.search(line) and _a_sum(line))
 
 
 def rate_question_for(amount, when=""):
@@ -278,6 +520,11 @@ def rate_question_for(amount, when=""):
     return "How much do i need to put by a week to have %s pounds?" % format(amount, ",")
 
 
+def the_money_already_held(memory):
+    """Public name for the pot, for the arithmetic outside this module that reads it too."""
+    return _the_money_already_held(memory)
+
+
 def _the_money_already_held(memory):
     """The money the person said is already in the pot, from the last few lines, or 0."""
     turns = [t for t in (memory or {}).get("turns") or () if isinstance(t, dict)]
@@ -287,6 +534,12 @@ def _the_money_already_held(memory):
         if pot:
             return pot
         pot = the_pot_said_alone(line)
+        if pot:
+            return pot
+        # "im on 4 thousand" is the same fact said as a position rather than as a report, and the
+        # length and the gap are both about it: read as nothing, the goal was answered as though
+        # not a penny of it were already there.
+        pot = the_pot_they_are_on(line)
         if pot:
             return pot
     return 0
@@ -356,12 +609,26 @@ HOW_LONG_UNTIL = re.compile(
     r"(?:save|have|get|reach|afford|be there)\b", re.I)
 
 
+# The same question asked from the other end: not how long it takes but when it lands. "when will
+# i have enough" and "when will we get there" were answered by the money arithmetic of the chat
+# from the figures on the screen, and that answer read the whole goal - so a chat that had already
+# been told "£10,800 still to find" was handed "at 400 a month, 15,000 takes about 38 months" on
+# its last turn, the pot the person had already saved gone. The length asks above do not match it:
+# no "how long" in the line. The words after "when" have to name landing on the goal, so "when
+# will i start saving" and "when should i set it up" are not this question.
+WHEN_AT_THE_GOAL = re.compile(
+    r"^\W*(?:(?:and|but|so|ok|okay|then|oh|right|yeah)\W+)*"
+    r"when\s+(?:will|would|can|could|should|might)\s+(?:i|we|you|it|its|it's|that|this)\s+"
+    r"(?:have|get|be|reach|afford|save|hit|make|manage)\b", re.I)
+
+
 def asks_how_long(text):
     """True when the line asks how long the goal takes and names no figure itself."""
     line = " ".join(str(text or "").lower().split())
     if not line or len(line.split()) > 8 or re.search(r"\d", line):
         return False
-    return bool(HOW_LONG_ASK.search(line) or HOW_LONG_UNTIL.match(line))
+    return bool(HOW_LONG_ASK.search(line) or HOW_LONG_UNTIL.match(line)
+                or WHEN_AT_THE_GOAL.match(line))
 
 
 def how_long_it_takes(memory):
@@ -385,19 +652,27 @@ def how_long_it_takes(memory):
     priced = 0 if goal else _the_goal_said_as_a_price(memory)
     if not goal:
         goal = priced
-    pot = 0
-    if goal:
-        pot = _the_money_already_held(memory)
-        if 0 < pot < goal:
-            # The length is about the money still to find, not the whole goal: "i have 1000 saved
-            # already" then "how long will that take" is the £2,000 left, and the answer above
-            # ("£2,000 still to find: ...") already said so. Read as the goal it answered with
-            # "For £1,000: £750 a month is 2 months", the pot they already hold.
-            goal = goal - pot
-        else:
-            pot = 0
-    else:
+    from_the_answer = False
+    if not goal:
+        # The goal can also be the one the answer above worked out, when the person's own lines
+        # never named it in words this module reads ("i need 5000" is a sum and a need, not a
+        # saving word). The pot comes off that goal too: a chat that never said "saving" still
+        # said "i already have 1500", and the length it got was for the whole 5,000.
         goal = _the_goal_in_the_answer(memory)
+        turns_said = [t for t in (memory.get("turns") or []) if isinstance(t, dict)]
+        last_bot = str((turns_said[-1] or {}).get("bot") or "") if turns_said else ""
+        # An answer that already worked the pot out ("£10,800 still to find: ...") is the money
+        # left, not the goal, and taking the pot off it again counts it twice.
+        from_the_answer = bool(goal) and "still to find" in last_bot.lower()
+    pot = _the_money_already_held(memory) if not from_the_answer else 0
+    if goal and 0 < pot < goal:
+        # The length is about the money still to find, not the whole goal: "i have 1000 saved
+        # already" then "how long will that take" is the £2,000 left, and the answer above
+        # ("£2,000 still to find: ...") already said so. Read as the goal it answered with
+        # "For £1,000: £750 a month is 2 months", the pot they already hold.
+        goal = goal - pot
+    else:
+        pot = 0
     if not goal or goal < 100:
         return ""
     if previous and _a_length_was_asked(previous):
@@ -579,7 +854,8 @@ def _the_goal_said_as_a_price(memory):
     """The sum said of the thing they are saving for, when no line named a goal, or 0."""
     turns = [t for t in ((memory or {}).get("turns") or []) if isinstance(t, dict)]
     recent = turns[-6:]
-    if not any(SAVING.search(str(t.get("user") or "")) and not _a_sum(str(t.get("user") or ""))
+    if not any(SAVING.search(str(t.get("user") or ""))
+               and (not _a_sum(str(t.get("user") or "")) or _a_rate(str(t.get("user") or "")))
                for t in recent):
         # Nothing in the chat says what is being saved for without a figure on it, so a price in
         # it is about something else - a repair, a bill - and not the pot.
@@ -587,6 +863,11 @@ def _the_goal_said_as_a_price(memory):
     for turn in reversed(recent):
         line = str(turn.get("user") or "")
         if not line or the_pot_said_alone(line):
+            continue
+        if the_pot_they_are_on(line):
+            # Where they are on the way is not the price of the thing: "i need 1200" / "im at 300
+            # towards it" read the position as the goal, so the goal and the pot became the same
+            # £300 and the next ask ("how much more do i need") had no gap to work between.
             continue
         if A_RATE.search(line) or A_RATE_ANY_OTHER_PERIOD.search(line):
             continue   # a rate, not a price
@@ -851,6 +1132,25 @@ _OTHER_FIGURE_WORDS = re.compile(
 
 A_LONE_SUM = re.compile(r"(?<![\d.,£$\u20ac])(\d[\d,]*)(?![\d.,])")
 
+# The figure on its own, after a word that puts something right: "actually its 150", "make that
+# 150", "no wait 150", "sorry, 150". The month was said once on the rate before it and never
+# changed, so a correction that names no doing and no period is the same rate with a new figure -
+# the reading `bot/memory/rates.py` already does for "actually 5 times" after "3 times a week",
+# and the one this file was missing: every sum worked out after it used the rate they had left
+# behind, and the figure they corrected to was filed as the balance instead.
+A_CORRECTION_AND_A_FIGURE = re.compile(
+    r"^\W*(?:(?:actually|sorry|no|nope|wait|oh|well|ok|okay|right|hang\s+on)\b\W*){0,3}"
+    r"(?:(?:it|its|it's|that|thats|that's|make\s+it|make\s+that|i\s+meant|meant)\b\W*){0,2}"
+    r"(?:£\s*)?\d", re.I)
+
+# ...and nothing on the line that says the figure is something other than the rate: a balance, a
+# spend, a debt, or a period of its own ("actually its 150 a week" is a different rate, not this
+# one with a new figure).
+_NOT_THE_RATE = re.compile(
+    r"\b(?:on|spent|spending|cost|costs|bill|bills|balance|owe|owes|owed|debt|debts|rent|"
+    r"price|paid|pay|total|goal|target|week|weeks|day|days|year|years|times?|hours?)\b",
+    re.I)
+
 # The plainest way of putting a rate right is to say no first: "no, 250 a month". The correction
 # words above cover the ways of saying it that carry their own verb ("actually", "i meant", "make
 # it"), and a person who answers the figure with "no" uses none of them - so the rate they had
@@ -872,7 +1172,25 @@ A_NO_THEN_A_RATE = re.compile(r"^\s*(?:no|nope|nah)\b[\s,.!\u2014-]*"
 A_SPENT_ON = re.compile(r"\b(?:on|spent|spending|costs?|bills?)\b", re.I)
 
 
-def a_rate_put_right(line):
+# The plainest correction of all has no verb on it: "actually its more like 300 now". Every way of
+# putting a rate right that this file knew carried one ("i can do 300", "make it 300 a month"), so
+# a figure corrected like this matched nothing, and every sum afterwards - the length, a week of
+# it, the date it lands - used the rate the person had already left behind.
+A_MORE_LIKE = re.compile(
+    r"\b(?:more\s+like|closer\s+to|call\s+it)\s*(?:£\s*)?\d"
+    r"|\b(?:it'?s|its|that'?s)\s+(?:(?:more\s+like|about|only)\s+)?(?:£\s*)?\d[\d,]*\s+now\b",
+    re.I)
+
+
+def _is_a_rate_line(line):
+    """True when the line puts money by at a rate, whatever else it says."""
+    for found in A_RATE.finditer(str(line or "")):
+        if not _is_not_a_rate(str(line or ""), found):
+            return True
+    return False
+
+
+def a_rate_put_right(line, before=""):
     """The monthly rate a line puts right, or 0.
 
     "i can put by 250 a month" / "actually i can do 300 now ive paid the car off" is one rate
@@ -883,6 +1201,11 @@ def a_rate_put_right(line):
     already left behind.
     """
     line = str(line or "")
+    if (before and A_MORE_LIKE.search(line) and A_RATE_PUT_RIGHT.search(line)
+            and _is_a_rate_line(before) and not _OTHER_FIGURE_WORDS.search(line)):
+        figures = A_LONE_SUM.findall(line)
+        if len(figures) == 1:
+            return _a_sum_named(figures[0])
     after_a_no = A_NO_THEN_A_RATE.search(line)
     if after_a_no and not A_SPENT_ON.search(line[after_a_no.end():]):
         return _a_sum_named(after_a_no.group(1))
@@ -891,11 +1214,15 @@ def a_rate_put_right(line):
     with_the_month = A_SUM_A_MONTH.search(line)
     if with_the_month:
         return _a_sum_named(with_the_month.group(1))
-    if not A_CAN_CARRY_IT.search(line):
-        return 0
     figures = A_LONE_SUM.findall(line)
     if len(figures) != 1:
         return 0
+    if not A_CAN_CARRY_IT.search(line):
+        # No "i can do" in it: only a correction that names the figure and nothing else is still
+        # this chat's rate ("actually its 150"), and one that names a balance, a spend or a
+        # period of its own is not.
+        if not A_CORRECTION_AND_A_FIGURE.match(line.strip()) or _NOT_THE_RATE.search(line):
+            return 0
     return _a_sum_named(figures[0])
 
 
@@ -917,6 +1244,7 @@ def _the_rate_in_the_chat(memory):
     """
     turns = [t for t in (memory.get("turns") or []) if isinstance(t, dict)][-6:]
     settled = 0
+    before = ""
     for turn in turns:
         line = str(turn.get("user") or "")
         for found in A_RATE.finditer(line):
@@ -930,9 +1258,10 @@ def _the_rate_in_the_chat(memory):
                 settled = value
             continue
         if settled:
-            put_right = a_rate_put_right(line)
+            put_right = a_rate_put_right(line, before)
             if put_right:
                 settled = put_right
+        before = line
     return settled
 
 

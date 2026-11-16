@@ -179,7 +179,7 @@ def _usual_unit(text, before=None):
     return max(counts, key=lambda unit: counts[unit])
 
 
-def _add_measured(spans, low, high, unit, usual, at=None):
+def _add_measured(spans, low, high, unit, usual, at=None, matched=""):
     """Add one measured span, taking the answer's own unit when the range did not name one."""
     if low is None or high is None:
         return
@@ -194,6 +194,7 @@ def _add_measured(spans, low, high, unit, usual, at=None):
             "text": "%s to %s%s" % (_say(low), _say(high), _unit(_plural(unit, high)))}
     if at is not None:
         span["at"] = at
+        span["end"] = at + len(matched) if matched else at
     spans.append(span)
 
 
@@ -273,6 +274,14 @@ ASKS = frozenset(("is", "was", "were", "are", "would", "will", "does", "do", "di
 SUBJECTS = ("that", "this", "it", "there", "they", "those")
 # What the doubt itself is called. "a lot" and "too much" are the same question from the other
 # side, and "enough" is the one that is about a floor rather than a ceiling.
+# The doubt words that are only ever about money: a person asking "is that expensive" wants a
+# price judged, and a span of years or hours in the answer is not the thing they asked about. The
+# deck has "i need a new tyre" / "is that expensive" answered "what figure have you got? the usual
+# is 5 to 6 years", which asks for a price against a lifespan.
+MONEY_DOUBTS = frozenset((
+    "a good price", "a fair price", "a good deal", "expensive", "cheap", "steep",
+    "on the high side", "on the low side", "about the going rate", "the going rate",
+))
 QUANTITY_WORDS = frozenset((
     "a lot", "much", "too much", "too high", "too low", "too little", "about right",
     "about average", "enough", "a good price", "a fair price", "a good deal", "expensive",
@@ -294,7 +303,13 @@ TIME_DOUBT = frozenset(("too long", "too short"))
 # "is that ok" is the same shape but not the same question: it asks whether the advice stands,
 # which is the composer's own verdict (`bot/compose/verdict.py`), so it is a doubt about a figure
 # only when the person has named one.
-DOUBT_WORDS = QUANTITY_WORDS | frozenset(("normal", "reasonable", "ok", "okay", "fine"))
+# "is that fair" and "is that right" are the same doubt in the words people use most, and neither
+# was read: "the man quoted 250" / "is that fair" was answered with the boiler card again, because
+# "fair" is not in the list of quantities and the answers module still had the question it had
+# already answered. Both only claim a line when a figure is in hand and an answer gave a range to
+# hold it against, so "is that fair" about a rota, with no figure, is left where it was.
+DOUBT_WORDS = QUANTITY_WORDS | frozenset(("normal", "reasonable", "ok", "okay", "fine", "fair",
+                                          "right"))
 # The doubt words that are a whole line on their own ("a bit much", "too much?"). The ones left out
 # are a nod back ("ok", "fine", "normal") or a comparison that needs its own verb ("about average"),
 # and those are the conversation's, not a figure's.
@@ -333,9 +348,15 @@ WORD_ALIAS = {
     "price about right": "about right", "what it should cost": "about right",
     "sound about right": "about right", "sounds about right": "about right",
     "look about right": "about right", "looks about right": "about right",
-    "cost that much": "too much",
+    "cost that much": "too much", "that much": "too much", "this much": "too much",
     # A figure with the person's own word for where it sits: "60 seems high", "45 feels low".
     # Which side it is, is the figure's job.
+    # The same "is it a lot" in the words that mean "no complaint": "is 8 pounds acceptable for a
+    # cinema ticket" and "is 4 pounds alright for a chicken" were read as a line with no doubt in
+    # it, so the price question went to whichever card named the subject - the minutes in the oven,
+    # or a paragraph about published rates - while the range was one lookup away.
+    "acceptable": "about right", "alright": "about right", "all right": "about right",
+    "sensible": "about right", "much good": "about right", "fair enough": "about right",
     "high": "too high", "low": "too low",
 }
 # The words that only say what the doubt is about, so they come off the end before the doubt word
@@ -378,6 +399,20 @@ DOUBT_UNITS = frozenset((
     "week", "weeks", "month", "months", "year", "years", "mile", "miles", "km", "kcal",
     "calories", "steps", "degrees",
 ))
+# The doubts that place a figure in a range ("is that too low", "is that a lot", "is that on the
+# low side"). "is that enough" and "is that normal" are about the thing itself, and the memory store
+# reads the figure that came with them, so the answer's own turn is not read for those: "i drink 2
+# litres of water a day" is the store's figure and not one to place.
+PLACES_A_FIGURE = QUANTITY_WORDS - {"enough"}
+
+# A gauge reading is never a bare number: a temperature ("55 to 60C") or a pressure ("1 to 1.5
+# bar") is a property of the thing, not an amount the person is holding up, so a bare number is
+# not placed against one. "my heating bill was 200 a month" then "is that too much" came back
+# "Yes, a bit much - 55 to 60C is the usual." A figure the person gave in a unit of its own ("is 1
+# bar a lot", "my boiler pressure is 0.4 bar") is read by the unit branch, which is untouched.
+A_GAUGE_UNIT = frozenset((
+    "c", "f", "celsius", "centigrade", "deg", "degree", "degrees", "bar", "bars", "psi"))
+
 # The unit the doubt's own figure is in, when it names one: "is 80 pounds a lot", "is 8000 steps
 # enough", "is 1.5 bar a lot". Money is a unit here too - the answers write a price either way -
 # and the unit words `UNIT` does not need (the readings it reads are gauges) are here.
@@ -454,6 +489,20 @@ def _doubt(text):
     if impression:
         line = "is %s %s" % (impression.group("figure").replace(" ", ""),
                              impression.group("rest").strip())
+    # The figure first and the doubt after it: "4 pounds for a chicken is that a lot", "80 is that
+    # too much", "30 quid for a haircut is that reasonable". The same question with its parts in
+    # the other order, so it is rebuilt as one - and the rebuild is what the range is looked up
+    # for. A figure followed by a period is a rate ("20 a month is that a lot") and is left alone,
+    # because "for a month" is not a thing to price.
+    turned = re.match(r"(?P<figure>[£$€]?\s?\d[\d,]*(?:\.\d+)?)\s*(?:pounds?|quid|euros?|"
+                      r"dollars?)?\s*(?:for\s+(?!a\s+(?:day|week|month|year|hour)\b)"
+                      r"(?P<thing>[a-z][\w' ]{0,40}?))?\s*[-,]?\s*(?:is|was|would)\s+"
+                      r"(?:that|this|it)\s+(?P<word>a lot|too much|expensive|reasonable|ok|okay|"
+                      r"alright|fine|fair|about right|steep|dear|pricey|cheap)\b", line)
+    if turned:
+        thing = (turned.group("thing") or "").strip()
+        line = "is %s %s%s" % (turned.group("figure").replace(" ", ""), turned.group("word"),
+                               (" for " + thing) if thing else "")
     # The same opinion with the figure further along the line: "one bloke said 4200 which seems
     # high". The figure is the value and the word after the verb is the doubt, so nothing has to
     # be rebuilt - it is read here and returned.
@@ -559,14 +608,31 @@ def _doubt_ranges(said):
             continue
         low, high = min(low, high), max(low, high)
         measured.append({"low": low, "high": high, "mark": "", "money": False, "unit": unit,
-                         "at": found.start(),
+                         "at": found.start(), "end": found.end(),
                          "text": "%s to %s%s" % (_say(low), _say(high), _unit(unit))})
     for found in WORD_RANGE.finditer(text):
         _add_measured(measured, _word_number(found.group(1)), _word_number(found.group(2)),
                       (found.group(3) or "").lower(), _usual_unit(text, found.start()),
-                      at=found.start())
+                      at=found.start(), matched=found.group(0))
+    measured = [span for span in measured if not _an_age(text, span)]
     measured.sort(key=lambda span: span.get("at", 0))
     return money, measured
+
+
+# "a one to three year old", "kids of 5 to 7 years old": the range is how old somebody is, not how
+# long anything lasts, and it is written in the same words a stretch of time is. Read as a stretch,
+# "how long does a toddler sleep" (answered "a one to three year old sleeps 11 to 14 hours") then
+# "is that too long" was judged against the child's age: "No - 1 to 3 years is the normal spread."
+# A range with "old" straight after it is an age and no yardstick for a duration.
+AN_AGE_AFTER = re.compile(r"^[\s,|\-]{0,3}(?:years?|months?|weeks?|days?)?\s*olds?\b", re.I)
+
+
+def _an_age(text, span):
+    """True when the range is somebody's age ("one to three year old"), not a stretch of time."""
+    end = span.get("end")
+    if not isinstance(end, int):
+        return False
+    return bool(AN_AGE_AFTER.match(text[end:end + 24]))
 
 
 def _money(value, mark="£"):
@@ -590,6 +656,10 @@ ABOUT_RIGHT = (
     "That sits inside the {span} that is usual for it.",
     "Right in the usual range: {span}.",
 )
+NOT_TOO_LITTLE = (
+    "No, that is about right - {span} is the usual.",
+    "No, you are inside it: the usual is {span}.",
+)
 NOT_TOO_MUCH = (
     "No, that is about right - {span} is the usual.",
     "No, that is fine: the usual is {span}.",
@@ -605,8 +675,15 @@ ON_THE_HIGH_SIDE = (
 # cough that is under the usual. A length under the usual is not too long, and one over it is not too
 # short.
 NOT_TOO_LONG = (
-    "No, that is not long - the usual is {span}.",
     "No - {span} is the usual, and that is under it.",
+    "No, that is short of the usual {span}.",
+)
+# The figure at the top of the range is not under it, and "not long" said to a length that *is* the
+# long end of the usual reads as a fault in the thing that is fine: at 3 weeks in "2 to 3 weeks" the
+# person is at the end of the usual, not short of it.
+NOT_TOO_LONG_INSIDE = (
+    "No, that is inside the usual {span}.",
+    "No - {span} is the usual, and that sits inside it.",
 )
 NOT_TOO_SHORT = (
     "No, that is not too short - {span} is the usual.",
@@ -631,7 +708,20 @@ ENOUGH = (
     "Yes, that is enough - the usual is {span}.",
     "That is plenty: the usual is {span}.",
 )
+# The low side, asked as a worry, keeps the same Yes the high side gives: "is that too low" wants
+# "Yes", and "No, that is under the usual" agrees with nobody. The question has two parts - the
+# side the doubt's own word asks about, and the side the figure is on - and the frame answers
+# both: "is that too high" at a figure under the range is a No that points the other way, and
+# "is that about right" is not a question about a side at all, so a figure under the range is a
+# plain No. One frame set for all three said "Yes, a bit low" to "is that too high".
 ON_THE_LOW_SIDE = (
+    "That is on the low side - the usual is about {span}.",
+    "Yes, a bit low - {span} is the usual.",
+)
+# Asked whether the figure is about right, or about the high side, and it is under the range. The
+# frames are the ones the single set already had for these two questions, in the same order, so
+# only the "too low" lines change wording: those frames answer them.
+THE_LOW_SIDE_FOUND = (
     "That is on the low side - the usual is about {span}.",
     "No, that is under the {span} that is usual.",
 )
@@ -766,6 +856,7 @@ def _the_span(doubt, said, mine=""):
             if priced:
                 spans = priced
     else:
+        measured = [span for span in measured if span["unit"] not in A_GAUGE_UNIT]
         # A bare figure ("is 100 enough", "2400") carries no mark and no unit, so the answer
         # decides what it is a figure of - and the answer leads with the thing that was asked
         # about, so the kind whose first range comes earlier in the text is the one it is a
@@ -821,6 +912,42 @@ def _the_span(doubt, said, mine=""):
     return spans[0]
 
 
+# The words that name the low side of the range. The high side is `TOO_MUCH_WORDS`, which was
+# already read here: a doubt that names one side is answered by that side's frame, and a doubt
+# that names neither ("about right", "a fair price", "the going rate") is answered by the range.
+TOO_LITTLE_WORDS = frozenset(("too low", "too little", "cheap", "on the low side"))
+
+
+def _the_side_asked(word):
+    """Which side of the range the doubt's own word asks about, or None when it names neither."""
+    word = str(word or "").strip().lower()
+    if word in TOO_MUCH_WORDS:
+        return "high"
+    if word in TOO_LITTLE_WORDS:
+        return "low"
+    return None
+
+
+def _the_side_decides(options, doubt, value, low, high, low_side, found_side):
+    """The frames the doubt's own word asks for, on the side the figure is on.
+
+    A doubt has two parts - the side its own word asks about, and the side the figure is on - and
+    a verdict has to answer both. "is that too high" at a figure under the range is a No that
+    points the other way (`found_side`), "is that too low" at the same figure is a Yes
+    (`low_side`), and a doubt that names no side ("about right", "a fair price", "the going
+    rate") is answered by the range: the frames the range gave it, which are `found_side` when the
+    figure is under it and `options` otherwise.
+    """
+    if doubt["word"] == "enough" or doubt["word"] in TIME_DOUBT:
+        return options
+    asked = _the_side_asked(doubt["word"])
+    if low <= value <= high:
+        return NOT_TOO_LITTLE if asked == "low" else options
+    if value < low:
+        return low_side if asked == "low" else found_side
+    return options
+
+
 def _judged(doubt, said, mine=""):
     """The verdict on the figure in the answer's own range, or None when nothing can be judged."""
     value = doubt["value"]
@@ -833,7 +960,7 @@ def _judged(doubt, said, mine=""):
     if doubt["word"] in TIME_DOUBT:
         long = doubt["word"] == "too long"
         if low <= value <= high:
-            options = NOT_TOO_LONG if long else NOT_TOO_SHORT
+            options = NOT_TOO_LONG_INSIDE if long else NOT_TOO_SHORT
         elif value > high:
             options = ON_THE_LONG_SIDE if long else NOT_TOO_SHORT
         else:
@@ -854,8 +981,54 @@ def _judged(doubt, said, mine=""):
             options = ABOVE_THE_USUAL
     else:
         options = UNDER_THE_USUAL if doubt["word"] == "enough" else ON_THE_LOW_SIDE
+    options = _the_side_decides(options, doubt, value, low, high,
+                                ON_THE_LOW_SIDE, THE_LOW_SIDE_FOUND)
     line = _verdict.pick(list(options), {"turns": [{"bot": span_text}]}, span_text)
-    return line.format(span=span_text, value=_money(value, span["mark"] or "£"))
+    line = line.format(span=span_text, value=_money(value, span["mark"] or "£"))
+    # What the answer said that money buys, when the verdict ends on the range itself: "£150 to
+    # £300 buys a sound second-hand one" is the difference between a verdict and an answer a
+    # friend would give, and it is the answer's own words about its own range.
+    aside = _the_band_aside(said, span_text)
+    if aside:
+        line = _with_the_aside(line, span_text, aside)
+    return line
+
+
+# The clause right after a range says what that money buys: "£150 to £300 **buys a sound
+# second-hand one** - a rigid 1990s mountain bike ...". Only a verb opens it, so a clause that
+# goes on to price something else ("in most pubs", "depending on where you are") is not an aside.
+_BUYS = re.compile(
+    r"^(?:buys|gets you|gets|gets a|pays for|fits|covers|includes|holds|lasts|makes|gives|"
+    r"comes to|is|are|will)\b", re.I)
+# Where a clause after the range stops being about it: the sentence ends, or the answer turns to
+# another price ("and £8,000 to £12,000 with the bath moved"), another place or another subject.
+_ASIDE_ENDS = re.compile(r"[,.;:()]|\s+\band\s+(?:£|\d)|\s+\u2014\s+|\s+-\s+|\s+but\s+", re.I)
+
+
+def _the_band_aside(said, span_text):
+    """What the answer says the range buys, or "" - the clause after the range, when it has one."""
+    said = " ".join(str(said or "").split())
+    if not said or not span_text:
+        return ""
+    found = said.find(span_text)
+    if found < 0:
+        return ""
+    after = said[found + len(span_text):]
+    end = _ASIDE_ENDS.search(after)
+    clause = (after[:end.start()] if end else after).strip()
+    if not clause or len(clause) > 70:
+        return ""
+    if not _BUYS.match(clause):
+        return ""
+    return clause.rstrip(" .,;:")
+
+
+def _with_the_aside(line, span_text, aside):
+    """The verdict with the answer's own clause on the end, when the verdict ends on the range."""
+    body = line.rstrip()
+    if not body.endswith(span_text + "."):
+        return line
+    return body[:-1] + ", which " + aside + "."
 
 
 # How far back the answer being judged may be. The doubt usually comes straight after it, but a
@@ -900,9 +1073,9 @@ def _a_stretch_of_time(unit):
 # about the range itself rather than telling someone who never said where they were that they are
 # inside it.
 THE_USUAL_NO = (
-    "No - {span} is the usual for it.",
-    "No, that is the usual: {span}.",
-    "No - {span} is the normal spread.",
+    "No - {span} is the usual, so it depends how long yours has been going on.",
+    "No, that is the usual: {span}. How long has yours been going on?",
+    "No - {span} is the normal spread, so say how long yours has lasted and I'll place it.",
 )
 
 
@@ -1014,6 +1187,18 @@ def _answer_before(memory, value=None):
                 return said, len(turns) - back
             if elsewhere[1] < 0:
                 elsewhere = said, len(turns) - back
+    if elsewhere[1] >= 0 or value is not None:
+        return elsewhere
+    # No answer gave a range. One that named a single price is still the answer a doubt is about:
+    # "how much is an mot" / "is that expensive" had no answer at all, so the knowledge base's card
+    # came back as the bare figure "£54.85." with no sentence round it.
+    for back in range(1, min(LOOK_BACK, len(turns)) + 1):
+        turn = turns[-back] if isinstance(turns[-back], dict) else {}
+        if turn.get("module") != "answers":
+            continue
+        said = str(turn.get("bot") or "")
+        if _a_lone_price(said):
+            return said, len(turns) - back
     return elsewhere
 
 
@@ -1050,11 +1235,33 @@ def _figure_since(memory, after, narrow=False):
     return None
 
 
+# A number that says *when* is not a number that says *how long*. "he keeps getting up at 5" says
+# five o'clock, and held against "a two year old needs eleven to fourteen hours" it came back "No,
+# that is under the 11 to 14 hours that is usual" - a verdict on a child who wakes at five, not one
+# who sleeps five hours. The fence is on the figure, because no comparison is safe while a clock
+# time is read as a count.
+A_CLOCK_TIME_BEFORE = re.compile(
+    r"\b(?:at|by|until|till|til|before|after|past)\s*$", re.I)
+A_CLOCK_TIME_AFTER = re.compile(r"^\s*(?:am|pm|a\.m|p\.m|o'?clock)\b", re.I)
+
+
+def _a_clock_time(said, found, value):
+    """Whether this number of the line names an hour of the day rather than a count of anything.
+
+    "at 250" is a sum said without its pound sign, so only a number that could be an hour of the
+    day is fenced by the word before it; "5am" and "5 o'clock" say what they are.
+    """
+    if A_CLOCK_TIME_AFTER.match(said[found.end():]):
+        return True
+    return 0 < value <= 24 and bool(A_CLOCK_TIME_BEFORE.search(said[:found.start()]))
+
+
 def _the_figure_in(said, found):
     """{value, money, unit} for one number in the person's line, or None when it is not a figure.
 
     A year ("1998") and an age ("im 52") are numbers a line uses without asking anything to be
-    judged, so they are not figures here.
+    judged, so they are not figures here. Nor is an hour of the day: "at 5" and "5.30" say when
+    something happens, and a unit after the number ("5 hours", "5 weeks") is what makes it a count.
     """
     value = float(found.group("number").replace(",", ""))
     money = bool(found.group("mark"))
@@ -1065,6 +1272,8 @@ def _the_figure_in(said, found):
     if YEAR <= value <= NEXT_YEAR and value % 100 and not money and not unit:
         return None  # a year, not a sum: "is 1998 a lot" (a round 2000 is a price)
     if AN_AGE.match(said.strip().lower()):
+        return None
+    if not unit and not money and _a_clock_time(said, found, value):
         return None
     return {"value": value, "money": money, "unit": unit}
 
@@ -1081,6 +1290,125 @@ ASKS_FOR_A_FIGURE = (
     "What figure have you got? The usual is {span}, and I'll say which side of it you are on.",
     "What is yours? {span} is the usual for it, so I can tell you where it lands.",
 )
+# A doubt about a figure the answer itself named: "how many hours do toddlers sleep" is answered
+# "a one year old needs 11 to 14 hours", and the next line is "is that a lot". There is no figure
+# of the person's to ask for - the only number in the conversation is the one the bot just gave -
+# so asking "what figure have you got" asks them for what they were told a turn ago. The answer
+# names a range, so the honest reply is that the range is the usual and offers to place their own
+# number if they have one. A price is different: there the person is holding a quote they have not
+# said yet, which is what ASKS_FOR_A_PRICE is for.
+# A price doubt about an answer that named no price at all: "i need a new tyre" is answered with
+# how long a tyre lasts, and "is that expensive" is a fair question the answer did not touch. The
+# honest reply says so and asks for the number they are holding, rather than judging a lifespan as
+# if it were a price.
+#
+# It must not claim they were quoted, though: a price word in a doubt does not mean the question
+# was about a thing with a price on it. "How much should I be saving" / "is that cheap" is a sum to
+# put away, and "how long does a fridge last" / "is that the going rate" is a lifespan - nobody is
+# holding a quote in either, and telling them what they were quoted invents one. So the ask is for
+# a figure they may have, and only a doubt whose answer really named money gets ASKS_FOR_A_PRICE.
+NO_PRICE_SAID = (
+    "I didn't give you a price there, so I can't call it cheap or dear yet. Tell me the figure you "
+    "have in mind and what it is for, and I'll say whether it is fair.",
+    "There was no price in what I said, so there is nothing to weigh up yet. Give me the number "
+    "and what it is for.",
+    "None of that was money, so I can't tell you expensive or not yet. Give me the figure and what "
+    "it is for, and I'll say whether it is fair.",
+)
+# The answer named one price rather than a range: "A car MOT costs up to £54.85 in England...".
+# "Is that expensive" then has nothing to hold it against, and the answer did name a price, so the
+# reply says the figure back and asks for the one being weighed up. Without this the reading said
+# "I didn't give you a price there" over an answer with £54.85 in it, and the knowledge base's own
+# card came back as a bare "£54.85." with no sentence round it (@apt-lime, #12204).
+A_LONE_PRICE = re.compile(
+    r"(?P<mark>[£$€])\s?(?P<amount>\d[\d,]*(?:\.\d+)?)"
+    r"|\b(?P<amount2>\d[\d,]*(?:\.\d+)?)\s*(?P<word>" + "|".join(sorted(MONEY_WORDS)) + r")\b")
+THE_PRICE_IT_GAVE = (
+    "{span} was the only price in that, so there is nothing to call dear yet. What have you been "
+    "quoted?",
+    "That answer named {span} and no range, so cheap or dear needs a second price. What figure are "
+    "you weighing up?",
+    "{span} is the figure I gave - one price, no range - so tell me the number you have in mind "
+    "and I'll say where it sits.",
+)
+
+
+def _a_lone_price(said):
+    """The text of a single price in the answer, when the answer gave one and no range."""
+    text = str(said or "")
+    money, measured = _doubt_ranges(text)
+    if money:
+        return ""
+    for found in A_LONE_PRICE.finditer(text):
+        amount = found.group("amount") or found.group("amount2") or ""
+        if not amount:
+            continue
+        try:
+            value = float(amount.replace(",", ""))
+        except ValueError:      # noqa: PERF203 - a figure that will not read is not a price
+            continue
+        if value <= 0:
+            continue
+        word = (found.group("word") or "").lower()
+        if not (found.group("mark") or word) and YEAR <= value <= NEXT_YEAR:
+            continue
+        return found.group(0).strip()
+    return ""
+
+
+# The answer gave a range of something other than money, and the doubt asked whether it is a lot:
+# "how much should i be saving" is answered "3 to 6 months is the usual", and "is that cheap"
+# cannot be answered about a stretch of months. The reply names the measure, so the person can see
+# the answer was not a price, and then asks for the figure they were asking about.
+A_RANGE_THAT_IS_NOT_A_PRICE = (
+    "That was a range of {unit}, not a price: {span} is what it said, so cheap or dear does not "
+    "come into it. If you are weighing up a figure, tell me it and what it is for.",
+    "{span} is a usual range, not a price, so there is nothing there to call expensive. Give me "
+    "the figure you are judging and I'll say where it sits.",
+)
+# The measures a "is that cheap" can be about without being money, written as the sentence needs
+# them. An abbreviation is spelled out ("hrs" -> "hours") and a unit this does not know is left to
+# NO_PRICE_SAID, which claims no measure at all.
+UNIT_WORDS = {
+    "hour": "hours", "hours": "hours", "hr": "hours", "hrs": "hours",
+    "minute": "minutes", "minutes": "minutes", "min": "minutes", "mins": "minutes",
+    "day": "days", "days": "days", "week": "weeks", "weeks": "weeks",
+    "month": "months", "months": "months", "year": "years", "years": "years",
+    "mile": "miles", "miles": "miles", "km": "kilometres", "calories": "calories",
+    "kcal": "calories", "steps": "steps", "g": "grams", "grams": "grams",
+    "kg": "kilos", "litre": "litres", "litres": "litres", "liter": "litres",
+    "liters": "litres", "ml": "millilitres",
+}
+THE_RANGE_ITSELF = (
+    "That is the range itself: {span} is what it says, so nothing in it is out of the ordinary. If "
+    "you have a figure of your own, tell me and I'll say where it sits.",
+    "{span} is the usual, so that is the figure to hold next to yours. Give me your own and I'll "
+    "place it on the range.",
+    "Nothing there was out of the ordinary - {span} is the usual, and that is the figure I gave "
+    "you. Tell me your own and I'll judge that one instead.",
+)
+# A doubt with a side to it. "Is that too low" about a tyre pressure is asking which side of the
+# range the thing they described is on, and a reply that answers "rather than something high" has
+# read the wrong end of it (@apt-lime, #12204). The span is the same; the side is the line's own.
+BELOW_THE_RANGE = (
+    "Under {span} would be low, so the bottom of that is what to aim for. Tell me your figure and "
+    "I'll say how far under it is.",
+    "{span} is the usual, so anything under it is on the low side. What is yours?",
+)
+ABOVE_THE_RANGE = (
+    "Over {span} would be high, so anything at the top of it is fine. Tell me your figure and I'll "
+    "say how far over it is.",
+    "{span} is the usual, so anything above that is on the high side. What is yours?",
+)
+# The doubts that name a side: under the usual, or over it. A doubt with no side ("a lot", "about
+# right") keeps the neutral reply.
+SAID_LOW = frozenset(("too low", "on the low side", "below average", "too little", "not enough",
+                      "enough"))
+# A word about money is not a side of a range of something else: "is that expensive" over 30 to 35
+# psi is not a question about the top of the range, so the money words stay out and that doubt is
+# left to the module that has prices.
+SAID_HIGH = frozenset(("too high", "on the high side", "above average", "too much",
+                       "over the top"))
 
 
 def asks_for_the_figure(doubt, said):
@@ -1090,11 +1418,55 @@ def asks_for_the_figure(doubt, said):
         # number held up against a range.
         return None
     money, measured = _doubt_ranges(said)
-    spans = money or measured
+    if doubt["word"] in MONEY_DOUBTS:
+        # A price ask is judged by a price, never by a lifespan or a distance.
+        spans = money
+        if not spans:
+            spoken = [span for span in measured if UNIT_WORDS.get(span.get("unit"))]
+            if spoken:
+                # The answer gave months, years or hours, so the doubt is about the wrong kind of
+                # number: say which kind it was instead of inventing a quote.
+                span = spoken[0]
+                unit = UNIT_WORDS[span["unit"]]
+                return _verdict.pick([line.format(span=span["text"], unit=unit)
+                                      for line in A_RANGE_THAT_IS_NOT_A_PRICE],
+                                     {"turns": [{"bot": said}]}, said)
+            single = _a_lone_price(said)
+            if single:
+                return _verdict.pick([line.format(span=single) for line in THE_PRICE_IT_GAVE],
+                                     {"turns": [{"bot": said}]}, said)
+            if measured and (doubt["word"] in SAID_LOW or doubt["word"] in SAID_HIGH):
+                # A doubt with a side, over a range this file has no word for: "my tyre is a bit
+                # soft" / "is that too low" is asking which side of the 30 to 35 psi the softness
+                # puts them on, and the range is the figure to say back. A plain "is that
+                # expensive" is not this: the answer gave no price at all, and the module that has
+                # tyre prices says something better than a line about psi.
+                span = measured[0]["text"]
+                options = BELOW_THE_RANGE if doubt["word"] in SAID_LOW else ABOVE_THE_RANGE
+                return _verdict.pick([line.format(span=span) for line in options],
+                                     {"turns": [{"bot": said}]}, said)
+            if measured:
+                # The answer gave a range of something that is not money and the doubt names no
+                # side: "my tyre is a bit soft" / "is that expensive" is better left to the module
+                # that has tyre prices than told there was no price in a line about psi.
+                return None
+            return _verdict.pick(list(NO_PRICE_SAID), {"turns": [{"bot": said}]}, said)
+    else:
+        spans = money or measured
     if not spans:
         return None
     span = spans[0]
-    options = ASKS_FOR_A_PRICE if span["money"] else ASKS_FOR_A_FIGURE
+    if span["money"]:
+        options = ASKS_FOR_A_PRICE
+    elif doubt["word"] in SAID_LOW:
+        # The line asks about the low end, so the reply says what low means for this range instead
+        # of answering the high end it was not asked about.
+        options = BELOW_THE_RANGE
+    elif doubt["word"] in SAID_HIGH:
+        options = ABOVE_THE_RANGE
+    else:
+        # No price to ask for: the range in the answer is the only figure either of them has said.
+        options = THE_RANGE_ITSELF
     return _verdict.pick([line.format(span=span["text"]) for line in options],
                          {"turns": [{"bot": said}]}, said)
 
@@ -1216,9 +1588,11 @@ HIGH_FOR_THE_THING = (
     "That is on the high side for {thing}: the usual is about {span}.",
     "Yes, a bit much for {thing} - {span} is the usual.",
 )
+# Same rule for a price the person brought with them: "is that too cheap" is a Yes, and the No
+# belongs to "is that enough for it", which `SHORT_FOR_THE_THING` holds.
 LOW_FOR_THE_THING = (
     "That is on the low side for {thing} - the usual is about {span}.",
-    "No, that is under the {span} that {thing} usually costs.",
+    "Yes, a bit low for {thing} - {span} is the usual.",
 )
 ENOUGH_FOR_THE_THING = (
     "Yes, that is enough for {thing} - the usual is {span}.",
@@ -1227,6 +1601,10 @@ ENOUGH_FOR_THE_THING = (
 SHORT_FOR_THE_THING = (
     "That is a little short for {thing} - the usual is {span}.",
     "No, that is under the {span} it needs for {thing}.",
+)
+THE_LOW_SIDE_FOUND_FOR_THE_THING = (
+    "That is on the low side for {thing} - the usual is about {span}.",
+    "No, that is under the {span} that {thing} usually costs.",
 )
 
 
@@ -1250,9 +1628,51 @@ def _judged_on_its_subject(doubt):
         options = ENOUGH_FOR_THE_THING if enough else HIGH_FOR_THE_THING
     else:
         options = SHORT_FOR_THE_THING if enough else LOW_FOR_THE_THING
+    options = _the_side_decides(options, doubt, value, low, high,
+                                LOW_FOR_THE_THING, THE_LOW_SIDE_FOUND_FOR_THE_THING)
     return _verdict.pick([line.format(thing=doubt["subject"], span=span["text"])
                           for line in options], {"turns": [{"bot": span["text"]}]},
                          span["text"])
+
+
+# A word that points at a thing instead of naming it: "is 4 pounds a lot for one", asked while a
+# chicken is on the table, is a question about the chicken.
+_POINTS_AT_IT = frozenset("""
+    one ones it that this these those them they him her he she thing things
+""".split())
+
+
+def _the_thing_the_chat_is_on(memory):
+    """The thing the conversation is on, as "a chicken", or "" when nothing says."""
+    understood = (memory or {}).get("understood") if isinstance(memory, dict) else None
+    if not isinstance(understood, dict):
+        return ""
+    ref = understood.get("ref")
+    if isinstance(ref, dict):
+        for key in ("it", "that", "they", "them"):
+            thing = str(ref.get(key) or "").strip()
+            if thing and thing.lower() not in _POINTS_AT_IT:
+                return thing if FOR_THE_ARTICLE.match(thing) else "a " + thing
+    return ""
+
+
+def _the_doubt_with_its_thing(clean, memory):
+    """The doubt about the figure, about the thing the chat is on when the line names none.
+
+    "im cooking a chicken" then "is 4 pounds a lot for one" names no thing of its own, and the
+    thing on the table is the chicken: the price row for a chicken is what the figure is judged
+    against, and without it the reply is a paragraph about shopping around.
+    """
+    doubt = _doubt(clean)
+    if not doubt or doubt.get("value") is None or not doubt.get("money"):
+        return doubt
+    subject = str(doubt.get("subject") or "").strip()
+    if subject and subject.lower() not in _POINTS_AT_IT:
+        return doubt
+    thing = _the_thing_the_chat_is_on(memory)
+    if thing:
+        doubt = dict(doubt, subject=thing)
+    return doubt
 
 
 def _its_own_subject_judges_it(clean, memory):
@@ -1265,7 +1685,7 @@ def _its_own_subject_judges_it(clean, memory):
     answer the line on its own words: "is 400 enough for a bike" reaches the bike price row, and
     its answer is better than a comparison.
     """
-    doubt = _doubt(clean)
+    doubt = _the_doubt_with_its_thing(clean, memory)
     if not doubt or not doubt.get("subject") or doubt.get("value") is None:
         return False
     said, _ = _answer_before(memory if isinstance(memory, dict) else {})
@@ -1357,9 +1777,27 @@ def _the_verdict_for_the_table(clean, memory):
     if not read:
         return None
     doubt, said, at = read
+    if doubt["value"] is None and doubt.get("word") in PLACES_A_FIGURE:
+        # A measured figure is the memory store's, and the figure the doubt is about is often in
+        # the line the answer answers rather than after it: "my boiler pressure is 1 bar", the
+        # boiler card, "is that too low". The answer's own turn is read only where the store read a
+        # measurement and the answer states a range in the same unit, so every figure the reading
+        # cannot hold against anything stays with the store. See `_figure_of_the_answer`.
+        held = _figure_since(memory, at, narrow=_only_says_that(doubt))
+        if held and held["unit"]:
+            figured = _figure_of_the_answer(memory, at)
+            if figured:
+                doubt = dict(doubt, **figured)
     if doubt["value"] is None:
         before = _figure_since(memory, at, narrow=_only_says_that(doubt))
         if not before:
+            if doubt["word"] in MONEY_DOUBTS:
+                # A price doubt with no figure of theirs behind it is about the answer's own
+                # price: asked for when there is a range to name, and named back when the answer
+                # gave a single figure instead.
+                asked = asks_for_the_figure(doubt, said)
+                if asked:
+                    return asked
             # A time doubt with no figure behind it is a question about the answer's own stretch.
             return _the_usual_is_the_answer(doubt, said)
         if before["unit"] and doubt["word"] in TIME_DOUBT:
@@ -1448,7 +1886,7 @@ def reply_to_a_doubt(clean, memory):
     if not read:
         if not _its_own_subject_judges_it(clean, memory):
             return None
-        return _judged_on_its_subject(_doubt(clean))
+        return _judged_on_its_subject(_the_doubt_with_its_thing(clean, memory))
     doubt, said, at = read
     if doubt["value"] is not None:
         return None     # a figure with no range to hold it: the modules that know better answer
@@ -1558,6 +1996,14 @@ THE_REST_IS_UNSURE = (
 )
 
 
+# A price said as something the person paid, with no unit word: "my haircut was 60", "it cost me
+# 60", "i paid 60", "the quote came to 300". The verb is what makes it money - without one, "was 60"
+# could be anything, and a doubt about it gets the ask for a second figure rather than a judgement.
+A_PRICE_VERB = re.compile(
+    r"\b(?:was|were|is|cost|costs|cost me|paid|pay|spent|spend|charged|comes to|came to|"
+    r"set me back)\s+(?:me\s+|us\s+)?[\u00a3$\u20ac]?\d", re.IGNORECASE)
+
+
 def _their_figure(memory, back=1):
     """The last figure the person gave in their own words, as (number, unit, text, money), or None.
 
@@ -1586,7 +2032,7 @@ def _their_figure(memory, back=1):
             # for the whole thing", where the phrase says the sum is the lot.
             words = set(re.findall(r"[a-z']+", said.lower()))
             if not (words & A_BILL) and not A_MONEY_PHRASE.search(said) and not re.search(
-                    r"[\u00a3$\u20ac]", said):
+                    r"[\u00a3$\u20ac]", said) and not A_PRICE_VERB.search(said.lower()):
                 continue
             for found in THEIR_NUMBER.finditer(said):
                 pass
@@ -1601,7 +2047,7 @@ def _their_figure(memory, back=1):
             continue  # an age is not a figure anybody asks to have judged
         words = set(re.findall(r"[a-z']+", said.lower()))
         money = bool(found.group("mark")) or unit in MONEY_WORDS or bool(words & A_BILL) or \
-            bool(A_MONEY_PHRASE.search(said))
+            bool(A_MONEY_PHRASE.search(said)) or (not unit and bool(A_PRICE_VERB.search(said.lower())))
         text = _figure_words(found.group("number"), unit, found.group("mark") or "")
         return value, unit, text, money
     return None
@@ -1776,3 +2222,42 @@ INSIDE = (
 def pick_inside(value, span_text, said):
     options = [line.format(value=_say(value), span=span_text) for line in INSIDE]
     return _verdict.pick(options, {"turns": [{"bot": said}]}, said)
+
+
+def _figure_of_the_answer(memory, at):
+    """The figure in the line the answer was given to, when the answer can hold it.
+
+    "my boiler pressure is 1 bar" is answered with the card that says what the pressure should be
+    (1 to 1.5 bar), and the next line is "is that too low". The figure the doubt is about came in
+    the line the answer answers, before the doubt, so a read that only looks forward asks the
+    person for a figure they have just typed out.
+
+    Only a figure the answer can be held against is read there: a price where the answer states a
+    price range, a reading where it states a range in the same unit. A bare number is not put
+    against a measured range at all - "my heating bill was 200 a month" under the boiler card put
+    200 against "55 to 60C" and came back "yes, a bit much" - so a bare number is only read where
+    the answer's own range is a price, which is the only kind of figure it can be there.
+    """
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list) or not 0 <= at < len(turns):
+        return None
+    turn = turns[at]
+    if not isinstance(turn, dict):
+        return None
+    said = str(turn.get("user") or "")
+    found = list(FIGURE.finditer(said))
+    if not found:
+        return None
+    figure = _the_figure_in(said, found[-1])
+    if not figure:
+        return None
+    money, measured = _doubt_ranges(turn.get("bot"))
+    if figure["unit"]:
+        if not any(span["unit"] == figure["unit"] for span in measured):
+            return None
+    elif figure["money"]:
+        if not money:
+            return None
+    elif measured or not money:
+        return None
+    return figure

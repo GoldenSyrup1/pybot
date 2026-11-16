@@ -13,12 +13,14 @@ call, so neither module closes an import circle. No reply changes: this is a mov
 
 import re
 
-from . import waited_for
+from . import findout, for_the_day, waited_for
 from .fallback_data import (
-    REPAIR_WHETHER_LINES, the_bots_own_answer, the_place_the_answer_is_kept,
+    MISSED_STEP_LINES, REPAIR_WHETHER_LINES, the_bots_own_answer,
+    the_place_the_answer_is_kept,
 )
 from .the_rule_for_it import A_CARE_WORD, A_MONEY_WORD, TIME_RULE, the_rule_for_it
 from .fallback import (
+    method_ask_pool,
     ANIMALS, ASKED_IF_I_SAW_LINES, A_PERSON_IN_A_CRISIS, A_STEP_ASK, BARE_FOLLOW_UP,
     BARE_FOLLOW_UP_CARE_REPLIES, BARE_FOLLOW_UP_REPLIES, BARE_PICK_AFTER_NEWS,
     BODY_IS_NOT_A_MACHINE, BODY_PARTS, CARE_HERE, CARE_MODULES, CRISIS_ASK,
@@ -29,7 +31,7 @@ from .fallback import (
     who_settles,
     REPAIR_DECISION, REPAIR_PERSON,
     REPAIR_RULE, REPAIR_TARIFF, REPAIR_TRADE, REPAIR_WHAT_IT_IS_WORTH, REPAIR_WHETHER,
-    SAME_AGAIN, SYMPTOM_WORDS, TAG_CAN,
+    SAME_AGAIN, SAME_AGAIN_WITH_THE_ANSWER, SYMPTOM_WORDS, TAG_CAN,
     TAG_CONFIRM, TAG_UNSURE, TIPS_ASKS, TIPS_LINES, TOO_LATE, UNKNOWN,
     UNKNOWN_ABOUT_A_PET, UNKNOWN_ABOUT_SOMEONE, UNKNOWN_DECIDE, UNKNOWN_HEALTH,
     UNKNOWN_REALISTIC, UNKNOWN_REALISTIC_CARE, UNKNOWN_TOO_LATE, UNKNOWN_WORD,
@@ -48,7 +50,7 @@ from .fallback import (
     _is_a_view_ask, _name_given_before, _names_its_own_thing, _news_above,
     _nothing_to_choose, _nothing_to_stand_behind, _only_a_reaction, _only_the_floor,
     _points_at_nothing, _reads, _reads_as_a_claim, _reads_as_taste,
-    _says_it_already, _the_answer_in_reply, _the_line_before,
+    _says_it_already, _the_answer_above, _the_answer_in_reply, _the_line_before,
     _the_pool_for_a_worry_about_them, _the_thread_is_heavy, _the_view_of,
     _the_weird_ask_pool, _their_own_day, _thread_is_about_a_person,
     _thread_is_about_a_pet, _thread_is_about_someone_else,
@@ -57,6 +59,25 @@ from .fallback import (
     finding_out, in_a_safety_thread, no_eyes, reads_as_if_i_saw, the_lost_ask_reply,
     unknown_pool,
 )
+
+
+def _the_repeat_answer(memory):
+    """The answer the person is asking for again, short enough to say again.
+
+    The same guard has two forms and only one of them answers. "Same answer, and it covers this:
+    <card>" carries what it names; "that is everything I have on that one, so I would only repeat
+    myself" names the answer on the screen and then hands the person none of it. Ask twice in
+    other words - "can i leave my bags at the hotel", then "can i leave my case at the hotel" -
+    and that is the turn they get, on a card that answers both.
+
+    So the answer above is carried, cut to its first two sentences when the card ran longer: the
+    repeat is the same answer, and the person asked for it.
+    """
+    answer = " ".join(str(_the_answer_above(memory) or "").split())
+    if not answer:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", answer)
+    return " ".join(sentences[:2]) if len(sentences) > 2 else answer
 
 
 def _drafting_pool(clean):
@@ -127,6 +148,46 @@ def _the_rule_for_it_for_the_turn(clean, repaired, memory):
         return None
     return pool
 
+# A plan with a step missed: "what if i miss a week", "what if i skip a session", "what if we
+# miss a couple of lessons". On main these fell to the search hedge - "a quick search online will
+# get you a solid answer" - or, for a bare "what if i miss a week", to the late-period card. What
+# the bot does know is what a missed step usually costs and what to do about it; what only the
+# person knows is what they are partway through, so the pool says the first and asks for the
+# second. It needs a plan noun after the miss ("what if i miss the bus" and "what if i miss her"
+# are not plans), and a missed dose, pill, appointment or period is a clinician's question: the
+# keep list stands the pool down for those, and so does a body, a pet, somebody else, a safety
+# thread, grief and a loss.
+MISSED_STEP = re.compile(
+    r"\bwhat (?:if|happens if) (?:i|we|you) (?:miss|skip|dont do|cant do|cannot do)\b"
+    r"|\bwhat (?:if|happens if) (?:i|we) (?:have to )?(?:miss|skip)\b")
+MISSED_STEP_PLAN = re.compile(
+    r"\b(?:a|an|one|two|three|four|\d+|a couple of|a few|couple of|few)?\s*"
+    r"(?:days?|weeks?|fortnight|months?|sessions?|runs?|rides?|swims?|classes?|lessons?|"
+    r"workouts?|practice|training)\b")
+MISSED_STEP_KEEPS = re.compile(
+    r"\b(?:pills?|doses?|drops|tablets?|meds|medication|medications|prescriptions?|insulin|"
+    r"inhalers?|injections?|jabs?|appointments?|periods?|contracepti\w*|antidepressants?|"
+    r"antibiotics?|lenses?|dressing|dressings)\b")
+
+
+def _a_missed_step(clean, repaired, memory, words):
+    """The pool for a stepped plan with one step missed, or None."""
+    if not MISSED_STEP.search(clean):
+        if repaired == clean or not MISSED_STEP.search(repaired):
+            return None
+    plan = MISSED_STEP_PLAN.search(clean) or MISSED_STEP_PLAN.search(repaired)
+    if plan is None:
+        return None
+    if MISSED_STEP_KEEPS.search(clean) or MISSED_STEP_KEEPS.search(repaired):
+        return None
+    if set(words) & HEALTH_WORDS or set(words) & BODY_PARTS:
+        return None
+    if (in_a_safety_thread(memory) or _grief_thread(memory) or _in_a_loss_thread(memory)
+            or _thread_is_about_the_body(memory) or _thread_is_about_a_pet(memory)
+            or _thread_is_about_someone_else(memory)):
+        return None
+    return MISSED_STEP_LINES
+
 
 def _unknown(understood, memory, clean):
     """An honest reply to a question nothing can answer: name who can, when it is clear."""
@@ -148,6 +209,21 @@ def _unknown(understood, memory, clean):
     cannot_see = no_eyes.cannot_see_your_thing(clean)
     if cannot_see:
         return _choose(cannot_see, memory, clean)
+    # A noise or a smell in the room with them is not a fact to look up: "what was that noise"
+    # and "what's that smell" both reached the search hedge, and the bot has no ear and no nose
+    # to lend either way. The pool says so and asks the one thing it needs, with what the common
+    # ones usually are.
+    # The answer to the question the bot has just asked - "it came from the loft", "like burning",
+    # "it blinks twice and stops" - is owed the other half of the exchange, so it is read before
+    # the room pool, which would otherwise read a described light as a new one and ask again for
+    # what it has just been told. It only fires where the bot's own last line was one of those
+    # questions, so no first line can reach it.
+    described = no_eyes.what_they_described(clean, memory)
+    if described:
+        return _choose(described, memory, clean)
+    in_the_room = no_eyes.a_thing_in_the_room(clean)
+    if in_the_room:
+        return _choose(in_the_room, memory, clean)
     if no_eyes.writes_the_message(clean):
         # "can you send an email for me", "can you send a text to my landlord": the words are the
         # one half of this the bot can do, and the drafting invite asks for the two things it
@@ -364,6 +440,10 @@ def _unknown(understood, memory, clean):
         said = " " + re.sub(r"[^a-z0-9']", " ", repaired) + " "
         words = said.replace("'", "").split()
         pool = unknown_pool(repaired, words)
+    if pool is UNKNOWN or pool is UNKNOWN_DECIDE:
+        missed = _a_missed_step(clean, repaired, memory, words)
+        if missed is not None:
+            return _choose(missed, memory, clean)
     if pool is UNKNOWN_WORRY and _a_bare_worry(clean) and _thread_is_about_the_body(memory):
         # "Should I be worried?" with no subject is about the thing they just described: a knee
         # that hurts to run on, headaches behind the eyes. That is a health question, not a
@@ -422,6 +502,14 @@ def _unknown(understood, memory, clean):
         routed = finding_out.for_the_ask(clean, repaired, understood)
         if routed:
             said = _choose(routed, memory, clean)
+            if said:
+                return said
+        # A day weighed against what the person wants to do in it - "is it too hot to run",
+        # "can i hang washing out today". Still not a forecast: what decides it is the same
+        # every time, and that is worth saying before naming the app that has the figure.
+        day = for_the_day.for_the_ask(clean, repaired)
+        if day:
+            said = _choose(day, memory, clean)
             if said:
                 return said
     named = _advisor(memory, clean, said, words)
@@ -484,6 +572,9 @@ def _unknown(understood, memory, clean):
     # because naming who can help beats saying there is nothing left to say.
     if pool is UNKNOWN and _says_it_already(clean, list(understood.get("words") or []),
                                             memory):
+        answer = _the_repeat_answer(memory)
+        if answer:
+            return _choose(SAME_AGAIN_WITH_THE_ANSWER, memory, clean).format(answer=answer)
         return _choose(SAME_AGAIN, memory, clean)
     pick = _bare_pick(clean, memory) or _bare_pick(repaired, memory)
     if pick:
@@ -555,12 +646,47 @@ def _unknown(understood, memory, clean):
             # rule is classed with the hedges (see `RULE_HEADS`), so any module with a real
             # answer, or the composer's own, still takes the turn over it.
             return _choose(rule, memory, clean)
-        place = the_place_the_answer_is_kept(clean)
-        if place is None and repaired != clean:
+        # How busy somewhere is now is not one of the kinds a page holds: no account, stock list,
+        # rule, timetable or listing has today's queue. A crowd word in the line used to lose to
+        # the first noun the pools knew - "is the recycling centre busy today" was answered about
+        # the council's recycling rules - so a crowd ask is not read as one of these kinds at all,
+        # and `bot/compose/findout.py` answers it under this band.
+        place = None if findout.reads_as_crowd(clean) else the_place_the_answer_is_kept(clean)
+        if place is None and repaired != clean and not findout.reads_as_crowd(clean):
             place = the_place_the_answer_is_kept(repaired)
         if place is not None:
             return _choose(place, memory, clean)
+    if pool is UNKNOWN or pool is UNKNOWN_WORRY:
+        # An ask about the person's own feeling is not a look-up: "what should i do about the
+        # guilt", "how do i forgive myself", "what is wrong with me" all reached the search hedge,
+        # which sends somebody off to read about themselves. Asked here, at the last place before
+        # the hedge, so every pool, advisor and place above keeps its turn; the reader stands down
+        # on its own for any line that names a thing (see `bot/compose/own_ask.py`).
+        from . import own_ask
+        own = own_ask.answer(clean, memory)
+        if own:
+            return _choose([own], memory, clean)
+    if pool is UNKNOWN:
+        # A method asked for in the person's own voice, with nothing in the file able to answer
+        # it: "how do i practise", "how do i start running", "where should i hang my washing".
+        # The search hedge is the one answer that helps nobody here - nobody looks up how to do
+        # their own evening - and the way in is what they have tried so far. Read last, so every
+        # pool above keeps its own answer, and only for the shape it names.
+        method = method_ask_pool(clean, memory)
+        if method is None and repaired != clean:
+            method = method_ask_pool(repaired, memory)
+        if method is not None:
+            return _choose(method, memory, clean)
+    counted = _a_countdown_in_a_care_thread_(memory, clean, repaired, understood)
+    if counted:
+        return counted
     return _choose(pool, memory, clean)
+
+
+def _a_countdown_in_a_care_thread_(memory, clean, repaired, understood):
+    """The countdown branch, imported on the first call to keep the two modules apart."""
+    from .fallback_chain import _a_countdown_in_a_care_thread  # noqa: PLC0415 - no import circle
+    return _a_countdown_in_a_care_thread(memory, clean, repaired, understood)
 
 
 def _the_view_asked_for(clean, memory):

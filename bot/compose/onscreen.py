@@ -28,6 +28,7 @@ twice, and the arbiter has rules for it (`bot/modules/arbiter.py`).
 """
 import re
 
+from ..understanding.kinds import a_stop_ask
 from . import fallback, verdict
 
 # A follow-up about the answer the bot has just given, where no entry and no module claims the
@@ -61,6 +62,16 @@ ON_SCREEN_LINES = (
     "It is in what I said above: {said}",
 )
 
+# A bare "should i stop" is not asking where the answer is, it is asking whether the bot still means
+# it: the lead-ins above read as a brush-off on that line ("That is in the answer above: keep
+# sessions to fifteen minutes and stop when they start to sting"), because they say where the
+# answer sits instead of standing by it. The sentence is the same sentence either way.
+STANDS_BY_LINES = (
+    "I'd go by what I said: {said}",
+    "I still stand by this: {said}",
+    "Same answer, and it holds: {said}",
+)
+
 # The ask that makes a line a follow-up rather than a question of its own: it opens with a
 # question word or an auxiliary, the way people type without punctuation.
 ON_SCREEN_ASK = re.compile(
@@ -77,7 +88,10 @@ A_THING_NAMED_IN_FRONT = re.compile(
 A_STEP_IN_IT = re.compile(
     r"\b(?:check|clean|clear|call|ring|ask|take|put|add|set|switch|turn|leave|keep|try|use|"
     r"replace|restart|update|move|fix|buy|get|book|look|make|run|wash|start|plug|test|wipe|"
-    r"pull|open|close|soak|water|cut|pick|apply|scrub|hoover|vacuum|cover|store|wrap|rinse)\b",
+    r"pull|open|close|soak|water|cut|pick|apply|scrub|hoover|vacuum|cover|store|wrap|rinse|"
+    # Effort rather than a thing: "should i push through" asks how hard to go at the answer's
+    # own subject, and no sentence of that answer has to say "push" for it to be the reply.
+    r"push|carry|plough|plow|soldier)\b",
     re.I)
 # A sentence that is a sign-off, a hedge or a question of the bot's own says nothing to hand
 # back: quoting "Hope that helps" or "A quick search will get you a solid answer" is the shrug
@@ -129,7 +143,7 @@ mean means meant stop stops started start keep keeps keeping give gives need nee
 help helps try tries use uses used work works working do does doing done happen happening
 happens enough better worse best long much many often soon cost costs price way time point
 anyway else instead still just really actually suppose supposed about around
-off out up down over back away on in
+off out up down over back away on in through along ahead
 """.split())
 # A word that describes rather than names, and so stands for the thing the answer is already about:
 # the smell is the washing machine's, the leak is the boiler's, the mould is the seedling's. It only
@@ -192,11 +206,25 @@ should will shall may might must
 """.split())
 
 
+# The letters that are doubled for the spelling and not for the word: "running" gives "runn",
+# never "run", and "stopped" gives "stopp". A doubled s, f or z is the word itself ("less",
+# "stuff"), so those come off only with the ending above.
+_DOUBLED = "bdgmnprtl"
+
+
 def _stem(word):
-    """The word without the ending that makes it a plural, a past tense or a participle."""
+    """The word without the ending that makes it a plural, a past tense or a participle.
+
+    The doubled last letter of "running", "stopped" and "getting" comes off too, so a question in
+    the plain form ("can i still run") meets the answer's "-ing" word ("drop the running mileage")
+    instead of looking like a thing the answer has never heard of.
+    """
     for ending in ("ing", "ed", "es", "s"):
         if len(word) - len(ending) >= 4 and word.endswith(ending):
-            return word[:-len(ending)]
+            word = word[:-len(ending)]
+            break
+    if (len(word) >= 4 and word[-1] == word[-2] and word[-1] in _DOUBLED):
+        word = word[:-1]
     return word
 
 
@@ -214,6 +242,13 @@ def _stems(words):
     return set(_stem(word) for word in words)
 
 
+# A word of effort, which in a follow-up asks how hard to go at the answer's own subject rather
+# than naming one: "should i push through", "shall i carry on", "can i keep going". None of them
+# names a thing, so none of them stands the reading down - the answer's own action is the reply.
+EFFORT_WORDS = frozenset("""push pushes pushing carry carrying keep keeping continue continuing
+on through harder ahead along""".split())
+
+
 def _names_something_new(mine, said, in_the_chat):
     """True when the line carries a word the answer has not got and that names a thing.
 
@@ -229,7 +264,7 @@ def _names_something_new(mine, said, in_the_chat):
     for word in mine:
         if _the_same_word(word, said):
             continue
-        if word in ASKS_RATHER_THAN_NAMES:
+        if word in ASKS_RATHER_THAN_NAMES or word in EFFORT_WORDS:
             continue
         if word in THE_THINGS_IT_COULD_BE_ABOUT and _the_same_word(word, in_the_chat):
             continue
@@ -261,29 +296,20 @@ def _the_answer_to_hand_back(memory):
     card that says flinching is what an old injury does, and "is that why i flinch" one line later
     got "Searching for it will turn up better sources than I can offer". The card's own sentence is
     the answer to that, and handing it back cannot take the card away - it was the turn before.
+
+    The reach itself is one check, in `bot/memory/history.py`, so that every module that reads a
+    follow-up out of an earlier turn steps back over the same turns (`the_answer_on_screen`).
     """
-    turns = [t for t in (memory.get("turns") or []) if isinstance(t, dict) and t.get("bot")]
-    for turn in reversed(turns[-3:]):
-        said = str(turn.get("bot") or "")
-        if verdict.takes_a_fact_back(said) or fallback.is_said_it_already(said):
-            continue
-        if str(turn.get("module") or "") not in ("answers", "safety"):
-            return ""
-        if fallback._is_a_hedge(said) or any(punt in said.lower() for punt in fallback.PUNT):
-            return ""
-        return said
-    return ""
+    from ..memory import history
+
+    return history.the_answer_on_screen(memory)
 
 
 def _the_answer_is_a_card(memory):
     """Whether the answer above is a safety card rather than a knowledge entry."""
-    turns = [t for t in (memory.get("turns") or []) if isinstance(t, dict) and t.get("bot")]
-    for turn in reversed(turns[-3:]):
-        said = str(turn.get("bot") or "")
-        if verdict.takes_a_fact_back(said) or fallback.is_said_it_already(said):
-            continue
-        return str(turn.get("module") or "") == "safety"
-    return False
+    from ..memory import history
+
+    return history.the_answer_is_a_card(memory)
 
 
 # The sentence asked about, or the clause of it after a colon: the part of "White powder on the
@@ -323,6 +349,36 @@ def _the_sentence_to_hand_back(sentence, mine, said):
     return sentence
 
 
+# A line that asks whether to go on with the thing the answer is about: "should i push through",
+# "can i carry on", "shall i keep going". It shares no word with a knee answer that says "keep
+# going as far as is comfortable", so no sentence of the answer scored and the whole reading stood
+# down on the one follow-up where the answer already holds the rule.
+A_GO_ON_ASK = re.compile(
+    r"\b(?:push(?:\s+(?:on|through|harder))?|carry\s+on|keep\s+(?:going|on|at\s+it|it\s+up)|"
+    r"continuing|continue|go\s+on|going\s+on|crack\s+on)\b", re.I)
+# "How far do I go" is only answered by a sentence that carries the limit. A step that only says
+# what to do is not one: "Check the thigh reads 74C" is a test and "a wasp nest dies in autumn and
+# is never reused" is a fact, and neither says where to stop, so a line asking whether to push on
+# gets nothing from them and keeps the hedge it had.
+A_LIMIT_IN_IT = re.compile(
+    r"\bas\s+far\s+as\b|\bfor\s+as\s+long\s+as\b|\bno\s+more\s+than\b|\bnot\s+(?:much\s+)?past\b|"
+    # `until` and `till` are only a limit when what follows is the going on being stopped or
+    # allowed: "until it eases", "until you can", "till it stops hurting". "Rinse it until the
+    # water runs clear" is a step, not a limit, and handing it back to "shall i carry on" is a
+    # sentence that does not answer how far.
+    r"\b(?:un)?til\s+(?:it|you|they|things|the\s+(?:pain|soreness|swelling|bleeding))\s*"
+    r"(?:eases|eased|is\s+(?:better|easier|still|comfortable)|stops|settles|calms|feels|can|are\s+able|hurts|gets\s+worse)?\b|"
+    r"\bwhile\s+(?:it|you|the|they)\b|\bshort\s+of\b|\bup\s+to\b|"
+    r"\bstops?\s+(?:if|when|as\s+soon|before|at)\b|\bease[sd]?\s+off\b|\bback(?:s|ed)?\s+off\b|"
+    r"\bfor\s+(?:a|the\s+first|one|two|three)\s+(?:week|fortnight|day|while|few)\b|"
+    r"\bfor\s+a\s+while\b|\bin\s+short\s+bursts\b|\blittle\s+and\s+often\b|"
+    r"\bno\s+more\s+of\s+than\b|\bwhen\s+it\s+(?:starts|hurts|gets\s+hard|feels)\b", re.I)
+# A step that asks for the one detail that settles it is an answer to "which one" without a
+# limit in it: "Tell me what it did - sank, dry, heavy, burnt - and I will give you the fix" names
+# the thing that decides, so "should i start again or carry on" is answered by it.
+ASKS_WHAT_DECIDES = re.compile(
+    r"\b(?:tell|say|let)\s+me\s+(?:what|how|which|whether|if|more)\b|"
+    r"\bwhat\s+(?:it|they|you)\s+(?:did|does|looks?\s+like|smells?\s+like|tastes?\s+like)\b", re.I)
 # The one place that reads the answer above for a sentence to hand back. It is asked last, from
 # `bot/modules/greeting.py`, and only when the composer has nothing but a hedge.
 def the_answer_on_screen(text, memory):
@@ -361,6 +417,7 @@ def the_answer_on_screen(text, memory):
                 and _names_something_new(mine, said, _the_words_in_the_chat(memory, answer))):
             return ""
         best, best_score, first_step, opening = "", 0, "", ""
+        steps = []
         for sentence in sentences:
             if len(sentence.split()) < 5 or sentence.endswith("?"):
                 continue
@@ -371,8 +428,10 @@ def the_answer_on_screen(text, memory):
             if any(punt in sentence.lower() for punt in fallback.PUNT):
                 continue
             step = bool(A_STEP_IN_IT.search(sentence))
-            if step and not first_step:
-                first_step = sentence
+            if step:
+                steps.append(sentence)
+                if not first_step:
+                    first_step = sentence
             if not opening:
                 opening = sentence
             # Scored on the sentence's own words, not the answer's: every line's words are in the
@@ -408,6 +467,15 @@ def the_answer_on_screen(text, memory):
             # sentence. It is the one case where the answer's opening is the reply, because that
             # sentence is the part the line is about.
             best, says_it_again = opening, True
+        if not best and A_GO_ON_ASK.search(clean):
+            # "should i push through" shares no word with the answer, so nothing scored, and what it
+            # asks is how far to go - which is the action the answer takes: "keep going as far as
+            # is comfortable", "ease off running and keep it moving gently". A step that says what
+            # to do and no more ("check the thigh reads 74C", "a wasp nest dies in autumn") is not
+            # an answer to how far, and handing it back is a line that would fit any message, so
+            # only a step carrying the limit itself is the reply.
+            best = next((one for one in steps
+                         if A_LIMIT_IN_IT.search(one) or ASKS_WHAT_DECIDES.search(one)), "")
         if not best:
             return ""
         if A_DECISION_ASK.search(clean) and not A_STEP_IN_IT.search(best):
@@ -439,7 +507,10 @@ def the_answer_on_screen(text, memory):
         given = A_LEAD_IN.sub("", best)
         if given and given != best:
             best = given[0].upper() + given[1:]
-        frames = (ON_SCREEN_LINES[:1] if says_it_again else ON_SCREEN_LINES)
+        if a_stop_ask(clean):
+            frames = STANDS_BY_LINES
+        else:
+            frames = (ON_SCREEN_LINES[:1] if says_it_again else ON_SCREEN_LINES)
         reply = fallback._choose(frames, memory, clean).replace("{said}", best)
         # The sentence may be the one the bot handed back on the turn before: that reply already
         # said it, and the composer's line for a repeat stands rather than saying it again.
@@ -473,7 +544,7 @@ _ABOUT_THE_CONVERSATION = re.compile(
     r"|\b(?:what|that) i (?:said|told you)\b"
     r"|\byou (?:said|mentioned|told me) (?:earlier|before|last time|a moment ago|just now)\b"
     r"|\byou said\s*:"
-    r"|\bsince we last spoke\b|\bsame as before\b|\bthe last time\b|\blast time you\b"
+    r"|\bsince we last spoke\b|\bsame as before\b|(?<!not )\bthe last time\b|\blast time you\b"
     r"|\bearlier you\b", re.I)
 
 

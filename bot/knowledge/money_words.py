@@ -273,6 +273,49 @@ ENTRIES = [
           avoid=("declined", "decline", "charged twice", "double charged", "fraud", "fraudulent",
                  "stolen", "lost", "scam", "refund", "chargeback", "contactless", "fees",
                  "fee", "abroad", "travel", "open an account", "switch", "cashback", "pin")),
+    entry("escrow", (("escrow", "in escrow", "escrow account"),
+                     ("what", "whats", "mean", "means", "work", "works", "how", "explain",
+                      "why", "money", "held")),
+          ("Escrow is money held by a third party until both sides have done what they promised. "
+           "In a house purchase your deposit sits with your solicitor until completion, and if the "
+           "sale falls through it comes back to you; on a building job a stage payment can sit in "
+           "escrow until the work is signed off. Nobody in the middle can spend it, which is the "
+           "whole point."),
+          avoid=("how do i", "should i", "worth it")),
+    entry("deductible", (("deductible", "deductibles", "insurance deductible", "an excess",
+                          "policy excess", "insurance excess"),
+                         ("what", "whats", "mean", "means", "how", "much", "work", "works",
+                          "explain", "difference", "pay")),
+          ("The deductible, which in the UK is usually called the excess, is the first part of a "
+           "claim you pay yourself: with a £250 excess on a £900 repair the insurer pays £650. "
+           "A higher excess lowers the premium, so work out what you could actually find in a bad "
+           "month before choosing one. Windscreen cover usually has a much smaller separate "
+           "excess, often £75."),
+          avoid=("how do i", "should i", "worth it")),
+    entry("agreement-in-principle",
+          (("mortgage in principle", "agreement in principle", "decision in principle",
+            "mortgage promise", "dip", "aip"),
+           ("what", "whats", "mean", "means", "how", "long", "worth", "need", "get", "explain",
+            "does it", "last")),
+          ("A mortgage in principle, also called an agreement or decision in principle, is a "
+           "lender's written 'we would lend you about this much' before you have found a house. It "
+           "is based on a soft credit check and your income, it usually lasts 60 to 90 days, and "
+           "estate agents ask for it because it shows you can actually buy. It is not an offer and "
+           "not a guarantee: the full application checks the property and the paperwork, and the "
+           "amount can come out lower. Get one before you start viewing and keep the figure you "
+           "really need in mind, not the top one."),
+          avoid=("how do i", "should i", "worth it", "apply")),
+    entry("pawn-shop", (("pawn shop", "pawnshop", "pawnbroker", "pawn broker", "pawn brokers",
+                        "pawnbrokers", "cash converter", "cash converters"),
+                       ("what", "whats", "mean", "means", "how", "work", "works", "explain",
+                        "much", "borrow", "sell", "interest", "get back", "lose")),
+          ("A pawn shop, or pawnbroker, lends you money against something you leave with them - "
+           "jewellery, a watch, a musical instrument - and holds it until you pay back the loan "
+           "plus interest, usually 5% to 10% a month; if you do not, they sell it. You get far "
+           "less than the item is worth, so it is a short-term fix rather than a way to raise "
+           "money: a credit union loan or a free debt adviser such as StepChange costs much less "
+           "if you can wait a few days."),
+          avoid=("how do i", "should i", "worth it")),
     # Four words that a person meets in a contract or on a forecourt and had no card for at all
     # ("what is hire purchase", "what is a bridging loan", "what is equity release" and "what is a
     # charge on a house" all met the search hedge), and a fifth whose sense the property table

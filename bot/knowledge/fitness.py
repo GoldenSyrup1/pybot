@@ -10,7 +10,7 @@ different question with a different answer, so each is its own entry, keyed on t
 own question is asked with and leading with the number the person came for."""
 import re
 
-from .lookup import entry, the_back_is_a_body_part
+from .lookup import A_HOUSE_WARMING_UP, entry, the_back_is_a_body_part
 from .body import _the_part_is_a_persons
 
 # How long the person says they have. The short-session answers used to print "with 20 minutes"
@@ -164,6 +164,26 @@ def _a_count_beside_the_hour(understood):
     return any(phrase in said for phrase in THE_HOUR_ITSELF)
 
 
+# A session the person went to and enjoyed is a chat, not a question about when to go: "i went to
+# the gym this morning, it was quiet" and "going to the gym for the first time in ages, any tips"
+# both got this row when "gym" joined the key, and the chat and the beginner's answer were better.
+# So the line has to ask about the time - or name the hour work ends, which is a time of day for
+# the session - and nothing else here counts as asking.
+_A_TIME_IS_ASKED = ("when", "what time", "which time", "best time", "time of day", "time should",
+                    "time to go", "time to exercise", "time to work out", "time to train",
+                    "first thing", "before or after", "or morning", "or evening", "morning or",
+                    "evening or", "before work", "after work",
+                    "finish work", "finishes work", "finished work", "get out of work",
+                    "out of work at", "leave work", "left work", "work until", "work till",
+                    "working until", "working till", "after my shift")
+
+
+def _a_time_is_asked(understood):
+    """False when the line does not ask when: a session already had, or a beginner's tips."""
+    said = " " + str((understood or {}).get("clean") or "").lower() + " "
+    return any(phrase in said for phrase in _A_TIME_IS_ASKED)
+
+
 def _short_cardio(memory, understood):
     """Twenty minutes a day, or honestly less when that is what the person has."""
     minutes = _minutes((understood or {}).get("text") or " ".join(
@@ -247,6 +267,23 @@ def _an_ask_about_training_every_day(understood):
         return True
     return bool((understood or {}).get("signals", {}).get("question_mark"))
 
+
+
+# What to bring to a gym induction belongs to the induction row in sport.py, which answers the
+# kit half and the first-month half of the same reading. This row keeps the first month, and it
+# stands down when the line asks what to bring, take or wear, so one owner decides the split:
+# "what should i bring to my first gym session" and "what should i take to a gym induction" were
+# answered two different ways while both rows read the same words.
+GYM_KIT_ASKS = ("what should i bring", "what do i bring", "what should i take", "what do i take",
+                "what should i wear", "what do i wear", "what to bring", "what to wear",
+                "shall i bring", "should i bring", "do i need to bring", "do i need",
+                "what do i need", "what will i need", "need to bring", "need to take",
+                "what kit", "kit list",
+                # the bare verbs are what the review caught: an avoid word is read loosely, so
+                # a lone "take" or "wear" stands this row down wherever the line says it
+                "bring a", "bring my", "bring your", "bring to", "bring on", "bring in",
+                "wear to", "wear for", "wear at", "wear on", "take to the gym",
+                "take to a gym", "take with me", "taking with me")
 
 ENTRIES = [
     entry("legs-after-run", (("legs", "thighs", "calves", "quads", "hamstrings", "glutes"),
@@ -601,6 +638,14 @@ ENTRIES = [
           avoid=("stomach", "sick", "diarrhoea", "the runs", "vomit", "monday", "tuesday")),
     entry("workout-time", (("workout", "work out", "exercise", "exercising", "cardio", "jog",
                             "jogging", "jogged",
+                            # "gym" is the word people use for the session itself, and the time
+                            # half is what keeps it off a bag, a contract and a pair of trainers.
+                            "gym", "gyms",
+                            # "train" is a train you get on, so it only carries the session as a
+                            # phrase: "when should i train if i finish work at 7" was a fare.
+                            "should i train", "when to train", "time to train",
+                            "train in the morning", "train in the evening",
+                            "training in the morning", "training in the evening",
                             # "run" and "running" on their own are any machine, tap or nose that is
                             # running, and next to the word "time" they took every one of them:
                             # "how do i stop my laptop fan running all the time" was answered with
@@ -617,7 +662,18 @@ ENTRIES = [
                            # carries "run" and "which" but it is not a question about when
                            ("morning", "evening", "afternoon", "at night", "in the morning",
                             "in the evening", "time of day", "best time", "time",
-                            "before work", "after work", "first thing")),
+                            "before work", "after work", "first thing",
+                            # The hour is often a fact about the day rather than a word for the
+                            # morning: "i want to start the gym but i get out of work at 8, when
+                            # should i go" was the job-search card (it keys "start" and "work")
+                            # and "when should i go to the gym if i finish work late" was the
+                            # late-period one. Naming the work and its finish time is a time of
+                            # day for the session, so the job row and the period row lose it.
+                            "when should i go", "what time should i go", "when to go",
+                            "finish work", "finishes work", "finished work", "get out of work",
+                            "out of work at", "leave work", "left work", "work until",
+                            "work till", "working until", "working till", "work at 8",
+                            "work at 9", "work at 7", "after my shift")),
           "Whatever time you'll actually stick to is the best time: morning suits consistency, "
           "evening suits people who feel stiffer early. If you go in the evening, finish at least "
           "two hours before bed so it doesn't keep you awake.",
@@ -634,7 +690,15 @@ ENTRIES = [
           # time-of-day word in the key and was told morning suits consistency. A count of
           # sessions is `how-often-exercise`'s question - unless the line names an hour too, and
           # then the hour is what was asked.
-          guard=_a_count_beside_the_hour),
+          # "a count beside the hour" and "a time is asked" are both needed: the first keeps a
+          # count of sessions off this row, the second keeps a session that has already happened
+          # and a beginner's "any tips" on the row that answers them.
+          guard=lambda understood: (_a_count_beside_the_hour(understood)
+                                    and _a_time_is_asked(understood)),
+          # A line that names the session and asks when loses the tie to whatever else it
+          # mentions on the way: "i finish work at 8pm what time should i train" was a
+          # productivity card and "when should i train if i finish work at 7" was a train fare.
+          bias=2),
     # Where the cardio happens is a real choice with a real answer, and the two sides are named in
     # the line: without this the treadmill question was the composer's "can't call that one for
     # you", which is the one answer a person weighing it up cannot use.
@@ -727,6 +791,20 @@ ENTRIES = [
                  # form of the "weight" in that line: an animal is never this entry's question
                  "my cat", "my dog", "my puppy", "my kitten", "my rabbit", "my hamster",
                  "the cat", "the dog", "overweight", "vet")),
+    # Grip is the one strength question people ask about by name, and it was a punt: nothing held
+    # "how do i improve my grip strength". It belongs with the other starting-strength rows.
+    entry("grip-strength", (("grip", "grip strength", "grip weaker", "hand strength",
+                            "forearm strength", "forearms", "crushing grip", "pinch grip"),
+                           ("strength", "stronger", "improve", "increase", "weak", "weaker",
+                            "how", "better", "train")),
+          "Grip comes from holding heavy things for time: hang from a bar for 20 to 30 seconds, "
+          "three times, and carry a heavy bag or a pair of dumbbells in each hand for 30 metres. "
+          "Add a thick towel round the bar or the handle now and then to make it harder without "
+          "more weight. Do it twice a week on the end of a normal session, and give it a rest day "
+          "after - the forearms recover slowly and a strained tendon takes weeks.",
+          ask=("how", "what", "should", "improve", "better", "train"),
+          avoid=("tennis racket", "golf grip", "putter", "cricket bat", "how to hold",
+                 "steering wheel", "phone case", "tyre", "tire", "shoes", "boots")),
     entry("20-min-cardio", (("cardio", "fitness"), ("20", "minutes", "get fit", "improve",
                                                    "most", "out")),
           _short_cardio),
@@ -797,10 +875,25 @@ ENTRIES = [
           "it.",
           # a calf or a shoulder that is being stretched, a pulled muscle and a stiff back are
           # each their own answer; a newborn, a pet and a car are not this row's question
-          avoid=("calf", "calves", "achilles", "back", "neck", "shoulder", "hip flexor",
+          # "flexible" is two questions: a request to the manager for flexible working,
+          # flexible hours or fewer days is `flexible-hours` in work.py, and "how do i ask for
+          # flexible working" and "how do i request flexible working" were getting this card.
+          avoid=("flexible working", "flexible hours", "flexi time", "flexitime", "job", "boss",
+                 "manager", "employer", "employment", "hr", "contract", "rota", "office",
+                 "hours at work", "working from home", "work from home", "wfh", "part time",
+                 "part-time", "hybrid", "maternity", "paternity", "parental", "redundancy",
+                 "union", "colleague", "salary", "holiday",
+                 "calf", "calves", "achilles", "back", "neck", "shoulder", "hip flexor",
                  "hamstring", "sore", "pain", "hurts", "hurt", "pulled", "pull", "baby",
                  "babies", "newborn", "toddler", "child", "dog", "cat", "car", "engine",
-                 "leather", "shoes", "budget"),
+                 "leather", "shoes", "budget",
+                 # "flexible" is a word about a ticket, a fare and a working pattern too:
+                 # "what is a flexible ticket" got this stretching routine, and the travel row
+                 # that answers it was in the table all along.
+                 "ticket", "tickets", "fare", "fares", "season ticket", "train", "trains",
+                 "rail", "railway", "flight", "flights", "airline", "booking", "bookings",
+                 "refund", "refundable", "date change", "change the date", "working hours",
+                 "flexitime", "flexi time", "hours", "contract"),
           bias=1),
     # "should i foam roll before or after" was a bread roll: "should i" and "rolls" is the
     # cooking row's key, and the roller is a gym question that had no answer of its own.
@@ -841,7 +934,9 @@ ENTRIES = [
                  # before running" was told the generic five minutes instead of the run's
                  "before the gym", "before running", "before a run", "before lifting",
                  "before weights", "before leg day", "before a match", "before football",
-                 "before a swim", "before cycling")),
+                 "before a swim", "before cycling",
+                 # a house warms up too, and so does a pan: the shared list is in lookup.py
+                 ) + A_HOUSE_WARMING_UP),
 
     # --- the questions that come with a first month of exercise -------------
     # "protein" is not a key here: a protein *target* question is protein-how-much's, and the
@@ -1239,7 +1334,7 @@ ENTRIES = [
                  # question was answered with a workout.
                  "worth it", "worth joining", "worth the money", "waste of money", "money",
                  "cost", "costs", "cheap", "expensive", "price",
-                 "should i join", "which gym"),
+                 "should i join", "which gym") + GYM_KIT_ASKS,
           # sport.py has a first-session entry too; this is the one main's test pins, so it
           # keeps the "first time and nervous" line
           bias=1),
@@ -1289,6 +1384,11 @@ ENTRIES = [
                  "change in a", "exchange rate", "exchange rates", "currency", "convert",
                  "conversion", "tip", "tips", "service charge", "share of the bill",
                  "split the bill", "share of a", "fraction", "fractions",
+                 # and the sums a pay office does: "how do i work out my redundancy pay" got the
+                 # three-sessions-a-week answer, because "work out my" is a figure and this row
+                 # only knew the pencil nouns. The money a job owes is that kind of figure too.
+                 "redundancy", "redundant", "severance", "notice pay", "final wages",
+                 "holiday pay", "sick pay", "wages", "salary", "payslip", "pay slip",
                  "swimming", "bike", "cycling", "yoga", "pilates", "park", "dog",
                  # the bare ask is here now, so the questions that only look like it step aside:
                  # an injury, an age, a long break, a target time and a body part all have their
@@ -1667,3 +1767,65 @@ ENTRIES.append(entry(
     avoid=("toddler", "baby", "babies", "child", "children", "kids", "dog", "puppy",
            "holiday", "flight", "airport", "hotel", "cruise", "abroad"),
     bias=4))
+
+# --- the words on a training plan ---------------------------------------------------
+# Three things a person meets in a running plan or a gym bag and has to ask about: the pace a
+# plan calls a "tempo", the way a race should be run, and the thing that stops running being
+# painful. All three were search hedges on main, and each is a definition, so each answer says
+# what the thing is and then the number that makes it usable.
+ENTRIES.append(entry(
+    "negative-split",
+    (("negative split", "negative splits", "negative splitting", "positive split",
+      "run the second half faster", "second half faster"),
+     ("what is", "whats", "what does", "mean", "means", "how", "why", "should i", "better",
+      "good", "pace", "race", "marathon", "half", "10k", "5k", "train", "training")),
+    "A negative split is running the second half of a race faster than the first - 5k in 25 "
+    "minutes then 5k in 24, say - and it is the mark of a well-paced run rather than a fast one. "
+    "It works because the first half of a race is where people go too quickly: the effort feels "
+    "easy for the first two miles, so the pace creeps up, and the last third is paid for at a "
+    "price. Start five or ten seconds a mile slower than your goal pace for the first third, hold "
+    "it through the middle, and let the last third come to you.",
+    # a marathon plan, a personal best and a stitch are other questions
+    avoid=("marathon plan", "training plan", "personal best", "pb", "stitch", "cramp",
+           "shin", "knee", "blister", "chafing"),
+    bias=1))
+
+ENTRIES.append(entry(
+    "tempo-run",
+    (("tempo run", "tempo runs", "tempo session", "tempo running", "threshold run",
+      "threshold training", "comfortably hard"),
+     ("what is", "whats", "what does", "mean", "means", "how", "how long", "how fast", "pace",
+      "should i", "do i", "week", "per week", "beginner", "start", "started", "faster")),
+    # the length comes first on purpose: "how long should a tempo run be" asks on the back of this
+    # reply and the follow-up reader takes the first duration out of it, which used to be "an
+    # hour" from the pace description and answered a 20-to-40-minute session with "An hour."
+    "A tempo run is 20 to 40 minutes at a pace you could just about hold for an hour - \"comfortably "
+    "hard\", where talking is possible in short sentences but not a conversation. It trains the "
+    "point "
+    "where your body stops clearing lactate as fast as it makes it, which is what makes a race "
+    "pace feel easier. It sits inside an easy run, once a week, with the warm-up and cool-down "
+    "done slowly; if you cannot speak a sentence, it is "
+    "too fast, and if you can chat, it is too slow.",
+    # an easy run, an interval session and a race are other runs, and a tempo in music is
+    # entertainment's
+    avoid=("interval", "intervals", "fartlek", "hill repeats", "sprint", "sprints", "race day",
+           "music", "song", "bpm"),
+    bias=1))
+
+ENTRIES.append(entry(
+    "sports-bra",
+    (("sports bra", "sports bras", "running bra", "high impact bra", "bra for running",
+      "bra for the gym", "bra for exercise"),
+     ("what is", "whats", "what does", "mean", "which", "what", "buy", "buying", "need",
+      "support", "impact", "size", "sizing", "fit", "fits", "right", "best", "how often",
+      "wash", "replace", "last", "running", "gym", "exercise", "bounce")),
+    "A sports bra is a bra built to hold the breast still rather than shape it, and the amount it "
+    "holds is graded: low support for yoga and walking, medium for cycling and weights, high for "
+    "running and anything bouncy. Buy it by the band size rather than the cup alone - it should be "
+    "snug on the loosest hook with two fingers of room under the band - and replace it when the "
+    "band has stretched, usually after about a year of regular washing. Wash it cool after every "
+    "wear, because sweat and elastic do not get on.",
+    # an everyday bra, a bikini and a fitted bra are clothing questions
+    avoid=("underwire", "wired bra", "everyday bra", "bra size", "bikini", "swimsuit",
+           "strapless", "backless", "nursing bra"),
+    bias=1))

@@ -8,7 +8,7 @@ The matcher in bot/knowledge/lookup.py finds the entry; bot/modules/answers.py a
 import re
 
 from ..compose.repair import owns_the_deed
-from .lookup import entry, the_fault, SLIPS
+from .lookup import MACHINE_SOUNDS, entry, the_fault, SLIPS
 
 # The plain words for a noise, when the person has not said which sound it is. A machine or a
 # neighbour is audible and the answer needs to know that, so every row that answers a noise reads
@@ -16,6 +16,72 @@ from .lookup import entry, the_fault, SLIPS
 # three words later got a full answer, and "the neighbours are making a racket" was echoed back.
 NOISE_WORDS = ("noise", "noises", "noisy", "loud", "racket", "racketing", "din", "clatter",
                "clattering", "thunderous", "deafening", "row", "drone", "droning", "palaver")
+
+# Whose screens a line is about: the writer's own phone, a child's, or somebody else's. Three
+# rows need it and each of them was matching the words alone - "im always on my phone how do i
+# stop" reached the children's limit, "my husband is always on his phone" reached it too, and
+# "my teen is always on his phone" reached the writer's own habit - so the test lives here, once,
+# rather than three times.
+_A_CHILD_NAMED = (
+    "kid", "kids", "child", "children", "toddler", "toddlers", "baby", "son", "sons",
+    "daughter", "daughters", "boy", "girl", "teen", "teens", "teenager", "teenagers",
+    "stepson", "stepdaughter", "grandchild", "grandchildren", "grandson", "granddaughter",
+    "year old", "year olds", "primary school", "secondary school", "nursery", "school age")
+_ONLY_SAID_ABOUT_A_CHILD = ("screen time", "screentime")
+_SOMEBODY_AT_HOME = (
+    "my mum", "my mom", "my mother", "my dad", "my father", "my husband", "my wife",
+    "my partner", "my girlfriend", "my boyfriend", "my stepson", "my stepdaughter",
+    "my flatmate", "my housemate", "my room mate", "my roommate", "my friend", "my mate",
+    "my brother", "my sister", "my nan", "my nana", "my gran", "my granny", "my grandma",
+    "my grandad", "my grandpa", "my uncle", "my aunt", "my auntie", "my cousin", "my boss",
+    "my colleague", "my staff")
+_THEIR_SCREENS = re.compile(r"\b(?:his|her|their)\s+(?:phone|phones|screens?|tablet|ipad|ipads)\b")
+_MY_OWN_SCREENS = re.compile(r"\b(?:my|the)\s+(?:phone|phones)\b|\bim\s+(?:always\s+)?on\b|"
+                             r"\bi'm\s+(?:always\s+)?on\b")
+
+
+def the_line_said(understood):
+    """The line as one lower-case string with spaces round it, or "" when there is no line."""
+    reading = understood if isinstance(understood, dict) else {}
+    said = " ".join(str(reading.get("clean") or reading.get("text") or "").split()).lower()
+    return f" {said} " if said else ""
+
+
+def _names_one_of(said, phrases):
+    tokens = set(re.findall(r"[a-z']+", said))
+    return any(phrase in said if " " in phrase else phrase in tokens for phrase in phrases)
+
+
+def screens_are_a_childs(understood):
+    """True when the screens in the line belong to a child, so a parent's limit answer fits."""
+    said = the_line_said(understood)
+    if not said.strip():
+        return True
+    if any(phrase in said for phrase in _ONLY_SAID_ABOUT_A_CHILD):
+        return True
+    return _names_one_of(said, _A_CHILD_NAMED)
+
+
+def screens_are_somebody_elses(understood):
+    """True when the phone in the line is not the writer's own.
+
+    A line that says "my phone" or "im on" is the writer's whatever else it names, which is what
+    keeps "my girlfriend says im always on my phone" off the card about her phone.
+    """
+    said = the_line_said(understood)
+    if not said.strip():
+        return False
+    if _MY_OWN_SCREENS.search(said):
+        return False
+    # A child's screens are the parent's question, not the "talk to them about it" card for a
+    # partner: "my grandson is always on his tablet" is the screen-time answer, and this card had
+    # taken it because a grandchild reads as somebody else at home.
+    if screens_are_a_childs(understood):
+        return False
+    if _THEIR_SCREENS.search(said):
+        return True
+    return any(phrase + " " in said for phrase in _SOMEBODY_AT_HOME)
+
 
 def _birthday_age(text):
     """The age the line names, as an int, or None.
@@ -1214,6 +1280,11 @@ ENTRIES = [
           # back is ask-for-refund's, so a claim for something owed stands this down.
           avoid=MOURNING + ("refund", "refunds", "complaint", "complain", "complaining",
                             "compensation", "replacement", "money back", "owed", "owes me",
+                            # A reference is written, but it is not a card: "what should i
+                            # write in a reference" is the job reference, and on main it was
+                            # answered "Thinking of you both - hope the year is a good one."
+                            "reference", "references", "referee", "referees", "testimonial",
+                            "recommendation", "cv", "job application", "employer", "interview",
                             # "how much cash do you put in a card" asks for an amount, and the
                             # words for the card are not it
                             "how much", "how many", "cash", "money", "quid", "pounds",
@@ -1502,7 +1573,15 @@ ENTRIES = [
                  "festival", "theatre", "theater", "cinema", "match", "festival ticket",
                  "train ticket", "bus ticket", "coach ticket", "season ticket", "ferry",
                  "ticket", "tickets", "holiday", "package holiday", "cruise", "travel agent",
-                 "tour operator", "cottage", "villa", "campsite")),
+                 "tour operator", "cottage", "villa", "campsite",
+                 # And it is for a thing you bought. "someone rang saying im due a tax refund" and
+                 # "hmrc emailed me about a tax refund" are a message that arrived, not a letter
+                 # to write, and both got the cracked-lamp template; money.tax-refund-scam
+                 # answers them. A benefit, a rebate and a council tax refund are the same shape.
+                 "tax", "tax refund", "tax rebate", "rebate", "hmrc", "p800",
+                 "benefit", "benefits", "universal credit", "council tax", "pension",
+                 "text saying", "email saying", "emailed saying", "rang saying", "called saying",
+                 "phoned saying", "message saying", "telling me", "saying im", "saying i am")),
     # The words for turning down a meeting, and only a meeting: "decline" and "politely" were
     # key words on their own, so "how do i politely decline a hen do" was answered "I can't make
     # Tuesday - can we do Thursday" before the refusal row could hear it. The subject now has to
@@ -1530,6 +1609,42 @@ ENTRIES = [
            "didn't, and that left you waiting. I'm sorry.\" Then say what you will do differently, in "
            "one sentence."),
           ask=("sorry", "apologise", "apologize", "apology")),
+    # What you say when the apology comes to *you*. Three rows were answering this and none of
+    # them is about it: the apology-message row below is the one you write yourself, the
+    # somebody-owes row is for an apology you have not been given, and the hedge was the last
+    # word. "how do i accept an apology" and "how do i reply to an apology" reached nothing at
+    # all, and "someone said sorry to me" was told how to apologise.
+    entry("accept-an-apology",
+          (("sorry", "apology", "apologise", "apologize", "apologies", "apologises",
+            "apologizes", "apologising", "apologizing", "apologized", "apologised"),
+           ("to me", "said sorry", "says sorry", "said it", "someone said", "someone apologised",
+            "someone apologizes", "someone apologises", "reply", "respond", "answer", "accept",
+            "accepting", "forgive", "forgiving", "what do i say", "what should i say",
+            "how do i reply", "how do i respond", "they said sorry", "he said sorry",
+            "she said sorry", "apologised to me", "apologized to me", "apologises to me",
+            "apologizes to me", "said sorry to me", "says sorry to me")),
+          ("Take it plainly and say so: \"Thanks for saying that - it means a lot.\" Then, if "
+           "something is still needed, name one thing in a sentence (\"a text next time you are "
+           "running late would help\") and leave it there. You do not have to forgive on the spot; "
+           "accepting the apology is enough for today."),
+          ask=("sorry", "apology", "apologise", "apologize", "say", "saying", "what", "how",
+               "reply", "respond", "accept", "forgive", "back", "after", "when"),
+          # The person's own apology, an apology they are owed rather than given, a habit of
+          # apologising and grief are other rows: this one is only the sorry that arrives.
+          avoid=("i said sorry", "i already said sorry", "i apologise", "i apologize",
+                 "i have apologised", "how do i say sorry", "how to say sorry",
+                 "should i apologise", "should i say sorry", "wont apologise", "wont say sorry",
+                 "never apologises", "never says sorry", "owes me an apology",
+                 "owe me an apology", "refuses to apologise", "refuses to say sorry",
+                 "stop saying sorry", "sorry for your loss", "condolence", "died", "funeral",
+                 "passed away", "grief",
+                 # drafting my own apology is the apology-message row above: "how do i write a
+                 # text to say sorry" reached the sorry that arrives, which is the other way
+                 "how do i write", "how to write", "write a text", "write a message",
+                 "text to say", "draft", "drafting", "wording", "how do i say", "how to say",
+                 "should i send"),
+          bias=2),
+
     entry("apology-somebody-owes",
           (("wont apologise", "wont say sorry", "wont apologise to me", "never apologises",
             "never apologize", "never apologise", "never says sorry", "never say sorry",
@@ -1558,7 +1673,14 @@ ENTRIES = [
           # above: this one is a sorry somebody else owes you
           avoid=("died", "death", "funeral", "passed away", "sorry i", "im sorry", "my fault",
                  "stop saying sorry", "all the time", "too much", "so much", "i apologise",
-                 "i apologize", "i said sorry", "i should say sorry")),
+                 "i apologize", "i said sorry", "i should say sorry",
+                 # an apology that has been given is answered, not chased: "what do i say when
+                 # someone apologises to me" was told how to ask for the repair, which is this
+                 # row's answer to an apology that has *not* come
+                 "what do i say", "what should i say", "what do i write", "reply", "respond",
+                 "accept", "said sorry to me", "says sorry to me", "apologises to me",
+                 "apologizes to me", "apologised to me", "apologized to me",
+                 "when someone apologises", "when someone apologized", "when someone says sorry")),
     # The note-to-school entry below reads the school and the child but not the teacher, so the
     # letters that name only the school have a row of their own.
     entry("email-to-teacher", ("teacher", "childs", "school", ("email", "write", "message")),
@@ -1825,6 +1947,10 @@ ENTRIES = [
     # offering one script for all of it.
     entry("how-to-tell-them",
           (("how do i tell", "how should i tell", "how to tell", "how do i break",
+            # "how do i ask my neighbour to stop smoking in the garden" is the same question with
+            # the asking named, and it reached the stop-smoking card: what to say to a neighbour
+            # is this row, and the thing in the line is what it is about.
+            "how do i ask", "how should i ask", "how can i ask", "how to ask",
             "break the news", "how do i say", "how do i bring it up", "how do i bring up",
             "bring it up with", "how do i raise it", "how do i talk to my", "talk to my",
             "how do i tell my", "telling my", "how do i announce",
@@ -1839,14 +1965,30 @@ ENTRIES = [
             # the giving side of bad news. "how do i give someone bad news" is a person about to
             # do the telling, and the comfort words for somebody who has just been told ("say you
             # are glad they told you") are the wrong side of the conversation.
-            "how do i give", "how to give", "how do i break it", "how to break it"),
+            "how do i give", "how to give", "how do i break it", "how to break it",
+            # The words asked for by name rather than by the telling: "give me the words to say
+            # to my boss" is this row's question, and without them the line went to the punt and
+            # "the words to say to my boss about leaving early" to the break-clause letter for a
+            # tenancy, because the only thing left to read was "leaving early".
+            "words to say", "words to use", "words to tell", "give me the words",
+            "help me word", "put it in words", "put this in words", "find the words",
+            "what words", "which words"),
            ("parents", "parent", "mum", "dad", "mother", "father", "partner", "husband", "wife",
             "housemate", "housemates", "flatmate", "flatmates", "roommate", "family",
             "my friend", "my friends", "brother", "sister", "son", "daughter", "kids",
             "children", "my boss", "my team", "team", "staff", "colleagues", "everyone",
             # ... and the same question with nobody named: "tell someone", "tell somebody",
             # "give a friend the news" are the shapes people type when they do not name a person.
-            "someone", "somebody", "person", "people", "friend", "friends")),
+            "someone", "somebody", "person", "people", "friend", "friends",
+            # ... and the people people live beside, who are asked rather than told. Not the
+            # landlord: "landlord" is the word of the renting rows, and a second key that carries
+            # it makes the word less of a sign inside this domain, which took the letter about the
+            # heating to the arrears card. A landlord line has its own letter, and it is better.
+            "neighbour", "neighbours", "neighbor", "neighbors", "my neighbour",
+            "housemates", "flatmates", "roommates", "workmate", "workmates", "coworker",
+            "co-worker", "boyfriend", "girlfriend", "fiance", "fiancee", "my ex", "ex partner",
+            "nan", "nana", "grandma", "grandad", "granny", "grandparent", "in laws", "in-law",
+            "stepson", "stepdaughter", "stepchildren")),
           _saying_it,
           # The lines that already have a better home: a place you cannot go is
           # tell-someone-you-cant-come, a resignation is the leaving letter, a death and a diagnosis
@@ -1859,8 +2001,8 @@ ENTRIES = [
           # "give"/"giving" are the telling verb said the other way round: "how do i give someone
           # bad news" is the same row, and the comfort words for somebody who has just been told
           # ("say you are glad they told you") are the wrong side of the conversation.
-          ask=("tell", "say", "bring", "raise", "talk", "breaking", "announce", "telling",
-               "give", "giving",
+          ask=("tell", "say", "ask", "asking", "asks", "bring", "raise", "talk", "breaking",
+               "announce", "telling", "give", "giving",
                "talks over me", "talking over me", "talk over me", "talks over my",
                "keeps talking over", "interrupts me", "interrupting me", "interrupts my",
                "keeps interrupting", "cuts me off", "keeps cutting me off", "butts in",
@@ -2223,6 +2365,11 @@ ENTRIES = [
                  "lost their mum", "lost their dad", "lost my mum", "lost my dad",
                  "card", "cards",
                  "doctor", "gp", "nurse", "boss", "manager", "employer",
+                 # an interview is where they explain what happened to an employer, not
+                 # somebody to comfort: "what do i say at a job interview about being fired"
+                 # was answered with how to sit with a friend who has just been sacked
+                 "interview", "interviews", "interviewer", "interviewers", "recruiter",
+                 "hiring manager", "job application", "cv", "resume",
                  # a friend who is off with you is ask-whats-wrong's line, not somebody else's
                  # bad news: "my friend is upset with me" is a different question
                  "with me", "at me", "off with me", "annoyed", "ignoring me", "ignores me",
@@ -2804,3 +2951,29 @@ ENTRIES.append(entry(
            "maid of honour", "speech to text", "speech delay", "speech therapy",
            "figure of speech"),
     bias=2))
+
+
+# --- a machine that had to do the job twice ----------------------------------------------------
+# "Takes" is two questions: how long a machine needs, and a machine that needed two goes at the job.
+# The second is a fault, and the rows around it were reading the first: "the tumble dryer takes two
+# goes to dry a load" was handed the dryer's turn-round time, and "the tumble dryer leaves everything
+# damp" was answered "Hang the washing on a rack in the warmest room", which is advice for a person
+# with no dryer at all. The phrases are the job handed back undone, or taking so long that it is not
+# getting done, said as people say it, and they
+# live here because the timing row (home.py), the drying row (clothing.py) and the fault rows in
+# home_craft.py all have to agree on what the shape is.
+A_JOB_LEFT_UNDONE = (
+    "two goes", "two cycles", "two washes", "two loads", "three goes", "three cycles",
+    "three washes", "took two", "takes two", "went through twice", "put it through twice",
+    "still wet", "still damp", "leaves everything damp", "leaves the clothes damp",
+    "leaves clothes damp", "leaves them damp", "leave everything damp", "come out damp",
+    "comes out damp", "come out wet", "comes out wet", "doesnt dry", "doesn't dry", "isnt drying",
+    "isn't drying", "not drying", "never dries", "doesnt finish", "doesn't finish", "not finishing",
+    "doesnt cook", "doesn't cook", "undercooked", "comes out raw", "not hot enough",
+    # the same fault said as time rather than as a second go: a job that takes all night is a job
+    # that is not getting done, and "the tumble dryer takes forever to dry a load" was answered
+    # with a clothes rack for the same reason
+    "takes ages", "taking ages", "takes forever", "taking forever", "taking hours", "takes hours",
+    "taking so long", "takes so long", "taking all day", "takes all day", "long to dry",
+    "slow to dry", "drying slowly", "dries slowly", "hours to dry", "all night to dry",
+)

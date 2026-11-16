@@ -10,10 +10,11 @@ import re
 import string
 
 from ..memory.when import the_plan
-from .geography import country_extreme, region_extreme
+from .geography import (carries_it_out_of_britain, country_extreme, crosses_a_border,
+                        region_extreme)
 from ..compose import pick
-from .lookup import (a_weight, entry, not_the_flat_of_something_made,
-                      not_the_flat_you_live_in, tokens)
+from .lookup import (a_price_not_a_loan, a_weight, entry, not_the_flat_of_something_made,
+                     not_the_flat_you_live_in, tokens)
 
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
 ANSWERS = ("geography-and-travel", "nature-and-weather")
@@ -138,6 +139,34 @@ def _the_booking_is_behind_them(understood):
         low = " " + str((understood or {}).get("clean") or "").lower() + " "
     return " booked " not in low
 
+
+# "Do it myself" is not a travel phrase on its own: a person says it about a kitchen, a bathroom
+# and a wardrobe as often as about a holiday, and the row below answered "hire a builder or do it
+# myself" with a package-holiday card about flights and transfers. The trade the row is about
+# only exists in a trip, so the row asks for the trip to be in the line - unless the line names
+# the package itself, which is travel whatever else it says.
+_THE_TRIP_IN_THE_LINE = re.compile(
+    r"\b(?:holiday|holidays|holidaymaker|trip|trips|travel|travelling|traveling|flight|flights|"
+    r"fly|flying|hotel|hotels|abroad|away|resort|resorts|villa|cruise|airport|city\s+break|"
+    r"beach|abroad|all\s+inclusive|package|packages|tour|tours|itinerary|hotel\s+and\s+flight|"
+    r"flights\s+and\s+hotel|transfer|transfers|operator|operators|atol|booking)\b", re.I)
+
+
+def _a_trip_to_arrange(understood):
+    """True unless "do it myself" is about a job rather than a trip.
+
+    A package holiday against booking it yourself is a real trade - protection and transfers
+    against price - and the row is good at it. The same words are ordinary for a bathroom or a
+    wardrobe, where the trade is a guarantee against an afternoon's work and the holiday card is
+    no answer at all. So the words the line names have to include the trip.
+    """
+    text = (understood or {}).get("clean") or ""
+    if not text:
+        words = (understood or {}).get("words") or ()
+        text = " ".join(str(word) for word in words)
+    return bool(_THE_TRIP_IN_THE_LINE.search(str(text).lower()))
+
+
 def _in_a_flight_thread(memory):
     """Whether the last exchange was about a flight, so a short follow-up belongs to it.
 
@@ -246,6 +275,14 @@ LONDON_AIRPORTS = (
 
 # Getting to London by coach, by train or by tube is not an airport question, however many of
 # its words are in the line: "bus or train to london" was answered with London City and the DLR.
+# A deadline said as the person's own need is a planning question, not a route one: "i need to get
+# to heathrow for 6am" wants the journey worked back from six, and the transfer card said the train
+# times to Paddington to somebody who had to be airside by six. "how do i get to gatwick by 5am"
+# still asks the route, so only the need-and-clock shape stands the card down.
+A_DEADLINE_NEED = re.compile(r"\b(?:i|we)\s+(?:need|needs|have|has|have got|got|want|wants|"
+                             r"must)\b[^.!?]{0,40}?\b(?:get|be|make it|arrive)\b[^.!?]{0,20}?"
+                             r"\b(?:for|by|before)\s+\d{1,2}(?:[.:]\d\d)?\s*(?:am|pm)?", re.I)
+
 GROUND_TRANSPORT = re.compile(r"\b(?:bus|buses|coach|coaches|national express|megabus|train|"
                               r"trains|tube|underground|oyster|travelcard|travel card|driving|"
                               r"drive|parking|congestion charge|ulez)\b")
@@ -257,6 +294,8 @@ def _london_airport(memory, understood):
     """The airport the line names gets its own route; otherwise the closest-airport answer."""
     clean = understood.get("clean", "")
     if GROUND_TRANSPORT.search(clean) and not AIRPORT_WORD.search(clean):
+        return None
+    if A_DEADLINE_NEED.search(clean):
         return None
     for names, answer in LONDON_AIRPORTS:
         if any(name in clean for name in names):
@@ -728,6 +767,49 @@ CITIES = {
     "hanoi": ("the old quarter on foot with a pho stop, Hoan Kiem lake in the morning, and a "
               "coffee on a balcony over the traffic. Cross the road by walking steadily: the "
               "mopeds go round you, not through you."),
+    # The cities a person in Britain or Ireland asks about are the ones they can get to for a
+    # weekend, and the table was all abroad: "whats manchester like", "what should i do in
+    # belfast" and "cheap places to eat in leeds" reached nothing but a search hedge, while the
+    # same questions about Lisbon were answered. These are the same shape of card - the two or
+    # three things worth the trip, and one thing that saves the day - and every row below also
+    # feeds the day-trip, cheap-eats, best-time and length-of-stay rows, which key on this table.
+    "manchester": ("the Northern Quarter for food and records, the Museum of Science and Industry "
+                   "in the old station, and a tram out to Salford Quays for the Lowry and the "
+                   "Imperial War Museum North. Book the Old Trafford or Etihad tour ahead."),
+    "liverpool": ("the Albert Dock and the two cathedrals, the Cavern and the Beatles Story if you "
+                  "want the music, and the ferry across the Mersey for the skyline. The Walker and "
+                  "the World Museum are free."),
+    "birmingham": ("the canals round Brindleyplace, the museum and art gallery, and a curry in the "
+                   "Balti Triangle rather than the middle of town. The library roof is free and "
+                   "has the best view in the city."),
+    "leeds": ("the Victoria Quarter and Kirkgate Market in the centre, then Headingley or Chapel "
+              "Allerton for dinner. The Royal Armouries is free, and so are the city's galleries."),
+    "sheffield": ("the Winter Garden and the Peace Gardens, then Kelham Island for food and a "
+                  "brewery tap. The Peak District is half an hour by bus, which is the reason "
+                  "most people go."),
+    "newcastle": ("the Quayside and the Millennium Bridge, Grainger Town for the arcades, and the "
+                  "Baltic in Gateshead for the view. The metro to Tynemouth is a good half day at "
+                  "the coast."),
+    "nottingham": ("the castle and the Trip to Jerusalem, which is built into the rock, then "
+                   "Hockley for food and shops. Wollaton Hall and its deer park are free and a "
+                   "good hour."),
+    "bristol": ("the harbourside and the SS Great Britain, the Clifton Suspension Bridge, and "
+                "Wapping Wharf or Stokes Croft for food. It is a walking city; the buses are the "
+                "weak point."),
+    "brighton": ("the pier and the pebble beach, the Lanes for shops and the North Laine for food. "
+                 "The i360 is the view and the South Downs are a short bus ride."),
+    "york": ("the Minster, the Shambles and the city walls, which take an hour and cost nothing. "
+             "Book the Minster and the Jorvik ahead in summer."),
+    "glasgow": ("Kelvingrove and the Burrell Collection, the Necropolis for the view, and the West "
+                "End for food. The subway is a single loop and gets you round the centre."),
+    "cardiff": ("the castle in the middle of town, the old arcades for covered shopping streets, "
+                "and Cardiff Bay for the waterfront. The national museum is free."),
+    "belfast": ("the Titanic museum on the old slipway, the Cathedral Quarter for pubs, and a black "
+                "taxi tour if you want the history. The Giant's Causeway is a day out north."),
+    "cork": ("the English Market for lunch, St Anne's tower for the bells, and a pint in the old "
+             "town. Kinsale and Cobh are short bus or train trips."),
+    "galway": ("the Latin Quarter for pubs and buskers, the Claddagh walk along the water, and a "
+               "day on Inishmore or in Connemara. Book the Aran ferry ahead in summer."),
 }
 
 
@@ -890,17 +972,48 @@ COUNTRY_ALIASES = {
 # article or a possessive with nothing between it and the name means the thing, plus the words
 # that say how the bird is sold, which nobody says of a country.
 COUNTS_AS_A_THING = re.compile(
-    r"\b(?:a|an|some|any|another|one|my|your|our|their|his|her|its|roast|roasted|frozen|"
-    r"whole|raw|stuffed|cooked|leftover|defrosted|fresh|smoked)\s+$", re.I)
+    r"\b(?:a|an|some|any|another|one|no|every|this|that|these|those|my|your|our|their|his|"
+    r"her|its|roast|roasted|frozen|whole|raw|stuffed|cooked|leftover|defrosted|fresh|"
+    r"smoked)\s+$", re.I)
+# The word after the name decides the other way, because a country is also how people describe
+# the trip: "a spain holiday" and "we booked a turkey holiday" are the place, and "a week in a
+# spain resort" is the place too. A travel word straight behind the name keeps it a country, and
+# anything else ("a turkey sandwich", "a china bowl") leaves it the thing the name is shared with.
+COUNTS_AS_A_TRIP = re.compile(
+    r"\s+(?:holiday|holidays|vacation|vacations|trip|trips|break|breaks|getaway|getaways|"
+    r"week|weeks|weekend|weekends|fortnight|resort|resorts|flight|flights|hotel|hotels|"
+    r"hostel|hostels|tour|tours|guide|guides|map|maps|visa|visas|beach|beaches|city|"
+    r"coast|island|islands|airport|airports|transfer|transfers|excursion|excursions|"
+    r"adventure|adventures)\b", re.I)
+
+
+# The article only makes a thing of a name that is a thing as well as a place, and that is a fact
+# about these few words rather than about a line: turkey the bird, china the plates, jersey the
+# shirt, guinea the pet, chile the pepper. There is no Greece the object, so "how long for a
+# greece" and "how many days in a spain" are the country said with one article too many, and they
+# keep the itinerary. A country that is not here is never fenced by its article alone.
+ALSO_A_THING = frozenset({"turkey", "china", "jersey", "guinea", "chile"})
 
 
 def _a_thing_not_a_place(clean, name):
-    """Whether the place word in this line is preceded by a word that makes it a thing."""
+    """Whether the place word in this line is preceded by a word that makes it a thing.
+
+    Every mention of the name has to be the thing: "a turkey for christmas, then two weeks in
+    turkey" names the country as well, and the country is what the line is about. A mention with
+    a travel word behind it is the place too, so one of those is enough to keep the country.
+    """
+    if str(name or "").strip().lower() not in ALSO_A_THING:
+        return False    # no such object, so the article belongs to the place
     low = " " + " ".join(str(clean or "").lower().split()) + " "
+    found_a_thing = False
     for match in re.finditer(r"\b" + re.escape(name.lower()) + r"\b", low):
         if COUNTS_AS_A_THING.search(low[:match.start()]):
-            return True
-    return False
+            if COUNTS_AS_A_TRIP.match(low[match.end():]):
+                return False
+            found_a_thing = True
+        else:
+            return False
+    return found_a_thing
 
 # A trip is said in words of its own: "where should i go in turkey", "what about a trip to spain",
 # "somewhere warm in january". A country named without one of them is the country, not a
@@ -1620,6 +1733,10 @@ AIRPORT_NAME = {
 DAY_TRIPS = {
     "london": "Bath (80 minutes by train), Oxford and Cambridge (about an hour), and Brighton "
               "(an hour) for the sea. Book the train a week ahead and you halve the fare.",
+    "edinburgh": "Glasgow (50 minutes by train from Waverley), Stirling for the castle (50 "
+                 "minutes), and North Berwick (35 minutes) for the beach and the boat out to the "
+                 "Bass Rock. St Andrews is about 90 minutes by train and bus, and worth the day "
+                 "for the ruins and the beach rather than the golf.",
     "paris": "Versailles (40 minutes on the RER C), Chartres for the cathedral, and Giverny for "
               "Monet's garden from April to October. Go early: the first trains are the quietest.",
     "rome": "Ostia Antica for the Roman ruins (30 minutes on the metro and train), Tivoli for the "
@@ -2137,6 +2254,29 @@ DAILY_BUDGET = {
     "tokyo": (70, 120, "convenience store breakfast and a rail pass change the total completely"),
     "london": (65, 110, "the tube and eating away from the centre is what keeps it down"),
     "new york": (90, 160, "the city tax and the tip on every bill are what people forget"),
+    # The country row answered "is croatia expensive" and left "is dubrovnik expensive" with
+    # nothing: the day rate is per place, and people name the place they are going to. Cities
+    # whose country is already above are given here for the same reason.
+    "dubrovnik": (55, 95, "the old town is the top of that range and the walls are paid for"),
+    "split": (40, 75, "it is the ferry port as much as a city, so eating inland costs less"),
+    "athens": (40, 75, "the ruins are the cost here, not the food: lunch in a taverna is cheap"),
+    "krakow": (30, 60, "the old town is the pricey part and the tram takes you out of it"),
+    "budapest": (30, 60, "the baths and the ruin bars are where the money goes"),
+    "seville": (45, 80, "tapas at the bar is the whole trick, and it is what locals do"),
+    "valencia": (45, 80, "the beach is free and it is cheaper than Barcelona for the same food"),
+    "vienna": (55, 95, "coffee and cake add up, and the transport pass is worth it"),
+    "zurich": (95, 160, "everything is dear, so a supermarket lunch and the lake save the most"),
+    "brussels": (55, 90, "the centre near the Grand Place is where the prices double"),
+    "copenhagen": (70, 120, "bikes rather than taxis, and lunch from a bakery rather than a cafe"),
+    "stockholm": (65, 110, "alcohol is the shock: eat and drink where people live, not in Gamla Stan"),
+    "istanbul": (30, 60, "the tourist quarter is the dear part, and the ferries are cheap"),
+    "bangkok": (25, 55, "street food is a few pounds a meal, and the skytrain beats the traffic"),
+    "singapore": (60, 110, "hawker centres keep food cheap and hotels are what pushes it up"),
+    "cape town": (35, 70, "the rand helps, and the wine is cheaper than the food"),
+    "sydney": (70, 120, "coffee and transport are dear, and the beaches cost nothing"),
+    "san francisco": (90, 160, "the hotel tax and the tip are the parts people forget"),
+    "orlando": (70, 130, "the park tickets are the cost, not the meals"),
+    "marrakesh": (25, 55, "haggling in the souk is expected, and a riad is cheap for what it is"),
 }
 
 TRIP_UNITS = (("weekend", 2), ("long weekend", 3), ("a week", 7), ("one week", 7),
@@ -2437,13 +2577,28 @@ WHERE_TO_STAY = ("where should i stay", "where shall i stay", "where do i stay",
                  "what area", "where is good to stay", "best place to stay", "good area",
                  "neighbourhood", "neighborhood", "part of town", "which part",
                  "a hotel", "a hostel", "somewhere to stay", "a place to stay",
-                 "accommodation", "places to stay", "hotels to stay", "a bed for the night")
+                 "accommodation", "places to stay", "hotels to stay", "a bed for the night",
+                 # "where should i sleep" and "where can i sleep" ask the same thing with the
+                 # older word for it, and both reached nothing at all.
+                 "where should i sleep", "where can i sleep", "where do i sleep",
+                 "where should we sleep", "where shall we sleep", "where should i kip",
+                 "somewhere to sleep", "a place to sleep",
+                 # "where do we stay" is the same ask with the other helper, and it reached the
+                 # card for an evening at home because "we stay in <town>" holds "stay in".
+                 "where do we stay", "where can we stay", "where can i stay",
+                 "where could i stay", "where should i stay the night",
+                 # "what area should i stay in" says the stay as "stay in", which is also the
+                 # phrase for an evening at home, so the area is what makes it the booking.
+                 "area should i stay", "area to stay in", "area do i stay")
 
 # A place whose name is also an everyday word: "bath" and "split". A bare match on one of these
 # answers a question nobody asked ("whats the best time to take a bath" got the Roman baths, and
 # "the best time to split firewood" got a ferry to Hvar), so the word only counts as a place in a
 # travel shape: "go to Bath", "in Split", "visit Bath", "a trip to Bath".
-AMBIGUOUS_PLACES = ("bath", "split")
+# "cork" is a city and the stuff in a bottle and on a noticeboard, so it is a place only when the
+# line says so ("whats cork like", "the train to cork", "cork is worth visiting") - the same test
+# bath and split get.
+AMBIGUOUS_PLACES = ("bath", "split", "cork")
 _PLACE_SHAPE = (r"\b(?:go|goes|going|went|get|getting|travel|travelling|traveling|trip|holiday|"
                 r"visit|visiting|stay|staying|fly|flying|from|in|near|see|seeing)\s+(?:to\s+)?%s\b")
 
@@ -2505,8 +2660,15 @@ def _capital(memory, understood):
 def _place_in(memory, understood, table):
     """The place the line names, or the one the last turn or two named: "what should we do
     there" is about the city from the turn before."""
-    name = _find_in(understood.get("clean", ""), table)
+    clean = understood.get("clean", "")
+    name = _find_in(clean, table)
     if name:
+        # Every row that reads a country as a destination reads it through here, and a country
+        # named as a thing is not one: "how long for a turkey" was three full days in Istanbul,
+        # and the rows for a country's weather, its money and its airports had the same hole.
+        # A country is never "a" anything, so the determiner says which word the line used.
+        if table is WHERE_TO_GO and _a_thing_not_a_place(clean, name):
+            return None
         return name
     turns = memory.get("turns") if isinstance(memory, dict) else None
     if not isinstance(turns, list):
@@ -2765,6 +2927,11 @@ def _guide(memory, understood):
         return None
     city = _find_in(clean, CITIES)
     if not city:
+        # The city was named in the line before and this line asks about it: the guide is one
+        # paragraph and it has just been served, so the question "what should i see" next to it
+        # is asking for what comes after it, not for it again. The follower owns that answer.
+        if SIGHTSEEING_ASK.search(clean):
+            return _guide_next(memory, understood)
         return None
     body = _without_the_season(CITIES[city], _when_said(memory, understood))
     # A line that asks nothing is not a new question about the city: "we are staying near
@@ -3143,9 +3310,13 @@ def _hike_day(memory, understood):
             "for what you sweat out")
     # What goes in the bag is a packing question: the water and the food are two items on a short
     # list, and the list is the answer. "what should i pack for a day hike" got "half a litre an
-    # hour ... for food, 60g" and nothing about layers, which is not a packing answer.
-    if re.search(r"\b(?:pack|packing|packed|bring|take|carry|wear|kit|bag|rucksack|backpack)\b",
-                 clean) and re.search(r"\b(?:what|which|anything|need|should)\b", clean):
+    # hour ... for food, 60g" and nothing about layers, which is not a packing answer. A quantity
+    # is not a packing ask either: "how much water should i take on a hike" says "take" and was
+    # handed the layers and the boots, when the figure it asked for is the water.
+    if (not re.search(r"\b(?:how much|how many|how long)\b", clean)
+            and re.search(r"\b(?:pack|packing|packed|bring|take|carry|wear|kit|bag|rucksack|backpack)\b",
+                          clean)
+            and re.search(r"\b(?:what|which|anything|need|should)\b", clean)):
         kit = ("Layers, a waterproof, and the water and food: base layer, fleece, a shell you "
                "can get into in the wind, spare socks; half a litre an hour, so two litres for a "
                "half day; 60g of carbohydrate an hour. Add a map or a charged phone with the "
@@ -4041,11 +4212,12 @@ def _where_to_stay(memory, understood):
 # same few rules hold in any town, so a place that is not in the table still gets an answer, and
 # the paragraph says how to pick rather than pretending to know streets it has never seen.
 TOWN_STAY = (
-    "Pick the centre or the seafront and walk to what you came for - the front, the pier and the "
-    "pubs in a seaside town, the market square and the station anywhere else - and take a street "
-    "or two back from the main road for quieter, cheaper rooms. Look at the map for a bar or a "
-    "through road under the window, check the last bus or train if you will be out late, and book "
-    "somewhere with free cancellation so you can move if the area is not what you hoped.")
+    "Book close to the middle of town and a street or two back from the main road: the station, "
+    "the food and the evening are then walkable, and the rooms just off the front are quieter and "
+    "cheaper. At the seaside that means a street back from the front rather than the front itself. "
+    "Look at the map for a bar or a through road under the window, check the last bus or train if "
+    "you will be out late, and book somewhere with free cancellation so you can move if the area "
+    "is not what you hoped.")
 
 
 # When to book it, what it costs, how to find one and whether to book at all are four different
@@ -4053,6 +4225,66 @@ TOWN_STAY = (
 # price, not a street. "a hotel" is one of the asking shapes, so the row has to look at what the
 # line does with it.
 _NOT_WHERE_ASKS = frozenset(("when", "how_long", "how_much", "how", "steps", "yesno", "why"))
+
+
+_A_CAR_NIGHT = re.compile(
+    r"\b(?:in|inside)\s+(?:my|the|our|his|her)\s+(?:car|van|motorhome|camper|campervan|truck)\b"
+    r"|\b(?:tent|camping|tourer|caravan|motorhome|campervan|camper)\b")
+
+
+# When and how to sleep is a sleep question even when the line says "where": "where do i sleep on
+# a night shift" and "where should i sleep after a night shift" are the sleep card's lines, and
+# the stay shape read them as a town to book in.
+_A_SHIFT_WORK = re.compile(
+    r"\bshift(?:s|work|work\s+pattern)?\b|\bon nights?\b|\bworking nights?\b|\bwork nights?\b"
+    r"|\bnight\s*worker\b|\bday\s+shift\b")
+
+
+_A_FLIGHT_WORD = re.compile(
+    r"\b(?:airport|airports|terminal|flight|flights|flying|heathrow|gatwick|stansted|luton)\b")
+
+
+_A_STAY_ASK = re.compile(
+    r"\b(?:where|which)\b[^.!?]{0,30}\b(?:stay|staying|sleep|sleeping|kip|hotel|book|night)\b"
+    r"|\b(?:hotel|hotels|place|somewhere|room)\b[^.!?]{0,25}\b(?:near|at|by|close to|around)\b"
+    r"[^.!?]{0,20}\b(?:airport|terminal|heathrow|gatwick|stansted|luton)\b")
+
+
+# The shapes that ask where to stay: the where/which ask, the "an area to stay in" ask, and the
+# "a hotel near the airport" ask. A line can hold the word hotel without asking any of them -
+# "i want to leave a bad review for a hotel" holds it and is a review - so the town paragraph
+# reads the shape, not the word.
+_A_STAY_PLACE_ASK = re.compile(
+    r"\b(?:where|which)\b[^.!?]{0,30}\b(?:stay|staying|sleep|sleeping|kip|hotel|book|night)\b"
+    r"|\b(?:area|place|somewhere|part of town|neighbourhood|neighborhood|district)\b[^.!?]{0,20}"
+    r"\b(?:to stay|stay in|staying in|to sleep|for the night)\b"
+    r"|\b(?:hotel|hotels|b&b|hostel|guest house|place|somewhere|room)\b[^.!?]{0,25}"
+    r"\b(?:near|at|by|close to|around|in)\b[^.!?]{0,20}"
+    r"\b(?:airport|terminal|heathrow|gatwick|stansted|luton|beach|sea|seafront|centre|center|"
+    r"station|town|city|old town|harbour|marina|lake|coast)\b")
+
+
+def _a_night_near_the_airport(understood):
+    """True when the line is a booking for the night, not an airport chore.
+
+    "Where should i stay near heathrow", "a hotel by the terminal", "where do i sleep before an
+    early flight" are the booking. A security queue, a lost bag and a coffee price name the same
+    airport and are not.
+    """
+    clean = (understood or {}).get("clean", "") or ""
+    return bool(_A_STAY_ASK.search(clean))
+
+
+def _a_town_stay(memory, understood):
+    """The paragraph for a town nobody has a card for, or nothing when a city is in the chat.
+
+    "We are thinking about tokyo in april" then "where should we stay" names no city in the
+    second line, and the city is what the person means: the row that reads it out of the
+    conversation answers with its three areas, and this paragraph must stand aside for it.
+    """
+    if _place_in(memory, understood, CITY_AREA):
+        return None
+    return TOWN_STAY
 
 
 def _a_town_stay_line(understood):
@@ -4063,6 +4295,21 @@ def _a_town_stay_line(understood):
     line that asks when, how much or whether, because the same three words are in those lines.
     """
     if any(ask in _NOT_WHERE_ASKS for ask in ((understood or {}).get("asks") or ())):
+        return False
+    # A flight is not a town: the night before a departure has its own row, and the general
+    # paragraph about a market square tells nobody where to sleep before a 6am check-in.
+    if _A_FLIGHT_WORD.search((understood or {}).get("clean", "") or ""):
+        return False
+    # Sleeping in the car is a car question, not somewhere to book.
+    if _A_CAR_NIGHT.search((understood or {}).get("clean", "") or ""):
+        return False
+    # A shift is a sleep-hygiene question, not a town: the sleep card says when and how to sleep
+    # in the day, and this paragraph named it a seaside front.
+    if _A_SHIFT_WORK.search((understood or {}).get("clean", "") or ""):
+        return False
+    # "i want to leave a bad review for a hotel" holds the word hotel and asks nothing about
+    # staying; only a line with a stay shape gets this paragraph.
+    if not _A_STAY_PLACE_ASK.search((understood or {}).get("clean", "") or ""):
         return False
     return _find_in(understood.get("clean", "") or "", CITY_AREA) is None
 
@@ -4947,6 +5194,28 @@ def _asked_for_the_guide_before(memory, city, clean):
     return False
 
 
+def _guided_off_a_question(memory, city):
+    """True when the guide in this chat answered a question, not a statement naming the trip.
+
+    "im going to edinburgh in june" takes the guide because naming the trip is enough to want it,
+    but it did not ask for it. The sightseeing question after it ("what should i see") is new, so
+    it wants what comes after the guide, not the guide again under "same as before". Only a line
+    that asked (a question word or a question mark) counts as having asked.
+    """
+    body = (CITIES.get(city) or "")[:40].lower()
+    for turn in memory.get("turns") or []:
+        if not isinstance(turn, dict):
+            continue
+        said = (turn.get("user") or "").lower().strip()
+        if not said or _find_in(said, CITIES) != city:
+            continue
+        if not (_A_QUESTION_OPENS.match(said) or "?" in said):
+            continue
+        if body and body in (turn.get("bot") or "").lower():
+            return True
+    return False
+
+
 # "and what about food" is one part of the city, so the guide answers that part rather than the
 # whole paragraph again or the day trips: the words that name the part, and the words the guide
 # itself uses for it.
@@ -4966,11 +5235,30 @@ DETAIL_PARTS = (
 )
 
 
+# The words that ask what there is to see are not a part of the city named: "what should i see"
+# is the whole of it, and the guide's own sentence for "see" handed the paragraph back - under
+# "Same as before" after the guide, and instead of the day trips. Only a word like "museum" or
+# "castle" names a part.
+ASKING_ONLY = frozenset("""see sight sights sightseeing visit visited miss anything something
+somewhere worth goto go""".split())
+# The words that ask about eating in a city. A city with a cheap-eats card answers the eating
+# part with that card, not with the guide sentence that happens to mention lunch: asked "and the
+# food like there" after the Lisbon guide, the person got "there is nothing separate on the food"
+# - the guide's own sentence about the Time Out Market, handed back as a shrug - when the card
+# that lists the bifana, the prato do dia and the market was sitting in the same file. DETAIL_PARTS
+# keeps the words for the other parts; this is the one with an answer of its own.
+_EATING_WORDS = frozenset(DETAIL_PARTS[0][0])
+
+
 def _detail_line(city, clean):
     """The part of the guide about the thing they named, or None when they named no part."""
     words = set(clean.split())
+    if words & _EATING_WORDS and city in CHEAP_EATS:
+        return CHEAP_EATS[city]
     for asked, said in DETAIL_PARTS:
-        if not words & set(asked):
+        # A part named is a part asked about: "what should i see" and "what should i visit" name
+        # nothing, and the sightseeing words in the group are the question's, not a part's.
+        if not (words & set(asked)) - ASKING_ONLY:
             continue
         for sentence in CITIES[city].split(". "):
             if set(sentence.lower().split()) & set(said):
@@ -4986,40 +5274,185 @@ _A_QUESTION_OPENS = re.compile(
     r"would|do|does|did|is|are|was|were|will|any|tell|recommend|suggest|give|show)\b")
 
 
+# "What should i see first" is a pick, not the whole list again: the person has three things and
+# wants to know which one to do first. After the guide it read "Same as before: In Rome: the
+# Colosseum with a timed ticket, the Pantheon, and Trastevere in the evening for dinner" - the
+# card they had just read, handed back with a frame in front of it.
+WHICH_FIRST = re.compile(
+    r"\bwhat\b[^.?!]{0,30}\b(?:see|do|visit)\b[^.?!]{0,20}\bfirst\b"
+    r"|\bwhere (?:should|shall|do|would) (?:i|we) (?:start|begin)\b"
+    r"|\bfirst thing (?:to (?:see|do)|i should|we should)\b"
+    r"|\bwhat(?:'s| is) the first thing\b", re.I)
+
+
+# A card that opens "In Barcelona:" is a city's guide, and the list under it is places to go.
+_IN_A_CITY = re.compile(r"^\s*in ([a-z][a-z .'-]{1,20}):", re.I)
+
+
+def a_city_card_is_in_front(card):
+    """True when the answer in hand is a city guide whose list of places it opens with."""
+    found = _IN_A_CITY.match(str(card or ""))
+    if not found:
+        return False
+    return found.group(1).strip().lower() in CITIES
+
+
+# The ask the composer stands down for on a city card: which of these to do first.
+WHICH_ONE_FIRST = re.compile(r"\b(?:see|do|visit)\b[^.?!]{0,20}\bfirst\b", re.I)
+
+# The words a city's list of places opens on when the item is a thing rather than a doing.
+_A_PLACE_OPENS = ("the ", "a ", "an ", "one ", "two ", "three ", "some ", "my ", "your ")
+
+
+def asks_which_one_first(text):
+    """True when the line asks which of the things already named to do first."""
+    return bool(WHICH_ONE_FIRST.search(str(text or "")))
+
+
+def _the_first_thing(city):
+    """The one to do first, from the city's own sights: "Start with the Colosseum, then ...".
+
+    The sights are one sentence in `CITIES`, written as a list of two or three, so the first two
+    are the first comma-separated parts of it. The rest of the card - the ticket note, the water
+    bottle - is not an answer to which one comes first.
+    """
+    sights = CITIES.get(city) or ""
+    head = sights.split(". ")[0].rstrip(".")
+    items = [part.strip() for part in head.split(",") if part.strip()]
+    items = [part[4:] if part.lower().startswith("and ") else part for part in items]
+    if not items:
+        return None
+    rest = f", then {items[1]}" if len(items) > 1 else ""
+    # A city writes its list either as places ("the Colosseum with a timed ticket") or as things
+    # to do ("walk the Ile de la Cite to the Marais"), and "Start with walk the Ile" is not a
+    # sentence. The frame follows the first item: a place is started with, a doing opens the reply
+    # in its own words.
+    first = items[0]
+    if first[:1].isupper() or first.lower().startswith(_A_PLACE_OPENS):
+        return f"Start with {first}{rest}."
+    return f"{first[:1].upper() + first[1:]}{rest}."
+
+
 def _about_city(city, memory, clean, understood=None):
     """The next thing to say about a city the conversation already named."""
     # A named part of the city (food, museums, shops) is answered by the guide's own line for
     # it: the day trips are no answer to "and what about food".
+    # Which to do first is answered by the city's own list, whichever turn it is asked on, and
+    # before the part-of-the-city line: "what should i see first" names "see", which is the
+    # sights part and would hand back the whole sentence the person already has.
+    if WHICH_FIRST.search(clean):
+        first = _the_first_thing(city)
+        if first:
+            return first
     detail = _detail_line(city, clean)
     if detail:
         return detail
     if _already_guided(memory, city):
-        # Saying the same guide twice reads as a machine: the ask after it wants the next thing,
-        # so give the day trips around it, or when to go, and only then repeat the guide.
+        # Saying the same guide twice reads as a machine: the ask after it wants something the
+        # chat has not had. Which card that is depends on the ask - "any day trips" wants the
+        # places around it, and "what should i see" wants more of the city's own advice - so the
+        # cards are tried in order and the first one this chat has not had yet is the answer.
         # A line with no ask is not a new question about the city: "we are staying near
         # waverley" is a statement about the trip, and the day trips are no answer to it. Only
         # a line with an ask gets the next thing; a statement keeps the guide it already had.
         if (understood is not None and not understood.get("asks")
                 and not _A_QUESTION_OPENS.match(clean)):
-            # A repeat of the guide is still a guide: its last sentence can be about a season,
-            # and "In December it's dark by 4pm" is wrong in a chat that said August. The same
-            # strip the first guide gets applies here.
             return "In %s: %s" % (city.title(),
                                   _without_the_season(CITIES[city],
                                                       _when_said(memory, understood or {})))
-        if city in DAY_TRIPS:
-            return f"Day trips from {city.title()}: {DAY_TRIPS[city]}"
-        if city in WHEN_TO_GO:
-            return f"For {city.title()}: {WHEN_TO_GO[city]}"
-        place = CITY_COUNTRY.get(city, city)
-        if place in BEST_TIME:
-            return f"For {city.title()}: {BEST_TIME[place]}"
-        low, high, note = DAILY_BUDGET[city] if city in DAILY_BUDGET else (0, 0, "")
-        if low:
-            return (f"{city.title()} is about \u00a3{low} to \u00a3{high} a day per person on the "
-                    f"ground, room aside. {note[0].upper() + note[1:]}.")
+        next_thing = _the_next_card_about(city, memory, clean)
+        if next_thing:
+            return next_thing
         return None
     return f"In {city.title()}: {CITIES[city]}"
+
+
+# "Any day trips" and "what else is there" are asking to leave the city; "what should i see" is
+# asking about the city itself. The day trips answer the first and not the second: Edinburgh's
+# Glasgow and Stirling are no answer to "anything we shouldn't miss" in Edinburgh.
+MORE_PLACES = frozenset("""trip trips else other others another further afield nearby outside
+countryside around surrounding surroundings excursion excursions""".split())
+
+
+SEEING = frozenset("see seeing saw sight sights sightseeing visit visiting visited miss "
+                   "missed seen".split())
+
+
+def _wants_more_places(clean):
+    """True when the line asks what is around the city rather than what is in it."""
+    words = set(clean.split())
+    if words & MORE_PLACES:
+        return True
+    return bool(re.search(r"\bday\s+(?:trip|trips|out)\b", clean))
+
+
+def _the_stay_is_long(memory, city):
+    """True when the stay is more days than the city fills, which is when the day trips fit.
+
+    A city that fills a day (Bath) has days to spare on a weekend, and one that fills four
+    (Paris) does not have them in a week: the room a person has for a day out is the length of
+    the stay next to how long the city itself takes, not a fixed number of days.
+    """
+    fills = CITY_DAYS.get(city, 3)
+    for turn in memory.get("turns") or []:
+        if not isinstance(turn, dict):
+            continue
+        said = (turn.get("user") or "").lower()
+        days = next((count for phrase, count in sorted(TRIP_UNITS, key=lambda item: -len(item[0]))
+                     if phrase in said), None)
+        if days is None:
+            more = re.search(r"\b(\d{1,2}|%s)\s+(?:days|nights)\b"
+                             % "|".join(_NUMBER_WORD), said)
+            if more:
+                word = more.group(1)
+                days = int(word) if word.isdigit() else _NUMBER_WORD.index(word) + 1
+        if days and days >= max(2, 2 * fills):
+            return True
+    return False
+
+
+def _said_in_this_chat(memory, text):
+    """True when the bot has already said this, so saying it again is the repeat to avoid."""
+    head = text[:40].lower()
+    for turn in memory.get("turns") or []:
+        if isinstance(turn, dict) and head and head in (turn.get("bot") or "").lower():
+            return True
+    return False
+
+
+def _the_next_card_about(city, memory, clean):
+    """The next thing about the city this chat has not had, in the order a person wants them."""
+    place = CITY_COUNTRY.get(city, city)
+    cards = []
+    # "What should i see" after the guide is asking for more of the city, so the areas of it come
+    # first: naming where to wander is the next thing to be seen, and the transport and the day
+    # trips are answers to other questions. "Any day trips" or a long stay flips that round.
+    areas = (f"In {city.title()}: by area, {CITY_AREA[city]}." if city in CITY_AREA else None)
+    day_trips = (f"Day trips from {city.title()}: {DAY_TRIPS[city]}"
+                 if city in DAY_TRIPS else None)
+    if _wants_more_places(clean) or _the_stay_is_long(memory, city):
+        cards += [day_trips, areas]
+    elif set(clean.split()) & SEEING:
+        # "What should i see" is about the city, so its own areas come before a day out of it.
+        cards += [areas, day_trips]
+    else:
+        cards += [day_trips, areas]
+    if city in CITY_TRANSIT:
+        cards.append(f"In {city.title()}: {CITY_TRANSIT[city]}")
+    if city in WHEN_TO_GO:
+        cards.append(f"For {city.title()}: {WHEN_TO_GO[city]}")
+    elif place in BEST_TIME:
+        cards.append(f"For {city.title()}: {BEST_TIME[place]}")
+    if city in CITY_CLIMATE and city in CLIMATES:
+        cards.append(f"For {city.title()}: {CLIMATES[CITY_CLIMATE[city]]}")
+    if city in DAILY_BUDGET:
+        low, high, note = DAILY_BUDGET[city]
+        cards.append(f"{city.title()} is about \u00a3{low} to \u00a3{high} a day per person on the "
+                     f"ground, room aside. {note[0].upper() + note[1:]}.")
+    for card in cards:
+        if card and not _said_in_this_chat(memory, card):
+            return card
+    return None
 
 
 def _guide_followup(memory, understood):
@@ -5039,9 +5472,12 @@ def _guide_followup(memory, understood):
         city = _the_place_held(memory)
     if not city:
         return None
-    if _already_guided(memory, city) and SIGHTSEEING_ASK.search(clean):
-        # The sights have been named already, so the answer is that answer again: it comes back
-        # framed as the repeat it is ("same as before"), not as a new thing to see.
+    if (_already_guided(memory, city) and SIGHTSEEING_ASK.search(clean)
+            and _guided_off_a_question(memory, city)):
+        # The sights were asked for already, so the answer is that answer again: it comes back
+        # framed as the repeat it is ("same as before"), not as a new thing to see. The guide
+        # coming from a statement ("im going to edinburgh in june") was not asked for, so the
+        # sightseeing question after it is a new one, and the day trips are its answer.
         return f"In {city.title()}: {CITIES[city]}"
     return _about_city(city, memory, clean, understood)
 
@@ -5057,12 +5493,19 @@ SIGHTSEEING_ASK = re.compile(
 
 
 def _the_place_held(memory):
-    """The place the store holds for the trip: "im going to rome in june" files "Rome"."""
+    """The place the trip is in: what the store holds for it, or the place they just said.
+
+    "im going to rome in june" files "Rome", and the store is the first place to look. A stay
+    files nothing - "three days in edinburgh next month" names the trip and the store has no
+    place in it - so the city named in the two lines they said last is read as well. Both are
+    narrow: a name in the store, or a name with a going word or a length of stay in front of it.
+    """
     held = (memory.get("user") or {}).get("places") if isinstance(memory, dict) else None
-    if not isinstance(held, list) or not held:
-        return None
-    newest = " ".join(str(held[-1] or "").lower().split())
-    return newest if newest in CITIES else None
+    if isinstance(held, list) and held:
+        newest = " ".join(str(held[-1] or "").lower().split())
+        if newest in CITIES:
+            return newest
+    return _city_they_are_going_to(memory)
 
 
 def _guide_next(memory, understood):
@@ -5108,10 +5551,13 @@ def _guide_next(memory, understood):
 
 
 # The words that make a place the place they are going, rather than a place mentioned on the way
-# past: a film set in Rome is not a trip.
+# past: a film set in Rome is not a trip. A length of stay is the other way people say it -
+# "three days in edinburgh next month" has no going word in it at all, and the line is the trip.
 GOING_TO_A_PLACE = re.compile(
     r"\b(?:going|go|off|heading|fly(?:ing)?|flying|travell?ing|trip|holiday|weekend|break|"
-    r"visiting|visit|staying|renting|booked|booking|flight)\b")
+    r"visiting|visit|staying|renting|booked|booking|flight)\b"
+    r"|\b(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|a\s+few|a\s+couple\s+of)\s+"
+    r"(?:days?|nights?|weeks?|weekends?|fortnight)\b")
 
 
 def _city_they_are_going_to(memory):
@@ -5177,7 +5623,13 @@ def _trip_budget(memory, understood):
     # A cost word has to be in the line itself: "is it warm enough for the beach" reached this
     # entry through the remembered place, and a daily rate is no answer to a weather question.
     cost_word = _re.search(r"\b(?:how much|cost|costs|costing|expensive|pricey|afford|budget|"
-                           r"spend|spending|will that|does that|go far|saved|money)\b", clean)
+                           r"spend|spending|will that|does that|go far|saved|money|cheap|"
+                           r"inexpensive|affordable)\b", clean)
+    # "cheap flights to spain" and "a cheap hotel in rome" are about one part of the trip, not
+    # about what a day there costs, so a day rate is no answer to them.
+    if _re.search(r"\b(?:flight|flights|fly|flying|hotel|hotels|accommodation|apartment|"
+                  r"villa|hostel|ticket|tickets|deal|deals|package|insurance|car hire)\b", clean):
+        return None
     # "is 400 enough" is a cost question; "is it warm enough", "good enough", "big enough" are
     # not, and the remembered place is what let them reach this entry at all.
     quality = _re.search(r"\b(?:warm|cold|hot|good|bad|big|small|deep|strong|quick|fast|early|"
@@ -5220,11 +5672,40 @@ def _trip_budget(memory, understood):
             f"\u00a3{amount}. {note[0].upper() + note[1:]}.")
 
 
+def _month_in_the_chat(memory):
+    """The month the chat has settled on, when this line does not name one.
+
+    "im planning a trip to edinburgh in march" and then, two turns on, "do you think march is too
+    cold": the month was read off the line only, so the judging frame got a shrug.
+    """
+    user = memory.get("user") if isinstance(memory, dict) else None
+    texts = []
+    if isinstance(user, dict):
+        texts.append(str(user.get("the_plan") or ""))
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if isinstance(turns, list):
+        for turn in reversed(turns[-4:]):
+            if isinstance(turn, dict):
+                texts.append(str(turn.get("user") or ""))
+    for text in texts:
+        text = text.lower()
+        found = next((number for name, number in sorted(MONTHS.items(), key=lambda item: -len(item[0]))
+                      if name in text), None)
+        if found:
+            return found
+    return None
+
+
 def _weather(memory, understood):
     clean = understood.get("clean", "")
-    city = _find_in(clean, CITY_CLIMATE)
+    # The place and the month are the trip's as often as they are the line's: "is it too cold
+    # there in april", "do you think march is too cold".
+    city = (_find_in(clean, CITY_CLIMATE) or _place_in(memory, understood, CITY_CLIMATE)
+            or _place_in_the_plan(memory, CITY_CLIMATE))
     month = next((number for name, number in sorted(MONTHS.items(), key=lambda item: -len(item[0]))
                   if name in clean), None)
+    if month is None:
+        month = _month_in_the_chat(memory)
     if not city or not month:
         return None
     low, high = CLIMATES[CITY_CLIMATE[city]][month]
@@ -5415,6 +5896,57 @@ def _cabin_guard(understood):
     return True
 
 
+# "Take home" and "bring home" wear two hats: the allowance ("how much wine can i take home from
+# france") and the wage ("what does take home mean", "i bring home about 1800"). The row's own pay
+# fence catches the nouns - pay, salary, after tax - but not the definitional asks, which carry no
+# pay word at all. A wage is only ever asked about with the verb and the ask against each other, so
+# those patterns are matched next to each other rather than anywhere in the line: the reading a
+# guard sees has the earlier turns' words carried along, and a loose test would fire on them.
+_A_PAY_ASK_AT_HOME = re.compile(
+    r"\bhow\s+much\s+(?:will|would|should|do|does|did)\s+(?:i|we)\s+(?:take|bring)\s+home\b"
+    r"|\b(?:will|would|do|does|did)\s+(?:i|we)\s+(?:take|bring)\s+home\b"
+    r"|\b(?:take|bring)\s+home\s+(?:mean|means|pay|after\s+tax|before\s+tax|net|gross)\b"
+    r"|\bwhat\s+(?:does|do)\s+(?:that\s+|it\s+)?(?:mean\s+for\s+)?(?:my\s+|the\s+)?"
+    r"(?:take|bring)\s+home\b"
+    r"|\bwhat\s+does\s+(?:\w+\s+){0,4}mean\b.{0,24}\b(?:take|bring)s?\s+home\b"
+    r"|\bmean\s+for\s+my\s+(?:take|bring)\s+home\b"
+    r"|\b(?:take|bring)\s+home\s+(?:meaning|definition|defined)\b"
+    r"|\bwhat\s+is\s+(?:my\s+|the\s+|a\s+)?(?:take|bring)\s+home\b"
+    r"|\b(?:explain|define|meaning\s+of)\s+(?:the\s+|my\s+|a\s+)?(?:take|bring)\s+home\b"
+    r"|\b(?:i|we)\s+(?:take|bring|takes|brings|took|brought)\s+home\s+"
+    r"(?:\d|\u00a3|about|around|roughly|nearly)\b", re.I)
+# The allowance is always asked about a thing you carry, or with the customs words in the line.
+_A_GOODS_WORD = re.compile(
+    r"\b(?:wine|wines|beer|beers|spirits|whisky|whiskey|vodka|gin|rum|alcohol|"
+    r"cigarettes?|cigs?|tobacco|baccy|perfume|gifts?|presents?|souvenirs?|chocolates?|"
+    r"coffee|tea|clothes|booze)\b", re.I)
+_A_CUSTOMS_WORD = re.compile(
+    r"\b(?:duty[- ]free|customs|allowance|allowances|limit|limits|declare|declaring|declared|"
+    r"red\s+channel|green\s+channel|border|airport|abroad|overseas|back\s+from|home\s+from|"
+    r"france|spain|portugal|greece|italy|ireland|germany|holland|belgium)\b", re.I)
+
+
+def _not_a_wage(understood):
+    """A pay question is not a customs question, even when both say "take home".
+
+    "what does take home mean" is net pay and "what does that mean for my take home" is the same
+    question with the phrase at the end; neither carries a pay word, so the fence above cannot see
+    them and the customs table answered both. A line that names something to carry, or says
+    customs at all, is still this row's: "how much wine can i take home from france" keeps its
+    table, and nothing but the pay shapes is stood down.
+    """
+    text = (understood.get("clean") or "")
+    if not _A_PAY_ASK_AT_HOME.search(text):
+        return True
+    return bool(_A_GOODS_WORD.search(text) or _A_CUSTOMS_WORD.search(text))
+
+
+# The allowance row already has a guard of its own, and an entry takes only one `guard=`: the
+# wage test is declared here by row id and folded into that guard when the knowledge base is
+# read, so the two conditions both hold and neither line is written beside the other.
+GUARD_FOLDS = {"duty-free": _not_a_wage}
+
+
 def _cabin_rules(memory, understood):
     """Which named thing the line is about decides the sentence; a bare rule line gets the list."""
     text = (understood.get("clean") or "").lower()
@@ -5534,6 +6066,36 @@ _MONTH_SUN = {
 _MONTH_SUN_ASK = ("sun", "sunny", "hot", "warm", "beach", "swim", "swimming", "heat", "tan",
                   "sunshine", "sea")
 
+# The verdict on a month with no place named yet: "a cheap week away in august" then "is that a
+# good time to go". The places for each month are already above; what the follow-up wants is
+# whether, and the one trade-off the month brings, without the list read out a second time.
+_MONTH_VERDICT = {
+    "january": ("good for sun or snow and the cheapest, quietest month of the year, but the "
+                "Mediterranean is cold and half shut"),
+    "february": ("still low season, so cheap and quiet, with real sun only a few hours south "
+                 "and half term the week everyone else books"),
+    "march": ("spring arriving while the prices are still low, though the Mediterranean is "
+              "mild rather than warm and Easter moves the cost"),
+    "april": ("one of the best months for southern Europe - warm, quiet and cheaper than May - "
+              "with Easter the week to book around"),
+    "may": ("warm without the crowds, with the sea warm enough in the south by the end of it "
+            "and the school holidays still a month away"),
+    "june": ("the sweet spot before the schools break up: hot, long days and prices that have "
+             "not caught up with July"),
+    "july": ("high season, so hot, busy and priced for it, and the Mediterranean coast is at "
+             "its fullest"),
+    "august": ("the busiest, hottest and priciest month of the year, so go north, go high or go "
+               "early"),
+    "september": ("the best month of the year for most of Europe: the sea at its warmest, the "
+                  "families gone and the rooms cheaper"),
+    "october": ("still warm in the south with the crowds gone, though the north turns wet and "
+                "some hotels shut for the winter"),
+    "november": ("cheap and quiet with short days, and real sun only in the Canaries, Egypt or "
+                 "the Cape Verde islands"),
+    "december": ("cold at home and festive in the cities, with sun a few hours south and the "
+                 "Christmas weeks to book early"),
+}
+
 
 _MONTH_ASK = ("where", "go", "going", "holiday", "away", "break", "week", "trip", "travel",
               "visit", "somewhere", "destination", "escape", "sun", "hot", "warm",
@@ -5631,6 +6193,13 @@ _MONTH_WORSE = re.compile(
 # `_month_destination` is the only place that sets it, and both calls to the function below are
 # inside it, so the reading is one line and no caller can pick up another turn's answer.
 _MONTH_ASKED = True
+# A finite verb in the first clause of a window: "June to August gives midnight sun" is a sentence
+# of its own, where "April to June and September to October, when it is 20-28C" is a time phrase
+# the sentence "The window is ..." can hold. Read only up to the first colon: "May, June: warm sea,
+# open tavernas" is a time phrase with a description after it, not a clause of its own.
+_A_CLAUSE_VERB = re.compile(
+    r"\b(?:is|are|was|were|gives|give|gets|get|has|have|holds|means|brings|sees|closes|runs|"
+    r"run|makes|make|leaves|leave)\b")
 
 
 def _a_month_for_a_place(name, window, month):
@@ -5660,6 +6229,12 @@ def _a_month_for_a_place(name, window, month):
     if clauses and month_here.search(clauses[0]):
         return f"{verdict[0]}{month.capitalize()} is in the good window for {label}: {window}"
     if any(month_here.search(part) and _MONTH_WORSE.search(part) for part in clauses[1:]):
+        # The window can only follow "The window is" when it opens on a time phrase: "June to
+        # August gives midnight sun" is a whole sentence, and "the window is June to August gives
+        # midnight sun" is not English. Where the first clause has a verb the window goes on its
+        # own after the verdict, and both forms are read back by _a_month_verdict_once.
+        if _A_CLAUSE_VERB.search(re.split(r"[;.:]", window)[0]):
+            return f"{verdict[1]}{month.capitalize()} is not the best month for {label}. {window}"
         return (f"{verdict[1]}{month.capitalize()} is not the best month for {label}. "
                 f"The window is {window}")
     return f"{label}: {window}"
@@ -5767,6 +6342,16 @@ def _a_week_at_home(name, month, kind):
     return " ".join(said)
 
 
+# A month in a line about something else is still a travel question when the line names the trip
+# itself: "i'm getting married in june and i don't know where to go for the honeymoon" is read as a
+# wedding, and the honeymoon is the question. Bare "go" is deliberately not here - "should i keep
+# going" is the phrase that put a half marathon in October, and "going" alone named no trip.
+_A_TRIP_NAMED = re.compile(
+    r"\b(?:holiday|holidays|trip|trips|honeymoon|vacation|getaway|break away|flight|flights|fly|"
+    r"flying|abroad|city break|weekend away|booked|booking|staying|stay in|travel|travelling|"
+    r"traveling|destination|sightseeing|cruise)\b", re.I)
+
+
 def _month_destination(memory, understood):
     """The three places a month is good for, when no place is named.
 
@@ -5776,6 +6361,31 @@ def _month_destination(memory, understood):
     """
     global _MONTH_ASKED
     clean = understood.get("clean", "")
+    # A month is this module's question only when the line is about something this module answers.
+    # "i'm training for a half marathon in october and my knee hurts, should i keep going?" was
+    # handed Cyprus and Crete: the month was read, the ask was in the second clause, and nothing
+    # here looked at what the first clause was about. The understanding lane already says what a
+    # line is about, and this module already declares the topics it answers in ANSWERS, so the two
+    # are compared instead of keeping a list of things a month is not about. A line with no topic
+    # at all - "a week in october", "somewhere hot in december" - is still this row's question, and
+    # small talk is not a subject that can take a month away from it.
+    topics = set((understood or {}).get("topics") or ()) - {"small-talk"}
+    # A line that asks where is this module's question whatever else is in it: "where is cheap in
+    # october" is read as money, and the place is still what was asked for.
+    asks_a_place = any(word in _AN_OPEN_ASK for word in clean.split())
+    # The month can sit in the lead-in or in the ask, and the reading already splits the line at
+    # the question word: `focus` is the ask clause, and everything before it is context. When the
+    # month is inside the ask it is what the person asked about - "is it too hot in august for a
+    # baby" is read as family-and-parenting, and standing the row down on that topic handed a
+    # weather question to the 38C fever card. When the month is in the lead-in it is the setting,
+    # and the half marathon in October is the case this guard was built for. Clause position is a
+    # property of the line, so no list of heat words has to be kept.
+    ask_clause = " ".join((understood or {}).get("focus") or ())
+    asks_the_month = bool(ask_clause) and any(
+        re.search(r"\b%s\b" % re.escape(name), ask_clause) for name in MONTHS)
+    if (topics and not (topics & set(ANSWERS)) and not asks_a_place
+            and not asks_the_month and not _A_TRIP_NAMED.search(clean)):
+        return None
     _MONTH_ASKED = (understood or {}).get("kind") == "question" or "?" in clean
     month = None
     found = []
@@ -5864,6 +6474,143 @@ def _month_destination(memory, understood):
 
 def _month_names():
     return tuple(sorted(MONTHS, key=len, reverse=True))
+
+
+# --- the month pointed back at ------------------------------------------------
+# The month row is keyed on a month being in the line, so the follow-up that points back at it -
+# "we are thinking of a cheap week away in august" then "is that a good time to go", or "is it a
+# good time of year" - had no month of its own to match and fell through to the punt. The month is
+# one the person named a turn or two ago about the same trip, so the verdict is the answer they are
+# asking for, and that sentence is the verdict row's own: this row only finds the month for it.
+_A_MONTH_POINTED_AT = ("that one", "those dates", "those weeks", "the same", "the month",
+                       # ... and the time itself, named without the month: "is it a good time of
+                       # year" is the same ask as "is august a good time", and the year, the
+                       # month and the season are the words it asks it with. A bare "it" or
+                       # "that" is not on the list: "is it worth it" is asked about the gym, the
+                       # house or the course in the chat, and a travel row that took it would
+                       # stand in front of the answer they want.
+                       "year", "month", "season", "time", "trip", "holiday", "week",
+                       "away")
+# The asks that word the question as a fault in the month - "is it too cold", "too busy", "will it
+# rain" - rather than as a judgement of it. "Yes, for the place it suits" cannot lead one of those:
+# yes to "too cold" says the month is too cold, and the clause after it says it is still warm in
+# the south. What answers them is the trade-off the month brings, which is the verdict sentence
+# itself, so it leads on its own. Bare "hot" and "warm" are not here: those are the sun asks, and
+# the sun list is a better answer to "is it hot in august" than the trade-off is.
+_A_MONTH_FAULT_ASK = ("too hot", "too cold", "too cool", "too wet", "too busy", "too crowded",
+                      "too quiet", "too damp", "too rainy", "too windy", "rain", "raining",
+                      "rains", "wet", "chilly", "muggy")
+_A_TIME_VERDICT_ASK = ("good time", "good time to go", "good time of year", "good time to visit",
+                       "worth it", "worth going", "worth a visit", "any good", "good idea",
+                       "a good month", "good month", "bad time", "too hot", "too cold",
+                       "too wet", "too busy", "rainy", "rain much", "sunny enough")
+# The words a line can be made of and still be nothing but the ask: a line with any other word in
+# it names something of its own, and the month's window says nothing about that thing.
+_A_VERDICT_FILLER = frozenset("""
+    is are was were be been am do does did the a an of to in on at for with about it that this
+    these those there then so and but or we us our i my me you your they them he she his her
+    good time year month season day days worth going go goes visit visiting trip holiday week
+    weeks away any much too hot cold wet busy rainy sun sunnier sunny nice ok okay fine idea
+    really still think sounds sound going then instead make difference much
+""".split())
+# How far back the month is looked for: the ask comes one or two turns after the month, and a month
+# named four turns ago in the same trip is still the month they mean.
+_MONTH_LOOKS_BACK = 4
+# A month in a turn about a trip is the month of the trip; a month in any other turn is somebody
+# else's answer, so the trip words are read on their own rather than borrowing _ABOUT_A_TRIP: the
+# commonest way of naming a month for a trip names no verb at all ("a cheap week away in august").
+_A_MONTH_OF_A_TRIP = re.compile(
+    r"\b(?:week|weeks|weekend|weekends|break|holiday|holidays|trip|trips|travel|travelling|"
+    r"traveling|abroad|getaway|honeymoon|fly|flying|flight|flights|visit|visiting|stay|staying|"
+    r"days|away|time off|city break|somewhere"
+    # "im going to spain in july" is how people name the month most often, and it names no noun of
+    # the list: the going is the trip word. Kept to the going-towards-the-place forms ("going to",
+    # "go to", "went to") so that "it went wrong in july" is not a trip.
+    r"|going to|go to|goes to|went to|heading to|off to|flying to|travel to)\b", re.I)
+
+
+def _the_month_named_in(text):
+    """The month a piece of text names, read the way _time_terms reads one, or None.
+
+    "may" and "march" are ordinary words as well as months, so a bare one is not a date and
+    only a month the sentence puts in time ("in May", "early March") counts.
+    """
+    low = " ".join(str(text or "").lower().split())
+    if not low:
+        return None
+    words = set(low.split())
+    for match in _MONTH_IN_TEXT.finditer(low):
+        return match.group(1)
+    for name in _month_names():
+        if name in AMBIGUOUS_MONTHS:
+            continue
+        if name in words:
+            return name
+    return None
+
+
+def _the_month_in_the_chat(memory):
+    """The month the person named a turn or two ago about a trip, or None.
+
+    Only a month in a turn that is about a trip counts. "i moved in january" then "is that a good
+    idea" is not a travel question, and the trip word is what tells the two apart.
+    """
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if not isinstance(turns, list):
+        return None
+    said = []
+    for turn in turns[-_MONTH_LOOKS_BACK:]:
+        text = str((turn if isinstance(turn, dict) else {}).get("user") or "").lower()
+        if text:
+            said.append(text)
+    for text in reversed(said):
+        if not _A_MONTH_OF_A_TRIP.search(text):
+            continue
+        month = _the_month_named_in(text)
+        if month:
+            return month
+    return None
+
+
+def _the_verdict_on(month, memory, clean):
+    """Whether a month is a good time, for the place the chat is on or in general."""
+    # A place already in the chat is that place's question, and this file holds the window for it:
+    # "we are going to portugal in august" then "is that a good time to go" wants whether August
+    # sits inside Portugal's window, which is a better answer than any verdict about the month.
+    for table in (BEST_TIME, WHEN_TO_GO):
+        in_hand = _the_place_in_the_chat(memory, table)
+        if in_hand:
+            return _a_month_for_a_place(in_hand, table[in_hand], month)
+    in_hand = _the_place_in_the_chat(memory, _AT_HOME)
+    if in_hand:
+        return _a_week_at_home(in_hand, month, _AT_HOME[in_hand])
+    # The month was named for a place in an earlier turn and this line points back at it. The
+    # places for each month are the answer to "where should i go", and they have just been read,
+    # so what is left to answer is whether - and the one trade-off the month brings.
+    if any(word in str(clean or "").split() for word in _MONTH_SUN_ASK):
+        return f"{month.capitalize()}: {_MONTH_SUN[month]}."
+    if any(ask in str(clean or "").lower() for ask in _A_MONTH_FAULT_ASK):
+        # The trade-off is the answer here, and a "Yes" in front of it would say the opposite of
+        # the clause that follows - see _A_MONTH_FAULT_ASK.
+        return f"{month.capitalize()} is {_MONTH_VERDICT[month]}."
+    return f"Yes, for the place it suits. {month.capitalize()} is {_MONTH_VERDICT[month]}."
+
+
+def _a_month_verdict_pointed_at(memory, understood):
+    """The verdict on the month the chat is on, when the line points back at it."""
+    clean = str((understood or {}).get("clean") or "")
+    if any(re.search(r"\b%s\b" % re.escape(name), clean.lower()) for name in MONTHS):
+        return None  # the line names its own month, and the month row answers that one
+    # The line has to be the ask and nothing else. "is the eden project worth it" after a week in
+    # Cornwall in August points at nothing in the month answer - it names a thing of its own, and
+    # the month's window is not an answer about the Eden Project.
+    if any(word for word in clean.split()
+           if len(word) > 2 and word.strip(".,!?'") not in _A_VERDICT_FILLER):
+        return None
+    month = _the_month_in_the_chat(memory)
+    if not month:
+        return None
+    return _the_verdict_on(month, memory, clean)
 
 
 # --- planning a trip -----------------------------------------------------------
@@ -6406,6 +7153,31 @@ _WARM_WEEK = (
     "one smarter outfit if you plan to eat out; everything else can be washed.")
 
 
+_FOOD_TO_CARRY = ("food", "foods", "snacks", "snack", "lunch", "dinner", "breakfast", "meal",
+                  "meals", "picnic", "dish", "dishes", "something to eat", "anything to eat",
+                  "cook", "cooking", "bake", "baking", "recipe", "recipes", "drinks")
+
+
+def _not_a_food_to_carry(understood):
+    """False when the line asks what food to take or cook for a place, not what kit to pack.
+
+    The kit rows in this file own "what should i take to the beach", "what do i need to take
+    camping" and "what should i pack for spain", and a food word in the same line is the picnic's
+    or the guest's-dish question, not the kit's: "what food should i bring to the beach" came back
+    as a warm-week clothes list and "what food should i bring camping" as a tent. A line that
+    names food and asks what to carry or cook is answered by the food rows, so the kit stands
+    aside - the same way the guest's dish stands aside for a cook ask.
+    """
+    line = understood or {}
+    clean = str(line.get("clean") or line.get("text") or "").lower()
+    words = set(re.findall(r"[a-z']+", clean))
+    if not words.intersection(_FOOD_TO_CARRY):
+        return True
+    carry = ("bring", "brings", "bringing", "take", "takes", "taking", "carry", "food",
+             "eat", "make", "makes", "cook", "bake")
+    return not any(word in words for word in carry)
+
+
 def _warm_week_pack(memory, understood):
     """What goes in the bag for a warm week, with the reason the weather gives for it."""
     clean = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
@@ -6482,6 +7254,19 @@ def _the_same_verdict_was_given(memory, tail):
 
 def _a_month_verdict_once(memory, understood):
     """The month row, answering with the verdict alone when the window is already read."""
+    # A follow-up reaches this row with the line before it joined on (answers' context path), so
+    # the month can be in the reading while the line itself names none: "we fancy a break in
+    # january" then "is that a good time of year". The month is the one asked about and the ask
+    # is whether, so the verdict is the answer - the three places are the answer to "where", and
+    # reading them out again is the paragraph they have just had.
+    here = ""
+    if isinstance(memory, dict):
+        here = str((memory.get("understood") or {}).get("clean") or "")
+    if (here and _the_month_of({"clean": here}) is None
+            and any(ask in here for ask in _A_TIME_VERDICT_ASK)):
+        month = _the_month_of(understood)
+        if month:
+            return _the_verdict_on(month, memory, here)
     said = _month_destination(memory, understood)
     if not said:
         return None
@@ -6493,7 +7278,8 @@ def _a_month_verdict_once(memory, understood):
         tail = _YES_THE_WINDOW + label
         return head + (" too." if _the_same_verdict_was_given(memory, tail) else ".")
     if said.startswith("No, ") and _NO_THE_WINDOW in said:
-        head, _, rest = said.partition(". The window is ")
+        marker = next((one for one in (". The window is ", ". ") if one in said), "")
+        head, _, rest = said.partition(marker) if marker else (said, "", "")
         if not rest or not _the_window_is_read(memory, rest):
             return said
         label = head.split(_NO_THE_WINDOW, 1)[1]
@@ -6537,12 +7323,23 @@ _AN_EATING = re.compile(r"\b(?:eat|eats|eating|food|foods|meal|meals|restaurant|
                         r"lunch|dinner|breakfast|snack|snacks|menu|menus|dining)\b")
 
 
+_VALUE_EATING = re.compile(r"\b(?:good value|value for money|cheap eats|cheapest eats)\b")
+
+
 def _a_way_there_needs_no_eating(understood):
-    """False for a line about getting somewhere that does not mention eating."""
+    """False for a line that does not mention eating.
+
+    It began as a fence for a line about getting somewhere, because "how do i get from the
+    airport to the centre of rome" has a city and a "cheap"-like word in no sense at all. Then
+    "is budapest cheap" reached this row on the word "cheap" alone and was told three habits for
+    eating cheaply in any city, when the question was what a day there costs: the same shape,
+    with the way there replaced by the cost. So the row now wants an eating word in the line,
+    which is the one thing both of those lines lack.
+    """
     clean = (understood.get("clean") or "").lower()
-    if _AN_EATING.search(clean):
-        return True
-    return not _A_WAY_THERE.search(clean)
+    # "good value in rome" was this row's line before the eating word was required, and it is a
+    # food question in the way people say it, so the value phrases count as one too.
+    return bool(_AN_EATING.search(clean) or _VALUE_EATING.search(clean))
 
 
 def _a_weight_is_the_kitchen(understood):
@@ -6610,6 +7407,29 @@ _TRAINS_FOR = re.compile(
     r"\s+train\b"
     r"|\btrain(?:ing|ed)?\s+(?:for|hard|harder|again|towards|up for)\b"
     r"|\btrain(?:ing|ed)\s+(?:twice|three|four|every|each|most|more)\b")
+
+
+# "do i need to treat the whole family for threadworms" is a question about the house, and the
+# passport checklist answered it: the row's own avoid list names the illnesses it thought of
+# (sick, fever, chickenpox, measles) and did not name the worms, the nits or the colds, so a
+# family word plus "do i need" was all it took. A journey in the line keeps the card; an illness
+# without one stands it down, which is the same rule the avoid list was reaching for.
+_A_TREATMENT_AT_HOME = re.compile(
+    r"\b(threadworms?|worms?|nits|head ?lice|lice|scabies|chickenpox|measles|mumps|"
+    r"hand foot and mouth|conjunctivitis|norovirus|stomach bug|sick bug|rash|fever|temperature|"
+    r"cold|flu|cough|vomit\w*|diarrhoea|diarrhea|infect\w*|isolat\w*|contagious|catching|"
+    r"unwell|ill)\b")
+_A_JOURNEY_SAID = re.compile(
+    r"\b(holiday|holidays|abroad|trip|trips|travel|travelling|traveling|flight|flights|fly|"
+    r"flying|airport|overseas|border|passport|passports|visa|destination|resort)\b")
+
+
+def _a_journey_not_a_treatment(understood):
+    """True unless the line is about an illness in the house and names no journey at all."""
+    text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if _A_JOURNEY_SAID.search(text):
+        return True
+    return not _A_TREATMENT_AT_HOME.search(text)
 
 
 def _a_journey_not_training(understood):
@@ -6997,6 +7817,88 @@ def _a_visit_to_a_home(understood):
     return isinstance(care, dict) and str(care.get("shape") or "") == "bring"
 
 
+# The six-month rule is the answer to "can i travel with two months left", and the card gives the
+# rule rather than the answer: the person with two months on their passport read a paragraph about
+# what most countries want to work out that the answer to their own question was no. The verdict is
+# read off the time the line says is left and put in front (`lead=`); the card follows with the
+# rule, the ten-year rule and what to do about it. A line that does not say how long is left (or
+# says six months or more) keeps the card exactly as it was.
+_A_TIME_LEFT = re.compile(
+    r"\b(\d{1,3}|a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*"
+    r"(months?|weeks?|days?)\b", re.I)
+# the line has to be about the passport being good enough, not a time mentioned in passing
+_A_VALIDITY_WORD = re.compile(r"\bvalid\b|\bexpir|\bruns? out\b|\bleft\b|\benough\b"
+                              r"|\bfly\b|\bflying\b|\btravel\b|\btrip\b|\bget in\b"
+                              r"|\bget in to\b|\benter\b", re.I)
+_UNDER_SIX = re.compile(r"\b(?:under|less than|fewer than|not)\s+(?:six|6)\b"
+                        r"|\bshort of six\b", re.I)
+# A line can hold two lengths - the time left on the passport and the length of the trip it is for
+# ("can i fly if my trip is 10 days and my passport has 8 months left" read the first length and
+# answered "No - too little time left" to eight months, thanks @cobalt-chicken). So the length that
+# counts is the one nearest a word about the passport running out, not the first one said.
+_ABOUT_THE_PASSPORT = re.compile(r"passports?|visas?|valid|expir\w*|renew\w*|enough"
+                                 r"|left|remaining|runs?\b", re.I)
+_ABOUT_THE_JOURNEY = re.compile(r"\bfly|\bflying|\btravel|\btrip\b|\bholiday|\bgo\b|\bgoing\b"
+                               r"|\bget in\b|\benter\b|\baway\b|\babroad\b", re.I)
+# how many words away from such a word a length can sit and still be its own
+_NEAR_ENOUGH = 6
+_NUMBER_WORDS = {"a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                 "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+
+
+def _the_time_left(said):
+    """The (count, unit) the passport has left, or None when no length is about the passport.
+
+    Every length in the line is weighed by how close it sits to a word about the passport running
+    out ("passport", "valid", "expires", "left", "enough"); the nearest one wins, and a line
+    whose only lengths sit far from any of those has said nothing about the time left. A journey
+    word is the fallback set, so "can i fly with 2 months" is still read, and the trip's own
+    length ("my trip is 10 days", "travel for 2 weeks") is never the one that counts.
+    """
+    words = said.split()
+    marks = [i for i, word in enumerate(words) if _ABOUT_THE_PASSPORT.search(word)]
+    if not marks:
+        marks = [i for i, word in enumerate(words) if _ABOUT_THE_JOURNEY.search(word)]
+    if not marks:
+        return None
+    best = None
+    for match in _A_TIME_LEFT.finditer(said):
+        first = len(said[:match.start()].split())
+        last = first + len(match.group(0).split()) - 1
+        away = min(abs(mark - word) for mark in marks for word in (first, last))
+        if away > _NEAR_ENOUGH:
+            continue
+        if best is None or away < best[0]:
+            best = (away, match.group(1), match.group(2).lower())
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
+def _the_passport_verdict(understood):
+    """No when the line says less than six months is left, and nothing it does not decide."""
+    said = understood.get("text") or understood.get("clean") or "" \
+        if isinstance(understood, dict) else ""
+    said = " ".join(str(said).lower().replace("\u2019", "'").split())
+    if not _A_VALIDITY_WORD.search(said):
+        return ""
+    too_little = "No - that is too little time left"
+    if _UNDER_SIX.search(said):
+        return too_little
+    match = _the_time_left(said)
+    if not match:
+        return ""
+    token, unit = match
+    count = int(token) if token.isdigit() else _NUMBER_WORDS.get(token, 99)
+    if unit.startswith("day"):
+        return too_little
+    if unit.startswith("week") and count < 26:
+        return too_little
+    if unit.startswith("month") and count < 6:
+        return too_little
+    return ""
+
+
 ENTRIES = [
 
     # What to eat in the country the trip is to. The trip card lists cities and answers the
@@ -7028,6 +7930,18 @@ ENTRIES = [
                  "im going", "i'm going", "nights", "night in", "booked", "booking", "book a",
                  "flights", "flight", "hotel"),
           bias=1),
+    # The follow-up that points at the month the chat is already on: "is that a good time to go"
+    # after "a cheap week away in august". The row above needs the month in its own line, so this
+    # one finds it a turn or two back and hands the verdict row the month to answer with.
+    entry("month-verdict-followup",
+          (_A_MONTH_POINTED_AT, _A_TIME_VERDICT_ASK),
+          _a_month_verdict_pointed_at,
+          # a price or a booking is the cost row's question, and a place named in the line is the
+          # guide's or the window's, so this row stands down for both.
+          avoid=("book", "booking", "booked", "flight", "flights", "fly", "flying", "price",
+                 "prices", "cost", "costs", "how much", "cheap", "cheapest", "expensive",
+                 "visa", "insurance", "hotel", "hotels"),
+          bias=4),
     # --- planning a trip ----------------------------------------------------------
     entry("plan-a-trip", (_PLAN_TALK, _PLAN_SHAPE), _trip_plan,
           # the before-you-go checklist is plans.py's holiday-countdown, and taking its lines
@@ -7079,7 +7993,7 @@ ENTRIES = [
                           # "im going to rome where do i start" is the guide's question, and
                           # "where do i start" was not one of its asking words
                           "where do i start", "where to start", "where should i start")),
-          _guide,
+          _guide, explain=True,
           # "bath" is a city and a thing you run, and "lag" is jet lag. The place has to be
           # the place meant, so the household words take the bath line away. Money words are
           # trip-budget's: "is 800 enough for a weekend in Lisbon" is a cost question.
@@ -7240,7 +8154,12 @@ ENTRIES = [
     entry("holiday-costs",
           (("costs down", "cost down", "cost of a holiday down", "keep the cost", "cut the cost",
             "cut costs", "reduce the cost", "cheaper", "spend less", "less money on",
-            "on a budget", "a budget holiday", "holiday on a budget", "money off",
+            "on a budget", "a budget holiday", "holiday on a budget",
+            # a bare "money off" was this row's key, and it took every discount question with an
+            # asking word in it: "can i get money off a sofa" was told when to book a flight. The
+            # trip has to be named for this row - everything else is the shop's discount row.
+            "money off a holiday", "money off the holiday", "money off my holiday",
+            "money off our holiday", "money off a trip", "money off the trip",
             "bring the cost", "cheapest way to book", "keep it cheap"),
            # the second signal is the asking word, not the subject: the subject is the trip, in
            # the line or in the turn before ("how do we keep the cost down" after the shortlist)
@@ -7257,6 +8176,9 @@ ENTRIES = [
                  "drive", "driving", "by car", "car", "cars", "petrol", "diesel", "fly",
                  "flying", "flight", "flights", "airport", "commute", "commuting",
                  "season ticket", "parking"),
+          # a discount on the trip and not money off a person: the same one test every price row
+          # uses, so "should i borrow money off my mum" no longer gets the cheapest-week script.
+          guard=a_price_not_a_loan,
           bias=2),
     # "Where should i go on holiday": no month, no country, which is how people start.
     entry("where-no-place", (HOLIDAY_ASK, HOLIDAY_SHAPE), _where_no_place,
@@ -7374,7 +8296,14 @@ ENTRIES = [
                  "boiled", "boiling", "steam", "steamed", "fry", "fried", "frying", "grill",
                  "grilled", "recipe", "recipes", "sauce", "soup", "stuffing", "thaw", "thawed",
                  "defrost", "freezer", "cook", "cooked", "cooking", "dinner", "christmas",
-                 "thanksgiving", "sandwich", "salad", "spice", "spices"),
+                 "thanksgiving", "sandwich", "salad", "spice", "spices",
+                 # a process that takes time is not a stay either: in a passport thread "how long
+                 # does a renewal take" was answered with "Barcelona three full days, Seville
+                 # two", because Spain was named two turns before and the country took the line
+                 "renewal", "renewals", "renew", "renewing", "passport", "licence", "license",
+                 "application", "applying", "paperwork", "post it off", "delivered",
+                 "delivery estimate", "refund", "claim form", "probate", "mortgage offer",
+                 "planning permission", "referral", "waiting list"),
           # "how long does a 5kg turkey take" is the Christmas bird: a table of days in Istanbul
           # answered it. The weight is what says the line is in the kitchen.
           guard=_a_weight_is_the_kitchen,
@@ -7571,6 +8500,10 @@ ENTRIES = [
                            "budget",
                            "budget for", "cost", "costs", "afford", "money", "spend",
                            "spending", "expensive", "pricey", "will that do", "will that cover",
+                           # "is budapest cheap" is the same question as "is budapest pricey":
+                           # cheap is a cost word in the line, and the callable checks for a
+                           # place and turns down a line about flights or a hotel.
+                           "cheap", "cheaper", "inexpensive", "affordable", "worth it",
                            "does that cover", "go far", "saved", "pounds", "euros", "dollars",
                            # "how much is a week in Lisbon" is the same question as "how much
                            # does a week in Lisbon cost", and it used to reach the prices entry.
@@ -7583,6 +8516,10 @@ ENTRIES = [
                            # worth three points, and naming a place beats a habit.
                            "spending money", "spending cash")),
           _trip_budget,
+          # "is budapest cheap" tied with the cheap-eats card, which answers about lunch: a
+          # daily rate is the answer to what a place costs, and the callable has already turned
+          # down every line without a place and a cost word in it.
+          bias=1,
           # A train fare, a flight or a hotel is a price, not a daily budget: "cheap train to
           # paris" belongs with the rail and flight entries.
           # Money that is not spending money: a transfer to someone who lives there, rent, a
@@ -7703,7 +8640,16 @@ ENTRIES = [
                  "how much", "cost", "price", "fare", "fares", "ticket price", "delay", "delayed",
                  "cancelled", "cancellation", "strike", "strikes", "refund", "seat reservation only",
                  "dog", "cat", "bike", "bicycle")),
-    entry("city-weather", ("weather", ("like", "usually", "month", "warm", "cold", "rain")),
+    # The judging frames are the same question about the world: "do you think march is too cold",
+    # "is it too cold for a tent in april", "will it be warm enough in june". They are phrases,
+    # never the bare "cold" or "hot" - "im too cold" and "the house is cold" are not weather.
+    entry("city-weather", (("weather", "too cold", "too hot", "too wet", "too windy",
+                            "too rainy", "too warm", "warm enough", "cold enough", "hot enough",
+                            "cold in", "warm in", "hot in", "rainy in", "rain in"),
+                           ("like", "usually", "month", "warm", "cold", "rain",
+                            # the time of year is the other half of the ask
+                            "go", "going", "visit", "visiting", "trip", "holiday", "there",
+                            "time to", "worth")),
           _weather, bias=1),
 
     # --- flights and airports -----------------------------------------------------
@@ -7918,7 +8864,13 @@ ENTRIES = [
            "photo of it will not get you through security.")),
     entry("passport-valid", ("passport", ("valid", "still valid", "valid for", "six months",
                                           "enough time", "months left", "weeks left", "runs out",
-                                          "expires", "expiring", "fly", "travel in")),
+                                          "expires", "expiring", "fly", "travel in",
+                                          # the same question counted in days, and asked as what
+                                          # you can travel with: "can i travel with 10 days left on
+                                          # my passport" reached no row at all and got a punt about
+                                          # the council's rules
+                                          "days left", "days to go", "weeks to go",
+                                          "travel with", "travel on", "fly with", "get in on")),
           ("Most countries want six months left on your passport beyond the day you plan to "
            "return, and some also want it issued within the last ten years. Check your "
            "destination's rule on its embassy site before you book: if you are close to the "
@@ -7928,6 +8880,9 @@ ENTRIES = [
           # a passport that has already gone is a renewal, not the six-month rule: "my passport
           # has expired" was answered with what other countries want on arrival. One that runs
           # out later stays here, because that line is about the trip.
+          # the rule is the answer to a line that says how long is left, so the verdict for that
+          # line goes in front of it - see `_the_passport_verdict`
+          lead=("yesno", _the_passport_verdict),
           avoid=("lost", "stolen", "missing", "renew", "how long",
                  "expired", "has expired", "ran out", "out of date")),
     # Where to keep it while nothing has gone wrong is a fourth question: the three above answer
@@ -8024,7 +8979,11 @@ ENTRIES = [
           # was answered with this travel list, because it names a weekend and packing.
           # And "how do i pack plates so they dont break" is a box of crockery, not a suitcase.
           avoid=("house", "moving", "move", "moved", "flat", "home", "boxes", "removals",
-                 "plates", "crockery", "mugs", "fragile")),
+                 "plates", "crockery", "mugs", "fragile",
+                 # "i smoke a pack a day and cant stop" is a packet of cigarettes, and the
+                 # suitcase list was answering it: a smoking line never wants a packing list
+                 "smoke", "smoked", "smoker", "smokers", "smoking", "cigarette", "cigarettes",
+                 "cigs", "nicotine", "vape", "vaping")),
     entry("packing-week", (("pack", "packing", "suitcase", "what should i take",
                             "what do i take", "what should i bring", "what do i bring"),
                            ("week", "week away", "a week", "two weeks", "10 days", "ten days",
@@ -8117,6 +9076,12 @@ ENTRIES = [
                  "off milk", "sour", "smells", "fridge not cold", "not cold enough", "freezer",
                  "freeze the", "can i freeze", "milk", "formula", "breast milk", "baby",
                  "how long does", "how long can", "how long will",
+                 # how much to drink is a quantity, and this row can only say how to keep a drink
+                 # cold: "how much water should i take on a hike" got the cool bag and a bag of
+                 # ice while the day-out row held "half a litre an hour of walking". The
+                 # quantity words stand this row down so the row that carries a figure answers.
+                 "how much water", "how much should i drink", "how much to drink",
+                 "how much liquid", "how many litres", "how many liters", "how much do i drink",
                  # a warm fridge full of ruined food is a claim, not a picnic: "fridge is warm
                  # and everything inside is ruined can i claim" reached this row on "can" (a can
                  # of drink) and "warm", and answered it with a cool bag and a bag of ice.
@@ -8167,11 +9132,68 @@ ENTRIES = [
            "container. Take warm layers and a waterproof even in summer, boots you can walk in, "
            "bin bags, a small first-aid kit with blister plasters, and food in a cool box. Book "
            "the pitch ahead and check the site's rules on fires, dogs and arrival time."),
-          bias=1,
+          bias=1, guard=_not_a_food_to_carry,
           # A day hike, a festival and a beach are packed for by their own entries, and a tent
           # in the garden is not a trip.
           avoid=("day hike", "hiking", "walk", "walking", "festival", "beach", "garden",
                  "back garden", "backyard", "kids", "children", "toddler", "baby")),
+
+    # Camping with small children is not the kit list with a child's sleeping bag added, and the
+    # row above stands itself down the moment a child is named, so "we are camping in july and the
+    # kids are 4 and 6, what should we pack" reached nothing and got "I don't know enough to
+    # answer that honestly". What a parent needs to know is the three things that stop a small
+    # child's night going wrong, which is why this row keys on the children and the packing
+    # together. A pitch that leaks, a broken pole and the price of a site are all other answers.
+    entry("camping-with-kids",
+          (("camping", "campsite", "camp site", "tent", "under canvas"),
+           ("kids", "children", "childs", "child's", "child", "toddler", "toddlers", "baby",
+            "babies", "family", "son", "daughter", "boys", "girls", "little ones",
+            # The people who take children camping are often not their parents, and a grandparent
+            # asks the same question in their own words: "taking the grandchildren camping, what
+            # do we need" was the plain kit list for two adults, because no word in it named a
+            # child. "kid", "boy" and "girl" are the same gap one size smaller.
+            "kid", "boy", "girl", "grandchildren", "grandchild", "grandkids", "grandson",
+            "granddaughter", "niece", "nephew", "teen", "teens", "teenager", "teenagers")),
+          ("A tent and bags for everyone, plus what small children need on a campsite: a mat each, "
+           "because they feel every root, warm layers and a hat for the night even in July, and a "
+           "full change of clothes kept in the car so a wet sleeping bag is not the end of the "
+           "trip. Take a torch each, wet wipes, a bin bag for wet things, breakfast that needs no "
+           "cooking, and something to do after dark. Pitch in daylight, close to the toilets but "
+           "not beside them, and let them run about before bed so they sleep."),
+          ask=("pack", "packing", "need", "take", "taking", "bring", "gear", "kit", "list",
+               "what should i", "what do i", "what to bring", "first time"),
+          # a "week" and a "trip" are words the money rows and the weekend list also hold, and a
+          # toddler brings the first-food rows out, so this row stands ahead of them all.
+          bias=2,
+          avoid=("hole", "holes", "leak", "leaking", "pole", "poles", "broke", "broken",
+                 "repair", "fix", "book", "booking", "price", "cost", "how much", "where",
+                 "dog", "dogs", "pitch up", "won't go up", "wont go up")),
+
+    # A family under canvas is the same trip with a different list, and the row above stands down
+    # for the child words, so this one takes it: "im going camping with the kids next month and it
+    # might rain, what should i pack" was answered with what to feed a baby by age. The adult kit
+    # is assumed; what a parent forgets is the second set of clothes and the wipes.
+    entry("camping-with-children",
+          (("camping", "campsite", "camp site", "wild camp", "wild camping", "tent",
+            "under canvas"),
+           ("pack", "packing", "need", "take", "taking", "bring", "kit", "gear", "list",
+            "what should i", "what do i", "what do we")),
+          ("Tent, sleeping bags and mats for everyone, a torch each so nobody is in the dark "
+           "alone, and one full change of clothes per child per day plus two spare sets: that is "
+           "what wet weather costs. Add wellies and a waterproof, wipes and nappy bags, a sun hat "
+           "and cream, snacks and a water bottle each, their own pillow or blanket, Calpol and "
+           "plasters, and a bag for wet things. Pitch near the toilets, take a mallet, and put "
+           "the tent up at home once before you go."),
+          # the child is what makes it this list rather than the plain one: a key of more than
+          # one group only has to reach its first, so the family is an `ask` and not a third part
+          ask=("kids", "kid", "children", "child", "toddler", "baby", "family", "families", "son",
+               "daughter", "boys", "girls", "with the kids", "with kids", "little ones"),
+          bias=2,
+          # a safety question about a baby is not a kit list, and a tent in the garden is not a
+          # trip
+          avoid=("safe", "safety", "is it ok", "ok to", "too cold", "too young", "months old",
+                 "weeks old", "cry", "crying", "feed", "feeding", "bottle", "garden",
+                 "back garden", "backyard", "festival", "beach")),
 
     # A festival has its own kit, and the ask is "what should i take" / "what do i need", so
     # "should i take a tent to a festival" (a yes/no about one thing) is not this list.
@@ -8216,20 +9238,58 @@ ENTRIES = [
           _where_to_stay, bias=1),
     entry("where-to-stay", (WHERE_TO_STAY,
                             tuple(CITY_AREA) + ("there", "that city", "the city", "this city")),
-          _where_to_stay),
+          _where_to_stay,
+          # "what area should i stay in in london" was answered by the card for an evening at
+          # home, because "stay in" is in both lines and the evening card keys the word "what".
+          # "where should i stay on a tight budget in lisbon" went to the card that splits a
+          # monthly wage: the city is the subject, the budget is how.
+          bias=2),
     # The same question about a town that has no card: the rules of picking a spot hold anywhere,
     # and a hedge is no use to somebody booking a weekend in Skegness.
     entry("where-to-stay-anywhere", (WHERE_TO_STAY,
                                      ("stay", "staying", "hotel", "hotels", "hostel", "b&b",
                                       "guest house", "caravan", "area", "town", "village",
                                       "seaside", "coast", "beach", "district", "in", "near",
-                                      "somewhere", "accommodation")),
-          TOWN_STAY, guard=_a_town_stay_line,
+                                      "somewhere", "accommodation",
+                                      # the word people use for a night's stay when they are
+                                      # not booking one: "where should i sleep", "where can i kip"
+                                      "sleep", "sleeping", "kip", "crash")),
+          _a_town_stay,
+          # "where should i stay on a budget" was answered by the card that splits a monthly
+          # wage, because "budget" is the loudest word in the line and the money row keys it.
+          # Two is enough to put the booking back in front of a card about a wage.
+          bias=3, guard=_a_town_stay_line,
           # a night in a hospital, a friend's spare room and a stop on a drive are not a booking
           avoid=("hospital", "ward", "sister", "brother", "mum", "dad", "mother", "father",
                  "friend", "friends", "relative", "in laws", "funeral", "wedding", "work",
                  "office", "airport", "stopover", "layby", "service station", "prison",
                  "uni", "university", "student", "hostel dorm")),
+    # A night before an early flight is its own booking: the airport hotel with the shuttle, the
+    # town a couple of stops away, or the car park with the transfer included. The general stay
+    # paragraph stands down when the line says airport, so without this row the question of the
+    # night before a flight reached nothing but a hedge.
+    entry("a-night-near-the-airport",
+          (("airport", "airport hotel", "terminal", "departure", "departures", "check in desk",
+            "heathrow", "gatwick", "stansted", "luton airport", "liverpool airport", "prestwick",
+            "flight", "flights", "flying",
+            "early flight", "early start", "dawn flight", "red eye"),
+           ("stay", "staying", "night", "sleep", "hotel", "hotels", "accommodation", "book",
+            "booking", "near", "before", "overnight", "stop over", "stopover")),
+          "For a night before an early flight, book an airport hotel with a shuttle and check the "
+          "first and last shuttle times before you pay - a 4am shuttle that stops at 11pm is the "
+          "usual trap, and so is a \"5 minutes from the terminal\" that is five minutes by car "
+          "on a road with no pavement. A town two or three stops away on the train, or a "
+          "park-and-fly with the transfer included, is usually about half the price; add up the "
+          "transfer, the parking and the extra hour and pick on the total. Take the flexible rate "
+          "if the flight is early, and get the shuttle time in writing.",
+          bias=2, guard=_a_night_near_the_airport,
+          # an airport is also where people complain about security queues, lost bags and the
+          # price of a coffee, and none of those is a booking
+          avoid=("queue", "queues", "security", "liquids", "laptop", "duty free", "lost",
+                 "delayed", "delay", "cancelled", "cancel", "compensation", "baggage",
+                 "hand luggage", "food", "eat", "coffee", "shops", "parking cost",
+                 "how long", "what time", "get to", "get from", "transfer to")),
+
     entry("trip-essentials",
           (_ESSENTIALS_ASK,
            # a trip word, never a bare country: "do i need a jumper in mexico" is a packing
@@ -8501,7 +9561,12 @@ ENTRIES = [
                  "boarding", "boards", "board the", "gate", "gates", "departure",
                  # "can i fly when pregnant" is the pregnancy row's question, not how far ahead
                  # to book: the fare card answered it with six to eight weeks
-                 "pregnant", "pregnancy", "weeks pregnant", "trimester", "midwife", "due date")),
+                 "pregnant", "pregnancy", "weeks pregnant", "trimester", "midwife", "due date",
+                 # a cost shared between people is not a fare: "how do i split the cost of
+                 # flights" was told to book six to eight weeks ahead
+                 "split", "splitting", "share", "sharing", "halves", "who pays", "who owes",
+                 "each pay", "chip in", "between us", "cost of the flights",
+                 "cost of flights", "pay for the flights")),
     # A named region has its own answer (Africa's biggest country is Algeria, Europe's longest
     # river is the Volga), so the world record passes on those lines.
     # A region's river is its own: geography.region_extreme answers "the longest river in africa"
@@ -8511,9 +9576,16 @@ ENTRIES = [
                          "The Nile, at about 6,650 km, is usually called the longest, with the "
                          "Amazon a close second and carrying far more water. Which one wins depends "
                          "on where you say the Amazon starts."),
-          avoid=("uk", "britain", "england", "scotland", "wales", "ireland", "china", "india",
+          # The home islands now have their own rivers in geography's region table, so they are
+          # not avoided any more; a named country the table has no fact for still passes.
+          avoid=("china", "india",
                  "france", "italy", "spain", "germany", "egypt",
-                 "how many rivers", "number of rivers", "count rivers")),
+                 "how many rivers", "number of rivers", "count rivers",
+                 # the longest bridge, tunnel and road are other records: the line said what it
+                 # was longest of, and the Nile is the answer only to the longest river
+                 "bridge", "bridges", "tunnel", "tunnels", "wall", "walls", "road", "roads",
+                 "motorway", "motorways", "causeway", "pier", "piers", "coastline",
+                 "border", "borders", "railway", "railways", "flight", "flights")),
     # The biggest country in a region is that region's own: geography.country_extreme answers the
     # continent the line names and leaves the Russia answer for the unqualified line.
     # "list the countries in africa by size" is the same record asked as a list: without "by size"
@@ -8531,7 +9603,13 @@ ENTRIES = [
                  "animal", "animals", "creature", "creatures", "whale", "elephant",
                  "bird", "fish", "shark", "dinosaur", "insect",
                  "how many countries", "number of countries",
-                 "countries have", "countries with", "countries without")),
+                 "countries have", "countries with", "countries without",
+                 # The end of the scale decides which row answers: "smallest country by area"
+                 # names area as well, which tied with this row and handed the line the
+                 # largest country in the world.
+                 "smallest", "smallest by", "least", "fewest",
+                 # Same for the measure: how many people live in a country is not its area.
+                 "population", "populous", "people live", "most people")),
     entry("altitude-sickness", ("sickness", "altitude", "avoid", ("mountain")),
           ("Go up slowly: above 3,000m, sleep no more than 500m higher than the night before, and "
            "take a rest day every third day. Drink plenty, skip alcohol, and if you get a bad "
@@ -8683,7 +9761,11 @@ ENTRIES = [
                                  "copenhagen", "greenland", "faroe", "wales", "snowdonia")),
           ("Take a warm mid layer and a waterproof shell, plus long sleeves rather than vests - "
            "even in June the evenings drop to about 8C. Add a hat and gloves if you are going "
-           "high or out on the water, and midge repellent for the west of Scotland."),
+           # The row covers Iceland, Norway and Finland as well as Scotland, so the answer cannot
+           # name one of them: "what should i pack for iceland" came back with midges "for the
+           # west of Scotland", which reads as the wrong country.
+           "high or out on the water, and midge repellent for anywhere damp and windless in high "
+           "summer."),
           # The same countries are also a travel question about getting there.
           avoid=("how long", "how far", "drive", "driving", "flight", "flights", "fly", "train",
                  "coach", "ferry", "cost", "cheap", "hotel", "hotels", "stay in", "days in",
@@ -8701,7 +9783,7 @@ ENTRIES = [
                               "france", "canaries", "mallorca", "sicily", "cyprus", "malta",
                               "october", "september", "may", "june", "july", "august", "summer",
                               "warm", "hot", "beach", "sun", "sunshine")),
-          _warm_week_pack,
+          _warm_week_pack, guard=_not_a_food_to_carry,
           # "what should i take for a week in spain in august" names a warm place and a month, and
           # it tied on score with money's weekly saving rate, which keys "a week" and "should":
           # naming where and when is worth the point that tells a packing list from a rate.
@@ -8722,7 +9804,17 @@ ENTRIES = [
     entry("london-airport", (("heathrow", "gatwick", "stansted", "luton", "london city", "london"),
                              ("closest", "nearest", "central london", "into london", "to london",
                               "get to london", "transfer", "which airport", "how do i get",
-                              "how do i")),
+                              "how do i",
+                              # the fare is the question people actually ask about an airport
+                              # run: "whats the cheapest way to get to heathrow" was answered
+                              # with the cheapest dinners, because no phrase here asked a price
+                              # and none said "get to" without "london" after it.
+                              "get to", "getting to", "get from", "cheapest", "cheap", "cheaper",
+                              "best way", "way to get", "early flight", "early in the morning",
+                              # not a bare "how much" or "price": those are the fare cards'
+                              # questions ("how much is a flight to heathrow" is when to book,
+                              # and adding them here took that line)
+                              "taxi")),
           _london_airport),
     # "drive to london or train" is a choice about a city, not a flight, and the either-or
     # reading answered it with "Either works, so take the one that's less fuss", which is
@@ -8825,7 +9917,13 @@ ENTRIES = [
                  "bring home", "brings home", "bringing home", "brought home",
                  "take home", "takes home", "taking home", "took home",
                  "earn", "earns", "earning", "earned", "wage", "wages", "payslip", "payslips",
-                 "after tax", "before tax", "monthly pay", "payday")),
+                 "after tax", "before tax", "monthly pay", "payday",
+                 # A card that holds files is not a card you spend: "does my phone take an sd
+                 # card" was answered with two cards and some local cash, because "card" and
+                 # "take" are both in the key.
+                 "sd card", "sd cards", "memory card", "memory cards", "micro sd", "microsd",
+                 "sim card", "sim cards", "storage card", "flash card", "usb stick",
+                 "hard drive", "ssd")),
     entry("send-money-abroad", (("send", "sends", "sending", "sent", "transfer", "transfers",
                                  "transferring", "wire", "wiring", "remit"),
                                 # The people are named with the country ("to my sister in spain"):
@@ -9322,7 +10420,11 @@ ENTRIES = [
                  "cinema", "theatre", "theater", "gig", "concert", "festival", "party",
                  "wedding", "birthday", "barbecue", "bbq", "picnic", "office", "at work",
                  "to work", "school", "college", "university", "hospital", "ward", "appointment",
-                 "hotel room", "my hotel", "the hotel", "in the hotel", "airbnb", "campsite",
+                 # an ordinary building named in full: "can i bring food into the library" kept
+           # nothing after the guard let go of it, and a shelf of books is as everyday a
+           # destination as an office
+           "library", "libraries", "into the library", "the canteen", "staff room",
+           "hotel room", "my hotel", "the hotel", "in the hotel", "airbnb", "campsite",
                  "football", "match", "church", "funeral",
                  # "how much more will i take home" is a pay question, not a customs one: "take
                  # home" is in this row's key and "how much" in the second group, so a pay rise
@@ -9379,8 +10481,12 @@ ENTRIES = [
     # which is a different question, and a wedding was a shrug. The plain "how do i book a hotel"
     # is still the pick-a-hotel answer: only the timing and the group are this entry's.
     entry("hotel-booking-when",
+          # Not the bare word "wedding": a hotel row keyed on it answers the wedding itself -
+          # "how many guests for a wedding" was four to six weeks' notice on booking a room.
+          # Only the room shapes of a wedding are this row's.
           (("hotel", "hotels", "guesthouse", "guest house", "b&b", "hotel room", "a room",
-            "rooms", "wedding", "weddings"),
+            "rooms", "wedding guests", "wedding rooms", "the wedding party",
+            "rooms for a wedding"),
            ("when should i book", "when do i book", "when to book", "how early", "how far in",
             "how far ahead", "how long before", "in advance", "weeks before", "months before",
             "book early", "book ahead", "last minute", "block of rooms", "for a wedding",
@@ -9391,7 +10497,9 @@ ENTRIES = [
            "hunting pays. If a booking site shows less than the hotel's own site, ring the desk: "
            "they usually match it, and the direct terms are better."),
           # a complaint, a dirty room, a cheap room and a cancelled booking are other answers
-          avoid=("complain", "complaint", "complaints", "dirty", "clean", "cleaned", "cleaning",
+          avoid=("how many guests", "how many people", "guest list", "number of guests",
+                 "how many to invite", "catering", "caterer", "the venue", "menu",
+                 "complain", "complaint", "complaints", "dirty", "clean", "cleaned", "cleaning",
                  "bed bugs", "noise", "noisy", "rude staff", "cockroach", "cockroaches",
                  "cheap hotel", "cheap hotels", "cheaper hotel", "cheaper hotels", "cheaper room",
                  "cheap room", "cheapest", "budget", "somewhere to stay", "place to stay",
@@ -9413,6 +10521,10 @@ ENTRIES = [
                  # wedding" and got four to six weeks ahead and a block of rooms.
                  "wear", "wearing", "outfit", "outfits", "dress", "dresses", "jumpsuit",
                  "jumpsuits", "hat", "hats", "fascinator", "shoes", "heel", "heels", "suit",
+                 # and the small things put on with it: "which socks for a wedding" named the
+                 # occasion and nothing else this row keys, so it was told when to book a room.
+                 # The sock has its own card in clothing.py.
+                 "sock", "socks", "tie", "ties", "waistcoat", "braces", "cufflinks",
                  "suits", "tie", "colour", "color", "dress code", "black tie",
                  # the same ask said with the verb: "what should i put on for a wedding"
                  "put on", "putting on", "clothes")),
@@ -9656,7 +10768,11 @@ ENTRIES = [
                         "walking", "walk", "walked"),
                        ("water", "drink", "eat", "food", "snack", "snacks", "lunch", "carry",
                         "pack", "take", "bring", "fuel", "energy", "hungry", "kilos", "weight",
-                        "how much water", "how much food", "how much liquid")),
+                        "how much water", "how much food", "how much liquid",
+                        # a quantity asked for in litres is the same day-out question, and the
+                        # line often names no water: "how many litres do i need for a long walk".
+                        "litre", "litres", "liter", "liters", "how many litres",
+                        "how much to drink")),
           _hike_day,
           # A walk to the shops, a dog, a pram, a flight and a water bill are other questions.
           avoid=("dog", "puppy", "pram", "pushchair", "baby", "toddler", "flight", "flying",
@@ -9758,7 +10874,18 @@ ENTRIES = [
                  "seat belt", "driving", "park", "parking", "route", "timetable", "live",
                  "running late", "cancelled",
                  "child", "children", "kids", "kid", "my son", "my daughter", "under 5s",
-                 "under fives", "5 year old", "4 year old", "child fare", "child ticket")),
+                 "under fives", "5 year old", "4 year old", "child fare", "child ticket",
+                 # The row keys the bare word "bus" against "to ", so every bus question with a
+                 # "to" in it was priced as a coach between two cities: "who do i complain to
+                 # about a bus driver" was told coaches are cheaper than trains, and a route or
+                 # a lost bag would have got the same. A complaint, a route and a lost bag are
+                 # other answers, so the row stands down for them.
+                 "complain", "complaint", "complaints", "report", "driver", "drivers",
+                 "bus driver", "bus company", "bus operator", "rude", "shouted",
+                 "left my bag", "lost property", "left it on", "left something on",
+                 "which bus", "what bus", "bus route", "routes", "bus stop", "bus number",
+                 "track", "tracking", "live times", "how often", "how far", "nearest",
+                 "wheelchair", "pram", "pushchair", "mobility scooter", "school run")),
     # Staying well is a different question from whether the tap water is safe: it is the food,
     # the ice, the fruit, and what to carry in case it goes wrong anyway.
     entry("stay-well-abroad",
@@ -9794,7 +10921,13 @@ ENTRIES = [
                  # a card is money, not food: "is it safe to use my card abroad" reached the
                  # street-food answer because "is it safe" and "abroad" are all it had
                  "card", "cards", "wallet", "cash", "money", "atm", "atm machine", "currency",
-                 "euros", "dollars", "pounds", "bank", "pay by card")),
+                 "euros", "dollars", "pounds", "bank", "pay by card",
+                 # "rinse the lentils until the water runs clear" is a kitchen instruction: the
+                 # "runs" in the first part and the bare "water" in the place part were enough
+                 # for it. Salad, fruit and the water itself stay here, because those are the
+                 # street-food questions; the pulses and the phrase about the water are not.
+                 "lentils", "chickpeas", "quinoa", "rice", "pasta", "spaghetti", "noodles",
+                 "greens", "water runs clear", "runs clear")),
     # --- before you set off, and the paperwork nobody thinks of until it is late ------
     # The airport has its own entry (airport-arrival). A ferry, a cruise and the tunnel do not:
     # they close the doors on a timetable, and the answer is the number the operator publishes.
@@ -9852,6 +10985,39 @@ ENTRIES = [
            "there."),
           avoid=("flight cancelled", "missed my connection", "short connection", "bag",
                  "luggage", "hotel near", "airport hotel")),
+    # The words on a booking are a vocabulary of their own, and the ones people meet on a cheap
+    # fare are the ones nobody explains: a layover is a wait, a stopover is a night, and a
+    # flexible ticket is the one you can change.
+    entry("layover-meaning",
+          (("layover", "layovers", "a layover", "stopover", "stop over", "stopovers",
+            "connecting flight", "connecting flights", "my connection", "our connection",
+            "flight connection", "connection flight", "connection time", "connection at",
+            "connection between flights", "how long is my connection",
+            "how long does a connection", "connection need", "connection needs",
+            "how long between flights", "connection tight", "time between flights",
+            "transit at the airport", "airside transit"),
+           ("what", "whats", "what is", "mean", "means", "explain", "difference", "different",
+            "vs", "versus", "how long", "counts as")),
+          ("A layover, or a connection, is the wait at an airport between two flights, and a "
+           "stopover is the same thing when it is long enough to leave the airport, usually a "
+           "night or more. A connection under about two hours on the same ticket is the airline's "
+           "problem if the first flight is late, so the risk is a tight change, not a long wait. "
+           "On two separate tickets you are on your own for a missed second flight, so leave "
+           "three hours or more."),
+          avoid=("missed my connection", "short connection", "jet lag", "body clock", "sleep",
+                 "hotel near", "airport hotel", "bag", "luggage")),
+    entry("flexible-ticket",
+          (("flexible ticket", "flexible tickets", "flexi ticket", "flex fare", "flexible fare",
+            "change my flight", "change the date"),
+           ("what", "whats", "mean", "means", "worth", "cost", "how much", "does it",
+            "difference", "explain", "refundable", "should i")),
+          ("A flexible ticket is the fare that lets you change the date, usually for no fee or a "
+           "small one, where a cheap fare charges £30 to £70 plus any fare difference to change "
+           "and often nothing back if you cancel. It is worth it when the date might move: work, "
+           "a hospital appointment, a family thing. Check whether the fare is changeable or "
+           "refundable, because they are not the same, and buy the cheaper ticket plus travel "
+           "insurance when the difference is more than the change fee."),
+          avoid=("how do i change", "how can i change", "my flight was cancelled", "cancel my")),
     # Paperwork is the one thing a person cannot fix on the day, and the answer is always "the
     # country's own site, applied for early" plus the timings that are stable.
     entry("visa-timing",
@@ -9879,7 +11045,8 @@ ENTRIES = [
            "the hotel's own cancellation terms. For a beach week with children, the package "
            "usually wins on the day something goes wrong."),
           avoid=("parcel", "delivery", "courier", "my package", "package arrived", "software",
-                 "install", "python")),
+                 "install", "python"),
+          guard=_a_trip_to_arrange),
     # A pushchair on a plane is a free, gate-checked item on almost every airline, and the one
     # thing people get wrong is handing it over too early.
     entry("pram-on-a-plane",
@@ -9939,7 +11106,17 @@ ENTRIES = [
                  # year old travel on the bus" reads travel plus "year old" and this row answered
                  # with the ears on take-off.
                  "bus", "buses", "coach", "coaches", "tram", "trams", "tube", "underground",
-                 "bus fare", "bus pass", "train ticket", "child fare", "school bus"),
+                 "bus fare", "bus pass", "train ticket", "child fare", "school bus",
+                 # "fly" is a verb here and a fly spray is a can: "is fly spray safe with a baby"
+                 # was an answer about clearing their ears on take-off.
+                 "fly spray", "insect spray", "bug spray", "mosquito spray", "wasp spray",
+                 "air freshener", "aerosol", "the spray",
+                 # A tent is not a plane either. "what do i need for a camping trip with a
+                 # toddler" and "what do i pack for a weekend camping trip with a baby" were both
+                 # answered with "feed or give a dummy at take-off and landing", because this row
+                 # holds "trip" and every word for a small child, and it is biased ahead of the
+                 # campsite's own list.
+                 "camping", "campsite", "camp site", "camp", "tent", "tents", "under canvas"),
           # fly-with-medicine holds the airline words too and reaches "can i fly with a newborn"
           # through them, so the baby's own row has to be the one that wins it.
           bias=3),
@@ -10009,6 +11186,9 @@ ENTRIES = [
                  "holiday camp", "day trip", "weekend trip", "in the uk", "staycation",
                  "without the kids", "without children", "without my kids", "no kids",
                  "adults only", "grown ups"),
+          # The passport list is a journey question: an illness in the house with no journey in
+          # the line is the health rows' question, and this row took it.
+          guard=_a_journey_not_a_treatment,
           bias=1),
 
     # A dog or a cat that comes on holiday is paperwork, not luggage: the chip and the rabies
@@ -10034,10 +11214,14 @@ ENTRIES = [
            "back from some countries. Check both countries' own rules, and the ferry or airline's, "
            "because each has its own kennel or cabin booking. Start six weeks out: the 21 days "
            "catches people, and nothing can be backdated."),
+          # "fly" is the airline word here and a fly spray is a can of insecticide, which is the
+          # household-chemical row's question: "is fly spray safe around cats" was a pet passport.
           avoid=("puppy food", "dog food", "cat food", "my dog is sick", "my cat is sick",
                  "dog training", "dog bark", "cat litter", "dog insurance", "vet bill",
                  "dog in the car", "car sick", "dog ate", "cat ate", "flea", "worming",
-                 "separation anxiety", "boarding kennel", "put my dog", "put my cat"),
+                 "separation anxiety", "boarding kennel", "put my dog", "put my cat",
+                 "fly spray", "insect spray", "bug spray", "mosquito spray", "wasp spray",
+                 "air freshener", "aerosol", "the spray"),
           bias=1),
     # "the cheapest way to get to X from Y" is a comparison between a coach, a train and a car,
     # and it is the same answer for any pair of cities in one country, so it is keyed on the
@@ -10201,7 +11385,16 @@ ENTRIES = [
             # "is the school bus free" names the ride and not the child, and it reached nothing
             # at all, though free school travel is the second half of this answer.
             "school bus", "school buses", "school travel", "school transport", "school run",
-            "family", "families"),
+            "family", "families",
+            # A parent asks how the child gets there without naming the child twice: "how does he
+            # get to school", "how will my son get to school", "getting to school in september".
+            # The phrases name the journey, so they are a subject of their own here. The travel
+            # half below carries them too, which is what lets the line match on the journey alone.
+            "get to school", "gets to school", "getting to school", "get to school and back",
+            "to school and back", "travel to school", "journey to school",
+            # "is there a bus to school" is the journey, and it was answered with the coach
+            # between two cities - the trip, not the school run
+            "bus to school", "coach to school"),
            # The travel half has to name travel. It used to take `pass`, `pay`, `cost` and
            # `school` on their own, and a child word plus `passed` is "my son passed his driving
            # test" and "my son passed his exams" - good news to a parent, answered with the child
@@ -10211,7 +11404,12 @@ ENTRIES = [
             "school bus", "school travel", "school transport", "free travel", "travel free",
             "travels free", "travel for free", "ride free", "rides free", "rides for free",
             "goes free", "go free", "pay on the bus", "pay on buses", "on the bus",
-            "on the coach")),
+            "on the coach",
+            # the journey said as the journey: "how does he get to school", "getting to school",
+            # "is there a bus to school", which named no fare and reached nothing at all
+            "get to school", "gets to school", "getting to school", "to school and back",
+            "travel to school", "journey to school", "get the bus to school",
+            "catch the bus to school", "bus to school", "coach to school")),
           "Under-fives usually travel free on local buses with a paying adult, and 5 to 15 pay a "
           "child fare, often about half: the operator's own page gives the age and the price for "
           "your area. Free travel to school is a council decision and it turns on distance - "
@@ -10856,6 +12054,25 @@ ENTRIES.append(entry(
 # "can i bring cheese back from france", "can i bring ham back from spain" and "can i bring
 # sausages into the uk" all reached nothing: the duty free allowance and the food ban are two
 # different rules and the food one is the one people get caught by.
+#
+# A line that carries food somewhere is the customs ban only when it crosses a border. "bringing"
+# is read as "bring" by the word forms, so "what food should i bring" to a picnic reached this row
+# and a party of ten children was told the EU ban on ham, cheese and milk. Carrying a dish to a do
+# is not importing it.
+#
+# The reading of "a border is being crossed" is one function shared with the dish row that answers
+# those same lines (occasions.py's `bring-dish`), because two lists of places cannot agree: with a
+# list here and a list there, "can i bring food into brazil" was the customs row here and a traybake
+# there, and no list of countries is ever complete. geography.py holds the shape - a crossing word,
+# a travelling bag, or a direction followed by a place that is not an everyday room or do - and this
+# row adds the one thing only it knows: the rule is the one for coming into Great Britain, so a
+# destination that is named and is not Britain stands the row down and the bot hedges instead of
+# giving one country's rule for another's.
+def _comes_across_a_border(understood):
+    line = str(understood.get("clean") or understood.get("text") or "").lower()
+    return crosses_a_border(line) and not carries_it_out_of_britain(line)
+
+
 ENTRIES.append(entry(
     "customs-food",
     (("cheese", "ham", "meat", "sausages", "sausage", "bacon", "dairy", "milk", "butter",
@@ -10905,7 +12122,7 @@ ENTRIES.append(entry(
     # "how much cheese can i bring home" and "how much ham can i bring home" are this rule asked
     # with "how much" in front, and a portion card (calories, 70g of red meat) outscored it: the
     # quantity in the question is how much you may carry, not how much you may eat.
-    bias=3))
+    bias=3, guard=_comes_across_a_border))
 
 
 # The same rule the other way round, and it is a different rule: the EU ban on personal imports of
@@ -11320,3 +12537,24 @@ ENTRIES.append(entry(
            "charge", "how long does it take to heal", "heal", "how long does it take to arrive",
            "how long does it take to get there", "how long does it take to learn",
            "how long does it take to bake", "how long does it take to digest")))
+
+# An adapter changes the pins and nothing else: "how do i use a travel adaptor" and "will my
+# hairdryer work abroad" were both a shrug, and the voltage is the thing that catches people out.
+ENTRIES.append(entry(
+    "using-an-adaptor",
+    (("adapter", "adaptor", "hairdryer", "hair dryer", "straighteners", "curling tongs",
+      "converter", "dual voltage", "electric shaver"),
+     ("how do i use", "how to use", "use", "using", "work", "works", "working", "abroad",
+      "away", "travel", "holiday", "trip", "voltage", "volts", "converter")),
+    "The adapter changes the shape of the pins, not the voltage: put it in the wall socket, plug "
+    "your own charger into it, and check the small print on the charger says 100-240V before you "
+    "pack it. The things to check are the ones with a motor or a heating element - a hairdryer, "
+    "straighteners, a kettle - because a 120V appliance from the US on a 230V supply needs a "
+    "converter and not an adapter, while a dual-voltage travel hairdryer is cheaper and safer "
+    "than a good converter.",
+    bias=1,
+    # which country uses which socket is the plug-country card's question, and a line that names
+    # only the country is asking that, not how to use the thing
+    avoid=("type c", "type g", "type e", "type f", "round pins", "square pins", "flat pins",
+           "same as the uk", "sockets in"),
+))

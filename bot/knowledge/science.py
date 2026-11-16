@@ -12,10 +12,109 @@ import re
 from .health import HEADACHE_NO_DRUGS, NO_DRUGS
 from ..compose.repair import owns_the_deed as _owns_the_deed
 from .lookup import names_a_thing
-from .lookup import (ASK_ABOUT, FEELING_WORDS, IMPROVE, NOT_A_NOSE, ORIGIN_ASK, entry,
+from .lookup import (ASK_ABOUT, FEELING_WORDS, IMPROVE, NOT_A_NOSE, ORIGIN_ASK, all_of, entry,
+                     not_a_count_for_the_box_or_the_dish, not_a_sleepy_body,
                      not_the_flat_you_live_in)
 
 ANSWERS = ("science", "sleep")
+
+# The person's own memory card must not take a line about somebody else's: "my dad is getting
+# forgetful" and "she keeps forgetting things" are the memory-assessment entry's, which reads
+# the relative in front of the forgetting. The pronoun forms have no relative to read, so they
+# are held out here as well.
+_ANOTHER_ADULTS_MEMORY = re.compile(
+    r"\b(?:my|his|her|our|their|the)\s+(?:\w+\s+){0,2}"
+    r"(?:mum|mom|mam|mother|dad|father|parent|parents|husband|wife|partner|spouse|other half|"
+    # Not a child: a son forgetting his PE kit is a school-morning thing, not a memory
+    # assessment, and the kit list is the answer to it.
+    r"nan|nana|gran|granny|grandma|grandad|grandpa|grandmother|grandfather|"
+    r"brother|sister|aunt|auntie|uncle|cousin|mother in law|father in law|friend|"
+    r"neighbour|neighbor|boss|colleague|flatmate|housemate|carer|pal|chum|mate|"
+    r"nephew|niece|grandchild|grandson|granddaughter|fiance|fiancee|stepmum|stepdad|missus|"
+    r"girlfriend|boyfriend)\b|"
+    r"\b(?:he|she|they)\s+(?:keeps?|is|are|has|have|always|never|used to)\b")
+# Somebody else is still the subject when the somebody is a child: "my son forgets everything i
+# tell him" is about him, even though a child's forgetting is not an assessment question.
+_A_CHILD = r"(?:son|daughter|child|kid|kid|children|kids|toddler|teenager|teen|baby)"
+_SOMEBODY_ELSE_IS_THE_SUBJECT = re.compile(
+    r"\b(?:my|his|her|our|their|the)\s+(?:\w+\s+){0,2}" + _A_CHILD + r"\b|" +
+    _ANOTHER_ADULTS_MEMORY.pattern)
+
+
+def _not_somebody_elses_memory(understood):
+    """True when the line is not about another adult forgetting. A `guard=` test.
+
+    The carried words count as well as the line: a follow-up is answered on the line before it
+    ("thats scary" after "my mum keeps forgetting things" is still her memory, not the speaker's),
+    and this card is written in the first person.
+    """
+    from .habits import _words_of
+    text = _words_of(understood)
+    if not text:
+        return True
+    return not _SOMEBODY_ELSE_IS_THE_SUBJECT.search(text)
+
+
+# A habit word names a thing that slipped - keys, a name, a tablet, a birthday - and those lines
+# have their own cards (where to put the keys, the trick for a new name, the pill box, the calendar).
+# What makes the difference is whether the line is asking about the illness: "is losing keys a sign
+# of dementia" is the illness question, and the habit card is the wrong answer to it. So the habit
+# words fence the card off only when the line does not name the illness, and the illness words are
+# what the card is for.
+_NAMES_THE_ILLNESS = re.compile(
+    r"\bdementia\b|\balzheimers?\b|\balzheimer's\b|\bmemory clinic\b|"
+    r"\bmemory assessment\b|\bearly onset\b|\bsigns? of (?:it|this|that)\b")
+# The speaker's own errand: "i keep forgetting to book my daughter an eye test" and "ive forgotten
+# to cancel the gas" are the speaker's to-do, not another person's memory. Both memory cards stood
+# on the person word alone and answered these.
+_MY_OWN_ERRAND = re.compile(
+    r"\b(?:i|im|i'm|ive|i've)\b(?:\s+\w+){0,4}?\s+(?:keep\s+|kept\s+)?(?:forget|forgets|"
+    r"forgetting|forgot|forgotten)\s+(?:about\s+)?to\b")
+
+
+def _the_speaker_forgot_to_do_it(understood):
+    """True when the line is the speaker forgetting to do a thing. A `guard=` test."""
+    from .habits import _words_of
+    text = _words_of(understood)
+    return bool(text and _MY_OWN_ERRAND.search(text))
+
+
+# A debt that slipped is not a memory question: "My mate owes me 50 quid and it's been months."
+# then "He's not short of money, he just keeps forgetting." reached the memory-assessment card,
+# because the errand's own person ("mate") was still in the chat and a forgetting word was in
+# the line. The card is for the goings of a mind, not for money that has not arrived.
+_MONEY_OWED = re.compile(
+    r"\b(?:owes?|owed|owing|quid|pay (?:me )?back|paid back|repay|repays|borrowed|lent|"
+    r"debt|debts|in arrears|wont pay|won't pay|not paid me|still hasnt paid|still hasn't paid)\b")
+
+
+def _its_money_that_has_not_come_back(understood):
+    """True when the chat is about a debt. A `guard=` test."""
+    from .habits import _words_of
+    text = _words_of(understood)
+    return bool(text and _MONEY_OWED.search(text))
+
+
+_A_HABIT_THING = re.compile(
+    r"\b(?:names?|keys|glasses|wallet|purse|password|passwords|pin|birthdays?|anniversary|"
+    r"tablets?|medication|medicines|pills|appointments?|shopping|bills?)\b")
+
+
+def _a_habit_without_the_illness(understood):
+    """True when the line is the speaker's own habit that slipped. A `guard=` test.
+
+    Only the speaker's own: another person forgetting names or keys is part of the picture of
+    their memory ("my husband cant remember names" is the assessment card), while "i keep
+    forgetting names" is the trick for holding a new one.
+    """
+    from .habits import _words_of
+    text = _words_of(understood)
+    if not text:
+        return False
+    if _ANOTHER_ADULTS_MEMORY.search(text):
+        return False
+    return bool(_A_HABIT_THING.search(text)) and not _NAMES_THE_ILLNESS.search(text)
+
 
 # A definition is answered when the line asks what the thing is, not when it only says a
 # question word. The subject can arrive from the last turn ("i cant switch my brain off at
@@ -113,6 +212,45 @@ def _dinosaurs(memory, understood):
             "descendants, survived.")
 
 
+# The words a person uses to say they are tired, and nothing else. The tiredness key names
+# "most days" and "most weeks" in both of its parts, so a line that says one of them satisfied
+# the whole key on its own: "my neighbour parks across my drive most days" was answered with the
+# tiredness card, and so were ten other ordinary lines that end the same way. The guard asks the
+# line to say the feeling before the row can answer at all; a card about being tired is only
+# ever the answer to a line that says someone is tired.
+# One list, two readers: the guard below asks a line to say the feeling, and the row's own key
+# splices the same tuple into its subjects, so a phrasing added here covers both and the two can
+# never drift apart. The drift was the fault three readers found: `_TIRED` held `no energy` but
+# not `zero energy`, so a line that named the feeling lost the card as soon as the frequency
+# phrase stopped counting as a subject.
+_FEELINGS = ("tired", "knackered", "exhausted", "exhausting", "worn out", "drained",
+             "run down", "shattered", "no energy", "any energy", "falling asleep",
+             "more energy", "energy levels", "energy back", "get energy",
+             # the words people use for it in their own mouth, which the guard was missing
+             "zero energy", "low on energy", "wiped out", "zonked", "lethargic",
+             "no get up and go", "no oomph", "keep my eyes open", "yawning", "sleepy",
+             "shattered all the time", "dead on my feet")
+
+# The phrases the row's key takes from the same tuple, minus the ones another row already owns
+# ("sluggish" and "flagging" are the more-energy row's own words) and minus the bare words that
+# are a machine's as often as a person's ("exhausted" strips to "exhaust"; see the row's comment).
+_KEYED_FEELINGS = tuple(p for p in _FEELINGS if p not in (
+    "exhausted", "exhausting", "drained", "run down", "shattered", "tired",
+    "more energy", "energy levels", "energy back", "get energy", "falling asleep"))
+
+_TIRED = re.compile(r"\b(" + "|".join(_FEELINGS) + r")\b")
+
+
+def _names_the_feeling(understood):
+    """True when the line says being tired in some form, not only how often it happens."""
+    if not isinstance(understood, dict):
+        return False
+    # All three readings: the raw line keeps a missing space ("imtired all the time") inside
+    # "imtired", and only the cleaned text and the words have it as two.
+    parts = [understood.get("text") or "", understood.get("clean") or "",
+             " ".join(understood.get("words") or ())]
+    return any(_TIRED.search(str(part).lower()) for part in parts if part)
+
 def _any_hit(patterns, text):
     return any(re.search(pattern, text) for pattern in patterns)
 
@@ -185,13 +323,81 @@ def _a_person_who_falls(understood):
     return not STANDS_UP_THINGS.search(said)
 
 
+# A fall is a body going down to the floor. Everything else with "fall" in it is another
+# question, and each of these was answered with the falls review for the old and unsteady:
+#
+#     my boiler pressure keeps falling   -> a falls review, above "the second one is worth acting on"
+#     it keeps falling off the wall      -> the same, for a shelf
+#     my calendar keeps falling off the wall
+#     i nearly fell over laughing        -> the same, for a joke
+#     i keep falling behind              -> a lesson on gravity
+#     i keep falling for the wrong people
+#
+# Two shapes decide it, and neither is a word list of things that fall. A word in front of the
+# verb that is not a person is the thing that fell: "pressure", "calendar", "it". And a fall
+# with a place it is going, or a reason, is the phrase people write rather than the event:
+# "behind" is falling behind on work, "for" is falling in love, "laughing" is a joke.
+A_FALL_VERB = re.compile(r"\bf(?:all|alls|alling|ell|allen)\b")
+BEFORE_THE_FALL = re.compile(
+    r"([a-z']+)\s+(?:keeps?|kept|is|are|was|were|has|have|had|just|nearly|almost|"
+    r"keep|would|did|didnt|never|still|always)\s+(?:f(?:all|alls|alling|ell|allen))\b")
+NOT_A_FALL_PHRASE = re.compile(
+    r"\bf(?:all|alls|alling|ell|allen)\s+(?:(?:over|down|about|in|out)\s+)?"
+    r"(?:behind|for|short|through|flat|foul|silent|quiet|ill|asleep|pregnant|in love|"
+    r"into place|in place|laughing)\b")
+PEOPLE_WHO_ARE_THE_SUBJECT = PEOPLE_WHO_FALL.pattern
+
+# Words that sit in front of a verb without being the thing it happens to. Every one of these
+# was read as the subject on the first pass, and "my nan is 89 and keeps falling" lost the falls
+# card to an "and".
+NOT_THE_SUBJECT = frozenset("""
+    and but so then than that which who whom whose where when what why how if or nor yet though
+    although while until till since because as also still just now even ever never always
+    sometimes often usually again once only really nearly almost quite very too much more most
+    s t d ll re ve m
+    """.split())
+
+
+def _a_thing_falls_not_a_person(understood):
+    """False when the thing that falls is a thing, or the "fall" is a phrase.
+
+    The card is for a person going down, so this reads who or what is doing the falling. A
+    person word in front of the verb is a body: "my mum keeps falling" is the card. Anything
+    else in front of the verb - "pressure", "calendar", "it" - is the thing that fell, and
+    nothing here is about a person's balance. With no word in front of the verb the line keeps
+    the card, because "why do old people fall over" names nobody ahead of the verb and is still
+    the person this entry is for.
+    """
+    if not isinstance(understood, dict):
+        return True
+    said = " ".join(str(part or "") for part in ((understood.get("clean"),
+                                                  understood.get("text"),
+                                                  understood.get("raw")))).lower()
+    said = re.sub(r"[^a-z0-9' ]+", " ", said)
+    if NOT_A_FALL_PHRASE.search(said):
+        return False
+    for subject in BEFORE_THE_FALL.findall(said):
+        if subject in ("i", "we", "you"):
+            continue
+        if re.search(PEOPLE_WHO_ARE_THE_SUBJECT, subject):
+            continue
+        # a joining word is not what fell: "my nan is 89 and keeps falling" is still her
+        if subject in NOT_THE_SUBJECT:
+            continue
+        return False
+    return True
+
+
 def _a_fall_a_person_had(understood):
-    """The two fences in one, because an entry takes a single guard.
+    """The fences in one, because an entry takes a single guard.
 
     `_a_fall_and_not_a_row` keeps falling out with somebody off the card; `_a_person_who_falls`
-    keeps a building or a plant off it. Both have to say yes for the falls review to answer.
+    keeps a building or a plant off it; `_a_thing_falls_not_a_person` keeps a boiler's pressure,
+    a calendar on the wall and "falling behind" off it. All have to say yes for the falls review
+    to answer.
     """
-    return _a_fall_and_not_a_row(understood) and _a_person_who_falls(understood)
+    return (_a_fall_and_not_a_row(understood) and _a_person_who_falls(understood)
+            and _a_thing_falls_not_a_person(understood))
 
 
 # A mouth that grinds belongs to one of two people, and they need different answers. A baby's
@@ -340,9 +546,36 @@ def _night_waking(memory, understood):
     return WAKE_AT_NIGHT
 
 
+# The named moons are the ones a person can actually do something with: the four Galilean moons
+# of Jupiter and the one moon of Saturn anybody can see. Asking for the names was a shrug while
+# "how many moons does jupiter have" was answered.
+NAMED_MOONS = {
+    "jupiter": "Io, Europa, Ganymede and Callisto are the four worth knowing - the ones Galileo "
+               "saw in 1610 - and Europa is the one with an ocean under the ice",
+    "saturn": "Titan is the one worth knowing - bigger than Mercury, with lakes of methane - then "
+              "Enceladus, Rhea, Iapetus and Mimas",
+    "mars": "Phobos and Deimos, both small lumps of rock no more than twenty-odd kilometres "
+            "across",
+    "uranus": "Titania, Oberon, Umbriel, Ariel and Miranda, all named after Shakespeare and Pope "
+              "characters",
+    "neptune": "Triton, the big one, which orbits backwards and is probably a captured "
+               "Kuiper-belt object",
+}
+
+
 def _moons(memory, understood):
     """Answer for the planet named in the line, or the whole solar system."""
     clean = (understood or {}).get("clean") or ""
+    if any(word in clean for word in ("name", "called", "which moon", "which moons", "list")):
+        if "earth" in clean:
+            return ("Just the Moon, the fifth largest in the solar system and the only "
+                           "other world people have stood on.")
+        for planet in ("jupiter", "saturn", "mars", "uranus", "neptune"):
+            if planet in clean:
+                return NAMED_MOONS[planet] + "."
+        return ("Earth's is the Moon, Mars has Phobos and Deimos, and the four big Jovian moons "
+                "are Io, Europa, Ganymede and Callisto. Most of the hundreds the counts refer to "
+                "are unnamed rocks a few kilometres across.")
     if "most" in clean and not any(name in clean for name in ("earth", "mars", "jupiter")):
         return "Saturn has the most confirmed moons, more than 140, ahead of Jupiter at about 95."
     for planet in ("jupiter", "saturn", "uranus", "neptune", "mars", "earth", "venus",
@@ -885,6 +1118,9 @@ _TEEN_AGE_PHRASES = tuple(shape % age for age in _TEEN_AGES
                           for shape in ("i am %s", "im %s", "aged %s", "age %s",
                                         "%s year old", "%s years old"))
 _COLD_PREVENT = ("prevent", "preventing", "prevention", "ward off", "avoid", "avoiding",
+                # keeping colds away is the same prevention asked as a keeping
+                "keep away", "keeping away", "colds away", "stay well", "keeping well",
+                "not catch",
                 "coming on", "in its tracks", "catch", "catching", "not get", "dodge",
                 "before it",
                 # "how do i stop a cold" is the same question as "can i stop one coming on", and
@@ -1689,8 +1925,14 @@ _SMOKE_IS_NOT_A_HABIT = ("brisket", "ribs", "rib", "pork", "pulled pork", "chick
                          "wings", "sausage", "sausages", "salmon", "haddock", "mackerel", "trout",
                          "fish", "cheese", "tofu", "beef", "steak", "lamb", "duck", "meat",
                          "peppers", "aubergine", "eggplant", "mushrooms", "bacon", "gammon",
-                         "smoke a", "smoke some", "smoke my", "smoke the", "smoking a",
-                         "smoking some", "smoked it", "smoke ring", "wood chips", "bark",
+                         "ham", "hams", "almonds", "almond", "cashews", "nuts", "salt",
+                         # "smoke a" alone stood down a person who smokes: "i smoke a pack a
+                         # day" was the barbecue's, because the meat is the word that follows.
+                         # The food nouns above already do that job, so the phrase is gone and
+                         # the joint and the pipe are named instead.
+                         "smoke some", "smoke my", "smoke the", "smoking some", "smoked it",
+                         "smoke ring", "wood chips", "bark", "smoke a joint", "smoke a pipe",
+                         "smoking a joint",
                          "low and slow", "internal temp", "probe")
 
 
@@ -1961,11 +2203,30 @@ WHAT_IS_REMEMBERED = re.compile(
     r"anything|everything|dates?|numbers?|birthdays?|faces?|keys?|passwords?)\b", re.I)
 
 
+# "lose" is the same verb for the temper, the plot and the job, and the row above keys on it with
+# the asking words. So the object decides, the way it decides for a bereavement: a line that loses
+# something nobody remembers is somebody else's question. "how do i lose my temper less" and
+# "how do i lose the plot" were both given the science of forgetting.
+# The pounds are not here, and nothing is being preserved by leaving them out: a weight line asks
+# "how much", and `_an_amount_of_losing` already stands the row down for an amount of anything
+# nobody remembers, so "how much should i lose" and "how much weight should i lose" reach the
+# diet cards with or without a word for the pounds in this list. Which card wins
+# "how do i lose the last stone" is the diet rows' ordering to settle, not this row's.
+LOSING_SOMETHING_ELSE = re.compile(
+    r"\b(?:lose|loses|losing|lost)\s+(?:the\s+|my\s+|our\s+|your\s+)?"
+    r"(?:temper|patience|plot|mind|head|sleep|hair|voice|job|jobs|home|house|flat|"
+    r"game|games|money|deposit|match|matches|argument|arguments|bet|race)\b", re.I)
+
+
 def _an_amount_of_losing(understood):
     """False when the line asks how much is lost and never says what is remembered."""
     if not isinstance(understood, dict):
         return True
     text = str(understood.get("clean") or understood.get("text") or "")
+    if LOSING_SOMETHING_ELSE.search(text):
+        # "how do i lose my temper less" loses a thing nobody remembers, and the row that holds
+        # the answer for it is never the science of forgetting.
+        return False
     if not AN_AMOUNT_OF_IT.search(text):
         return True
     return bool(WHAT_IS_REMEMBERED.search(text))
@@ -2068,6 +2329,14 @@ _BABY_SLEEP_TAIL = ("What matters is feeding and nappies: six or more wet a day 
 _BABY_SLEEP_PLAIN = ("A baby sleeping a lot is usually fine: a six-week-old still sleeps 15 to 17 "
                      "hours a day, in stretches of two to four hours, and a growth spurt makes "
                      "them sleepier for a few days. " + _BABY_SLEEP_TAIL)
+# The tail is the newborn check - six wet nappies a day, steady weight gain, the health visitor if
+# they are hard to wake for a feed - and it sat on the end of every age band, so the answer for a
+# three year old read "A three to five year old sleeps 10 to 13 hours a night, and most have given
+# the nap up by five. What matters is feeding and nappies: six or more wet a day and steady weight
+# gain, and a call to the health visitor if they are hard to wake for a feed." A child of three
+# has no feeds to be woken for, and the check is a baby's: it stops at a year, where the health
+# visitor's weaning and weigh-in advice stops too.
+_BABY_SLEEP_TAIL_UNDER_MONTHS = 12.0
 
 
 def _the_age_in_months(said):
@@ -2110,9 +2379,21 @@ def _a_baby_sleep_reply(memory, understood):
             break
     if band is None:
         return _BABY_SLEEP_PLAIN
+    tail = _the_baby_sleep_tail(months)
     if _A_WORRY.search(said):
-        return ("A baby sleeping a lot is usually fine: " + band + ". " + _BABY_SLEEP_TAIL)
-    return (band[0].upper() + band[1:] + ". " + _BABY_SLEEP_TAIL)
+        # "A baby sleeping a lot is usually fine" is the reassurance for the parent of one; a
+        # child of a year and up is told the same thing without the baby.
+        opening = ("A baby sleeping a lot is usually fine: " if tail
+                   else "Sleeping a lot is usually fine: ")
+        return (opening + band + "." + tail)
+    return (band[0].upper() + band[1:] + "." + tail)
+
+
+def _the_baby_sleep_tail(months):
+    """The newborn feeding check for a child still on milk, and nothing from a year up."""
+    if months is not None and months >= _BABY_SLEEP_TAIL_UNDER_MONTHS:
+        return ""
+    return " " + _BABY_SLEEP_TAIL
 # A record about the body, asked as a question about the thing itself: "what's the strongest
 # bone in the body", "how many teeth do adults have", "why do we have fingerprints". Each is one
 # fact about a named thing, and they were punts - "That's beyond what I know well, sorry" - while
@@ -2298,6 +2579,36 @@ def _not_a_volcano_build(understood):
     # "what makes a volcano erupt" wears the same two words - makes, then volcano - and is the
     # geology: the question word in front of the verb is what tells the two apart.
     return bool(_VOLCANO_CAUSE.search(text))
+# A place-shaped ask is only half a question: "where should" on its own is "where should i stay
+# in rome" as much as "where should my screen be". The posture row held both halves of the ask
+# in its two groups - "where should" in the first and "should i" in the second - so every
+# "where should i <verb>" line satisfied both on its own question words, and eight lookups came
+# back as chair advice: "where should i stay in rome" was "Most bad posture is the chair and the
+# sitting still", and so were "where should i go in lisbon", "where should i park", "where should
+# i eat in york", "where should i keep my passport", "where should i hang a mirror" and "where
+# should i go for my birthday". Only "where should i put my desk" had been patched, by an avoid
+# word. The thing whose place is being asked about is what makes it a posture question, so the
+# row now asks for the kit - the chair, the screen, the seat - and not the verb "sit": "where
+# should i sit at a wedding" is a seat at a wedding, not a chair height.
+_SITTING_KIT = frozenset((
+    "chair", "chairs", "desk", "desks", "screen", "screens", "monitor", "monitors", "keyboard",
+    "keyboards", "mouse", "mousemat", "laptop", "workstation", "office", "seat", "seating",
+    "armrest", "armrests", "footrest", "posture", "slouch", "slouching", "setup",
+))
+
+_A_PLACE_SHAPED = ("where should", "where do i", "where does", "how high", "how low",
+                   "too low", "too high", "set up", "setting up", "set my", "should my")
+
+def _a_place_for_the_kit(understood):
+    """Whether a line that asks where something goes is asking about the thing you sit at."""
+    understood = understood or {}
+    clean = " ".join(str(understood.get("clean") or "").split())
+    if not clean:
+        return False
+    if not any(phrase in clean for phrase in _A_PLACE_SHAPED):
+        return True
+    return bool(set(clean.split()) & _SITTING_KIT)
+
 
 
 # "How long does ice take to melt" is asked for a time, and the why of melting is a different
@@ -2321,6 +2632,93 @@ def _how_long_ice_takes(understood):
             "whole tray left out takes a few hours. In a drink it is quicker still, a few minutes, "
             "because the drink is warmer than the freezer. ")
     return when + why
+
+
+# --- a bruise, leading with the part of the bruise that was asked about ----------------
+# One card answered every bruise line, and it opened with what a bruise is. So "how do i get
+# rid of a bruise faster" was told the definition and got to the cold pack third sentence in,
+# "why does my bruise hurt so much" the same, and "is it normal for a bruise to spread" nothing
+# at all, because the row held no word for spreading. STYLE.md wants the answer in the first
+# sentence, and the four bruise questions have four different first sentences.
+_BRUISE_PLAIN = (
+    "A bruise is blood leaking under the skin from small vessels broken by a knock, which is "
+    "why it turns purple, then green, then yellow as the blood is cleared away. It fades on "
+    "its own in one to two weeks, and a cold pack for twenty minutes with a cloth round it, a "
+    "few times in the first two days, keeps it from spreading and eases the throbbing. "
+    "If a bruise turns up with no injury behind it, or you bruise far more easily "
+    "than you used to, get it checked: that is worth a blood test.")
+
+_BRUISE_SPREADING = (
+    "A bruise does spread a little in the first day or two, as the blood that leaked tracks "
+    "along under the skin, and the colour drifting outwards is that blood being cleared rather "
+    "than a new injury. Cold for twenty minutes at a time, with a cloth round the pack, for the "
+    "first day or two, keeps the swelling down. Get it looked at if it is still growing after "
+    "two days, if it goes hard, tight and hot, or if it came up without a knock.")
+
+_BRUISE_FASTER = (
+    "Cold is what speeds a bruise up: a cold pack for twenty minutes at a time, a cloth round "
+    "it, a few times a day for the first two days, then time - and raise the limb on a cushion "
+    "when you sit. It still fades over one to two weeks through purple, green and yellow, and no "
+    "cream honestly changes that; arnica has little evidence behind it. Take paracetamol rather "
+    "than aspirin or ibuprofen, which thin the blood and can make the bruising worse.")
+
+_BRUISE_STAYS = (
+    "A bruise that is still there after two weeks has stopped being an ordinary bruise: blood "
+    "under the skin is cleared away in one to two weeks, so one that will not fade, or that keeps "
+    "coming back in the same place, is worth showing to a GP. The same goes for bruising that "
+    "arrives with no knock behind it, or bruising far more easily than you used to - that is a "
+    "blood test, and it is a quick one. While you wait, treat it as any bruise: cold for twenty "
+    "minutes at a time, a cloth round the pack, for the first day or two.")
+
+_BRUISE_HURTS = (
+    "A bruise hurts because the blood that leaked under the skin is pressing on the tissue "
+    "around it, and that tightness eases over the first day or two as the blood settles and "
+    "starts to clear. Cold for twenty minutes at a time, with a cloth round the pack, takes the "
+    "throb down, and paracetamol is the painkiller to reach for: aspirin and ibuprofen thin the "
+    "blood and can make the bruise bigger. Get it seen if the pain is worse rather than better "
+    "after two days, or the area goes hard, hot and tight.")
+
+# The order matters: a bruise that is spreading is the worry, whatever else the line asks.
+_BRUISE_ASKS = (
+    (("spread", "spreading", "spreads", "growing", "bigger", "larger", "getting worse"),
+     _BRUISE_SPREADING),
+    # a bruise that will not go is the one the GP sentence answers, and it also holds "fade",
+    # so it has to be read before the how-to-heal-it branch
+    (("wont go", "won't go", "not going", "doesnt fade", "doesn't fade", "not fading",
+      "still there", "still here", "keeps coming back", "keeps coming", "for weeks",
+      "months", "lasts", "lasting"),
+     _BRUISE_STAYS),
+    (("hurts", "hurt", "hurting", "pain", "painful", "throbbing", "sore", "aching", "ache"),
+     _BRUISE_HURTS),
+    (("faster", "quicker", "quickly", "quick", "get rid", "go away", "clear up", "heal",
+      "healing", "fade", "treat", "treatment", "help"),
+     _BRUISE_FASTER),
+)
+
+
+def _the_bruise_answer(memory, reading):
+    """The bruise card, opening with the part of the bruise the line asked about."""
+    text = " " + str(reading.get("text") or reading.get("clean") or "").lower() + " "
+    for words, answer in _BRUISE_ASKS:
+        for word in words:
+            if " " + word + " " in text.replace("?", " ").replace(".", " ").replace(",", " "):
+                return answer
+    return _BRUISE_PLAIN
+
+
+def _the_backs_are_a_body(understood):
+    """True unless every "back" in the line is a direction, so this card only answers a body.
+
+    "back" after a verb of moving is a direction: "im moving back in with my parents" was this
+    card, a paragraph about a strain of a body the line never mentioned. A phrase list in `avoid`
+    cannot do that job, because `avoid` is matched word by word: a line that owns a back and also
+    says "moved back" - "i moved back to the gym and my back hurts", "moving home has been hard on
+    my back" - was vetoed by the fence that was meant to protect the body it was talking about.
+    body.py already reads the word, so the fence is that reading inverted.
+    """
+    from .body import _back_is_a_direction
+
+    return not _back_is_a_direction(understood)
 
 
 ENTRIES = [
@@ -2560,7 +2958,8 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "hot water", "plumber", "kettle", "flask")),
     entry("moons", (("moon", "moons"), ("jupiter", "saturn", "mars", "earth", "venus", "neptune",
                                         "uranus", "mercury", "planet", "how many", "number of")),
-          _moons, ask=("how many", "number of", "what about", "which planet", "does")),
+          _moons, ask=("how many", "number of", "what about", "which planet", "does",
+                       "names", "name", "called", "list")),
     # Not a bare "and": every follow-up in the conversation has one in it, and "ok and what
     # should i wear" was answered with this entry's difference instead of the weather.
     entry("weather-climate", ("weather", "climate", ("difference", "between", "vs")),
@@ -2588,7 +2987,10 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
     entry("stroke-signs", (("stroke", "strokes", "mini stroke", "tia"),
                            ("sign", "signs", "symptom", "symptoms", "spot", "recognise",
                             "recognize", "first", "early", "warning", "how do i know",
-                            "how would i know", "what are", "sudden")),
+                            "how would i know", "what are", "sudden",
+                            # What a person asks when they want the signs rather than the
+                            # definition: "what should i watch for", "what do i look out for".
+                            "watch for", "watching for", "look out for", "watch out for")),
           "Think FAST: Face - ask them to smile, has one side dropped? Arms - can they raise both "
           "and hold them up? Speech - is it slurred or garbled? Time - if any of those is off, "
           "call 999 straight away and note when it started, because clot-busting treatment depends "
@@ -2898,11 +3300,18 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
     # The rest of the family: what a person actually asks about at the tap, in the kitchen and at
     # the pump. Each of these was a hedge, and "where does tap water come from" was worse than
     # that - the water words put it under the tradesman fallback, which offered a plumber.
+    # A water that is where it should not be is a fault in the house, not a lesson in the water
+    # cycle: "water is coming out of the bottom of my dishwasher" was answered "Rain soaks into
+    # the ground and runs into rivers" because "water" is the subject and "coming out of" is one
+    # of the ways of asking where a thing comes from. The appliances and the words for water on
+    # the floor stand this row down, and the fault rows answer it.
     entry("water", (("water", "tap water", "drinking water"), ORIGIN_ASK),
           "Rain soaks into the ground and runs into rivers, and your tap water is drawn from a "
           "river, a reservoir or a borehole, then filtered and treated so nothing can grow in it "
           "and pumped to the house under pressure. A town near hills is usually fed from a "
-          "reservoir; anywhere else it comes from a river or from deep underground."),
+          "reservoir; anywhere else it comes from a river or from deep underground.",
+          avoid=("dishwasher", "washing machine", "washer", "tumble dryer", "fridge", "freezer",
+                 "leaking", "puddle", "puddles", "flooded", "flooding")),
     entry("bread", (("bread", "loaf", "loaves"), ORIGIN_ASK),
           "Flour, water, salt and yeast. The yeast gives off gas as it feeds on the flour, and "
           "the gluten in the flour - stretchy because it is wheat - traps it as bubbles, which is "
@@ -3292,8 +3701,19 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           "warm and wet.",
           ask=("soil", "compost", "pot", "pots", "surface", "houseplant", "houseplants", "plant",
                "plants"),
+          # A seedling tray is the one place white mould is not harmless: damping off collapses
+          # the seedling at soil level and its own row says so. "my seedling compost is mouldy"
+          # was the damping-off answer on main f7fe9dda1 and reached this row once a new key word
+          # elsewhere changed a rarity point, which is the third time this week that adding a
+          # word has flipped a tie nobody meant to touch.
           avoid=PESTS_AND_CARE + ("bread", "jam", "wall", "walls", "bathroom", "shower", "ceiling",
-                                  "fridge", "food", "cheese", "fruit", "tennis", "badminton")),
+                                  "fridge", "food", "cheese", "fruit", "tennis", "badminton",
+                                  "seedling", "seedlings", "seed tray", "damping off", "damping",
+                                  # a pot of food is the gone-off answer, not the compost one
+                                  "curry", "stew", "soup", "sauce", "rice", "pasta", "noodles",
+                                  "risotto", "casserole", "chilli", "chili", "broth", "gravy",
+                                  "bolognese", "cooked", "leftovers", "leftover", "takeaway",
+                                  "slow cooker", "yoghurt", "yogurt")),
     entry("seeds-grow", (("seed", "seeds"), ("grow", "germinate", "sprout", "sprouting")),
           "A seed waits until it has water, warmth and oxygen, then its stored food fuels the "
           "first root and shoot. Once the shoot reaches light, the plant starts making its own "
@@ -3346,7 +3766,15 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           "Dreaming happens mostly in REM sleep, when the brain is nearly as active as when "
           "awake. Scientists think it helps sort memories and practise threats and feelings; "
           "there is no good evidence that dreams predict the future.",
-          avoid=("job", "career", "goal", "house", "holiday", "career")),
+          # A line that tells a dream is the dream, not the explanation of REM sleep: "i had a
+          # dream my mother died" was answered with "Dreaming happens mostly in REM sleep" - true,
+          # and no answer to the person in front of you. The dreams module has the scene; this
+          # entry keeps the questions about dreams in general ("why do i dream", "why do we dream").
+          avoid=("job", "career", "goal", "house", "holiday", "career",
+                 "i dreamt", "i dreamed", "i had a dream", "i had a nightmare", "nightmare",
+                 "nightmares", "last night", "dream about", "dreamt about", "dreamed about",
+                 "dreaming about", "dream of", "dreamt of", "dreamed of",
+                 "keep dreaming", "keeps dreaming", "kept dreaming", "still dreaming")),
     entry("yawn", ("yawn", ("why", "contagious", "happen", "cause", "tired")),
           "A yawn stretches the jaw and takes a deep breath, and it seems to help cool the brain "
           "and shift gears between waking and sleep. Yawning is contagious because seeing or "
@@ -3498,6 +3926,40 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
     # Brushing the hair had no answer of its own: "how often should i brush my hair" was cleaning
     # the hairbrush, then two minutes of fluoride toothpaste, and "is it bad to brush wet hair" was
     # a shrug. The brush is the subject and the hair is the object, and the two questions differ.
+    # Choosing a cut is not how often to have one, and the bot had nothing for it: "what should i
+    # ask for at the hairdresser" and "i want a change of hairstyle, what should i get" both
+    # reached "I don't know enough to answer that honestly", and "what haircut should i ask for"
+    # was answered with the six-to-eight-weeks rule, which is a different question. A cut you want
+    # to be different is a question about what to say in the chair.
+    entry("hair-ask-for",
+          (("haircut", "hair cut", "cut my hair", "cutting my hair", "hair", "hair style",
+            "hairstyle", "fringe", "bangs", "layers", "trim", "hairdresser", "hairdressers",
+            "salon", "barber", "stylist"),
+           ("what should i ask for", "what do i ask for", "what to ask for", "what shall i ask for",
+            "what should i get", "what should i do with", "what do i do with", "which cut",
+            "which haircut", "change", "changed", "different", "new style", "new look",
+            "suits me", "suit me", "look good", "looks good", "interview", "new job",
+            "grown out", "growing out", "bored of",
+            # one word each, because the thing asked for sits inside the frame: "what haircut
+            # should i ask for" has no phrase of this row's unbroken
+            "ask", "asking", "get", "want", "should", "style")),
+          ("Take in three photos of cuts on hair like yours - same thickness and wave, not a "
+           "different length - and ask for the nearest thing to one of them, because a photo says "
+           "more than any name for a cut. Then say what you hate about it now: too flat on top, "
+           "too heavy at the sides, frizzy ends. Ask for a dry cut if yours is curly, and if it is "
+           "a big change have it two weeks before the interview or the wedding, not the day "
+           "before, so it has time to settle."),
+          ask=("ask", "get", "should", "want", "change", "changed", "suits", "suit", "interview",
+               "job", "style", "look", "different"),
+          # the frequency, the colour, doing it at home and every hair fault have their own cards
+          avoid=("how often", "how long", "grow", "grows", "growing", "grew", "faster", "thicker",
+                 "at home", "myself", "cut it myself", "cutting it myself", "clippers",
+                 "grey", "gray", "colour", "color", "dye", "dyed", "dyeing", "bleach",
+                 "highlights", "regrowth", "wash", "washing", "shampoo", "conditioner",
+                 "dandruff", "frizz", "frizzy", "static", "greasy", "oily", "falling out",
+                 "thinning", "hair loss", "bald", "my dog", "my cat", "dog", "cat",
+                 "children", "child", "toddler", "baby", "beard")),
+
     entry("hair-brush",
           (("hair", "my hair", "brush my hair", "brushing my hair", "brushing hair",
             "hair brush", "comb", "combing"),
@@ -3510,6 +3972,9 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           "the shower is what actually gets tangles out.",
           ask=("how", "often", "should", "is it", "why"),
           avoid=("hairbrush", "hair brush", "clean", "cleaning", "wash the brush", "dog", "cat",
+                 # a wet head at night is the wet-hair row: "is it bad to sleep with wet hair"
+                 # was answered with how often to brush it
+                 "catch a cold", "make me ill",
                  # a colour, a dye job and its fading are the hair-colour rows in clothing:
                  # "how often should i colour my hair" was answered with how often to brush it
                  "colour", "color", "dye", "dyed", "dyeing", "bleach", "bleached", "fade",
@@ -3518,6 +3983,53 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "thinning", "bald", "wig", "dreadlocks", "curly", "frizzy", "straighten",
                  "cut", "cuts", "cutting", "haircut", "trim", "trimming", "scissors",
                  "clippers", "fringe", "layers")),
+    # A wet head at night is not a brushing question and not a cold: "is it bad to sleep with wet
+    # hair" got how often to wash it, and "will i catch a cold if i sleep with wet hair" was a
+    # search hedge. The honest answer is the whole answer - it does not make you ill, and it does
+    # snap the hair - so it is written out rather than left to a shrug.
+    entry("wet-hair-at-night",
+          (("wet hair", "hair wet", "wet head", "damp hair", "hair still wet", "dry my hair",
+            "wet hair before bed", "with it wet", "bed with it wet",
+            "to bed with it"),
+           ("sleep", "sleeping", "slept", "bed", "night", "bad", "ill", "cold", "catch",
+            "catch a cold", "catch a chill", "before bed", "should i")),
+          "No: wet hair does not make you ill. A cold comes from a virus, and being damp or cold "
+          "only nudges down what your nose fights it with, so nobody catches one from a wet head. "
+          "What a wet head does do is break the hair, because wet hair stretches and snaps where "
+          "dry hair gives, and a damp pillow is a night of rubbing. Towel it until it stops "
+          "dripping, do not rub hard, and a loose braid or a silk-ish pillowcase is enough if you "
+          "would rather not dry it properly. Dry it if you are going out into the cold with it, "
+          "for comfort, not for the cold.",
+          # brushing, cutting and washing the hair are their own rows, and a shower or a hairdryer
+          # is a different question again
+          avoid=("brush", "brushing", "comb", "cut", "trim", "haircut", "dye", "colour", "color",
+                 "how often", "wash my hair", "washing my hair", "shampoo my", "hair wash",
+                 "shampoo", "conditioner", "dryer", "hairdryer", "straighten",
+                 "curly", "frizz", "dandruff", "flakes", "thin", "thinning", "bald", "beard"),
+          bias=2),
+    # Washing yourself had no card of its own: "how do i wash myself" got the laundry lesson, and
+    # once the laundry row stands down for a part of a person the line was left to a shrug. The
+    # question is the same for every part, so one row answers all of them and the parts that do
+    # have their own rows - the hair, the face, the hands - stand it down with their own words.
+    entry("wash-a-body",
+          (("wash myself", "wash my body", "clean myself", "wash properly", "wash all over",
+            "wash my back", "wash my legs", "wash my feet", "wash my arms", "wash my chest",
+            "wash my neck", "shower properly", "wash under my arms", "how to wash"),
+           ("how", "should", "do i", "often", "properly", "best", "good")),
+          "Stand in a warm shower - warm enough to be comfortable, not hot enough to redden the "
+          "skin - and work from the top down: hair if you are washing it, then the face, then the "
+          "places that hold sweat, which are under the arms, under the breasts, the groin and "
+          "between the toes. Plain soap or shower gel on your hands, a flannel or a soft cloth is "
+          "all it needs, and a rinse of everything afterwards. Dry the folds properly rather than "
+          "rubbing, and a wash of the face, hands, feet and under the arms is enough on the days "
+          "in between a full shower.",
+          ask=("how", "what", "should", "can", "is it", "do i"),
+          # the hair, the face and the hands are their own cards, and a machine, a pet, a child
+          # or a load of washing is a different question again
+          avoid=("hair", "face", "hands", "car", "dog", "cat", "baby", "toddler", "child", "kids",
+                 "dishes", "windows", "washing machine", "clothes", "laundry", "duvet", "pillow",
+                 "trainers", "shoes", "brush", "brushes", "teeth", "bottle"),
+          bias=1),
     # Cutting the hair had no answer: "how often should i cut my hair" got the hair-washing
     # frequency, and split ends and how often to shower were both shrugs.
     # A bare "trim" in the key made this the answer to "how do i trim ..." of any kind, so the
@@ -3532,7 +4044,10 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           "split ends travelling up the hair shaft, which is what makes long hair look thin. A "
           "dry cut on wavy or curly hair is more honest about how it falls than a wet one.",
           ask=("how often", "often", "should", "when", "how do i", "how to"),
-          avoid=("cut myself", "cutting myself", "burn", "scalp", "scissors in", "dandruff",
+          # a cut the person wants to be different is `hair-ask-for`'s question, not a schedule
+          avoid=("ask for", "ask the", "which cut", "which haircut", "new style", "new look",
+                 "change of hairstyle", "different hairstyle",
+                 "cut myself", "cutting myself", "burn", "scalp", "scissors in", "dandruff",
                  # booking one is a booking question, not a how-often one: "how do i book a
                  # haircut" was answered with the six-to-eight-weeks rule
                  "book", "booking", "appointment", "reserve", "a slot",
@@ -3688,7 +4203,12 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "day trip", "day out", "worth visiting", "worth it", "things to do",
                  "what to do", "to do in", "to see", "see in", "sightseeing", "get to",
                  "how long to", "how long does it take", "roman baths", "city", "town",
-                 "weekend away", "stay in", "hotel", "travel", "visit")),
+                 "weekend away", "stay in", "hotel", "travel", "visit",
+                 # "should i replace my bath with a shower" is a builder's question, not a
+                 # question about how often to wash, and how often to wash is no answer to it
+                 "replace", "replacing", "replaced", "swap", "swapping", "swapped",
+                 "install a shower", "installing a shower", "fit a shower", "fitting a shower",
+                 "fitted a shower", "shower over the bath")),
     entry("grey-hair", (("hair",), ("grey", "gray", "white", "turn", "turning", "going",
                                      "coming out", "why")),
           "Hair gets its colour from melanin, and the cells that make it gradually stop as we "
@@ -3705,6 +4225,37 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "thinning", "thin", "shed", "shedding", "patch", "patches",
                  "roots", "regrowth", "cover", "dye", "dyed", "tint", "colour it",
                  "color it", "get rid", "rid of", "hide", "conceal", "blend")),
+    # The word "hair" is not always said: "im going grey", "im going grey at 30", "my beard has
+    # gone grey" and "my husband is going grey" are all the colour question, and the only card that
+    # claimed them was the safety one for a colour change, which told a person going grey to ring
+    # 999. That card now stands down for a hair word and for a grey that is nobody's body part; this
+    # is the card it hands those lines to. The body parts are the lines where a grey really is a
+    # shut-down - lips, face, gums, fingertips - and they keep the emergency card, so none of them
+    # may be answered with melanin.
+    entry("gone-grey", (("going", "gone", "goes", "turning", "turned", "turn"), ("grey", "gray")),
+          "Hair gets its colour from melanin, and the cells that make it gradually stop as we "
+          "age, so new hairs grow in without pigment. Genetics decides when that starts, and "
+          "stress can speed it up but does not turn a single hair white overnight.",
+          ask=("grey", "gray"), bias=2, slips=("grey", "gray"),
+          avoid=("lips", "lip", "face", "facial", "skin", "gums", "gum", "fingertips",
+                 "fingertip", "fingers", "finger", "toes", "toe", "hands", "hand", "feet",
+                 "foot", "clammy", "sweaty", "passed out", "pass out", "faint", "fainted",
+                 "unconscious", "unresponsive", "floppy", "limp", "breathing", "breathe",
+                 "ambulance", "999", "911", "nails", "nail", "tongue", "teeth", "eyes",
+                 "dog", "dogs", "cat", "cats", "puppy", "kitten", "horse", "pony", "pet",
+                 "paint", "wall", "walls", "ceiling", "sky", "cloud", "clouds", "weather",
+                 "car", "cars", "hair dye", "roots", "dye", "dyed", "tint", "cover",
+                 "colour it", "color it", "hide", "conceal", "blend", "wardrobe", "curtains",
+                 "washing", "laundry", "shirt", "shirts", "socks", "fabric", "wool",
+                 # A colour that has gone out of a garment is a wash question, and the fabric is
+                 # what says so: "my old jeans have gone grey" and "my black jeans have gone grey"
+                 # were the laundry card on main ("Wash dark things inside out, in cold water")
+                 # and became "Hair gets its colour from melanin" once this row existed. The whole
+                 # fabric family stands it down, not just a shirt.
+                 "jeans", "trousers", "denim", "top", "tops", "jumper", "jumpers", "cardigan",
+                 "hoodie", "dress", "dresses", "skirt", "coat", "jacket", "bedding", "sheets",
+                 "towels", "towel", "wash", "washed", "wash it", "faded", "fading", "bleach",
+                 "bleached", "faded black", "black clothes", "dark clothes")),
     entry("blood-red", (("blood",), ("red", "why", "colour", "color")),
           "Blood is red because of haemoglobin, the iron-containing protein in red cells that "
           "carries oxygen. Bright red blood is rich in oxygen; darker blood has given its oxygen "
@@ -3890,7 +4441,22 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                                               # bucket: the bucket alone clears the fence but not
                                               # the score, so key and bucket take the phrase pair.
                                               "what should i do", "what shall i do",
-                                              "should i do about", "do about")),
+                                              "should i do about", "do about",
+                                              # "cold medicine for adults" and "what is good
+                                              # for a cold" named the medicine and the goodness
+                                              # and neither verb, so both were a shrug and a
+                                              # punt: the thing you buy for a cold is this
+                                              # question asked as a noun
+                                              "medicine", "medicines", "medication",
+                                              "tablets", "tablet", "syrup", "lemsip",
+                                              "pharmacy", "chemist", "good for",
+                                              "what is good for", "whats good for",
+                                              # "how do i keep colds away this winter" is the
+                                              # prevention half asked as a keeping, and it was
+                                              # the frost card and then a punt
+                                              "keep away", "keeping away", "keeps away",
+                                              "colds away", "stay well", "keeping well",
+                                              "not catch", "fight off")),
           _cold_help,
           # "take" belongs to the medicine question; a cold shower, a cold beer and cold weather
           # are other uses of the same word.
@@ -3900,6 +4466,12 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  # answers were a coin flip away from this one
                  "fridge", "freezer", "frozen", "freezing", "radiator", "draught", "draft",
                  "window", "outside", "tap",
+                 # a house that is cold is a heating question, not an illness: "my boiler is
+                 # noisy and the heating is cold, what do i do" got the cold remedy paragraph
+                 # because "cold" was the whole of what it shared with this row, and the house
+                 # words are the same class as "radiator" above
+                 "heating", "boiler", "boilers", "thermostat", "central heating", "hot water",
+                 "plumbing", "flue", "immersion", "combi", "trv", "no heat", "stone cold",
                  "cold sore", "cold sores", "herpes", "lip", "lips", "blister", "blisters",
                  # cold hands, cold feet and feeling cold all the time are a circulation
                  # question, and the word "stop" is what was carrying them here
@@ -3949,7 +4521,11 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                # "about" forms, so the shortest question about a cold was a shrug while
                # "what can i do for a cold" - the same question - was answered here.
                "what should i do", "what shall i do", "should i do", "do about",
-               "what helps", "anything for"),
+               "what helps", "anything for",
+               "medicine", "medicines", "medication", "tablets", "syrup", "lemsip",
+               "pharmacy", "chemist", "good for",
+               "keep away", "keeping away", "colds away", "stay well", "keeping well",
+               "not catch", "fight off"),
           # "what should i take for a cold" was answered with a packing list, because "take" is
           # the verb of both questions. A cold in the line is the illness, so this entry wins the
           # tie and the travel table keeps the lines that are about a trip.
@@ -4033,10 +4609,20 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           ask=("why", "cause", "happen", "what")),
     entry("ears-pop", (("ear", "ears"), ("pop", "pops", "popping", "popped", "plane",
                                           "flight", "pressure")),
-          "Ears pop because the cabin pressure changes faster than the air pressure inside your "
-          "middle ear. Swallowing, yawning, or holding your nose and blowing gently pushes it back "
-          "into balance; a blocked nose from a cold makes it harder.",
-          ask=("why", "do", "does", "what")),
+          "Ears pop because the air pressure around you changes faster than the pressure inside "
+          "your middle ear - in a lift, or in a plane as it climbs. Swallowing, yawning, or holding "
+          "your nose and blowing gently pushes it back into balance; a blocked nose from a cold "
+          "makes it harder.",
+          # a bare report of the popping is the question too: "my ears pop when i swallow" has
+          # no why in it, and the pop itself is the ask
+          ask=("why", "do", "does", "what", "pop", "pops", "popping", "popped", "pressure"),
+          # The pop explains the crackle, not the pain: "my ear popped and now it hurts" is an
+          # earache, and the ache row is the one that answers it. Only the words that say the ear
+          # hurts, because a pop in a cold or a feverish ear is still a pressure question, and
+          # the ache row already stands down on "pressure" and "eustachian".
+          avoid=("hurt", "hurts", "hurting", "pain", "painful", "ache", "aches", "aching",
+                 "throb", "throbbing", "sore", "tender", "tenderness"),
+          bias=2),
     entry("brain-freeze", (("brain freeze", "brainfreeze", "ice cream headache"),
                           ("ice", "cream", "cold", "drink", "drinks", "eat", "eating", "why",
                            "get", "getting", "cause", "causes")),
@@ -4094,8 +4680,15 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                               "everyones birthdays", "everybodys birthdays",
                               "track of my friends birthdays"),
                              ("why", "cause", "causes", "happen", "happens", "what", "things",
-                              "everything", "names", "words", "so", "how", "way", "tips",
-                              "tip", "advice", "best way", "easiest", "keep track")
+                              "everything", "names", "words", "so")
+                             # The words that make a line a method ("how", "way", "tips",
+                             # "advice", "keep track") are not on this side either: with BLANK_WORDS
+                             # in the first group, a bare "how" in the second made the card the
+                             # answer to every follow-up that starts with one. "i want to lose a
+                             # stone" then "how long will it take" got the forgetting card instead
+                             # of the rate, and `tests/test_a_new_subject_ends_the_carry.py` went
+                             # red on main (#10560). The birthday how-to has its own row below,
+                             # which is what those words were added for.
                              + BLANK_WORDS),
           _forgetting,
           guard=_an_amount_of_losing,
@@ -4124,6 +4717,17 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "interest", "interested", "interesting", "enjoy", "enjoyed", "enjoying",
                  "enjoyment", "hobbies", "hobby", "motivation", "motivated", "bothered",
                  "to water", "to tidy", "to clean", "to put", "to send", "to ring",
+                 # "thats scary" said about somebody else's forgetting is the person's feeling, and
+                 # the chat module's warm line is the answer to a feeling; the science of memory
+                 # is not. The words are matched on the line as typed, so they only stand this
+                 # card down for a line that is nothing but the feeling.
+                 "scary", "scared", "scares", "frightening", "frightened", "terrifying",
+                 # A forgetting that is going on now ("lately", "these days", "for months") is the
+                 # person's own worry and the card for it is `own-memory-worry`; the mechanism is
+                 # the answer to "how does it work" and to nothing else.
+                 "lately", "recently", "these days", "nowadays", "for months", "for weeks",
+                 "for a while", "all the time", "constantly", "non stop",
+                 "terrified", "upsetting", "upsets",
                  # "im so lost" is a feeling, not a question about memory: the science card
                  # answered it with "Most forgetting is not a lost file: new memories fade unless
                  # they are slept on", where "i feel lost" was already heard. Phrases only, and
@@ -4585,7 +5189,12 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "tooth hurts", "my tooth", "dentist", "filling", "braces", "brace",
                  "broken bone", "break a bone", "broke my", "fracture", "sprain",
                  "muscle ache", "sore muscles", "strain", "cramp", "cut my finger",
-                 "numb", "numbness", "tingling", "nail")),
+                 "numb", "numbness", "tingling", "nail",
+                 # a line about cooking is about the dinner, whatever else it names: "whats a
+                 # nice thing to cook for a date" named a "date", the record row took it and had
+                 # nothing to say, and a candidate that says nothing is the search line.
+                 "cook", "cooking", "cooked", "bake", "baking", "roast", "recipe", "recipes",
+                 "dinner", "supper", "meal", "meals", "menu")),
     entry("heart-rate", (("heart", "heartbeat", "pulse"),
                         ("fast", "faster", "beat", "beats", "run", "running", "exercise",
                          "racing")),
@@ -4696,7 +5305,16 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           avoid=("pregnant", "pregnancy", "baby", "child", "kid", "ice", "dirt", "cigarette",
                  "smoke", "alcohol", "drink", "drug", "drugs", "was", "im", "i'm", "said",
                  "say", "told", "remind", "remember", "again", "did", "help", "helps", "relieve",
-                 "relief", "treat", "treatment", "cure", "stop", "prevent", "manage", "best"),
+                 "relief", "treat", "treatment", "cure", "stop", "prevent", "manage", "best",
+                 # "my mum is 80 next week and we want a cake, what should i bake" was answered
+                 # with what cravings mean, because "cake" is one of this row's words and "what"
+                 # is the other. A line that asks what to bake, or names the oven or a recipe, is
+                 # a baking line: what someone wants to eat is not what they are about to make.
+                 # The bare forms of bake are NOT here: a craving and a bake share both words in
+                 # "why do i crave cake when i bake bread", and fencing the verb took a craving
+                 # question to the sponge times. The asking phrase is what tells them apart.
+                 "oven", "recipe", "recipes", "icing",
+                 "decorate", "how long in the oven", "what should i bake", "what to bake"),
           ask=("want", "wants", "wanting", "crave", "craves", "craving", "cravings", "fancy",
                "feel like"),
           # a "why do i crave sugar" question wants the cause, not the cut-down plan, and the
@@ -4721,7 +5339,7 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           "a GP.",
           avoid=("shirt", "shirts", "clothes", "clothing", "fabric", "stain", "stains",
                  "detergent", "laundry", "wash", "washing", "rash", "chickenpox", "measles",
-                 "mole", "cancer", "bleeding", "am", "was", "im", "i'm", "said", "say", "told",
+                 "mole", "cancer", "bleeding", "am", "was", "said", "say", "told",
                  "remind", "remember", "again", "did",
                  # the other life of "spots": on a car, a wall, a carpet, a leaf. The goal verbs
                  # above are what a person says about their face, and a marketing or a paint
@@ -5107,7 +5725,11 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
             "wake up in the night", "wake in the night", "waking in the night",
             "wake up in the middle of the night", "middle of the night", "wake up several times",
             "waking up several times", "wake up every night", "waking up every night",
-            "cant get back to sleep", "can't get back to sleep", "cant get back off to sleep"),
+            "cant get back to sleep", "can't get back to sleep", "cant get back off to sleep",
+            # "how do i get back to sleep when i wake up" is the same night said as a question
+            # about the next time it happens, and it got "Sure. What have you tried so far?"
+            "get back to sleep", "get back off to sleep", "back to sleep",
+            "get to sleep and stay asleep"),
            ("2", "3", "4", "5", "2am", "3am", "4am", "5am", "night", "nights",
             "why", "how", "stop", "always", "every", "again", "back to sleep", "repeat")),
           _night_waking,
@@ -5387,7 +6009,17 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "wont heat up", "won't heat up", "doesnt heat", "doesn't heat",
                  "no heat", "stopped heating", "not getting hot", "not hot", "stays cold",
                  "cold food", "heats nothing", "not warming", "faulty", "repair", "mend",
-                 "dead", "died", "stopped working"),
+                 "dead", "died", "stopped working",
+                 # How a microwave works is a question about the appliance. A line that asks
+                 # about the food going into it - is it safe to reheat, does reheating kill the
+                 # bacteria, how hot should it be - is the reheating question, and this card
+                 # answered it with a magnetron and spinning water molecules: "is it safe to
+                 # reheat chicken in the microwave" got the physics and no word about the
+                 # chicken.
+                 "reheat", "reheats", "reheating", "reheated", "warm up", "warms up",
+                 "warming up", "warmed up", "heat up", "heats up", "heating up", "heated up",
+                 "leftover", "leftovers", "left over", "bacteria", "food poisoning",
+                 "piping hot", "safe to eat", "is it safe to eat"),
           # "why does my microwave heat unevenly" scored level with the summer answer on "why"
           # and "heat", and the tie used to fall this way only because "microwave" was a word
           # one entry in the domain used. The metal entry above is the second, so the tie needs
@@ -5672,13 +6304,22 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                       # "i have a bruise that wont go away" was a chat line: the key had "gone"
                       # but never "go away", so the one shape where a GP matters did not match
                       "go away", "wont go", "not going", "still there", "lasts", "lasting",
-                      "weeks", "months", "stay") + ASK_ABOUT),
-          "A bruise is blood leaking under the skin from small vessels broken by a knock, which is "
-          "why it turns purple, then green, then yellow as the blood is cleared away. It fades on "
-          "its own in one to two weeks, and a cold pack for twenty minutes with a cloth round it, a "
-          "few times in the first two days, keeps it from spreading and eases the throbbing. "
-          "If a bruise turns up with no injury behind it, or you bruise far more easily "
-          "than you used to, get it checked: that is worth a blood test."),
+                      "weeks", "months", "stay",
+                      # a bruise that is spreading is its own worry and the row held no word
+                      # for it: "is it normal for a bruise to spread" and "i have a bruise that
+                      # keeps growing" were both answered with nothing at all
+                      "spread", "spreading", "spreads", "growing", "bigger", "larger",
+                      "getting bigger", "keeps growing",
+                      # "a bruise that doesnt fade" had no ask word the row held either, and
+                      # fading is the shape of the line that ends with a blood test
+                      "fade", "fading", "fades", "doesnt fade", "not fading",
+                      # "bruise on my arm hurts", "i bruise really easily" and "my bruise is
+                      # going yellow" name the bruise and the thing they want explained, and
+                      # none of those words was in the row: all three fell to the chat lane
+                      "hurts", "hurt", "hurting", "pain", "painful", "sore", "throbbing",
+                      "aching", "easily", "easy", "yellow", "colour", "color", "turning")
+                     + ASK_ABOUT),
+          _the_bruise_answer),
     entry("heartburn", (("heartburn", "acid reflux", "reflux", "indigestion"),
                         ("night", "help", "get rid", "stop", "what", "antacid", "burning", "worse",
                          "relief",
@@ -5774,6 +6415,11 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           # the same complaint as "any energy". "how much energy does a kettle use" is a physics
           # line, and its own words keep it there.
           (("tired", "no energy", "any energy", "keep falling asleep", "tired even after", "knackered",
+            # The same question said as a shortage, which is how most people say it and which no
+            # card claimed: "im always low on energy in the afternoons" was answered with the
+            # hours a two-rate tariff is cheap in. The personal shapes are phrases; the bare
+            # "low energy" is a light bulb as often as it is a person.
+            "low on energy", "low in energy", "low of energy",
             "am exhausted", "i'm exhausted", "im exhausted", "feel exhausted", "feeling exhausted",
             "so exhausted", "always exhausted", "exhausted all the time", "exhausted after",
             # "why am i exhausted" is the plainest way the question is asked, and the phrase
@@ -5800,9 +6446,17 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
             # car exhaust and worn brake pads stay where they were.
             "often exhausted", "often tired", "often knackered", "often shattered",
             "often worn out", "often drained", "exhausted a lot", "tired a lot",
-            "knackered a lot", "a lot of the time",
-            "most days", "tired most days", "exhausted most days", "regularly tired",
-            "regularly exhausted", "keep feeling tired", "keep feeling exhausted"),
+            "knackered a lot",
+            # How often a thing happens is the shape of the answer, not the thing itself. "Most
+            # days" and "a lot of the time" stood here, in the list of subjects, and both are in
+            # the shape list below as well, so one phrase answered both halves of the key: "i walk
+            # the dog most days", "i go to the gym a lot of the time" and "i get home late most
+            # days" were all told how to fix constant tiredness. A line reaches this row now only
+            # when it says a tired word as well - the phrases kept below carry their own, and
+            # "tired most days" still matches, one list each.
+            "tired most days", "exhausted most days", "regularly tired",
+            "regularly exhausted", "keep feeling tired", "keep feeling exhausted")
+           + _KEYED_FEELINGS,
            ("normal", "why", "what", "how", "should", "worry", "worried", "fix", "wrong",
             "always", "constantly", "every day", "all the time", "all day", "lately", "for weeks",
             "for months", "doctor", "gp", "blood test", "sleep", "desk", "afternoon", "morning",
@@ -5877,7 +6531,8 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  # should i do" was answered with the two weeks of basics, which is the wrong
                  # subject. Bored of a thing belongs to the row about changing it, and a punt
                  # is better than a lecture about bedtimes.
-                 "tired of", "sick of", "bored of", "bored with", "fed up of", "had enough of")),
+                 "tired of", "sick of", "bored of", "bored with", "fed up of", "had enough of"),
+          guard=_names_the_feeling),
     entry("more-energy",
           # "how do i get more energy" was a search and "what should i eat to have more energy"
           # was a random dinner, because `meal-tonight` keys the ask and the energy words were
@@ -5897,7 +6552,14 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           bias=1,
           # A bill, a supplier, a drink and a workout all carry these words, and none of them is
           # the body's energy question.
-          avoid=("bill", "bills", "company", "companies", "supplier", "tariff", "solar",
+          # A contract, a meter or a tariff is a document and a bill is a bill: the utility
+          # reading of "energy" wins whenever one of these is in the topic. "how do i cancel my
+          # energy contract" and "how do i cancel my energy supply" were answered with this card,
+          # which tells somebody asking how to leave a tariff to go to bed on time.
+          avoid=("contract", "contracts", "cancel", "cancelling", "cancellation", "supply",
+                 "account", "accounts", "meter", "meters", "switch", "switching", "switched",
+                 "direct debit", "unit rate", "economy 7", "prepayment", "smart meter",
+                 "bill", "bills", "company", "companies", "supplier", "tariff", "solar",
                  "electricity", "gas", "price cap", "standing charge", "renewable", "kwh",
                  "energy drink", "energy drinks", "red bull", "monster", "drink", "drinks",
                  "exercise", "workout", "gym", "calories", "carbs", "protein shake",
@@ -5924,12 +6586,26 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
             # keeps forgetting things" are the same question about the same kind of adult, and
             # they were reaching the trick for remembering a new name instead.
             "husband", "wife", "partner", "spouse", "other half", "brother", "sister",
-            "aunt", "auntie", "uncle", "boyfriend", "girlfriend"),
+            "aunt", "auntie", "uncle", "boyfriend", "girlfriend",
+            # an adult who forgets is not always a relative: "my best friend seems forgetful
+            # lately" and "my neighbour keeps repeating himself" are the same question about the
+            # same kind of person, and the friend's line got no answer at all.
+            # a child is not: "my son keeps forgetting his PE kit" is a school morning, and the
+            # kit list answers it.
+            "cousin", "friend", "mate", "pal", "chum",
+            "neighbour", "neighbor", "colleague", "coworker", "boss", "flatmate", "housemate",
+            "carer", "nephew", "niece", "grandchild", "grandson", "granddaughter", "fiance",
+            "fiancee", "missus", "stepmum", "stepdad", "sister in law", "brother in law",
+            "daughter in law", "son in law"),
            ("forgetting", "forgetful", "forgets", "forgot", "memory", "repeats", "repeating",
             "confused", "confusion", "gets lost", "wandering", "same question", "forget things",
             "forgetting things", "forget names", "forgets names", "cannot remember",
             "cant remember", "can't remember", "cant recall", "keeps forgetting",
-            "forget words", "cant remember words")),
+            "forget words", "cant remember words",
+            # the slip said as losing something: "the wife keeps losing her glasses" is the same
+            # worry as "keeps forgetting her glasses", and only the forgetting words were here.
+            "losing her", "losing his", "losing their", "keeps losing", "loses things",
+            "losing things", "losing track", "loses her", "loses his", "loses their")),
           "Write down for a fortnight what they forget, and whether it is new. Slower recall of "
           "names is ordinary; asking the same question within minutes, getting lost on a familiar "
           "route, or forgetting something they have always done are not, and want a GP "
@@ -5940,11 +6616,20 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           # about the relative's memory: "i forgot to call my mum" was answered with the
           # memory-assessment card, which is the opposite end of the same word
           # (bot/compose/repair.py reads the deed and the composer answers it).
-          guard=lambda reading: not _owns_the_deed(reading),
+          guard=lambda reading: (not _owns_the_deed(reading)
+                                and not _a_habit_without_the_illness(reading)
+                                and not _the_speaker_forgot_to_do_it(reading)
+                                and not _its_money_that_has_not_come_back(reading)),
           # a funeral, a will or a hurt birthday is not a memory question
           avoid=("died", "passed away", "funeral", "burial", "cancer", "hospice", "birthday",
                  "christmas", "never calls", "wont call", "anniversary", "card", "present",
                  "hospital", "stroke", "dementia diagnosed", "care home",
+                 # A person who wanders is a safety question before it is an assessment one: the
+                 # card that says a lockable gate, an alarm and a note in the wallet is the answer
+                 # to "my mum has dementia and keeps wandering", and the assessment card was
+                 # taking the turn because it is ranked above it.
+                 "wandering", "wanders", "wandered", "gone missing", "went missing",
+                 "gone walkabout", "left the house at night", "found in the street",
                  # forgetting a dose is a medicines question, not a memory assessment: the lines
                  # that name the tablets go to missed-medication, which answers for the dose.
                  "tablet", "tablets", "medication", "medications", "meds", "medicine", "medicines",
@@ -5961,6 +6646,79 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           # "things") and answered it with how to set a reminder in Siri. A person and the
           # forgetting together are this row's question, so it speaks first.
           bias=2),
+    # The person's own memory, which had no card at all: "my memory is getting worse" was given
+    # a shower and an early night, "im getting forgetful" was asked how far they wanted to get,
+    # and "memory loss", "how do i know if its dementia" and "am i getting dementia" were a
+    # shrug. The entry above is about somebody else's memory ("what they forget"), so the worry
+    # in the first person is its own answer: the fortnight of notes, the ordinary at any age
+    # part, and the fixable causes a GP can check.
+    entry("own-memory-worry",
+          (("memory", "memories", "forgetful", "forgetfulness", "forgetting", "forget",
+            "dementia", "alzheimers", "alzheimer's", "recall", "remember", "remembers",
+            "remembering"),
+           ("my memory", "my memories", "my recall", "im getting forgetful",
+            "i am getting forgetful", "im so forgetful", "i am so forgetful", "so forgetful",
+            "getting forgetful", "getting worse", "worse lately", "getting bad",
+            "memory loss", "my memory is", "memory is getting", "memory problems",
+            "short term memory", "short-term memory", "losing my memory", "losing it",
+            "keep forgetting things", "cant remember things", "can't remember things",
+            "keep forgetting everything", "forgetting everything", "forgetting a lot",
+            "forget things", "cant remember things like i used to", "remember things like i used to",
+            "things like i used to", "not as good as it was",
+            "should i worry", "is it normal", "how do i know", "am i getting", "am i losing",
+            "could it be", "am i", "why am i", "worried", "worry",
+            # the same question asked as a fear or as a meaning: "im scared im getting
+            # alzheimers" and "does forgetting mean dementia" are both "is this the illness",
+            # and both were answered with a listening line because no phrase here fit them.
+            "scared", "frightened", "terrified", "im worried", "worried im", "scared im",
+            "getting alzheimers", "getting dementia", "mean dementia",
+            "does forgetting mean", "is forgetting", "does this mean", "does that mean",
+            "cant hold on to", "forgetting names", "forgets names", "forgetting words",
+            # "is losing keys a sign of dementia" is the illness question, and every phrase here
+            # is the shape of asking it rather than a wording somebody wrote down.
+            "sign of dementia", "sign of alzheimers", "signs of dementia", "a sign", "signs",
+            "symptom of", "symptoms of", "early signs", "first signs", "is it dementia",
+            "could it be dementia", "does it mean dementia", "start of dementia")),
+          "Note it down for a fortnight before you decide anything: what was forgotten, when, and "
+          "whether it was new. Forgetting names, or where the keys went, is ordinary at any age "
+          "and worse when you are tired, stressed, low or sleeping badly. What is not ordinary is "
+          "losing the thread of something you have always done - a recipe you know by heart, the "
+          "way to a place you drive every week, paying the same bill twice - and that is what "
+          "wants a GP. Book one if it is getting worse, if it came on suddenly, or if it frightens "
+          "you, and take the notes with you: a GP can check the causes that are fixable, which "
+          "include low B12, an underactive thyroid, blood pressure, sleep apnoea, depression and "
+          "the medicines you already take. Going early is not an overreaction; it is how the "
+          "fixable ones get found.",
+          # The errand card answers "i keep forgetting to pay a bill" and the name trick answers
+          # "i keep forgetting names": a deed that slipped is not the question this card is for.
+          guard=lambda reading: (_not_somebody_elses_memory(reading) and not _owns_the_deed(reading)
+                                and not _a_habit_without_the_illness(reading)
+                                and not _the_speaker_forgot_to_do_it(reading)
+                                and not _its_money_that_has_not_come_back(reading)),
+          avoid=("forgetting to", "forgot to", "forget to",
+                 # the forgetting is a symptom of the situation, not the subject: "i go bright red
+                 # in interviews and forget everything" is about the nerves.
+                 "interview", "interviews", "presentation", "presentations", "go red", "went red",
+                 "blush", "blushes", "go blank", "went blank", "nervous", "panic",
+                 "what causes", "why does", "why do we", "how does memory work", "sleep",
+                 "tired", "exhausted", "baby", "newborn", "pregnant", "menopause",
+                 # A "why" asks how memory works, and the explanation entry answers it with the
+                 # mechanism ("most forgetting is not a lost file"); revision asks how to hold
+                 # what is being learned, and the study card answers that with testing yourself.
+                 "why", "revise", "revising", "revision", "revised", "study", "studying",
+                 "studied", "exam", "exams", "coursework", "flashcards", "learn", "learning",
+                 "memorise", "memorize", "test myself",
+                 # A person who wants a better memory is asking for the training, not for a GP:
+                 # "how can i improve my memory" was answered with the fortnight of notes and
+                 # the assessment, when the card next door says to test yourself instead of
+                 # rereading. Wanting a sharper memory is not the same question as fearing one.
+                 "improve", "improving", "sharpen", "sharpening", "boost", "train my memory",
+                 "better memory", "memory better", "memory tricks", "techniques", "tips",
+                 "games for", "exercises", "get sharper", "keep my memory", "stay sharp",
+                 # and the person who says their memory is fine is asking about the word that
+                 # went, which is the explanation's subject, not this card's
+                 "memory is fine", "memory is good", "memory is ok", "memory is okay")),
+
     # The most common wording of the question is "why cant i sleep", and it matched nothing: the
     # entry next door keys the phrase "cant sleep", which is not in that line ("cant i sleep"),
     # and the ones about the racing mind are about the mind. So this asks for the "why" shapes and
@@ -6367,6 +7125,10 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  # "do i need waterproof trousers for walking" was getting the daily target
                  "waterproof", "waterproofs", "overtrousers", "trousers", "jacket", "coat",
                  "boots", "wellington", "wellies", "rucksack", "gaiters",
+                 # how many litres to carry is not how many steps to take: "how many litres do i
+                 # need for a long walk" was given the daily step target, on "how many" and
+                 # "walk". A quantity in litres or in water is travel.py's day-out answer.
+                 "litre", "litres", "liter", "liters", "how much water",
                  # "how many steps are there in the eiffel tower" is a count of stairs up a
                  # building, and it was getting the daily target: a place has a number, and a
                  # person has a habit, and only the second is this entry. The landmarks are
@@ -6560,7 +7322,14 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  # "where should i put my desk" is a room to lay out, not a screen height.
                  # "how high should i mount the tv" is the fixing, and a shelf is its own.
                  "put", "mount", "mounting", "shelf", "shelves", "bracket",
-                 ) + FEELING_WORDS),
+                 ) + FEELING_WORDS,
+          # "where should" is the place-shaped ask, and it needs the kit to go with it: see
+          # _a_place_for_the_kit. A country, a car park or a passport has no chair in it. A body
+          # that is short of sleep is not sitting badly either - "i keep nodding off at my desk"
+          # got the chair and the screen height, which answers somebody falling asleep with the
+          # height of a monitor.
+          guard=all_of(_a_place_for_the_kit, not_a_sleepy_body)),
+
     entry("blood-pressure-numbers",
           (("blood pressure", "hypertension", "systolic", "diastolic"),
            ("lower", "reduce", "bring down", "high", "diet", "exercise", "naturally", "how",
@@ -7367,6 +8136,13 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "re-freeze", "food", "meat", "chicken", "beef", "pork", "fish", "milk",
                  "bread", "cake", "cakes", "dough", "pastry", "rice", "soup", "stew",
                  "fridge", "pipes", "pipe", "boiler", "windscreen",
+                 # a person who is freezing wants the body's answer, not the ice tray's:
+                 # "my feet are freezing all the time" and "my hands are freezing" were the
+                 # three-to-four-hours-for-a-tray answer, because "freezing" is in the key and
+                 # "time" is all the ask side needs. The body's own row says it better.
+                 "my feet", "my foot", "my toes", "my hands", "my hand", "my fingers", "my finger",
+                 "feet", "foot", "toes", "toe", "hands", "hand", "fingers", "finger",
+                 "always cold", "freezing all", "i am freezing", "im freezing", "i feel freezing",
                  "car", "road", "roads", "grit", "salt", "black ice", "pond", "lake",
                  "leaves", "lawn", "hose", "tap", "milk bottle",
                  "ice cream", "ice pack", "ice packs", "ice bath", "ice rink",
@@ -7560,7 +8336,20 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           "a child is drinking less and has a fever that will not come down.",
           bias=1,
           avoid=("sore", "sores", "hands", "feet", "fingers", "toes", "war", "country",
+                 # A child who has gone grey, mottled or clammy has a circulation question, not
+                 # a virus: "my son is mottled and cold" was told a cold is a virus, and the
+                 # safety colour card is the answer to that line. Only the colours a cold never
+                 # makes are here - "pale" on its own is how people describe a sniffle.
+                 "mottled", "clammy", "grey", "gray", "ashen", "white as a sheet",
+                 "blue round the lips", "blue lips",
                  "countries", "weather", "room", "water", "outside", "garden", "morning",
+                 # "is it too cold to go for a bike ride" is the day's question: "cold" is the
+                 # temperature and "go" is the verb in the ask, so the illness duration answered
+                 # a line about a bicycle. Anything said of being out in it stays out of here.
+                 "too cold to", "too cold for", "cold enough", "cold outside", "out in the cold",
+                 "bike", "bikes", "bicycle", "cycle", "cycling", "ride", "walk", "walking",
+                 "hike", "picnic", "barbecue", "bbq", "parasol", "washing", "laundry",
+                 "line", "dog", "dogs", "baby out", "pram", "buggy",
                  # "how long does a cold beer last in the fridge" is a "cold" drink and a
                  # keeping question, not an illness: the food-keeping answers own it.
                  "beer", "lager", "wine", "milk", "juice", "brew", "coffee", "tea", "fridge", "freezer",
@@ -7993,7 +8782,11 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
     entry("statin-work",
           (("statin", "statins", "atorvastatin", "simvastatin", "rosuvastatin"),
            ("work", "how", "do i need", "need", "side effects", "side effect", "worth",
-            "should i take", "stop", "muscle", "safe")),
+            "should i take", "stop", "muscle", "safe",
+            # the same ask in the other shapes it is typed: "should i be on statins", "should i
+            # start statins", "should i keep taking them" were the "that's your call" line
+            "should i be on", "should i go on", "should i start", "should i keep taking",
+            "keep taking")),
           "A statin blocks the liver enzyme that makes cholesterol, so less LDL ends up in your "
           "blood: expect roughly a 30 to 50% fall in LDL depending on the dose, with the biggest "
           "benefit for anyone who has already had a heart attack or stroke. Muscle aches are the "
@@ -8002,7 +8795,11 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           "because the benefit is real. Don't stop one on your own: ask the GP or pharmacist.",
           # when in the day to take one is the timetable row's question ("when should i take
           # atorvastatin" is this card's "should i take" and nothing about the timetable)
-          avoid=("is it worth", "how much do statins cost", "when should i take", "when do i take",
+          # "is it worth" was fenced here, and "worth" is in this entry's own key: the line it was
+          # meant to keep out ("is it worth taking statins") is this card's question, and fencing it
+          # sent it to "Can't call that one for you". Only the price and the timetable stay out.
+          avoid=("how much do statins cost", "how much is a statin", "when should i take",
+                 "when do i take",
                  "when to take", "what time", "time of day", "at night", "in the evening",
                  "in the morning", "same time each day")),
     entry("bmi-healthy",
@@ -8016,8 +8813,18 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           "you want a real assessment ask the GP or a pharmacist.",
           avoid=("child", "children", "kid", "kids", "my son", "my daughter", "baby", "toddler")),
     entry("quit-smoking",
-          (("smoking", "smoke", "cigarettes", "cigs", "vape", "vaping", "nicotine"),
-           ("quit", "stop", "give up", "cut down", "how", "help", "best way", "cold turkey")),
+          (("smoking", "smoke", "smoked", "smoker", "smokers", "i smoke", "cigarettes",
+            "cigarette", "cigs", "vape", "vaping", "nicotine",
+            # "pack" alone is a suitcase ("pack a day", "packing for a weekend"), and the packing
+            # row was answering a smoker's line; the phrase is the cigarette one
+            "pack a day", "packs a day", "smoke a pack", "pack and a half"),
+           ("quit", "stop", "give up", "cut down", "how", "help", "best way", "cold turkey",
+            # "ive smoked for 20 years, how do i stop" is the same question in the words people
+            # actually use: the habit named as a history ("smoked for", "a smoker since", "30
+            # years", "20 a day") rather than as the phrase "quit smoking". Only the report was
+            # a shrug: the plain how-to lines were already answered.
+            "a day", "for years", "since i was", "i want to stop",
+            "i want to quit", "want to give up", "years")),
           "The most reliable way is nicotine replacement plus a stop date: patches for the "
           "background craving and a fast-acting gum, lozenge or spray for the moments it spikes, "
           "used together. Set a date in the next two weeks, tell people, and change the routines "
@@ -8031,7 +8838,11 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "smoked paprika", "smoked cheese", "barbecue", "bbq", "smoke alarm",
                  "brisket", "briskets", "meat", "ribs", "pork", "pastrami", "jerky",
                  "sausages", "smokehouse", "low and slow",
-                 "smoke from", "bonfire", "smoke house", "smoker",
+                 "smoke from", "bonfire", "smoke house",
+                 # "smoker" alone was standing down a person who smokes: "ive been a smoker for
+                 # 30 years" reached nobody. The barbecue machine is named by what makes it one.
+                 "pellet smoker", "electric smoker", "charcoal smoker", "smoker grill",
+                 "smoker box", "smoker tube", "use a smoker", "my smoker", "buy a smoker",
                  # it is someone else's cigarette: "set a stop date" tells the wrong person to
                  # stop, and a worried relative wants what to say, not a plan for themselves
                  "dad", "mum", "mother", "father", "husband", "wife", "partner", "girlfriend",
@@ -8207,7 +9018,12 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           # the screen-height answer on "desk" and "how". Only the fan words go here, because a
           # plain "how do i clean a desk" is answered as it was before, wrong or not, and taking
           # the cleaning words out too would turn that line into a hedge.
+          # "a proper sit down with my manager" is a meeting, not an armchair: the noun is what
+          # people call the conversation, and this answer was telling them the screen height.
+          # Phrases, and only the noun ones: the verb ("when i sit down") is a body in a chair.
           avoid=("dog", "cat", "horse riding", "baby carrier", "chair", "mattress",
+                 "a sit down", "sit down with", "sit down about", "sit down and talk",
+                 "sit down to talk", "proper sit down", "sit down meeting",
                  "fan", "fans", "ceiling fan", "desk fan", "pedestal fan", "blades", "grille",
                  # "sit out" is food on the side, not a person in a chair: "how long can meat
                  # sit out" was answered with the screen height, on "sitting" and "how". Phrases,
@@ -8239,6 +9055,9 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           # timing line as well and answered it with the cholesterol advice.
           # A bare "boiled" is not enough on its own: "are boiled eggs good for you" is this
           # question and must keep this answer. It is the time that gives the line away.
+          # And the verb tells a daily amount from a count in a dish or a count of days in the
+          # box: "how many eggs go in an omelette" and "how many days do eggs keep" are not this.
+          guard=not_a_count_for_the_box_or_the_dish,
           avoid=("how do i cook", "poach", "scramble", "how many minutes", "how many mins",
                  "how long", "minutes", "minute", "timer", "eggs for breakfast ideas",
                  # A shell that did not open is a food-safety question about that pan, not a
@@ -8340,8 +9159,9 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
                  "sit all day", "sitting all day", "sat all day", "sit at a desk",
                  "sitting at a desk", "sit at my desk", "sitting at my desk", "desk job",
                  "my son", "my daughter", "my husband", "my wife", "my mum", "my dad",
-                 "my partner", "pregnant"),
-          bias=1),
+                 "my partner", "pregnant",
+                 ),
+          guard=_the_backs_are_a_body, bias=1),
     entry("sprain-heal", (("sprain", "sprained", "twisted", "ankle", "wrist", "thumb"),
                           ("heal", "healing", "how long", "long", "recover", "recovery", "take",
                            "weeks", "better")),
@@ -8391,8 +9211,13 @@ entry("gas-flame-blue", (("gas flame", "gas hobs", "gas hob", "blue flame", "hob
           # headache entry, and a headache with a duration in it is the one that needs the GP
           # line rather than the water-and-a-dark-room one.
           bias=4),
+    # "gasping" and "gasp" are in the list because the sleep-apnoea row used to own that word
+    # wherever it appeared, and "im gasping going up the stairs" is an effort on the stairs, not
+    # a night-time airway: the second half of the key is what makes the gasp an effort, so a
+    # line with no stairs, hill or walk in it is left alone.
     entry("out-of-breath-stairs", (("out of breath", "breathless", "short of breath",
-                                    "puffed out", "puffed", "cant breathe"),
+                                    "puffed out", "puffed", "cant breathe",
+                                    "gasping", "gasp", "gasped"),
                                    ("stairs", "upstairs", "walking", "hills", "hill",
                                     "exercise", "everyday")),
           "Getting puffed on the stairs is usually fitness rather than illness, and it improves "
@@ -8795,6 +9620,12 @@ ENTRIES.append(entry(
            "aztec", "aztecs", "inca", "incas", "rome", "roman", "romans", "empire", "empires",
            "civilisation", "civilization", "dynasty", "regime", "soviet", "berlin wall",
            "government", "governments", "monarchy", "kingdom", "republic", "slave trade",
+           # and not every "fall" is a thing going down through the air: "i keep falling behind",
+           # "i keep falling for the wrong people" and "we didnt fall out" were all given the
+           # dropped-stone lesson. Falling behind is being behind on work, falling for somebody
+           # is love, and a falling-out is a row.
+           "falling for", "fell for", "fall for", "fall out", "falling out",
+           "fell out", "falls out", "falling behind", "fell behind", "falls behind",
            "my dad", "my mum", "my mother", "my father", "my nan", "my nana", "my grandad",
            "my grandma", "grandad", "grandma", "granny", "grandpa", "elderly", "oap",
            "unsteady", "balance", "his feet", "her feet", "on his feet", "on her feet",
@@ -8879,6 +9710,13 @@ ENTRIES.append(entry(
            "hair", "grass", "lawn", "wood", "metal", "budget", "pay", "job", "staff",
            "infected", "infection", "septic", "pus", "swollen", "red", "hot", "smell", "smells",
            "tetanus", "deep", "bleeding", "stitches",
+           # a machine that "cuts out" is stopping, not cutting anything: "why does my boiler keep
+           # cutting out" was answered "a cut stings because the broken skin leaves nerve endings
+           # exposed". The particles are phrases so a genuine cut keeps this answer - "i cut my
+           # finger on a tin", "why does a cut sting" - and cutting something out of paper, cake or
+           # a dress pattern is not in these shapes.
+           "cut out", "cuts out", "cutting out", "cut off", "cuts off", "cutting off",
+           "cut out on me", "keeps cutting out", "cutting out at", "cuts out when",
            # an animal scratches what it sits on, and a sting has nothing to do with that: "why
            # does my cat scratch the furniture" was answered "a cut stings because the broken skin
            # leaves nerve endings exposed". The shapes are phrases, not the bare animal, because a
@@ -9628,6 +10466,23 @@ ENTRIES.append(entry(
     ask=DEFINITION_ASK))
 
 ENTRIES.append(entry(
+    "watt-what",
+    (("watt", "watts", "kilowatt", "kilowatts", "kw", "kwh", "kilowatt hour",
+      "kilowatt-hour"),
+     ("what", "how", "mean", "meaning", "definition", "explain", "many", "much", "difference",
+      "work", "unit", "measure")),
+    "A watt is a rate of energy use: one watt is one joule every second, so a 10-watt LED left on "
+    "for 100 hours uses one kilowatt-hour, and a unit on your electricity bill is exactly that. "
+    "Watts are volts times amps, which is why a 2,400-watt kettle on 230 volts pulls about 10 "
+    "amps. A kilowatt is 1,000 watts, and a kWh is a kilowatt for an hour - the number the meter "
+    "counts, not the number on the label.",
+    avoid=("car", "cars", "battery", "batteries", "charger", "charging", "phone", "laptop",
+           "wiring", "wire", "shock", "fuse", "socket", "plug", "boiler", "heater", "bulb",
+           "light bulb", "microwave", "kettle"),
+    ask=DEFINITION_ASK + ("how many", "how much", "what is a", "whats a", "in a kilowatt",
+                          "per hour")))
+
+ENTRIES.append(entry(
     "circuit-what",
     (("circuit", "circuits", "electrical circuit", "electric circuit"),
      ("what", "how", "work", "works", "mean", "meaning", "definition", "explain", "complete",
@@ -10360,6 +11215,284 @@ ENTRIES.append(entry(
            # standing word. The cold is the garden's question.
            "frost", "frosts", "frosty", "freezing", "cold", "winter", "winters", "ice"),
     bias=1))
+
+
+# --- a bridge, and what kind it is ---------------------------------------------------------
+# The card above answers why a structure stays up, and it was all there was: "what is a bridge",
+# "what is a beam bridge", "what is a viaduct" and "what is a cantilever" were the honest shrug,
+# "how does an arch work" was answered as though the person had told the bot something, and two
+# lines got another subject's answer - "what is a suspension bridge" was the chemistry suspension
+# and "what is the longest bridge in the world" was the Nile. A bridge is a school-book subject,
+# and each kind of bridge is one fact, so the kind the line names picks the answer.
+STRUCTURE_ANSWERS = (
+    (("longest bridge", "longest bridges", "longest bridge in the world"),
+     "The longest bridge in the world is the Danyang-Kunshan Grand Bridge on the Beijing-Shanghai "
+     "high-speed railway, about 165 km, most of it on piers over land and water. The longest over "
+     "open sea is the Jiaozhou Bay Bridge at about 42 km, and the longest in Europe is the Crimean "
+     "Bridge at about 19 km. A long bridge is nearly always a run of short spans on piers rather "
+     "than one big span."),
+    (("suspension bridge", "suspension bridges"),
+     "A suspension bridge hangs its deck from two main cables slung over the towers and anchored "
+     "into the ground at each end, with vertical hangers dropping to the deck. The cables pull, "
+     "the towers carry that pull down, and the anchors take it at the ends, which is why it can "
+     "span 1 to 2 km - the Humber Bridge, the Golden Gate, the Akashi Kaikyo."),
+    (("cable stayed", "cable-stayed", "cable stayed bridge"),
+     "A cable-stayed bridge runs cables straight from the tower to the deck, a fan or a harp of "
+     "them, instead of one main cable with hangers. It needs no big anchorage at the ends, so it "
+     "suits spans of a few hundred metres - the Queen Elizabeth II Bridge at Dartford and the "
+     "Millau Viaduct are cable-stayed."),
+    (("box girder", "box girders", "box girder bridge"),
+     "A box girder is a beam made as a hollow box of steel or concrete, wide at the top to carry "
+     "the road and deep enough to be stiff: a hollow box is far stiffer than a solid bar of the "
+     "same weight, because the material sits out at the edges. Most long concrete bridges and "
+     "cable-stayed decks are a box girder, and the box is also where the cables and the air for "
+     "the inside run."),
+    (("pier", "piers"),
+     "A pier is one of the upright supports a bridge span rests on, and it is what the weight of "
+     "the span comes down through to the ground. In a river they are built inside a cofferdam or "
+     "a caisson, and the spans sit on bearings on top of them so the deck can expand and "
+     "contract without cracking."),
+    (("beam bridge", "beam bridges", "girder bridge", "girder bridges"),
+     "A beam bridge is the simplest kind there is: a slab or a girder laid across two supports. "
+     "The deck bends under the load, so the top is squeezed and the bottom is stretched, and the "
+     "deeper the girder the further it reaches. Cheap, quick, and right for a short span."),
+    (("arch bridge", "arch bridges", "how does an arch work", "how do arches work",
+      "why do arches work"),
+     "An arch bridge carries its load in compression: the weight comes down through the arch and "
+     "pushes outwards at the bottom, so the ground or the abutments at each end have to resist "
+     "that push. That is why stone and brick are so good in an arch - they take squeezing and not "
+     "stretching - and why the Iron Bridge at Coalbrookdale, the first big cast-iron arch, was "
+     "built in 1779 in the same shape."),
+    (("viaduct", "viaducts", "aqueduct", "aqueducts"),
+     "A viaduct carries a road or a railway across a valley on a run of arches or piers rather "
+     "than one span, which is what you need when the gap is long and the ground below is uneven - "
+     "the Ribblehead Viaduct has 24 arches. An aqueduct is the same structure carrying water: the "
+     "Romans built them on stone arches, and a canal aqueduct does the same job for boats."),
+    (("cantilever", "cantilevers", "cantilever bridge", "cantilever bridges"),
+     "A cantilever is a beam held at one end with the other end free: a balcony, a diving board, a "
+     "crane jib. Two cantilevers reaching out from opposite banks make a cantilever bridge, and it "
+     "can be built outwards from each side without scaffolding in the water - the Forth Bridge is "
+     "the famous one."),
+    (("expansion joint", "expansion joints"),
+     "Bridges have expansion joints because steel and concrete change length as they warm and "
+     "cool, and a long deck moves by several centimetres between winter and summer. The joint is "
+     "the strip that lets it happen without cracking the deck or shoving the abutments - the "
+     "toothed metal you hear clicking under the wheels - and it is also what lets the bridge move "
+     "in an earthquake."),
+    (("tunnel", "tunnels"),
+     "A tunnel under water is usually not bored through the seabed: most are immersed tubes - a "
+     "trench is dredged, boxed sections are floated out, sunk into it and joined, then covered "
+     "over, which is how the Oresund link and the Fehmarn tunnel were built. Boring is used where "
+     "the ground is good, as in the chalk under the Channel: a shielded machine cuts the face and "
+     "the lining goes up behind it as it goes."),
+)
+
+
+def _a_tunnel_named(said):
+    """The tunnel record or the Channel Tunnel, when that is what the line asks about."""
+    if " tunnel" not in said and " tunnels" not in said:
+        return None
+    if "channel tunnel" in said or (" channel " in said and ("how long" in said or "long" in said)):
+        return ("The Channel Tunnel is 50.5 km from end to end, with about 38 km of it under the "
+                "sea, and a train takes about 35 minutes from Folkestone to Calais. Three tubes "
+                "run side by side: two for trains and a smaller service tunnel between them, "
+                "bored through chalk that is soft enough to cut and stiff enough to stand while "
+                "you do it.")
+    if "longest" in said or "how long" in said:
+        return ("The longest railway tunnel in the world is the Gotthard Base Tunnel in "
+                "Switzerland at 57 km, opened in 2016; the longest road tunnel is the Laerdal "
+                "Tunnel in Norway at 24.5 km. The longest undersea one is still the Channel "
+                "Tunnel at 38 km under the water.")
+    return None
+
+
+PLACES_WITH_A_TALLEST = ("the world", "world", "london", "uk", "the uk", "britain", "great britain",
+                         "the united kingdom", "united kingdom", "england", "scotland", "wales",
+                         "british")
+
+
+# The bridge records the file holds are the world, Europe, Britain and the home countries. A
+# longest bridge asked about any other place gets the honest pass, not the world record.
+PLACES_WITH_A_LONGEST = ("the world", "world", "europe", "uk", "the uk", "britain",
+                         "great britain", "the united kingdom", "united kingdom", "england",
+                         "scotland", "wales", "british")
+
+
+def _the_place_asked(said, known=PLACES_WITH_A_TALLEST):
+    """The place a record line asks about, or None when the line names none."""
+    parts = said.split(" in ")
+    if len(parts) < 2:
+        return None
+    words = parts[-1].split()
+    for count in (3, 2, 1):
+        guess = " ".join(words[:count])
+        if guess in known:
+            return guess
+    return words[0] if words else None
+
+
+def _the_longest_bridge(said):
+    """The longest bridge in the place the line names, or None when it names no bridge."""
+    if " bridge" not in said and " bridges" not in said:
+        return None
+    if "longest" not in said and "biggest" not in said and "largest" not in said:
+        return None
+    place = _the_place_asked(said, PLACES_WITH_A_LONGEST)
+    if place and place not in PLACES_WITH_A_LONGEST:
+        return None
+    if " europe " in said and " world " not in said:
+        return ("The longest bridge in Europe is the Crimean Bridge at about 19 km, if you count "
+                "the crossing built in 2018; inside the European Union the longest is the Vasco "
+                "da Gama Bridge in Lisbon at about 17 km, opened in 1998. The Oresund link between "
+                "Denmark and Sweden is about 8 km of bridge and 4 km of tunnel.")
+    if any((" " + word + " ") in said for word in ("uk", "britain", "england", "scotland",
+                                                   "wales", "british")):
+        return ("The longest bridge in Britain is the Prince of Wales Bridge over the Severn, "
+                "about 5 km, which carries the M4; the Queen Elizabeth II Bridge at Dartford is "
+                "about 2.9 km and the Humber Bridge 2.2 km, though the Humber has the longest "
+                "single span in Britain.")
+    return None
+
+
+def _a_kind_of_bridge(memory, understood):
+    """The kind of structure the line names, or the plain bridge answer when it names none."""
+    said = _the_line(understood) if "_the_line" in globals() else ""
+    if not said:
+        said = " " + str((understood or {}).get("clean") or (understood or {}).get("text")
+                         or "").lower() + " "
+    named = _the_longest_bridge(said) or _a_tunnel_named(said)
+    if named:
+        return named
+    if "longest" in said or "biggest" in said or "largest" in said:
+        place = _the_place_asked(said, PLACES_WITH_A_LONGEST)
+        if place and place not in PLACES_WITH_A_LONGEST:
+            return None
+    if any(word in said for word in (" build ", " built ", " builds ", " building ",
+                                     " construct ", " constructed ")) and any(
+            (" " + word + " ") in said for word in ("bridge", "bridges", "viaduct", "flyover")) and any(
+            (" " + word + " ") in said for word in ("motorway", "motorways", "road", "roads",
+                                                    "railway", "railways", "rail")):
+        return ("A bridge over a motorway is built a piece at a time so the road can stay open: "
+                "the beams or the whole deck are put together beside it and lifted or slid into "
+                "place in overnight closures, or the deck is pushed out from one side with a "
+                "launching girder. The piers go in first, the beams land on them, and the road "
+                "below is only shut for the hours it takes to place each piece.")
+    if any(word in said for word in (" how long does it take ", " how long to ", " cost of ",
+                                     " how much does ")):
+        return None
+    if any(word in said for word in (" what does ", " what do ", " meaning ", " in english ")) and not any(
+            (" " + word + " ") in said for word in ("bridge", "bridges", "tunnel", "tunnels",
+                                                    "viaduct", "aqueduct", "span", "spans")):
+        return None
+    for names, answer in STRUCTURE_ANSWERS:
+        if any((" " + name + " ") in said for name in names):
+            return answer
+    return ("A bridge carries a load across a gap, and it does it in one of four ways: a beam "
+            "resting on a support at each end, an arch pushing the weight outwards into solid "
+            "ground, a truss or box girder making a beam stiffer, or cables hanging the deck from "
+            "towers - suspension or cable-stayed. Stone and brick work in an arch, steel works in "
+            "all four.")
+
+
+# --- the tallest building ---------------------------------------------------------------
+# "What is the tallest building in the world" was the honest shrug on main, and it is a school-book
+# question with one answer. The tallest in Britain is a different record, so the place in the line
+# picks it, and a line about why a tall thing stands up keeps the card above.
+TALL_BUILDINGS = (
+    (("shard",),
+     "The Shard in London is 310 m to the tip of its spire, 95 storeys, finished in 2012 - the "
+     "tallest building in the United Kingdom and, for four years, in western Europe. Its floor "
+     "plate is glass on all sides and the tower leans in as it rises, so the top storeys are "
+     "smaller than the bottom ones."),
+    (("burj khalifa", "burj"),
+     "The Burj Khalifa in Dubai is 828 m, 163 floors, finished in 2010, and it is the tallest "
+     "building in the world. It is concrete from top to bottom rather than steel, and it steps in "
+     "as it rises to break up the wind, which is what allows the height."),
+)
+
+# A place the file has no record for gets an honest pass rather than the world record: a confident
+# answer about New York or Manchester that names Dubai is worse than the shrug it replaces.
+def _the_tallest_building(memory, understood):
+    said = " " + str((understood or {}).get("clean") or (understood or {}).get("text") or ""
+                     ).lower() + " "
+    for names, answer in TALL_BUILDINGS:
+        if any((" " + name + " ") in said for name in names):
+            return answer
+    place = _the_place_asked(said)
+    if place and place not in PLACES_WITH_A_TALLEST:
+        return None
+    if ((" skyscraper " in said or " skyscrapers " in said)
+            and not any((" " + word + " ") in said for word in
+                        ("tallest", "highest", "biggest", "world", "london", "uk", "britain"))):
+        return ("A skyscraper is a very tall building, and the usual line is 100 m for one and "
+                "150 m for a supertall. Two things made them possible: a steel frame that carries "
+                "the weight instead of the walls, and the safety lift, so the building could go up "
+                "rather than out. The first was the Home Insurance Building in Chicago in 1885, "
+                "ten storeys; the Burj Khalifa is 163.")
+    if " london " in said and " world " not in said:
+        return ("The tallest building in London is The Shard at 310 m, finished in 2012, with 95 "
+                "storeys; One Canada Square at Canary Wharf, 235 m, was the tallest before it. "
+                "The tallest in the United Kingdom is still The Shard.")
+    if any((" " + word + " ") in said for word in ("uk", "britain", "england", "scotland",
+                                                   "wales", "british")):
+        return ("The tallest building in the United Kingdom is The Shard in London at 310 m, "
+                "finished in 2012. The tallest in Scotland is the Aughton Street tower in "
+                "Glasgow, and in Wales it is the Sky Plaza in Cardiff.")
+    return ("The tallest building in the world is the Burj Khalifa in Dubai at 828 m, 163 floors, "
+            "finished in 2010; Merdeka 118 in Kuala Lumpur at 679 m is second, and the Shanghai "
+            "Tower at 632 m third. The Burj was built that tall because the client wanted it to "
+            "be, and the limits above 500 m are the lifts - a single lift run gets too long - and "
+            "the wind, which is why the tower steps in as it rises.")
+
+
+ENTRIES.append(entry(
+    "the-tallest-building",
+    (("tallest building", "tallest buildings", "tallest tower", "tallest skyscraper",
+      "highest building", "biggest building", "burj khalifa", "burj", "shard", "skyscraper",
+      "skyscrapers"),
+     ("what", "whats", "what's", "which", "where", "how tall", "tall", "highest", "tallest",
+      "in the world", "world", "uk", "britain", "london", "explain", "tell me")),
+    _the_tallest_building,
+    # a line about why a tall thing stands up, or about the flat they live in, is another answer
+    avoid=("hold up", "holds up", "stay up", "stays up", "stand up", "stands up", "fall down",
+           "collapse", "sway", "wobble", "topple", "leaning", "my flat", "my office", "rent",
+           "my building", "upstairs", "neighbour", "neighbours", "lease", "cladding",
+           "fire", "fires", "insurance", "mortgage", "buy", "move", "moving"),
+    bias=1))
+
+ENTRIES.append(entry(
+    "a-kind-of-bridge",
+    (("bridge", "bridges", "suspension bridge", "beam bridge", "arch bridge", "girder",
+      "cantilever", "viaduct", "viaducts", "aqueduct", "tunnel", "tunnels", "expansion joint",
+      "expansion joints", "arch", "arches"),
+     ("what", "whats", "what's", "how", "why", "explain", "mean", "means", "built", "build",
+      "building", "work", "works", "working", "used for", "made", "made of", "difference",
+      "definition", "define", "longest", "highest", "biggest")),
+    _a_kind_of_bridge,
+    # The card above answers why a named structure stands up, and a line that says it is falling
+    # down or standing up is that question, not this one.
+    avoid=("hold up", "holds up", "hold it up", "stay up", "stays up", "standing up",
+           "stand up", "fall down", "falls down", "fell down", "falling down", "collapsed",
+           "collapse", "sway", "wobble", "topple", "lean", "leaning",
+           # an arch in a foot, a dental bridge and a game of cards are not a bridge
+           "foot", "feet", "fallen arches", "arch support", "arch supports", "insole",
+           "insoles", "plantar", "heel", "nose", "tooth", "teeth", "dental", "dentist",
+           "dentures", "dentistry", "bridgework", "implants", "crown", "crowns",
+           "card game", "cards", "bridge the gap", "bridge a gap", "loan",
+           "the gap",
+           # a network bridge, and the Romans, whose arch is a history line with its own card
+           "network", "networking", "ethernet", "router", "routers", "wifi", "wi-fi", "modem",
+           "switch", "lan", "vlan", "docker", "hypervisor", "virtual machine",
+           "roman", "romans", "roman britain", "the romans", "boudicca", "hadrians wall",
+           "hastings", "castle", "castles", "monastery", "cathedral", "cathedrals",
+           # a car's suspension, a tunnel in the wrist and a tunnel in the garden
+           "car", "rear suspension", "front suspension", "suspension arm", "suspension arms",
+           "suspension bush", "suspension bushes", "shock", "shocks", "spring", "springs",
+           "mot", "wheel",
+           "carpal", "wrist", "tunnel vision", "polytunnel", "wind tunnel", "garden",
+           "allotment", "greenhouse", "sewing", "fabric", "music", "song", "guitar", "piano"),
+    bias=1))
+
 
 # --- the school science definition that had no card ---------------------------------------
 # Twenty everyday "what is" questions from a school book, asked on main `e900c474`: eight were a
@@ -11259,8 +12392,11 @@ ENTRIES.append(entry(
     "In chemistry a suspension is solid bits mixed through a liquid that do not dissolve and settle "
     "out if you leave it: muddy water, or flour stirred into water. Shaking it mixes it again, "
     "which is how it differs from a solution.",
+    # a suspension bridge is a structure, not a mixture: the line named the subject and the
+    # chemistry card answered a different question about the same word
     avoid=_RECORD_WORDS + ("car", "bike", "bicycle", "fork", "shock", "shocks", "spring",
-                           "school", "work", "job", "driving", "licence", "license", "mot"),
+                           "school", "work", "job", "driving", "licence", "license", "mot",
+                           "bridge", "bridges", "viaduct", "tower", "towers", "span", "cables"),
     ask=("what", "mean", "meaning", "definition", "explain"), bias=2))
 
 ENTRIES.append(entry(
@@ -11475,6 +12611,66 @@ ENTRIES.append(entry(
     avoid=_RECORD_WORDS + ("relationship", "team", "argument", "blame", "politics", "party"),
     ask=_MEASURED, bias=2))
 
+# "does magnesium help you sleep" was the general sleep-habits list and "do sleep gummies work"
+# was a search hedge: the row that answers sleep at night never reads the name of a pill, so the
+# thing a person is holding in their hand was never the subject. The supplements people ask about
+# by name each have their own line, and the habit advice is the one thing all of them are worth.
+# The supplements answer is the same three facts in a different order, and a person who names
+# valerian should not hear about magnesium first. Two sentences have to do it: @clean-bench
+# measured the old paragraph at 159 words in six sentences, and STYLE.md asks for one to three.
+_SLEEP_MAGNESIUM = ("Magnesium has only a little evidence behind it, and only if you are short "
+                    "of it: the glycinate or citrate sorts, not the oxide.")
+_SLEEP_VALERIAN = "Valerian and the herbal teas do very little in trials."
+_SLEEP_GUMMIES = "The gummies are usually a low dose of melatonin or an antihistamine."
+_SLEEP_HABIT = ("What beats them is a steady wake-up time, no caffeine after early afternoon, "
+                "and getting up rather than lying there.")
+_SLEEP_CHILD = "For a child, ask a pharmacist or the GP first."
+_SLEEP_CHILD_WORDS = (" child", "kids", "kid ", "my son", "my daughter", "baby", "toddler",
+                      "teenager", "my boy", "my girl", " 8 year", " 9 year", " 10 year",
+                      " 11 year", " 12 year")
+
+
+def _sleep_supplements_reply(memory, understood):
+    """The supplement the line names is answered first; the habit is always the last word."""
+    clean = " " + (understood.get("clean") or understood.get("text") or "").lower() + " "
+    for word in _SLEEP_CHILD_WORDS:
+        if word in clean:
+            # a child's question is the pharmacist's before it is the supplement's
+            return " ".join([_SLEEP_CHILD, _SLEEP_MAGNESIUM, _SLEEP_HABIT])
+    if "valerian" in clean or "herbal" in clean or "tea" in clean:
+        order = (_SLEEP_VALERIAN, _SLEEP_MAGNESIUM, _SLEEP_GUMMIES)
+    elif "gumm" in clean or "melatonin" in clean or "antihistamine" in clean:
+        order = (_SLEEP_GUMMIES, _SLEEP_MAGNESIUM, _SLEEP_VALERIAN)
+    else:
+        order = (_SLEEP_MAGNESIUM, _SLEEP_VALERIAN, _SLEEP_GUMMIES)
+    return " ".join(order + (_SLEEP_HABIT,))
+
+ENTRIES.append(entry(
+    "sleep-supplements",
+    (("magnesium", "valerian", "sleep gummies", "gummies", "herbal sleep", "sleep supplement",
+      "sleep supplements", "supplements for sleep", "sleep aid", "sleep aids", "natural sleep",
+      "natural remedy", "what can i take to sleep", "anything i can take to sleep",
+      "something to help me sleep", "something to help me sleep", "sleeping remedy",
+      "sleep remedy"),
+     ("sleep", "sleeping", "asleep", "help", "helps", "work", "works", "take", "taking",
+      "bed", "night", "nights", "insomnia", "better", "anything", "supplement", "tablet",
+      "tablets", "pill", "pills")),
+    # "help you sleep", "good for sleep" and "helps me sleep" are how people ask about a bath, a
+    # walk and a book as well as a tablet, so those shapes are only this row's when the line also
+    # holds something you swallow: "is a hot bath good for sleep" and "does exercise help you
+    # sleep" were both the magnesium paragraph, and the bath and the exercise cards are better.
+    ask=("take", "taking", "tablet", "tablets", "pill", "pills", "supplement", "supplements",
+         "dose", "dosage", "gummy", "gummies", "magnesium", "valerian", "herbal", "remedy",
+         "remedies", "aid", "aids", "anything", "something", "worth", "try", "trying",
+         "help you sleep", "helps you sleep", "help me sleep", "good for sleep",
+         "good for sleeping"),
+    reply=_sleep_supplements_reply,
+    bias=1,
+    # the magnesium in food, a cramp, a child, a pregnancy and melatonin each keep their own row
+    avoid=("foods", "food", "diet", "rich in", "deficiency", "deficient", "how much magnesium",
+           "cramp", "cramps", "restless legs", "melatonin",
+           "pregnant", "pregnancy", "breastfeeding")))
+
 ENTRIES.append(entry(
     "vacuum-what",
     (("vacuum",), _MEASURED + ("physics", "space")),
@@ -11484,3 +12680,24 @@ ENTRIES.append(entry(
     avoid=_RECORD_WORDS + ("cleaner", "cleaners", "hoover", "bag", "filter", "robot", "cordless",
                            "buy", "best", "which"),
     ask=_MEASURED, bias=4))
+# --- a phrase from the news that people are handed without a number -------------------------
+# "what is a carbon footprint" was a search hedge. The commonest misunderstanding is that it is
+# mostly about flights and plastic bags, so the answer says what it counts and where the weight
+# actually sits.
+ENTRIES.append(entry(
+    "carbon-footprint",
+    (("carbon footprint", "carbon footprints", "my carbon footprint", "co2 footprint",
+      "carbon emissions", "my emissions", "greenhouse gas"),
+     ("what is", "whats", "what does", "mean", "means", "reduce", "lower", "cut", "shrink",
+      "how big", "size", "offset", "calculate", "work out", "biggest", "how much", "co2")),
+    "A carbon footprint is the total greenhouse gas a person, a household or a product causes, "
+    "counted in kilograms of carbon dioxide equivalent over a year. For a household in the UK it "
+    "is roughly 8 to 10 tonnes, and the weight is not where people think: heating and electricity "
+    "and car travel are the bulk of it, while a flight is big in one hit and a plastic bag is "
+    "almost nothing. The changes that move it most are the boring ones - a heat pump or good "
+    "insulation, less red meat and dairy, fewer and shorter flights, a smaller car - and offsetting "
+    "does not cancel them out.",
+    # a footprint in sand, a tyre footprint and a data footprint are other things
+    avoid=("footprint in", "sand", "tyre", "tire", "shoe", "data footprint", "building footprint",
+           "boot", "animal", "dinosaur", "imprint"),
+    bias=1))

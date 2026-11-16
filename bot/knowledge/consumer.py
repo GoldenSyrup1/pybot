@@ -19,6 +19,21 @@ ANSWERS = ("shopping", "money", "home-and-diy", "technology", "geography-and-tra
 # Every cancellation answer ends the same way, because the complaint that follows a cancellation
 # is nearly always the same one: a payment went out after the date the company confirmed. The
 # bank's direct-debit indemnity is the fastest route back, so it is written once here.
+# One way of saying "money left my account that should not have" is the mistake of overpaying:
+# overpaid, paid twice, double paid, paid too much. The words are one tuple because the same
+# wording is the duplicate-charge card for a shop, the recall card for a payment that went astray
+# and the overpayment card for a person or a trader, and a new way of saying it should reach all
+# three at once.
+PAID_BY_MISTAKE = ("overpaid", "overpay", "overpaying", "overpayment", "paid twice",
+                   "paid it twice", "paid the same again", "double paid", "double-paid",
+                   "double payment", "paid too much", "paid over the odds", "paid again",
+                   "sent it twice", "sent the same payment", "went out twice",
+                   "taken twice", "took it twice", "pays twice",
+                   # the same mistake with the payee in the middle: "i paid the plumber twice",
+                   # "i paid a tradesman too much". The phrase cannot span the words, so the
+                   # mistake word is keyed on its own and the payee is the second signal.
+                   "twice", "too much", "again", "double")
+
 AFTER_CANCEL = (" If a payment goes out after the date they confirmed, ring the bank and ask for "
                 "the direct debit indemnity, which has to put it back, and keep the email that "
                 "shows the date you cancelled.")
@@ -115,6 +130,36 @@ _A_MARK_THAT_CAME_WITH_IT = re.compile(
     r"dinged|cracks?|cracked|smashed|damaged|damage|mark|marks|marked)\b", re.I)
 
 
+# A judgement on a figure the person has already said: "is that too much", "was that a fair
+# price", "is 900 reasonable", "does that sound about right". The figure itself may be said in
+# the same line or in the one before, which is why this reads the shape of the ask and not the
+# number: the number is `bot/memory/price.py`'s business, and it reads the same words
+# (`judged()`), so a line of this shape belongs there rather than to the overpayment card.
+_A_FIGURE_JUDGED = re.compile(
+    r"\b(?:is|was|isn'?t|wasn'?t|does|did|would)\s+"
+    r"(?:that|this|it|£\s?\d[\d,.]*|\d[\d,.]*)\s+"
+    r"(?:about\s+|roughly\s+|really\s+|actually\s+|sound\s+|seem\s+)?"
+    r"(?:too\s+(?:much|dear|expensive|high|steep)|fair|normal|reasonable|sensible|steep|"
+    r"a\s+lot|about\s+right|right|ok|okay|good|decent)\b",
+    re.I)
+
+
+def _not_a_figure_judged(understood):
+    """Whether the line is asking whether a figure they have is a normal one.
+
+    The overpayment row is keyed on a mistake word beside a payee, and its mistake words include
+    `too much` and `twice`, which are also how people ask whether a price is high or how often
+    something is done. A judgement on a figure is the price reader's question - it answers with
+    the usual range for the thing - so this row stands down for it. A statement of the mistake
+    is not this shape: "i paid the plumber too much" has no figure being judged and keeps the
+    card, which is the line the row was written for.
+    """
+    text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not text:
+        text = str((understood or {}).get("clean") or (understood or {}).get("text") or "")
+    return not _A_FIGURE_JUDGED.search(text)
+
+
 def _a_mark_that_came_with_it(understood):
     """Whether the mark is the delivery's rather than a fault found later.
 
@@ -176,6 +221,24 @@ _A_HOW_TO_ASK = re.compile(
 # or repair" and "my washing machine is broken, repair or replace" were both told to take it back
 # inside 30 days, which is not what someone with a two-year-old phone is asking. Both word orders
 # are here, because "replace or repair" and "repair or replace" are written about equally.
+# "theyre saying its my fault" names no shop and no thing, and the blame could be a partner's:
+# the row answers when the line names the shop or the thing it is about.
+_A_A_SHOP_OR_A_THING = re.compile(
+    r"\b(?:shops?|stores?|retailers?|sellers?|company|currys|argos|amazon|ebay|john lewis|"
+    r"screwfix|phones?|laptops?|tvs?|telly|screens?|coat|coats|shoes|trainers|jumper|jumpers|"
+    r"dress|dresses|watch|watches|hoover|machines?|washing machine|dishwasher|fridge|freezer|"
+    r"oven|kettle|items?|product|products|goods|warranty|guarantee|receipt|refund|faulty|"
+    r"broken|wear and tear|worn out)\b", re.I)
+
+
+def _the_shop_or_the_thing_is_named(understood):
+    """False for a blame with no shop and no thing in it: that is not a sale yet."""
+    text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not text:
+        text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    return bool(_A_A_SHOP_OR_A_THING.search(text))
+
+
 _A_REPAIR_OR_REPLACE = re.compile(
     r"\b(?:repair or replace|replace or repair|fix or replace|replace or fix|fix it or buy|"
     r"repair it or buy|repair or buy|mend or replace|replace or mend|or a repair|"
@@ -193,12 +256,60 @@ def _not_a_how_to_about_their_own_thing(understood):
     return bool(_A_BUYING_LINE.search(text))
 
 
+_A_SAVING_ACT = re.compile(r"\b(save|saves|saving|savings|saved|save\s+up|saving\s+up|"
+                            r"put\s+away|putting\s+away|stash|stashing|set\s+aside|"
+                            r"how\s+do\s+(?:i|we)\s+(?:save|get)|best\s+way\s+to\s+save|"
+                            r"quickest\s+way\s+to\s+save)\b")
+_A_DEPOSIT_PAID = re.compile(r"\b(paid|pay|paying|payments?|bought|buying|by\s+card|"
+                             r"credit\s+card|debit\s+card|section\s+75|s75|chargeback|"
+                             r"refund|money\s+back|dealer|shop|seller|company|landlord)\b")
+
+
+def _not_saving_for_a_deposit(understood):
+    """False when the deposit is a savings goal rather than a payment already made."""
+    text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not text:
+        text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if not _A_SAVING_ACT.search(text):
+        return True
+    return bool(_A_DEPOSIT_PAID.search(text))
+
+
 def _not_a_repair_or_replace_decision(understood):
     """False when the line is deciding whether to mend the thing or buy a new one."""
     text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
     if not text:
         text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
     return not _A_REPAIR_OR_REPLACE.search(text)
+
+
+# An old machine being weighed up for repair or replacement is the lifespan table's question, and
+# the clock row kept answering it: "my washing machine is 8 years old and noisy, should i replace
+# it" got six years of shop rights. The guard above reads the shape of the ask, and the row it
+# guards is the ladder a shop owes; this one hands over only a machine that table has a row for -
+# a phone, a laptop and a telly are weighed up by their own answers, and standing the clock down
+# for them swapped one wrong card for another ("my telly is 7 years old, should i replace it" was
+# answered with the screen-time hours for a five year old).
+_A_MACHINE_THAT_WEARS_OUT = re.compile(
+    r"\b(?:washing\s+machine|washer|tumble\s+dryer|tumbler|dishwasher|fridge\s+freezer|fridge|"
+    r"freezer|oven|cooker|stove|hob|microwave|boiler|dryer|white\s+goods?|appliances?)\b", re.I)
+# and a claim on an old machine is still this row's question: "can i still claim for a six year
+# old washing machine" is what the clock is for.
+_A_CLAIM_ON_IT = re.compile(
+    r"\b(?:claim|refund|reject|rights|warrant\w*|guarantee|receipt|shop|retailer|seller|"
+    r"entitled|obliged|sold\s+as\s+described)\b", re.I)
+
+
+def _not_an_old_machines_repair_decision(understood):
+    """False when an old machine in the house is being weighed up for repair or replacement."""
+    if _not_a_repair_or_replace_decision(understood):
+        return True
+    text = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if not text:
+        text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    if _A_CLAIM_ON_IT.search(text):
+        return True
+    return not _A_MACHINE_THAT_WEARS_OUT.search(text)
 # A deposit held on a table, a slot or an appointment is not a deposit held on a house, and the
 # tenancy rows answer the house. "can i get my deposit back" on its own is a tenancy, so the two
 # booking rows ask this first: a person asking about a booking names the place or the thing they
@@ -539,6 +650,32 @@ def _the_employer_is_who_stopped_it(understood):
         if " %s " % word in text:
             return False
     return any(" %s " % word in text for word in EMPLOYER_WORDS)
+
+
+# The break clause is the tenancy's own question, and it holds the word "notice" because the
+# clause names how much the clause itself takes. The notice the tenant writes to end the tenancy
+# is a different question with its own row, and the two meet on the same words. Who is giving the
+# notice is the tell: "how much notice do i need to give my landlord" is the tenant's letter, and
+# "can my landlord stop me moving out early" and "my landlord says i cant leave early" are the
+# clause, so the row stands down on the giving and never on the landlord.
+_THE_NOTICE_IS_GIVEN = re.compile(
+    r"\b(?:give|gives|giving|gave)\b[^.?!]{0,30}\b(?:notice|keys)\b|"
+    r"\bnotice\b[^.?!]{0,25}\b(?:to give|i give|do i give|before i (?:go|leave|move)|"
+    r"letter|in writing)\b", re.I)
+
+
+# ...and the letter is written TO the landlord, so the line has to name them as well. The tenancy
+# words alone are not enough: "how much notice do i give to leave my flat" is the clause and has no
+# landlord in it, and standing this row down for it left the hedge answering.
+_NAMES_THE_LANDLORD = re.compile(r"\blandlords?\b|\blandlady\b|\bletting agents?\b", re.I)
+
+
+def _the_notice_is_theirs_to_give(understood):
+    """False when the line is the notice the tenant writes, which is the leaving-letter row."""
+    if not isinstance(understood, dict):
+        return True
+    text = str(understood.get("clean") or understood.get("text") or "")
+    return not (_THE_NOTICE_IS_GIVEN.search(text) and _NAMES_THE_LANDLORD.search(text))
 
 
 def _not_a_leave_question(understood):
@@ -1116,6 +1253,46 @@ _PURCHASE_IN_THE_LINE = frozenset("""
     """.split())
 
 
+def _not_a_buy_or_repair_choice(understood):
+    """False when the line is deciding what to spend on a machine they already own.
+
+    "should i get a new boiler or repair this one" and "should i replace my old boiler or repair
+    it" were both answered with the 30-day refund ladder, because `repair` and `or` are in the key
+    and no shop, receipt or claim is anywhere in the line: the question is the money rule for a
+    machine that has worn out (`home.py`'s `repair-or-replace`), not a remedy against a seller.
+    A line that does name the shop side keeps this row, so "my boiler broke after a month, can i
+    get a refund or a repair" is still the ladder's.
+    """
+    reading = understood if isinstance(understood, dict) else {}
+    text = " ".join(str(one) for one in (reading.get("words") or ())).lower()
+    if not text:
+        text = str(reading.get("clean") or reading.get("text") or "").lower()
+    if not _A_MACHINE.search(text) or not _BUY_OR_MEND.search(text):
+        return True
+    return bool(_A_CLAIM_AGAINST_A_SELLER.search(text))
+
+
+# The machines people decide to repair or replace: the same list home's rule answers for, and
+# a machine is what makes this a spend decision rather than a claim about goods.
+_A_MACHINE = re.compile(
+    r"\b(?:washing machine|washer|tumble dryer|dryer|dishwasher|fridge|freezer|oven|cooker|"
+    r"hob|microwave|vacuum|hoover|boiler|kettle|toaster|mower|lawnmower|strimmer|machine|"
+    r"appliance|white goods|laptop|computer|phone|tv|television|washer dryer)\b")
+# One side of the decision and the other in one line, in either order, with no shop in it.
+_BUY_OR_MEND = re.compile(
+    r"(?:\bnew\b|\breplac|\bbuy|\bbuying|\bscrap|\bupgrade)"
+    r"[^.?!]{0,40}?(?:\brepair|\bfix|\bmend)"
+    r"|(?:\brepair|\bfix|\bmend)[^.?!]{0,40}?(?:\bnew\b|\breplac|\bbuy|\bscrap|\bkeep)")
+# Anything that puts a shop, a receipt or a claim in the line: those lines keep the ladder.
+# The name is its own: `_A_SHOP_CLAIM` further down is the brake-cable guard's list, and it counts
+# "new" as a shop word, which would have kept the ladder on "should i get a new washing machine or
+# repair the old one" - the very line this fence is for.
+_A_CLAIM_AGAINST_A_SELLER = re.compile(
+    r"\b(?:refund|refunded|refunds|money back|shop|store|retailer|seller|sold|receipt|warranty|"
+    r"guarantee|rights|entitled|consumer|insist|claim|compensation|reject|faulty|delivered|"
+    r"order|ordered|bought|bought it|they|the company)\b")
+
+
 def _a_machine_that_stopped(reading):
     """False for a machine the line says has stopped, with nothing about buying it in the line."""
     words = [str(one).lower() for one in (reading.get("words") or ())]
@@ -1273,6 +1450,27 @@ _A_SHOP_CLAIM = re.compile(
     r"bought|buying|arrived|delivered|replacement)\b", re.I)
 
 
+# A row whose question is asked both ways round cannot owe one standing sentence. The
+# change-of-mind row answers "can i return shoes i bought online" with a yes and "is it too late
+# to send these back" with a no and its condition; a plain "Yes" on the second reads as "yes, too
+# late" against a card that says there are 14 days. So the row declares a function of the line,
+# the way cold-vs-flu's verdict is, and not a fixed string.
+_TOO_LATE = re.compile(
+    r"\btoo late\b|\bhave i left\b|\bleft it\b|\bout of time\b|\bmissed (?:it|the|my)\b")
+_STILL_TIME = re.compile(
+    r"\bstill time\b|\bcan i still\b|\bcan we still\b|\bam i still\b|\bstill able\b")
+
+
+def _change_of_mind_verdict(understood):
+    """The sentence the change-of-mind row owes, read off which way round the line asks."""
+    text = str((understood or {}).get("text") or "").lower()
+    if _TOO_LATE.search(text):
+        return "No, not if it is within 14 days"
+    if _STILL_TIME.search(text):
+        return "Yes, if it is within 14 days"
+    return "Yes"
+
+
 def _a_brake_cable_repair_ask(understood):
     """Whether a bicycle brake cable line is a repair question rather than a shop claim.
 
@@ -1293,6 +1491,20 @@ def _a_brake_cable_repair_ask(understood):
     if not any(word in text for word in ("bike", "bicycle", "cycle", "pushbike")):
         return True
     return bool(_A_SHOP_CLAIM.search(text)) or not _A_REPAIR_ASK.search(text)
+
+
+# A stretch of waiting is the second signal a tracking line needs, and people say it as a number:
+# "tracking says in transit for 5 days" was the same two words twice ("in transit"), which is one
+# signal and scored nothing, while "since tuesday" is a word and scored. Read as a shape, every
+# way of giving the wait counts - "for 5 days", "for two weeks", "for a fortnight".
+_A_WAIT = re.compile(r"\b(?:for\s+)?(?:\d+|a|an|one|two|three|four|five|six|seven|eight|"
+                     r"nine|ten|a few|several)\s+(?:days?|weeks?|months?)\b"
+                     r"|\b(?:a|one|two|three)\s+fortnight\b", re.I)
+
+
+def _a_stretch_of_waiting(said):
+    """True when the line says how long the parcel has been sitting where it is."""
+    return bool(_A_WAIT.search(str(said or "")))
 
 
 ENTRIES = [
@@ -1580,6 +1792,55 @@ ENTRIES = [
           # and to money's four rungs, because the ask is "do i have to pay". Two key words on a
           # line that names an accident in a shop is as clear as this gets, so the tie goes here.
           bias=2),
+    # A shop that blames the buyer: "the shop says i damaged it but i didnt" is not a parcel that
+    # never arrived, "the shop says i broke it" was answered with a week of cheap dinners, and
+    # "they say its wear and tear" got the shrug. The thing people are stuck on is the argument
+    # about who caused the fault, and the law settles it: for six months the shop has to prove the
+    # fault was not there when it sold it. The blame can arrive in any word - damaged, broke, wear
+    # and tear, my fault, not covered, was fine when it left - so the second group is the claim
+    # itself, not one wording of it.
+    entry("shop-blames-me",
+          (("shop", "shops", "store", "retailer", "seller", "company", "they", "them",
+            "bought it", "bought this", "where i bought", "the place i bought",
+            # the claim can come first and name no shop at all - "theyre saying its my fault" and
+            # "currys say i damaged the screen" - so the claim is a first-half word too, and the
+            # fault word is then the second half of the line
+            "says i", "said i", "say i", "says id", "said id", "says its", "said its",
+            "says that i", "said that i", "claims i", "claimed i", "claims that i",
+            "reckons i", "reckon i", "reckoned i", "insists i", "insist i", "insisted i",
+            "insisting i", "accused me", "accuses me", "accusing me", "blames me",
+            "blaming me", "blamed me", "wear and tear", "worn out", "my fault",
+            "my own fault", "not my fault", "misused", "abused it", "not covered",
+            "user damage", "physical damage", "caused by you", "was fine when",
+            "wasnt like that", "wasnt me", "not our fault", "dont believe", "dont accept"),
+           ("damaged", "damage", "damaged it", "damaged the", "broke", "broken", "broke it",
+            "broke the", "ruined", "ruined it", "screen", "phone", "laptop", "tv", "coat",
+            "shoes", "jumper", "dress", "wash", "washed", "machine", "item", "goods", "product",
+            "fault", "faulty", "warranty", "shop", "store", "retailer", "says i", "said i",
+            "wear and tear", "my fault", "it went", "went wrong")),
+          ("In the first six months the shop has to prove the fault was not there when it sold "
+           "it, so \"you damaged it\" is a claim it has to back up, not one you have to answer: "
+           "put it in writing, say you are rejecting it as not of satisfactory quality, and ask "
+           "for a full refund. Inside 30 days you can insist on the refund; after that they get "
+           "one repair or replacement, and if that fails or drags on you can ask for the money "
+           "back or a price reduction. Wear and tear is only a defence for something plainly "
+           "used hard - a zip that went on a month-old coat is not that. Keep the receipt, the "
+           "photos and the emails, and the small claims track is free online for anything under "
+           "\u00a310,000."),
+          # the accident in the shop is the other question: there the person agrees they did it
+          # and asks whether the shop can make them pay for it
+          avoid=("in a shop", "in a store", "in the supermarket", "on the shelf", "on display",
+                 "do i have to pay", "must i pay", "have to pay", "pay for it", "owe",
+                 # "what is wear and tear" asks what the phrase means, not for a way through
+                 # a shop's refusal: the definition is not this row's question
+                 "what is wear and tear", "what does wear and tear mean",
+                 "what counts as wear and tear", "what is classed as wear and tear",
+                 "whats wear and tear",
+                 # a tenancy deposit, a policy and a car dealer have their own answers
+                 "landlord", "landlords", "letting agent", "deposit", "tenancy", "flat", "rent",
+                 "insurance", "policy", "warranty", "car", "dealer", "garage", "van", "mot"),
+          guard=_the_shop_or_the_thing_is_named,
+          bias=2),
     # How long you have is the question people ask once the thing is a few years old, and it is
     # the one the 30-day ladder never answers: the clock, the reversal of proof and the six-year
     # limit are the answer. It also stops "the fridge is five years old can i still claim" from
@@ -1622,6 +1883,9 @@ ENTRIES = [
                  # get a new one" is the same decision, and the age is the half of it that says
                  # replace, so the clock has nothing to add.
                  "repair it or", "fix it or", "repair this or", "fix this or"),
+          # the same decision said any other way is read as a shape, not as another phrase in
+          # this list: the age is only half of the question, and the lifespan table answers it
+          guard=_not_an_old_machines_repair_decision,
           bias=3),
     entry("no-refunds-sign", (("no refunds", "no returns", "refund policy", "returns policy",
                                "exchange only", "can't return", "cant return",
@@ -1722,6 +1986,9 @@ ENTRIES = [
                  # "new car or keep repairing it" is a spend-more-or-spend-less question about
                  # something you already own: nothing here is being rejected for a refund
                  "new car", "keep repairing", "keep fixing", "or keep", "or scrap", "scrap it",
+                 # the same weighing-up about a car: "should i repair or sell my car" and "fix
+                 # it or sell it" are the repair table's, not the shop's ladder
+                 "repair or sell", "or sell it", "sell it or", "fix or sell", "or fix the car",
                  # The decision has two word orders and the list could only see the phrase it was
                  # given: "my phone screen is smashed, replace or repair" and "does my phone need
                  # a new screen or a repair" were told what the shop owes, which is not what
@@ -1732,6 +1999,8 @@ ENTRIES = [
                  "repair or replace", "replace or repair", "fix or replace", "replace or fix",
                  "mend or replace", "replace or mend", "or a repair", "new screen or",
                  "screen or a repair", "repair or a new", "new one or a repair"),
+          # The buy-versus-repair decision about a machine they own is home's money rule, not the
+          guard=_not_a_buy_or_repair_choice,
           # "can i insist on a refund" is the remedy question, and money's general refund
           # answer (a bare 30-day rule) now ranks above it: which remedy you get is the ask.
           bias=3),
@@ -1869,8 +2138,15 @@ ENTRIES = [
           avoid=("returned to me", "came back to me", "come back to me",
                  "i sent", "i posted", "sent it", "posted it")),
     entry("consumer-return-window", (("return", "returns", "send back", "send it back", "take back",
-                             "take it back", "money back", "refund"),
+                             "take it back", "money back", "refund",
+                             # "how long do i have to take something back" says the object in
+                             # between, and it was answered with "whichever date it is, three
+                             # things settle it" - the right answer was already here
+                             "take something back", "take that back", "take the thing back",
+                             "bring it back", "give it back", "have it back", "swap it"),
                             ("how long", "how many days", "how much time", "time limit",
+                             "how long do i have", "how long have i got", "how long can i",
+                             "how long to", "go back with", "take it back by",
                              "deadline", "return window", "returns window", "refund window",
                              "time window",
                              "window to return", "window for a return", "window for returns",
@@ -2018,7 +2294,14 @@ ENTRIES = [
                  # a deposit held by a landlord is the tenancy answer: "claim back my deposit"
                  # matched "deposit" and "claim" here and got the Section 75 rule
                  "landlord", "landlady", "tenancy", "tenant", "letting agent", "rent",
-                 "moving out", "moved out", "end of my tenancy", "flat")),
+                 "moving out", "moved out", "end of my tenancy", "flat"),
+          # A deposit that has not been paid yet is a savings goal, not a card payment: "what is
+          # the best way to save for a house deposit" matched "deposit" and "what is" here and
+          # was told about Section 75. It is a guard and not an avoid word, because an avoid
+          # phrase is read loosely - any of its words, in any order - so "house deposit" stands
+          # the row down for "how much is a house deposit" as well, and the rows that answer the
+          # savings question stopped winning the line at all.
+          guard=_not_saving_for_a_deposit),
     entry("duplicate-charge", (("charged twice", "charged me twice", "double charged",
                                 "duplicate charge", "two payments",
                                 # taken twice from a card or an account, rather than charged
@@ -2060,7 +2343,12 @@ ENTRIES = [
           "arrived damaged or were not what was described. Most banks take claims up to 120 days "
           "from the payment, and it's the route for debit cards under £100."),
     entry("parcel-missing", (("parcel", "package", "delivery", "order", "courier", "locker",
-                              "inpost", "parcel box", "pick up point"),
+                              "inpost", "parcel box", "pick up point",
+                              # who brought it is named instead of the thing: "the driver left it
+                              # with a neighbour without asking" was only sympathy, because no
+                              # word of the line was a parcel.
+                              "driver", "the driver", "delivery driver", "courier driver",
+                              "postman"),
                              ("not arrived", "never arrived", "lost", "missing", "didn't arrive",
                               "didnt arrive", "late", "tracking", "delivered", "stolen",
                               "stole", "stolen it", "nicked", "someone took", "taken from",
@@ -2098,6 +2386,47 @@ ENTRIES = [
                  "i sent", "we sent", "i posted", "we posted", "i shipped", "i sold",
                  "parcel i sent", "parcel i posted", "the one i sent", "i have sent",
                  "i've sent", "my buyer", "buyer says")),
+
+    # A line about the tracking page names no parcel at all, and the page is where a person looks
+    # first: "tracking hasnt moved", "the tracking hasnt updated in a week", "it says out for
+    # delivery since tuesday" and "the tracking number doesnt work" were a "I'm listening - say
+    # more if it helps." or the whole missing-parcel speech. The status phrasing is a key word
+    # here as well as the page, so the same thing said without the word "tracking" is still this
+    # row, and the answer is about the page rather than about the parcel being lost.
+    entry("tracking-not-moving", (("tracking", "track and trace", "a tracking", "the tracking",
+                                   "my tracking", "tracking page", "tracking number",
+                                   "courier app", "the app says", "the website says",
+                                   "out for delivery", "in transit", "at the depot",
+                                   "been scanned", "no scan"),
+                                  ("not moved", "hasnt moved", "hasn't moved", "not updated",
+                                   "hasnt updated", "hasn't updated", "no movement",
+                                   "no update", "stuck", "not changed", "nothing since",
+                                   "same for", "since monday", "since tuesday", "since friday",
+                                   "for a week", "for days", "for three days", "for 3 days",
+                                   "for two days", "out for delivery", "in transit",
+                                   "at the depot", "not working", "doesnt work", "doesn't work",
+                                   "invalid", "not recognised", "not recognized", "wrong number",
+                                   "no information", "still says")),
+          # Two sentences, not four: a longer answer leaves sentences over, and the follow-up to
+          # it ("what do i do") was given one of them - "Keep a screenshot of each update." - as
+          # though that were the answer.
+          "The tracking page belongs to the courier, but the parcel is still the seller's to "
+          "deliver: ask the shop in writing for the current status and a new date, quoting the "
+          "order number and the day it last moved, and keep a screenshot of each update. Once the "
+          "promised date has passed, or the page has not moved for a week or more, ask for a "
+          "replacement or a refund; if the number is not recognised, ask them for the right one, "
+          "because that is theirs to fix.",
+          shape=(_a_stretch_of_waiting,),
+          bias=1,
+          # "says" is in the ask because the page is quoted: "tracking says in transit for 5
+          # days" names no other framing word, and the row was passed over for that alone.
+          ask=("my", "the", "it", "its", "i", "we", "they", "is", "does", "has",
+               "says", "said", "saying"),
+          # a parcel they sent is the seller's side of it (see parcel-missing), a damaged one is
+          # the damage card, and "track" on its own is a spending or a cycle question
+          avoid=("i sent", "we sent", "i posted", "we posted", "i sold", "my buyer",
+                 "buyer says", "damaged", "broken", "smashed", "battery", "lost my job",
+                 "interview", "my spending", "my period", "my cycle", "track my steps")),
 
     # a driver who damages the place is not a missing parcel or a damaged one: the parcel
     # arrived, and what is broken is the wall, the gate or the car
@@ -2162,6 +2491,47 @@ ENTRIES = [
           # entry only answers when the line actually asks for something back.
           ask=("claim", "compensation", "refund", "money back", "delay repay", "entitled",
                "owed", "rights", "can i get", "anything i can do", "what can i do")),
+    # A late train has Delay Repay; a bus that keeps being cancelled had nothing, so "the bus has
+    # been cancelled three mornings running and i've been late twice, how do i complain" was a
+    # shop complaint ("what you bought, when, what went wrong") that names nobody a bus passenger
+    # can write to. The route for a bus is the operator first, then the watchdog and the Traffic
+    # Commissioner, and the same answer covers a bus driver and a stop that is never served.
+    entry("bus-service-complaint",
+          (("bus", "buses", "bus company", "bus operator", "bus driver", "bus stop",
+            "bus route", "bus service", "the bus", "my bus", "coach", "coach company",
+            "school bus", "shuttle"),
+           ("complain", "complains", "complaining", "complaint", "complaints", "who do i",
+            "report", "refund", "compensation", "cancelled", "canceled", "cancellation",
+            "keeps getting cancelled", "keeps being cancelled", "always late", "late again",
+            "never turns up", "didnt turn up", "didn't turn up", "never came", "reliable",
+            "unreliable", "missed three", "late twice", "who to", "what can i do")),
+          ("Complain to the bus operator first, in writing, with the route number, the stop, the "
+           "date and the time of each failure: their customer services address is on the "
+           "timetable or their website, so ask for a reply within 10 working days and keep the "
+           "reference. If it goes on, a passenger body takes it up free - Bus Users UK outside "
+           "London, London TravelWatch inside it - and the Traffic Commissioner registers repeated "
+           "failures, which is what actually moves a timetable. A route the council pays for goes "
+           "to the council's transport team as well, because they hold the contract.",
+           "Put it in writing to the operator with the route, the stop and the dates, and give "
+           "them 10 working days: most refund or explain from that letter alone. If nothing "
+           "changes, Bus Users UK (or London TravelWatch in London) takes cases for free, and the "
+           "Traffic Commissioner is who registers a service that keeps failing - a route the "
+           "council funds also goes to their transport team, who can call the operator in."),
+          # The row answers the asking, not the grumbling: "the bus was late again" is the
+          # existing claim card's question, which says how to claim it back, and the first draft
+          # of this row took it, and took "funny that the bus never came" from the small talk.
+          ask=("complain", "complains", "complaining", "complaint", "complaints", "who do i",
+               "who to", "who can i", "how do i complain", "report it", "report the bus",
+               "raise a complaint", "make a complaint", "what can i do about", "who should i",
+               "is there anyone", "anyone i can"),
+          # a bus or coach as a way to get somewhere is the travel domain's question, and a
+          # loyalty card question is not a service complaint
+          avoid=("cheapest", "cheap coach", "how much is", "how much does", "ticket price",
+                 "day ticket", "return ticket", "timetable", "what time", "when does the bus",
+                 "how do i get to", "how far", "journey", "megabus", "national express",
+                 "bus pass", "apply for", "concession", "lost property", "left my bag",
+                 "book a coach", "book a bus", "how long is the coach", "airport coach"),
+          bias=1),
               entry("hotel-cancel", (("hotel", "booking", "guest house", "airbnb"),
                            ("refund", "cancel", "non-refundable", "non refundable", "charged",
                             "money back")),
@@ -2764,6 +3134,15 @@ ENTRIES = [
           guard=_dentist_grievance,
           avoid=("toothache", "tooth hurts", "how much do braces", "how much does a filling",
                  "how often should i", "vet", "nurse", "doctor", "gp", "hospital",
+                 # "charge" is in the key because a bill is what a complaint is about, and it
+                 # took the price list with it: "how much does a dentist charge" and "what do
+                 # dentists charge" were sent the complaints letter when the person wanted to
+                 # know what a check-up costs before they book. The price ask is the cost rows'
+                 # question, so it stands this row down.
+                 "how much does a dentist", "how much does the dentist", "how much do dentists",
+                 "how much is a dentist", "what do dentists charge", "what does a dentist charge",
+                 "how much do you charge", "price list", "what are the fees", "private fees",
+                 "how much for a",
                  "registration", "register with", "find a dentist", "nhs dentist taking",
                  # A state of the tooth is not a complaint about the work: the key holds
                  # "my tooth" and "my crown" beside "loose", "fell out", "came out" and
@@ -3158,8 +3537,9 @@ ENTRIES = [
                  # a shop that refuses a change-of-mind return is its own answer
                  "shop", "in a shop", "in store", "the shop", "retailer"),
           # "can i return shoes i bought online if they dont fit" is a yes/no question, and the
-          # card answered it with the 14-day rule and never said yes.
-          lead=("yesno", "Yes")),
+          # card answered it with the 14-day rule and never said yes. The row is asked both ways
+          # round, so the sentence is `_change_of_mind_verdict`'s rather than a fixed "Yes".
+          lead=("yesno", _change_of_mind_verdict)),
     # "i changed my mind" was answered as a distance sale whether or not anything had been
     # bought by post: "i changed my mind about the hoover" told someone about the 14-day right
     # when the hoover may have come from a shop. This row answers the mind alone, both ways.
@@ -3251,6 +3631,12 @@ ENTRIES = [
           "line to whoever is expecting you - a change of heart is easier to take than a silence, "
           "and you do not need a reason they will approve of, only the one that is true.",
           avoid=("faulty", "broken", "refund", "return it", "should i return", "send it back",
+                 # Backing out of a house purchase is a legal question, not a message to send:
+                 # "can i back out of buying a house" was told to say so early and in one short
+                 # line. The sale's own rows answer it, and every other plan keeps this card.
+                 "buying a house", "buying a flat", "buying a property", "house purchase",
+                 "purchase of a house", "exchange contracts", "contracts exchanged",
+                 "after exchange", "deposit", "gazumping",
                  "receipt", "tags", "faq", "online", "shop", "store", "keep changing",
                  "keeps changing", "i keep", "i always", "cant decide", "can't decide",
                  # something already paid for is goods, whatever it is: the returns card and the
@@ -3369,6 +3755,12 @@ ENTRIES = [
     entry("meal-bill-wrong",
           (("bill is wrong", "wrong bill", "bill was wrong",
             "bill seems wrong", "bill seems high", "bill is too high", "bill is higher",
+            # the same complaint said of a place: "the bill at the restaurant was too high" matched
+            # no phrase here, so the fuel row's "bill" and "high" took it and answered with the
+            # boiler. "bill at the" only ever means the one on a table - a bare "bill was too high"
+            # was tried and gave "my bill was huge" to the table instead of the fuel, so the
+            # place words are the whole widening.
+            "bill at the", "bill at a", "bill at our",
             "extra on the bill", "too much on the bill", "extra items", "not on the menu",
             "asked to pay for", "they added", "extra charge on the"),
            ("bill", "restaurant", "meal", "pub", "bar", "cafe", "drinks", "dinner", "lunch",
@@ -3385,7 +3777,13 @@ ENTRIES = [
                  "mobile", "council tax", "credit card", "card bill", "store card", "invoice",
                  "salary", "wage", "tax", "vet", "dentist", "doctor", "hospital", "repair",
                  "garage", "mot", "builder", "plumber", "landlord", "rent", "lease", "hotel",
-                 "minibar", "airbnb", "cleaning fee", "leasehold", "management charge")),
+                 "minibar", "airbnb", "cleaning fee", "leasehold", "management charge",
+                 # "my heating bill is too high" was told to ask for the itemised bill at the
+                 # table: the household fuels are all fenced here and the fuel a boiler burns is
+                 # called "heating", which was not in the list. The heating card has the answer,
+                 # so the same words go in as `bill-becomes-law` carries.
+                 "heating", "heating oil", "boiler", "boilers", "radiator", "radiators",
+                 "kwh", "heat pump", "wood burner", "log burner", "storage heater")),
 
     entry("ask-for-the-bill",
           (("ask for the bill", "get the bill", "ask for the check", "get the check",
@@ -3401,21 +3799,108 @@ ENTRIES = [
                  "mobile", "council tax", "credit card", "card bill", "invoice", "salary",
                  "wage", "tax", "landlord", "rent", "lease", "vet", "dentist", "doctor",
                  "hospital", "repair", "garage", "mot", "builder", "parking", "fine",
-                 "hotel", "minibar", "taxi", "train", "flight")),
+                 "hotel", "minibar", "taxi", "train", "flight",
+                 # the same hole as `meal-bill-wrong`: "pay my heating bill" was the card machine
+                 "heating", "heating oil", "boiler", "radiator", "radiators", "kwh",
+                 "heat pump", "wood burner", "log burner", "storage heater")),
 
     entry("taking-food-home",
           (("doggy bag", "doggybag", "doggy-bag", "take the rest home", "take my leftovers home",
             "take the leftovers home", "box up the rest", "box the rest", "leftovers box",
             "take it home with me", "ask to take", "take my food home", "take home the rest",
-            "take the leftovers"),
+            "take the leftovers", "take food home", "box to take", "a box to take",
+            "takeaway box", "take away box", "take out box"),
+           # "how do i ask for a doggy bag" is the commonest way the question is typed and the
+           # row could not hear it: it names the bag and nothing else, so the second half - which
+           # wanted a restaurant word - was empty. The asking is the restaurant, so the asking
+           # counts. The dog, the bin and the cake in the avoid below are still not this row.
            ("restaurant", "meal", "food", "leftovers", "waiter", "waitress", "dinner",
-            "rude", "polite", "ok", "okay", "normal")),
+            "rude", "polite", "ok", "okay", "normal",
+            "ask", "asking", "asked", "how do i", "can i", "is it")),
           "Ask - 'could you box up what's left?' is normal, and most places say yes, though here "
           "it is their choice rather than your right. Get it into the fridge within two hours and "
           "eat it within a day or two, reheating it once until it is piping hot.",
           # a dog, a bin and a cake are all "taking it home" in words and none of them is this.
           avoid=("dog", "dogs", "puppy", "cat", "pet", "poo", "bin", "compost", "cake", "bake",
                  "recipe", "freezer bag", "ice cube", "patient", "hospital")),
+
+    # Asking the staff for something is its own small skill and the bot had no row for it.
+    # Eleven typed lines were a hedge or a card about something else: "how do i ask for a smaller
+    # portion at a restaurant", "can i ask for a takeaway box at a restaurant", "how do i ask for
+    # tap water at a restaurant" (the sink-and-tap cleaning card), "is it rude to ask for tap
+    # water" (a plumber), "how do i ask for no onion in a restaurant" (how to soften an onion),
+    # "how do i ask for the sauce on the side" (start a business), "how do i ask for a doggy bag"
+    # (a search hedge), "how do i ask for a different table", "how do i ask for a highchair",
+    # "how do i ask if a dish has nuts in it" and "how do i ask a dish without dairy" (the
+    # dairy-swap card). The object goes first in the key, as it does in the bill rows, because
+    # the ask is the same whatever is being asked for.
+    entry("asking-at-a-table",
+          (("smaller portion", "small portion", "half a portion", "starter portion",
+            "half portion", "portion is too big", "too much food",
+            "different table", "another table", "move table", "move tables",
+            "highchair", "high chair", "baby chair", "booster seat",
+            "tap water", "just water", "water for the table",
+            "no onion", "without onion", "no cheese on", "hold the cheese", "no mayo",
+            "no dressing", "sauce on the side", "sauce separate", "sauce in a dish",
+            "dressing on the side", "dressing separate", "on the side please",
+            "without the sauce", "extra sauce",
+            "napkins", "take the plate", "clear the plates", "the plate away",
+            # a cake asked about *in* a restaurant is still a table question - cakeage, a
+            # candle, carrying it in - so the phrase carries the table with it and the bare
+            # "birthday cake" stays out of this half (see the note below)
+            "cake to a restaurant", "cake at a restaurant", "cake in a restaurant",
+            "bring a cake", "bring our own cake", "our own cake", "cakeage",
+            "candle in the cake"),
+           # The asking is what makes it a table question. A bare "how do i" or "can i" in
+           # this half was enough for "can i drink the tap water in turkey" and "can i brush my
+           # teeth with the tap water" to be told to ask for a highchair. What is NOT in the
+           # first half is the birthday cake: "how do i order a birthday cake from a bakery" and
+           # "where do i order a birthday cake" were the bakery and the two-layer sponge cards,
+           # and "order" in this half turned all four of those into a table question. A cake is
+           # a thing to buy or bake, not a thing to ask a waiter for.
+           ("ask", "asking", "asked", "rude", "polite", "awkward", "embarrassing",
+            "restaurant", "waiter", "waitress", "server", "waiting staff", "order",
+            "menu", "meal", "eat out", "eating out", "pub", "cafe")),
+          "Ask in one short sentence when you sit down or when you order - 'could we have a "
+          "highchair?', 'no onion in the pasta please', 'a table away from the door if you have "
+          "one' - and it needs no explanation or apology beyond please and thanks; staff would far "
+          "rather be asked than find you unhappy later. Kitchens do 'on the side' and smaller "
+          "portions all the time and neither costs anything, so ask for 'a starter portion of the "
+          "main' when the menu sells the dish both ways. Tap water is free and comes without a "
+          "fuss, and the answer to almost all of it is to ask early, because 'we have already "
+          "started cooking it' is the only real no.",
+          # the onion row, the tap washer row and the baking rows all own their own words: this
+          # is the asking at a table, so it stays out of the kitchen and out of the plumbing
+          avoid=("chop", "chop it", "soften", "caramelise", "saute", "boil", "recipe", "bake",
+                 "baking", "oven", "soup", "curry recipe", "pickle",
+                 "tap washer", "dripping tap", "limescale", "boiler", "plumber", "sink",
+                 "washing up", "dishwasher", "mains water", "water pressure", "hard water"),
+          # "on the side" is a side hustle to the business row, so a dish asked for separately
+          # has to outrank it: "how do i ask for the sauce on the side" was "sell something
+          # before you register anything".
+          bias=2),
+
+    # An allergy said at a table is a different sentence from a preference, and the bot was
+    # answering "how do i ask if a dish has nuts in it" with a search hedge.
+    entry("asking-about-allergens-at-a-table",
+          (("nut allergy", "allergic to", "allergy", "allergens", "asking about nuts",
+            "has nuts", "contain nuts", "nuts in it", "no dairy", "dairy free", "without dairy",
+            "gluten free", "coeliac", "celiac", "shellfish", "sesame"),
+           ("restaurant", "waiter", "waitress", "server", "chef", "kitchen", "menu", "dish",
+            "order", "ask", "asking", "takeaway", "eating out", "curry house", "cafe", "pub",
+            "hotel", "buffet", "school dinner", "canteen")),
+          "Say the word allergy rather than preference, name the dish, and ask them to check with "
+          "the kitchen: 'I'm allergic to nuts - can you check the curry paste?' A server who says "
+          "they will ask the chef is the answer you want, and one who guesses is the reason to "
+          "order something else, because the fryer, the chopping board and the sauce are where it "
+          "hides. For coeliac, ask about the fryer and the bread separately and ask to see the "
+          "allergen folder, which every UK chain keeps and has to give you.",
+          # a reaction already happening is an emergency, and the swaps at home are the cooking
+          # rows: this is the sentence to say across a table
+          avoid=("throat", "swollen", "swelling", "cant breathe", "can't breathe", "rash",
+                 "vomiting", "ambulance", "999", "a&e", "epipen", "anaphylaxis",
+                 "recipe", "bake", "baking", "substitute", "swap", "swaps", "instead of milk",
+                 "at home", "cake recipe")),
 
     entry("table-fully-booked",
           (("fully booked", "fully-booked", "no table for", "no tables left"),
@@ -4045,7 +4530,10 @@ ENTRIES = [
           bias=2),
     entry("move-a-booking",
           (("booking", "bookings", "reservation", "reservations", "table booking",
-            "table reservation", "my table", "our table", "hair appointment", "haircut",
+            # "a table" alone is not here: "how do i move a table upstairs" is a piece of
+            # furniture going up a stairwell, so the restaurant sense has to be named
+            "table reservation", "restaurant table", "my table", "our table",
+            "hair appointment", "haircut",
             "barber", "slot", "deposit", "double booked", "booking reference"),
            ("cancel", "cancelled", "canceled", "cancelling", "canceling", "call off",
             "called off", "change", "changed", "changing", "move", "moved", "moving",
@@ -4078,7 +4566,13 @@ ENTRIES = [
                  # this row on the words "booking" and "cancelled"
                  "booking fee", "festival", "festivals", "gig", "gigs", "concert", "concerts",
                  "ticket", "tickets", "event", "events", "show", "theatre", "cinema",
-                 "lost the booking", "they lost", "went bust", "covid"),
+                 "lost the booking", "they lost", "went bust", "covid",
+                 # "move out" and "moving house" are the tenancy's words: "how do i get my
+                 # deposit back when i move out" was answered as a restaurant table, and the
+                 # deposit rows are the ones that answer a flat.
+                 "move out", "moved out", "moving out", "move in", "moved in", "moving in",
+                 "moving house", "moved house", "end of tenancy", "deposit scheme",
+                 "renting", "rented", "my flat", "the flat", "our flat", "house deposit"),
           # a flight refund, a referee's card and a hotel rate all key the same words and carry
           # their own weight, so this row has to match them or it never gets the line: "i need
           # to cancel my booking" is a table or a garage, not a non-refundable hotel rate
@@ -4497,7 +4991,11 @@ ENTRIES = [
                              # subject and nothing the row held: the tenancy words are the second
                              # signal when the subject is the notice itself
                              "tenancy", "tenancies", "tenant", "tenants", "lease", "flat",
-                             "flats", "renting")),
+                             "flats", "renting",
+                             # and the notice the other way round: "how much notice must a
+                             # landlord give a tenant" is the same right read from the tenant's
+                             # side, and the reply already says who gives what
+                             "landlord", "landlords", "landlady")),
           "Read your tenancy for a break clause first: it is the term that lets either side end "
           "the tenancy before the fixed term is up, and it names the date it can be used and how "
           "much notice it takes, often two months. Without one the landlord only has to agree if "
@@ -4508,6 +5006,7 @@ ENTRIES = [
           # The row is about leaving before the end, so one of those words has to be there: the
           # tenancy words alone made it answer "what is a tenancy agreement", which is the
           # definition question and belongs to lifeadmin's tenancy-copy.
+          guard=_the_notice_is_theirs_to_give,
           ask=("break", "notice", "leave", "leaves", "leaving", "early", "end", "ends",
                "ending", "surrender", "move out", "moving out", "get out", "getting out",
                "can i go", "before the end", "give up"),
@@ -4518,6 +5017,10 @@ ENTRIES = [
                  "left the house",
                  "deposit", "boiler", "repairs", "landlord won't", "landlord wont", "evict",
                  "eviction", "section 21", "damp", "mould", "problems", "complaint",
+                 # writing to the landlord to say you are going is the notice letter, not the
+                 # break clause: "how much notice do i need to give my landlord before moving
+                 # out" was this row on the words "notice" and "moving out".
+                 "notice letter", "im leaving on", "i am leaving on", "hand back the keys",
                  # "do i need to tell the council when i move out" is the moving-house list,
                  # not an argument with the landlord about the fixed term
                  "council", "council tax", "gp", "doctor", "royal mail", "redirect",
@@ -4738,6 +5241,7 @@ ENTRIES = [
 # is for the shop, the store, the company or the trader; a bare website or site with no trader in
 # the line stands it down. (Reviewer's point on this PR: the shop card had taken the phishing
 # shapes.)
+
     # Money sent to the wrong account by mistake is a recall, not a scam: nothing was stolen, so
     # the crime route does not fit, and "i transferred money to the wrong account" was getting
     # the send-money-abroad answer about exchange rates.
@@ -4771,6 +5275,72 @@ ENTRIES = [
           # the undo-send entry has three key parts to this one's two, so a tie on the words is
           # decided against the money answer: one point more keeps the recall where it belongs
           bias=4),
+    # An overpayment is stated, not asked, and every row that handles money paid by mistake is
+    # keyed on the mistake being sent to the wrong place or taken twice: "i overpaid a builder"
+    # and "i accidentally overpaid a friend" got a chat nod, and "i paid the builder too much"
+    # got his day rate. Whoever holds the money decides the answer - the shop keeps the
+    # duplicate-charge card, payroll the overpaid-at-work card, HMRC the rebate - so this one is
+    # for the person or the trader who has been paid too much.
+    entry("overpaid-someone",
+          (PAID_BY_MISTAKE,
+           # the payee, not the payment: "the invoice was paid twice" names nobody, and the
+           # duplicate-charge card is the right answer for a bill nobody can be asked about.
+           # A payee is the person or the trade who was paid, and the money itself is not one:
+           # "money" and "back" were in this list, so the mistake words took a spending habit
+           # ("i spend too much money", "... on clothes", "... every month") and answered it
+           # with the letter asking for £400 back from a plumber who was never mentioned. The
+           # paid-twice cards name the money anyway ("i sent the money twice" is the
+           # duplicate-charge card), so nothing is lost by standing these two words down.
+           ("builder", "plumber", "electrician", "roofer", "tradesman", "trade", "decorator",
+            "landlord", "landlady", "letting agent", "friend", "mate", "relative", "supplier",
+            "vet", "garage", "mechanic", "cleaner", "gardener", "contractor", "installer",
+            "driver", "rent", "deposit", "him", "her", "them", "someone", "somebody")),
+          "Ask for it back in writing today, naming the amount and the date: \"I paid the £400 "
+          "invoice on Tuesday and sent it again on Thursday by mistake - please can you refund "
+          "the second one.\" Most people and most trades refund or credit it once they are asked "
+          "plainly, and the message is the date you can prove. If they will not, ask your bank to "
+          "recall the payment while it is recent and a money claim online takes the rest; never "
+          "pay anyone who offers to get it back for you.",
+          # an overpayment to an employer, to HMRC or to a shop has its own card, and a payment
+          # that went astray is a recall rather than an overpayment
+          avoid=("employer", "payroll", "payslip", "pay slip", "at work", "my pay", "salary",
+                 "wages", "boss", "hmrc", "tax", "council tax", "universal credit", "benefit",
+                 "pension", "child benefit",
+                 "shop", "company", "online", "order", "subscription", "restaurant", "pub",
+                 "takeaway", "till", "checkout", "supermarket", "seller", "charged twice",
+                 "duplicate", "card",
+                 # what a trader charged is a price question, and a shop's bill is the
+                 # duplicate-charge card: this row is for money the person sent themselves
+                 "charged", "charge", "charges", "overcharged",
+                 # "twice" is in this key as the mistake word, and it is also how people say
+                 # how often they wrote, rang or were visited: "i emailed him twice" was asked
+                 # for its money back. The payment has to be the doing, so those verbs stand
+                 # the row down.
+                 "email", "emailed", "e-mail", "text", "texted", "message", "messaged",
+                 "phone", "phoned", "ring", "rang", "called", "wrote", "letter", "letters",
+                 "invite", "invited", "reminded", "remind", "asked", "told", "came", "come",
+                 "visit", "visited", "appointment", "appointments", "booked",
+                 # a price someone regrets is a price question ("i paid too much for my car"
+                 # is whether the car was worth it), and an overpayment is money that should
+                 # come back to the person who sent it
+                 "too much for", "was it worth", "worth it",
+                 # owing money is not paying it: "i owe the plumber money again" is a bill
+                 # coming round, and the letter tells them to ask for a refund they never
+                 # paid. The row is for money that has already gone out.
+                 "owe", "owes", "owed", "owing", "on account", "bill", "invoice",
+                 "quote", "quoted", "says", "wants", "wanted", "estimate", "estimated",
+                 "wrong account", "wrong person", "wrong number", "wrong sort code",
+                 "scam", "scammed", "fraud", "vanished", "never arrived"),
+          # a rate card names the trade as well, and a person who has just overpaid one wants
+          # the money back rather than the day rate
+          bias=3,
+          # "is that too much" is the commonest way to ask whether a price is high, and the
+          # words are the row's own mistake word beside a payee, so a judgement on a figure
+          # already said read as an overpayment: "i paid 120 for a plumber to fix a leak, is
+          # that too much" was told to ask for a £400 invoice back, and so was "my builder
+          # says 12 grand, is that too much". Whether the line is a judgement on a figure is
+          # the reading's question, not a word list's, so it is asked here.
+          guard=_not_a_figure_judged),
     entry("food-poisoning", (("food poisoning", "sick after eating", "bad food", "off food",
                               "food was off", "ill after eating", "ill after", "poorly after",
                               "made me ill", "made me sick", "gave me food poisoning"),
@@ -4799,7 +5369,29 @@ ENTRIES = [
           # which names the meal, wins the tie
           bias=1),
     entry("noise-neighbour", (("neighbour", "neighbor", "neighbours", "flat above", "next door",
-                               "building work", "music", "dog barking", "council", "environmental health"),
+                               "building work", "music", "dog barking", "council", "environmental health",
+                               # The complaint is often made without saying whose noise it is:
+                               # "who do i complain to about noise", "how do i report noise". The
+                               # phrasings are whole ones and "noise" is never one of them, so a
+                               # line about quietening a room keeps the answer it had.
+                               # "a noise complaint" on its own took "how do i get a noise
+                               # complaint sorted", which is the council-route answer
+                               # (where_it_answers): the phrase is the making of one, not the
+                               # thing to hand to a particular service.
+                               "about noise", "noise nuisance",
+                               "report a noise complaint", "log a noise complaint",
+                               "make a noise complaint", "raise a noise complaint",
+                               "noise complaint about", "noise complaint to the council",
+                               "noise pollution", "report noise", "report the noise",
+                               "reporting noise", "complain about noise", "complain about the noise",
+                               "complaint about noise",
+                               # What the council does about it is the same question, and the
+                               # name of the power they use is how people ask it: "how do i get
+                               # a noise abatement notice" and "what is a statutory nuisance"
+                               # were a shrug. The words are whole ones, so a line about the
+                               # notice a landlord served on a tenant stays in the housing rows.
+                               "abatement notice", "noise abatement", "abatement",
+                               "statutory nuisance"),
                               ("noise", "noisy", "loud", "banging", "building work", "6am", "early",
                                "at night", "all night", "every night", "party", "complain",
                                "complaint", "report")),
@@ -4822,7 +5414,56 @@ ENTRIES = [
                  "at work", "at my desk", "open plan", "in the office", "the office",
                  "classroom", "in class", "library", "on the train", "on the bus",
                  "my flatmate", "flatmate", "flatmates", "roommate", "roommates",
-                 "housemate", "housemates")),
+                 "housemate", "housemates",
+                 # Asking how to say it is a different question from who to tell: "help me word
+                 # a note to the neighbours about the noise" wants the words, which the row that
+                 # says to talk to them gives.
+                 "word a note", "word the note", "word a letter", "wording", "wording a",
+                 "write to them", "write a note", "note to the neighbours", "note to my neighbour",
+                 "letter to the neighbours", "what should i say", "how do i say")),
+    # A nuisance is not only noise. "who do i tell about the smell from the farm", "who do i
+    # report a smell to" and "the bonfire smoke is coming into our garden every night" were all
+    # a shrug: the noise row is where the council's nuisance powers are written down, and a
+    # smell is the same statutory nuisance served with the same abatement notice. The subjects
+    # here are whole phrases ("smell from", "smoke coming from") so the ordinary smell lines -
+    # a fridge, a bin, a drain under the sink, a car - keep the answers they had.
+    entry("a-nuisance-from-a-place",
+          (("smell from", "smells from", "smell coming from", "smells coming from",
+            "smell of sewage", "sewage smell", "smells like sewage", "stink from",
+            "stinks from", "odour from", "odor from", "chemical smell", "smoke from",
+            "smoke coming from", "bonfire smoke", "bonfire next door", "farm smell",
+            "smell from the farm", "smell from the factory", "dust from", "nuisance from",
+            "smell nuisance", "smell complaint", "report a smell", "report the smell",
+            "complain about the smell", "complain about a smell", "smell and noise",
+            "smoke and noise", "statutory nuisance", "smoke is coming", "smoke blowing",
+            "smoke drifts", "smell is coming"),
+           # the second half is deliberately loose, because the first half is whole phrases only:
+           # a line that says "smell from" or "smoke from" is about that nuisance whatever the
+           # rest of the sentence does, and the ordinary smells are stood down by `avoid` below.
+           ("report", "reporting", "who do i", "who to", "tell", "complain", "complaint",
+            "nuisance", "environmental health", "council", "how do i", "get it stopped",
+            "stop it", "abatement notice", "next door", "neighbour", "neighbours",
+            "there is", "there's", "is coming", "coming from", "coming into", "keeps coming",
+            "every night", "all night", "every day", "all the time", "cant open", "can't open",
+            "fed up", "sick of", "notice it", "noticed it", "again tonight")),
+          "Report it to the council's environmental health team, who handle smoke, smells, dust "
+          "and fumes from a farm, a factory, a takeaway or a building site: ring them or use the "
+          "online form with the address and the times it happens, and keep a diary for a week or "
+          "two. If it is bad enough they must look into it as a statutory nuisance and can serve "
+          "an abatement notice, so ask for the case reference. Nothing in ten working days means "
+          "chasing it and asking for it to be logged as a formal complaint; after their final "
+          "reply the Local Government Ombudsman takes it on free.",
+          avoid=("my fridge", "the fridge", "freezer", "bin", "bins", "bin bag", "kitchen",
+                 "sink", "drain", "plughole", "washing machine", "dishwasher", "toilet",
+                 "my house smells", "my flat smells", "my room smells", "damp", "mould",
+                 "car", "van", "caravan", "cooker", "oven", "cooking", "food", "milk",
+                 "meat", "chicken", "cigarette", "vape", "smoke alarm", "smoke detector",
+                 "my breath", "urine", "stool", "vagina", "discharge", "wound",
+                 "my feet", "my mouth", "my nose", "get rid of the smell",
+                 # a bonfire you are having, and the rules for one, are the garden's question
+                 "my bonfire", "have a bonfire", "bonfire night", "fireworks",
+                 # the gas board is the safety answer, never a nuisance letter
+                 "gas leak", "smell gas", "smell of gas", "gas smell", "carbon monoxide")),
     # both halves have to name an injury: "how do i claim X" is a way of asking, not a subject,
     # and a bare "claim" in the first half made this entry answer every benefit, deposit and
     # warranty question that happened to say "claim"
@@ -5044,7 +5685,15 @@ ENTRIES = [
                  # claim, so the bare word "bleach" is not held out, only the home-job shapes.
                  "from bleach", "bleach at home", "bleached it at home", "box dye",
                  "box colour", "box color", "did it myself", "done it myself",
-                 "dyed it myself", "bleached it myself"),
+                 "dyed it myself", "bleached it myself",
+                 # a repair the council or a landlord owes is not a job you paid a shop for:
+                 # "how do i complain about a repair the council wont do" was told to photograph
+                 # a botched job and ask for a refund of money nobody had paid. The council's
+                 # own rows and the landlord rows answer those lines.
+                 "council", "the council", "councils", "housing association", "social housing",
+                 "council house", "council flat", "landlord", "landlords", "letting agent",
+                 "my flat", "my house", "my home", "my boiler", "the boiler", "the heating",
+                 "my heating", "damp", "mould", "mold", "leak", "leaking"),
           # "the dry cleaner shrank my dress" is reached by a cleaning entry too (how to care
           # for the garment), and a garment already ruined is this question: the tie goes here.
           # A refund for ruined hair is also reached by money's general refund answer.

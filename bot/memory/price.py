@@ -93,10 +93,25 @@ def _a_value(token):
         return 0.0
 
 
+def _the_money_said_back(said, text):
+    """A figure keeps the symbol the line wrote; with none written it is the pound it was asked in."""
+    said = str(said or "").strip()
+    if re.match(r"[£$€]", said):
+        return said
+    for mark in ("£", "$", "€"):
+        if mark in str(text or ""):
+            return mark + said
+    return "£" + said
+
+
 def _the_price_said(value):
-    """"2400" said back the way it is written: "2,400"."""
-    whole = _money(value)
-    return whole
+    """"2400" said back the way it is written: "£2,400".
+
+    The currency is part of the figure when it is said back: a verdict that opens "400 sits inside
+    the usual range of £150 to £400" reads as a count beside a price, and every pool below opens
+    on the figure.
+    """
+    return "£" + _money(value)
 
 
 # A symbol on the range but not on the figure reads as two different moneys in one sentence
@@ -141,7 +156,16 @@ def _prices_in(text):
             continue
         if _AFTER_A_RATE.match(after):
             continue
-        found.append((value, token.strip(" ,")))
+        # A figure counted in thousands is that many thousands: "a builder quoted me 12 grand for
+        # an extension" was read as twelve pounds, and the answer told them "£12 is under the
+        # £200 to £350 it usually comes to". The unit word stays in the figure said back, because
+        # "12 grand is over the £200 to £350" is what the person wrote and "12,000" is not.
+        thousands = re.match(r"\s?(k|grand|thousand)\b", after, re.I)
+        spoken = token.strip(" ,")
+        if thousands:
+            value = value * 1000
+            spoken = said[start:start + len(token) + len(thousands.group(0))].strip(" ,")
+        found.append((value, spoken))
     return found
 
 
@@ -280,7 +304,10 @@ def _the_range_that_is_about_it(answers, price, period=None):
     that prices one job in two sizes should leave that unsaid.
     """
     for said in answers[:2]:
-        found = _price_ranges_in(said, period)
+        # A card that prices a day of the work cannot judge the price of the whole job: the second
+        # range in "£150 to £300 a day for one person, or £200 to £350 for two" has no period on
+        # it, so the reader inside the range cannot see that it is a rate and the sentence can.
+        found = _the_ranges_that_are_not_rates(said, _price_ranges_in(said, period))
         if not found:
             continue
         bands = [(item[2], item[3], item[4]) for item in found]
@@ -328,8 +355,9 @@ A_PRICE_OVER = (
     "That is on the high side: the range is {aim}, and {price} is above it.",
 )
 A_PRICE_UNDER = (
-    "That is below the usual {aim}, so it is a good price - check what is included.",
-    "{price} is under the {aim} it usually comes to, which is worth asking about.",
+    "That is below the usual {aim}, so check what it covers - a part, a deposit, or the "
+    "whole job.",
+    "{price} is under the {aim} it usually comes to, so check what the quote leaves out.",
     "That is cheap against the {aim} the answer named, so make sure the price covers the job.",
 )
 
@@ -483,6 +511,21 @@ def _a_price_ask(text):
     return None
 
 
+def _a_rate_is_all_the_answer_names(answers):
+    """Whether the newest answer prices only a day or an hour of the work, and never the job."""
+    for said in answers[:1]:
+        found = _price_ranges_in(said)
+        if found and not _the_ranges_that_are_not_rates(said, found):
+            return True
+    return False
+
+
+def _a_second_quote_is_the_test(memory):
+    """What settles a figure for a whole job: the same job priced a second time."""
+    from ..compose.prices import A_JOB_JUDGED
+    return pick(list(A_JOB_JUDGED), memory, "jobjudged")
+
+
 def judged(text, memory):
     """A line asking whether a figure they gave is high or low, from the answer already given."""
     if not isinstance(text, str) or not isinstance(memory, dict):
@@ -496,8 +539,16 @@ def judged(text, memory):
     mine, said = _the_price_they_mean(text, memory)
     if not mine:
         return None
-    aim = _the_range_that_is_about_it(answers, mine, _the_period_they_said(text, memory))
+    said = _the_money_said_back(said, text)
+    period = _the_period_they_said(text, memory)
+    aim = _the_range_that_is_about_it(answers, mine, period)
     if aim is None:
+        if not period and _a_rate_is_all_the_answer_names(answers):
+            # The answer prices a day or an hour of the work and the figure is the price of the
+            # whole job, so there is no range to hold it against - but the person is still asking
+            # whether their figure is normal, and the answer to that is the same for every job:
+            # a second quote for the same job, compared on what each one covers.
+            return _a_second_quote_is_the_test(memory)
         return None
     low, high, spoken = aim
     return _the_verdict(mine, said, low, high, spoken, memory)
@@ -567,6 +618,31 @@ def judged_with_the_card(text, answer, memory):
     return _the_verdict_against_a_card(mine, said, answer, memory)
 
 
+# A card can price a day of the work and the person can give the price of the whole job: "a
+# builder is usually £150 to £300 a day for one person, or £200 to £350 for two" and "they want
+# 12 grand for an extension" are not comparable, and the range alone said "that is above the
+# going rate of £200 to £350" about a twelve thousand pound job. The second range in that card
+# has no "a day" after it, so the range reader cannot see the rate; the sentence it sits in can.
+_A_RATE_IN_THE_SENTENCE = re.compile(
+    r"\b(?:a|an|per|each)\s+(?:day|hour|week|month|night|visit|person|load)\b", re.I)
+
+
+def _the_ranges_that_are_not_rates(answer, ranges):
+    """The card's ranges that price the thing, leaving out a rate for a day or an hour of it."""
+    kept = []
+    for item in ranges:
+        start, end = item[0], item[1]
+        left = max(answer.rfind(".", 0, start), answer.rfind("\n", 0, start))
+        after = [at for at in (answer.find(".", end), answer.find("\n", end)) if at != -1]
+        right = min(after) if after else len(answer)
+        sentence = answer[left + 1:right]
+        if _A_RATE_IN_THE_SENTENCE.search(sentence) \
+                and not _AFTER_A_RATE.match(answer[end:end + 20]):
+            continue
+        kept.append(item)
+    return kept
+
+
 def _the_verdict_against_a_card(mine, said, answer, memory, definite_only=False):
     """The verdict when the card's ranges say one thing about the figure, else None.
 
@@ -576,7 +652,7 @@ def _the_verdict_against_a_card(mine, said, answer, memory, definite_only=False)
     costs. Without it, a boiler at 1,200 came back between the price of a boiler service and the
     price of a boiler.
     """
-    ranges = _price_ranges_in(answer)
+    ranges = _the_ranges_that_are_not_rates(answer, _price_ranges_in(answer))
     if not ranges:
         return None
     holds = [item for item in ranges if item[2] <= mine <= item[3]]
@@ -594,7 +670,15 @@ def _the_verdict_against_a_card(mine, said, answer, memory, definite_only=False)
     under = [item for item in ranges if item[3] < mine]
     over = [item for item in ranges if item[2] > mine]
     if under and over:
-        below = max(under, key=lambda item: item[3])[4]
-        above = min(over, key=lambda item: item[2])[4]
-        return _the_between_verdict(mine, said, below, above, memory)
+        near = max(under, key=lambda item: item[3])
+        far = min(over, key=lambda item: item[2])
+        # The bands of one job sit against each other ("£50 to £100 for a callout, £100 to £200
+        # for a day"), so a figure in the gap is over one band and under the next and both are
+        # named. A gap wider than the band below is not one job at two sizes: a haircut at £40 is
+        # between "£15 to £35" for a cut and "£60 to £150" for colour, and naming both answered a
+        # question about a cut with a hedge about two different things. A wide gap is read against
+        # the nearer band, which is the thing that was asked about.
+        if far[2] - near[3] <= near[3] - near[2]:
+            return _the_between_verdict(mine, said, near[4], far[4], memory)
+        return _the_verdict(mine, said, near[2], near[3], near[4], memory, own=True)
     return None

@@ -28,7 +28,7 @@ import re
 from ..compose import pick
 from ..compose.whole import a_whole_cut
 from ..memory import topics
-from . import repeat
+from . import named, repeat
 
 # What a line can be made of and still be asking for another option rather than naming one. The
 # ask words of a bare follow-up ("what", "should", "i", "any") come from repeat.py; these are the
@@ -56,6 +56,32 @@ SWAP_WORDS = frozenset("""
 """.split())
 
 ASK = repeat.ASK | repeat.FILLER | OPTION_WORDS | CONTINUATION_WORDS | SWAP_WORDS
+
+# The words that ask for one part of an answer rather than for a thing: "anything i should include",
+# "anything i should know", "what am i forgetting". Said after an answer, they are the same request
+# as "what else" - the answer is on the screen and they want the part of it that matters - and
+# none of them names a thing to be about. Read as a named thing instead, the line was answered
+# "I'm listening - say more if it helps" after a wedding-speech answer (deck qdl-010).
+THE_MISSING_PART = frozenset("""
+    include includes including included bring bringing add adding say saying mention mentioning
+    cover covers covering know wear take expect prepare check forget forgetting forgot missed
+    miss left put
+""".split())
+# The shape of that ask: a word for the whole of it next to one of those words. Both are needed,
+# because "what should i do" said with nothing on the screen wants the bot to ask what about, and
+# "i include the VAT" names a thing.
+A_MISSING_PART = re.compile(
+    r"\b(?:anything|what|which|is there|are there|something|all)\b[^.?!]{0,40}?\b"
+    r"(?:include|includes|including|bring|bringing|add|adding|say|saying|mention|mentioning|"
+    r"cover|covering|know|wear|take|expect|prepare|check|forget|forgetting|forgot|missed|"
+    r"miss|left|put)\b", re.I)
+# "defo", "deffo", "probs" and "tbh" are fillers the same way "just" and "really" are, and they
+# are not in the shared list: one of them left the line naming something, so "anything i should
+# defo include" stood down. Only this reader needs them, so they are added here.
+SOFT_FILLER = frozenset("""
+    defo deffo definitely probs prob probably tbh honestly basically totally literally
+""".split())
+ASK = ASK | THE_MISSING_PART | SOFT_FILLER
 
 # The shape of "what else", "anything other than that", "any other ideas": a word for another one
 # next to a word for an option, which is what makes the line an ask for one.
@@ -227,7 +253,8 @@ def names_nothing(text):
     said = str(text or "")
     asks_for_more = bool(CARRY_ON.match(said.strip())
                          or CARRY_ON.match(LEAD_IN.sub("", said.strip()))) or (
-        bool(OTHER_OPTION.search(said)) and bool(AN_OPTION.search(said)))
+        bool(OTHER_OPTION.search(said)) and bool(AN_OPTION.search(said))) or bool(
+        A_MISSING_PART.search(said))
     if not asks_for_more:
         return False
     if repeat.ABOUT_THE_BOT.search(said):
@@ -451,6 +478,11 @@ def _the_rest(said, memory, ruled_out=(), at=None):
 def other_option(text, memory):
     """The second half of the answer they just asked for more of, or None when it is not that."""
     if not names_nothing(text):
+        return None
+    if named.asks_a_part_of_the_trip(text, memory):
+        # A line that steers to one part of a trip asks its own question about the place the card
+        # is about, and the second half of that card is not the answer to it: "how many days do i
+        # need" after the guide for a city came back as "The beach at Barceloneta for half a day."
         return None
     turns = [t for t in (memory.get("turns") or []) if isinstance(t, dict)]
     if not turns:

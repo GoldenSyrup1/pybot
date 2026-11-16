@@ -253,3 +253,44 @@ ENTRIES += [
                                                       "disabled person"),
           explain=True, bias=1),
 ]
+
+# ---- the other way round: the family does the caring, and the line says so ---------
+#
+# "my son cares for me" has nobody answering it. The rows above all want the caring said in the
+# first person ("i care for my mum"), the money rows want the benefit named, and a houseplant row
+# reads "care for" as its own: every line of this shape was answered "Water when the top couple
+# of centimetres of compost is dry". That is the wrong answer and a confusing one, from a file
+# about the garden, to a person talking about their own care.
+#
+# What a person in that position is short of is the same three things everybody is short of,
+# and none of them is sent automatically: what the carer can claim, what they can claim
+# themselves, and the assessment that buys a few hours back.
+_LOOKED_AFTER_ME = ("cares for me", "care for me", "caring for me", "cared for me",
+                    "cared for by", "looks after me", "look after me", "looking after me",
+                    "looked after me", "looked after by")
+_MY_FAMILY_CARER = ("son", "sons", "daughter", "daughters", "husband", "wife", "partner",
+                    "mum", "mother", "dad", "father", "sister", "brother", "grandson",
+                    "granddaughter", "grandchild", "niece", "nephew", "children", "kids",
+                    "family", "friend", "friends", "neighbour", "neighbours", "aunt", "uncle",
+                    "cousin", "relatives", "carer", "carers")
+# The more specific rows keep the lines that name their own subject: a benefit asked about by
+# name is the allowance row's, a carer at the end of their rope is the burnout row's, and a
+# break or an assessment is its own question.
+_NOT_THIS_ROW = _NOT_THE_JOB + ("allowance", "allowances", "credit", "benefit", "benefits",
+                                "claim", "claiming", "qualify", "qualifies", "entitled",
+                                "pip", "attendance", "cope", "coping", "cant cope",
+                                "cannot cope", "exhausted", "burnt out", "burned out",
+                                "struggling", "overwhelmed", "tiring", "worn out", "no life",
+                                "respite", "assessment", "a break", "how do i get help")
+
+ENTRIES += [
+    entry("my-family-cares-for-me", (_LOOKED_AFTER_ME, _MY_FAMILY_CARER),
+          "Two things are worth starting this week, because neither is sent automatically. "
+          "Whoever looks after you for 35 hours a week or more can claim Carer's Allowance, "
+          "about \u00a383 a week, and it keeps their National Insurance record going too. There is "
+          "money for you as well: Attendance Allowance if you are over pension age, PIP if you "
+          "are younger, neither of them means-tested, and both unlock more on other benefits. "
+          "Then ask the council for a carer's assessment - it is free, it is about their needs, "
+          "and it can pay for someone to sit with you so they get an evening back.",
+          avoid=_NOT_THIS_ROW, bias=1),
+]

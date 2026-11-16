@@ -271,7 +271,21 @@ PLAN_ASKS = re.compile(
 # "what my plan was" with the newest fact it has instead of the plan.
 PLAN_MINE = re.compile(
     r"\bwhat (?:was|is) my plan\b|\bwhat my plan (?:was|is)\b|"
-    r"\bwhat (?:did|do) i say (?:my plan|i was planning)\b")
+    r"\bwhat (?:did|do) i say (?:my plan|i was planning)\b|"
+    # A plan is asked for in the plural as often as the singular, and only the singular shapes
+    # were here: "what's my plan" was answered from the store while "what are my plans", "do i
+    # have any plans", "have i got any plans" and "what plans do i have" were handed the search
+    # hedge (and "what are my plans for the week" was offered three dinners). One ask, one
+    # reader, so the plural rows sit beside the singular and keep its guard: "what are my plans
+    # for dinner" is about the dinner.
+    r"\bwhat (?:are|were) (?:my|our) plans?\b" + NOT_THE_PLAN + r"|"
+    r"\bwhat plans (?:do|did) (?:i|we) have\b" + NOT_THE_PLAN + r"|"
+    # The question forms people use for a calendar. The indefinite is the tell that the line is
+    # about their own diary - "do i have a plan" asks for advice and keeps its own answer.
+    r"\b(?:do|did) (?:i|we) have (?:any |some )?plans?\b|"
+    r"\b(?:do|did) (?:i|we) have anything (?:planned|coming up|on)\b|"
+    r"\bhave (?:i|we) got (?:any |some )?(?:plans?|anything (?:planned|coming up|on))\b|"
+    r"\b(?:is|are) there anything (?:planned|coming up|on) for (?:me|us)\b")
 WHEN_ASKS = re.compile(r"\bwhen (?:do|does|will|am|are) (?:i|we)\s+(?:going to\s+)?([a-z]+)")
 # The day asked the way "when do i start" asks the time of it: "what day do i start", "which
 # date do we move". The verb is what names the plan, and the day on it is the answer. Read as a

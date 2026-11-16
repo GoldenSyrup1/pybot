@@ -216,7 +216,12 @@ ENTRIES = [
                  # for the working-day framing. Neither is a risk question, which is what the
                  # boiler card answers.
                  "all day", "out at work", "im out at work", "when im out", "timer",
-                 "24 hours", "how many hours")),
+                 "24 hours", "how many hours",
+                 # "how do i turn off the hot water cylinder" is the tank's question, not
+                 # whether a boiler can be left running overnight
+                 "immersion", "hot water cylinder", "hot water tank", "hot cylinder",
+                 "where is the valve", "isolation valve", "drain", "draining", "drained",
+                 "spur", "fused spur")),
     # An oven, a candle, a dryer, a fridge: four different risks and one question, which is
     # whether it can be left. What is named in the line picks the answer.
     entry("left-on-unattended",

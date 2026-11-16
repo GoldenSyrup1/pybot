@@ -30,14 +30,18 @@ from ..compose import pick
 # they named, so "and how often" with nothing of its own names the newest one.
 # The rate itself, in the words people type it: "twice a week", "3 times a week", "every morning",
 # "most days". One pattern for both ends, so the ask can quote back exactly what was filed.
-RATES_TEXT = (r"(?:once|twice)(?:\s+(?:a|per|each)\s+(?:day|week|fortnight|month|year))?"
+RATES_TEXT = (r"(?:once|twice)(?:\s+(?:a|per|each)\s+(?:hour|day|week|fortnight|month|year))?"
              r"|(?:(?:\d+|two|three|four|five|six|seven|eight)\s+times?)"
-             r"\s+(?:a|per|each)\s+(?:day|week|fortnight|month|year)"
-             r"|every\s+(?:\d+|a|an|one|two|three|four|five|six|few)\s+(?:days?|weeks?|months?)"
-             r"|every\s+(?:day|week|morning|evening|night|weekend|other\s+day|monday|tuesday"
+             r"\s+(?:a|per|each)\s+(?:hour|day|week|fortnight|month|year)"
+             r"|every\s+(?:\d+|a|an|one|two|three|four|five|six|few)\s+"
+             r"(?:hours?|minutes?|days?|weeks?|months?|nights?)"
+             r"|every\s+(?:hour|day|week|morning|evening|night|weekend|other\s+day|monday|tuesday"
              r"|wednesday|thursday|friday|saturday|sunday)"
              r"|most\s+(?:days|weeks|mornings|evenings)")
-RATES_SAID = re.compile(r"\b(?P<how>" + RATES_TEXT + r")", re.I)
+# The rate is a phrase, not a prefix: without the lookahead "every weekend" was filed as "every
+# week" and the doing lost its last letters ("my mum comes round end").
+RATES_END = r"(?![a-z])"
+RATES_SAID = re.compile(r"\b(?P<how>" + RATES_TEXT + r")" + RATES_END, re.I)
 # The first-person clause the rate sits in, which is where the doing is: "i go to the gym twice a
 # week" is about the gym. A rate in somebody else's line ("and the cat gets fed twice a day") is
 # not this person's own doing, and is left to whatever already reads that line.
@@ -53,6 +57,16 @@ RATES_FIX_LEAD = frozenset(("actually", "no", "sorry", "make", "i mean", "i mean
 # an answer to a question the bot asked, not something to file against a subject.
 RATES_IGNORE = frozenset("""i we my our me the a an at on in to for of it that this and but so
 just now only really still usually normally about around im ive were don't dont""".split())
+# A rate said of somebody else's doing is filed too, against the doing as the line names it: "our
+# 7 month old is waking every 2 hours" then "how often was he waking". It was dropped because it
+# was not first person, so the late ask found nothing and a card about the first line was said
+# again. It is kept apart from their own doings, because it is said back as something they told
+# the bot ("You said your 7 month old is waking every 2 hours") and never as something they do.
+# What is not filed is a question or a piece of advice ("how often should i water them", "you
+# should water them twice a week"), and a line about the bot's own reader is not a rate at all.
+RATES_ASK_LEAD = frozenset("""how what when where why who which whose should shall can could
+would will do does did is are was were if whether whats hows remind tell""".split())
+RATES_LEAD = re.compile(r"^(?:and|so|but|also|oh|well|then|just|now|ok|okay|plus)\s+", re.I)
 
 # A rate put right on a line with no doing in it: "actually 5 times", "no wait, twice a week",
 # "sorry, every other day". The doing is the one the store filed a turn or two before, because a
@@ -91,8 +105,41 @@ def _the_rates(memory):
     return held if isinstance(held, list) else []
 
 
-def _keep_a_rate(memory, what, how, said):
-    """File one rate they said of a thing they do, newest winning for that doing."""
+# The lead a line can carry before the doing it is about: "and the dog goes out three times a day".
+RATES_FILLER_LEAD = frozenset("""and so but also oh well then plus just still only now really
+actually normally usually today tomorrow tonight yesterday""".split())
+
+
+def _keep_a_rate_of_a_doing(said, rate, memory):
+    """File a rate a line says of a doing that is not put as their own: "the boiler gets serviced
+    once a year", "our 7 month old is waking every 2 hours".
+
+    A question ("how often should i water them") and advice to them ("you should water them twice
+    a week") are not things to keep; a line whose rate is the whole of it ("twice a week") is an
+    answer to a question the bot asked, not a fact about a doing.
+    """
+    words = said.split()
+    if not words or words[0] in RATES_ASK_LEAD or RATES_ASK.search(said) \
+            or RATES_ADVICE.search(said):
+        return
+    if words[0] in ("you", "your", "yours", "themselves"):
+        return
+    what = RATES_SAID.sub(" ", said)
+    what = " ".join(what.split()).strip(" .,!;:-")
+    lead = what.split()[:1]
+    if lead and lead[0] in RATES_FILLER_LEAD:
+        what = " ".join(what.split()[1:]).strip(" .,!;:-")
+    if not what or not [w for w in re.findall(r"[a-z']+", what) if w not in RATES_IGNORE]:
+        return
+    _keep_a_rate(memory, what, rate.group("how"), said, own=False)
+
+
+def _keep_a_rate(memory, what, how, said, own=True):
+    """File one rate they said of a doing, newest winning for that doing.
+
+    `own` is whether the doing is theirs ("i go to the gym twice a week") or somebody else's
+    ("our 7 month old is waking every 2 hours"); only the first is said back as what they do.
+    """
     what = " ".join(str(what or "").split()).strip(" .,!;:-")
     how = " ".join(str(how or "").split()).strip(" .,!;:-")
     if not what or not how:
@@ -104,9 +151,11 @@ def _keep_a_rate(memory, what, how, said):
             item["how"] = how
             item["said"] = said
             item["turn"] = turn
+            item["own"] = bool(own)
             break
     else:
-        held.append({"what": what, "how": how, "said": said, "turn": turn})
+        held.append({"what": what, "how": how, "said": said, "turn": turn,
+                     "own": bool(own)})
     memory["rates"] = held[-8:]
 
 
@@ -160,7 +209,12 @@ def _the_rate_put_right(text, memory):
 
 
 def keep(text, memory):
-    """Keep a rate said of their own doing: "i go to the gym twice a week"."""
+    """Keep a rate a line says of a doing: "i go to the gym twice a week".
+
+    A rate said of somebody else's doing ("our 7 month old is waking every 2 hours") is kept
+    too, filed against the doing as the line put it, because the late ask is the same ask ("how
+    often was he waking") and it was being answered with the first line's card again.
+    """
     if not isinstance(text, str) or not isinstance(memory, dict):
         return
     if _the_rate_put_right(text, memory):
@@ -175,8 +229,12 @@ def keep(text, memory):
         if not rate:
             continue
         subject = RATES_SUBJECT.match(said)
-        if not subject or subject.group("subj").lower() not in ("i", "we", "i'm", "im", "i've",
-                                                               "ive", "we're", "were"):
+        if not subject:
+            _keep_a_rate_of_a_doing(said, rate, memory)
+            continue
+        if subject.group("subj").lower() not in ("i", "we", "i'm", "im", "i've",
+                                                 "ive", "we're", "were"):
+            _keep_a_rate_of_a_doing(said, rate, memory)
             continue
         rest = " ".join(subject.group("rest").split())
         # The doing is the rest of the clause with the rate taken out of it: "go to the gym".
@@ -219,8 +277,15 @@ RATES_ADVICE = re.compile(r"\b(?:should|shall|ought|need(?:s)?|best|recommend\w*
 RATES_ASK = re.compile(
     r"^\s*(?:and |so |ok |okay |oh |also |then )*(?:remind me\s+)?"
     r"(?:(?P<a>how often|how many times)\b(?P<rest>.*)"
-    r"|(?P<b>was|is|were|are)\s+(?:that|it|this)\s+(?P<how>" + RATES_TEXT + r")"
+    r"|(?P<c>how (?:many|much)\b(?P<rest3>[^?]*))"
+    r"|(?P<b>was|is|were|are)\s+(?:that|it|this)\s+(?P<how>" + RATES_TEXT + r")" + RATES_END +
     r"|what(?:'s|s| is| was)\s+the\s+(?:pattern|rate|schedule)\b(?P<rest2>.*))\s*[?.!]*\s*$", re.I)
+# A count per period is the same ask in other words: "how many a week was that", "how many do i
+# take a day". People say "how many" far more often than "how often", and the store read the
+# period word as the thing counted ("You said three week."). The period is what says it is a rate,
+# so a "how many" line with no period in it ("how many people should i invite") is left alone.
+COUNTS_A_PERIOD = re.compile(
+    r"\b(?:a|per|each)\s+(?:hour|day|week|fortnight|month|year|morning|evening|night)\b", re.I)
 # A pronoun in the ask points at what the store holds ("i water them every evening" / "how often
 # should i feed them") but does not name it, so it never makes one doing the one asked about:
 # "them" is in both lines and the question is about feeding, which this store has no rate for.
@@ -228,7 +293,8 @@ RATES_PRONOUN = frozenset("""them they it its it's that this these those him her
 one ones thing stuff""".split())
 RATES_ASK_FILLER = frozenset("""do does did was is were i we my our me the a an you go going
 again then was that it this now still say said tell once twice a week day month year times
-usually normally i'm im've""".split())
+usually normally have has had get gets got take takes make makes use uses need needs
+i'm im've""".split())
 
 
 def is_a_rate_ask(text, memory):
@@ -251,7 +317,10 @@ def answer(text, memory):
     # and saying their habit back tells them nothing they did not say.
     if RATES_ADVICE.search(asked.group(0)):
         return None
-    rest = (asked.group("rest") or asked.group("rest2") or "").lower()
+    if asked.group("c") and not COUNTS_A_PERIOD.search(asked.group("c")):
+        # A "how many" ask with no period in it counts things, not rates.
+        return None
+    rest = (asked.group("rest") or asked.group("rest3") or asked.group("rest2") or "").lower()
     named = {word for word in re.findall(r"[a-z']+", rest) if word not in RATES_ASK_FILLER
              and word not in RATES_PRONOUN and len(word) > 2}
     item = None
@@ -267,8 +336,12 @@ def answer(text, memory):
             # A doing this store holds no rate for: not its to answer.
             return None
     else:
-        lean_back = re.search(r"\b(?:that|it|this|again|remind)\b", asked.group(0).lower())
-        if not lean_back and not asked.group("b"):
+        lean_back = re.search(
+            r"\b(?:that|it|this|again|remind|said|say|told|tell)\b",
+            asked.group(0).lower())
+        if not lean_back and not asked.group("b") and not asked.group("c"):
+            # "how many a week do we have" asks for the rate already on file: the period is what it
+            # leans back on, so it needs no "that" or "again" to be the same ask.
             return None
         item = held[-1]
     what = " ".join(str(item.get("what") or "").split())
@@ -279,6 +352,10 @@ def answer(text, memory):
     # your hair cut", not "You get my hair cut".
     what = re.sub(r"\bmy\b", "your", what)
     what = re.sub(r"\bour\b", "your", what)
+    if item.get("own") is False:
+        # Somebody else's doing is not theirs: it is said back as what they told the bot, in the
+        # words they used ("You said your 7 month old is waking every 2 hours").
+        return "You said " + what + " " + how + "."
     if pick([0, 1], memory) == 0:
         said = "You " + what + " " + how + "."
     else:

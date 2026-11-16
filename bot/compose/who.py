@@ -23,6 +23,9 @@ It only reads a line that is nothing but the ask (a bare "who should i see", "wh
 """
 import re
 
+from ..memory import holds as earlier
+from ..understanding import understand
+
 from . import pick
 
 # The person, as the reply calls them, the words that name them in an answer, and the way in.
@@ -100,7 +103,9 @@ PREAMBLE = re.compile(r"(?:,\s*(?:and|but|so)\s+|;\s*|\.\s+)", re.I)
 # is about the condition and wants the person put in front.
 EARLY = 45
 
-# The person a thread is about when the answer named none.
+# The person a thread is about when the answer named none. A family thread is here because a
+# parent who keeps falling or a child who will not sleep is a GP conversation: without it the
+# bare "who do i ring" over a care thread fell through to the search hedge.
 BY_TOPIC = (
     ("pets", "vet"),
     ("health", "GP"),
@@ -138,35 +143,64 @@ def asks_who(text):
 
 
 def _last_module(memory):
-    turns = memory.get("turns") if isinstance(memory, dict) else None
-    if not isinstance(turns, list) or not turns:
-        return ""
-    last = turns[-1]
-    if not isinstance(last, dict):
-        return ""
-    return str(last.get("module") or "")
+    return earlier.last_module(memory)
 
 
 def _last_reply(memory):
+    return earlier.last_reply(memory)
+
+
+def _names_no_subject(line):
+    """True for a line that only says to go on: "what can i do", "and then", "thanks".
+
+    The understander's keywords are what is left of a line once the grammar is gone, so a line
+    with none of them named nothing: it is a follow-up about the subject before it.
+    """
+    if asks_who(line):
+        return True
+    read = understand(_flat(line), {})
+    return not [word for word in (read.get("keywords") or []) if len(word) > 2]
+
+
+def _the_subject(memory):
+    """(turn index, the answer to it) for the last line that named a subject.
+
+    A bare "who do i ring" is about the last thing the person described, which is not always the
+    last line and is almost never the last answer. "she keeps falling" is answered "a second one
+    is worth a GP visit", "what can i do" is answered with the grab-rails checklist, and the ask
+    arrives after an answer that names nobody: the person the thread named is in the answer to the
+    line that named the subject.
+    """
     turns = memory.get("turns") if isinstance(memory, dict) else None
     if not isinstance(turns, list) or not turns:
-        return ""
-    last = turns[-1]
-    if not isinstance(last, dict):
-        return ""
-    return str(last.get("bot") or "")
+        return None
+    for index in range(len(turns) - 1, -1, -1):
+        turn = turns[index]
+        if not isinstance(turn, dict):
+            continue
+        line = str(turn.get("user") or "")
+        if not line or _names_no_subject(line):
+            continue
+        return index, str(turn.get("bot") or ""), line
+    return None
 
 
 def _thread_text(memory, answer=""):
-    """The last few lines and the answer, which is what the thread is about."""
+    """What the person said over the last few lines, which is what the thread is about.
+
+    Their own words only. The bot's answers are where the *person* is read from, and they are the
+    worst place to read the subject from: advice names things the person never mentioned, as the
+    thing to rule out or to check. "my mum keeps falling" / "what can i do" ends "...and get the
+    eyes checked", and "who do i ring" was answered "An optician: book an eye test" - the mother
+    had fallen, and a passing mention in the advice became the subject of the thread.
+    """
     said = [answer]
-    turns = memory.get("turns") if isinstance(memory, dict) else None
-    if isinstance(turns, list):
-        for turn in turns[-3:]:
-            if not isinstance(turn, dict):
-                continue
-            said.append(str(turn.get("user") or ""))
-            said.append(str(turn.get("bot") or ""))
+    # Their own words only, as main reads it: the bot's answers are where the person is read
+    # from, not the thread. The walk itself is `earlier.turns`, the one place a turn is read.
+    for turn in earlier.turns(memory)[-3:]:
+        if not isinstance(turn, dict):
+            continue
+        said.append(str(turn.get("user") or ""))
     return " ".join(part for part in said if part)
 
 
@@ -253,8 +287,13 @@ def _says_it_again(way, said):
     return False
 
 
-def _person_for_the_topic(memory, said=""):
-    """The person the thread is about, when the answer named nobody."""
+def _person_for_the_topic(memory, said="", subject=""):
+    """The person the thread is about, when the answer named nobody.
+
+    `subject` is the last line that named one: its reading beats the carried topic, which can be
+    a topic of its own ("my dog keeps scratching" then "my boiler is noisy" left `pets` on the
+    reading of a who-ask, and "who do i call" was answered "A vet").
+    """
     read = memory.get("understood") if isinstance(memory, dict) else None
     topics = []
     if isinstance(read, dict):
@@ -262,6 +301,10 @@ def _person_for_the_topic(memory, said=""):
         one = str(read.get("topic") or "").lower()
         if one:
             topics.append(one)
+    if subject:
+        theirs = understand(_flat(subject), {})
+        if isinstance(theirs, dict) and theirs.get("topics"):
+            topics = [str(t).lower() for t in theirs["topics"]]
     care = [topic for topic in topics if topic in CARE_TOPICS]
     if care:
         thread = _thread_text(memory, said)
@@ -274,19 +317,23 @@ def _person_for_the_topic(memory, said=""):
     return ""
 
 
-def _from_the_answer(name, sentence, at, memory, said):
-    """The person the answer named, with the one line on how to get to them."""
+def _from_the_answer(name, sentence, at, memory, said, repeat=True):
+    """The person the answer named, with the one line on how to get to them.
+
+    `repeat` is False when the sentence comes from an answer the person has already heard: the
+    answer above the last one is not said again, so the reply is the person and the way in.
+    """
     clause, start = _cut_the_preamble(sentence, at)
     way = _the_way_in(name, memory, said, clause)
-    if at - start <= EARLY:
+    if not way:
+        return None
+    if repeat and at - start <= EARLY:
         # The sentence says who to see at the front of it ("see a GP if it is no better in a
         # fortnight"): hand it back, condition and all, with the way in after it.
         body = _tidy(clause)
         if way and not _says_it_again(way, _flat(body)):
             body = body + " " + way[0].upper() + way[1:] + "."
         return body
-    if not way:
-        return None
     # The person is named at the end of a condition ("if it is no better in six weeks, ask your
     # GP about physio", "is a same-day job for a doctor"): the condition is what the answer above
     # already said, so the reply is the person and the way in.
@@ -309,7 +356,16 @@ def reply_for(text, memory):
         reply = _from_the_answer(*found, memory=memory, said=text)
         if reply:
             return reply
-    name = _person_for_the_topic(memory, text)
+    # The last answer named nobody: the person the thread already named is the one to hand back.
+    subject = _the_subject(memory)
+    turns = memory.get("turns") or []
+    if subject and subject[1] and subject[0] != len(turns) - 1:
+        found = _person_in(subject[1])
+        if found:
+            reply = _from_the_answer(*found, memory=memory, said=text, repeat=False)
+            if reply:
+                return reply
+    name = _person_for_the_topic(memory, text, subject[2] if subject else "")
     if not name:
         return None
     way = _the_way_in(name, memory, text)

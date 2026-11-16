@@ -211,6 +211,16 @@ REPLIES = {
         "getting drowsy, sick or confused. Keep the glass if you can, and tell someone you trust "
         "what happened.",
     ),
+    "allergy_now": (
+        "What can you see? Swollen lips, tongue, face or throat, a hoarse voice or any trouble "
+        "breathing is 999 or 911 now, and if you have an EpiPen, use it first and ring 999 after. "
+        "A rash or hives with none of that swollen is an antihistamine, a sit down, and watching it "
+        "for the next hour.",
+        "Tell me what it looks like and I can point you: swelling of the lips, tongue or throat, a "
+        "tight chest or a voice going croaky is 999 or 911 straight away, even if it seems to be "
+        "settling. Itchy spots with nothing swollen is an antihistamine and a quiet hour, and "
+        "anything in between is A&E rather than waiting at home.",
+    ),
     "lips_swell": (
         "Ring 999 or 911 now: swelling of the lips, tongue or throat can close the airway, so say "
         "that the lips and face are swelling. Sit upright, stay with someone, and use an adrenaline "
@@ -236,6 +246,20 @@ REPLIES = {
         "Have no more of it - an antihistamine helps the itch, and keep half an eye on it for the "
         "next hour. Any swelling of the lips or tongue, a tight throat, a wheeze or feeling faint "
         "is 999 or 911 straight away.",
+    ),
+    # A tingle in the lips or the tongue with no cause in the line is the commonest tingle there
+    # is, and it is not the food card: there is nothing to stop eating. It is also not a shrug -
+    # the same tingle is how anaphylaxis starts - so the answer says what it usually is and what
+    # to watch for, and the 999 is the change rather than the tingle.
+    "lips_tingle_alone": (
+        "A tingle like that on its own is usually nothing much: a cold sore starting, a new lip "
+        "balm or toothpaste, something spicy, or breathing a bit fast. Keep half an eye on it for "
+        "the next hour, and ring 999 or 911 if your lips or tongue start to swell, your throat "
+        "feels tight, your voice changes or your breathing does - say anaphylaxis.",
+        "On its own that is usually nothing - a cold sore, a new toothpaste, spice, or "
+        "over-breathing. What matters is what comes next: swelling of the lips or tongue, a tight "
+        "throat, a voice that has changed or a breath that is not right is 999 or 911, and say "
+        "anaphylaxis.",
     ),
     "throat_tight": (
         "A throat that feels tight with nothing else going on is worth getting looked at today: "
@@ -716,6 +740,29 @@ REPLIES = {
         "anything that is bleeding and don't lift the cloth off to look. Even if they seem fine, "
         "they need to be seen today, because internal injuries do not show at once.",
     ),
+    "struck_my_bike": (
+        "Were you on it? That is the part that matters - a clipped bike is a write-off, but a "
+        "rider who came off needs looking at today even if nothing hurts yet. If you are still on "
+        "the road, get off it and behind a barrier first; then swap details, and if you are sore "
+        "anywhere, shaky, or you banged your head, get seen rather than sleeping it off.",
+        "Glad you are here to tell me. If you came off, check yourself over somewhere safe and get "
+        "anything that hurts looked at today - the aches from a road knock turn up hours later. If "
+        "you are fine, you still need the driver's details and a photo of the bike before they go.",
+        "That is a fright and a half. Get yourself out of the traffic before anything else, and if "
+        "you came off, sit down for a minute and check how you feel - sore, dizzy or banged on the "
+        "head means getting seen today. The bike can wait; the police non-emergency line is where a "
+        "hit-and-run goes if they did not stop.",
+    ),
+    "near_thing_over": (
+        "That is what makes those so frightening - it is over in a second and you are left shaking. "
+        "Sit down somewhere safe for five minutes before you ride or drive on, and if the shaking "
+        "does not settle, or you keep replaying it tonight, tell someone rather than sitting with it.",
+        "They never even saw you, by the sound of it. Nothing you did caused that, and if you want it "
+        "on record the police non-emergency line takes reports of near misses and bad driving - write "
+        "down the time, the place and the vehicle while it is fresh.",
+        "That would rattle anyone. Have a hot drink and give yourself ten minutes before the next "
+        "bit of the day; if you are still shaky or sore tomorrow, that is when to get checked.",
+    ),
     # Somebody trapped in a car is the one emergency where the wrong instinct - pulling them out -
     # is what paralyses people, so that is the instruction the card spends itself on. The engine
     # off, nothing to smoke, something warm and a voice: the four things that can be done by a
@@ -803,6 +850,29 @@ REPLIES = {
         "close doors behind you if you can.",
         "Leave the building straight away and call 999 or 911 from outside. If there's smoke, stay "
         "low and keep your mouth covered.",
+    ),
+    # A fire that nearly started is not the building's card, and it is not nothing either: the line
+    # wants "you caught it, here is what to check" and the one number that matters if it is wrong.
+    # The two rules the reply has to keep are that it never says to go back inside, and that the door
+    # stays open for the real fire - "it is still burning" is answered by FIRE, not by this.
+    "near_fire": (
+        "Close call, and good that you caught it. Check whatever it was is properly out and cold "
+        "before you leave it - and if there is any smoke, or it flares up again, that is out of the "
+        "building and 999 or 911.",
+        "Glad that one did not take. Keep an eye on it for a bit yet, and anything that smoulders "
+        "or flares up again means get out and ring 999 or 911.",
+        "That was a near thing. Let it cool right down before you put it away, and if the smell of "
+        "burning does not clear or it starts smoking again, get out and call the fire service on "
+        "999 or 911.",
+    ),
+    # The turn after the near-fire card: the person says it was nothing, and the answer is to let
+    # them stop checking. No number here - the card has already given the one that matters.
+    "near_fire_over": (
+        "Good, then there is nothing to watch. Let it cool right down before you put it away and "
+        "get on with your evening.",
+        "Nice one. If it was the toaster or the grill, empty the crumb tray when it is cold - that "
+        "is usually what it was.",
+        "Glad to hear it. That is the end of it, then - no need to keep checking.",
     ),
     # Heat stroke is said both ways - "i have heatstroke" and "my dad has heat stroke" - so it
     # has a first-person reply and a "them" reply, rather than "get them out of the sun" for
@@ -899,6 +969,54 @@ REPLIES = {
         "or 911 if they are floppy, hard to wake, breathing fast or going blue round the lips. "
         "Keep them warm, keep offering drinks and stay with them while you wait.",
     ),
+    # A grown-up who has gone pale, grey or clammy has lost blood pressure, and the child's advice
+    # ("keep them warm, ring 111") is the wrong way round: sitting them down and calling the
+    # ambulance is the answer, and so is not giving them anything to eat or drink while a bleed or
+    # a heart attack is possible.
+    # A child whose colour has gone with a red sign on it - floppy, mottled, breathing fast - is
+    # an ambulance, and the plain colour card below is the 111 one. This row was skipping the
+    # child altogether, so "my son is mottled and cold" was told a cold is a virus.
+    "pale_child_now": (
+        "That is an ambulance now rather than a wait-and-see: ring 999 or 911 and say the age, "
+        "the colour and whether they are floppy, hard to wake or breathing fast. Lie them on "
+        "their side if they are not responding, keep them warm and don't give them anything to "
+        "eat or drink while you wait.",
+        "Ring 999 or 911 now and give the age and what you can see - the colour, the cold or "
+        "clammy skin, and how they are breathing. Keep them warm and still, don't try to sit "
+        "them up or give them a drink, and stay on the line.",
+    ),
+    # A grown-up who goes pale and sweaty at the gym or in the sun is hot, not shocked, and the
+    # ambulance card would be a false alarm: the cooling answer is the one that fits.
+    "pale_adult_effort": (
+        "Sit down somewhere cool, loosen your kit and drink water in small sips - pale and sweaty "
+        "straight after effort is the heat leaving you. If the colour is not back in half an hour, "
+        "or you feel faint, sick or confused, ring 111 or 999 rather than pushing on.",
+        "That is the effort and the heat rather than a shock: sit down, cool off and get water in. "
+        "If you are still pale, clammy or light-headed in half an hour, or you faint, ring 111.",
+    ),
+    "pale_adult": (
+        "Pale, grey or clammy skin with a cold sweat means the blood is not getting round - a "
+        "bleed, shock or a heart attack. Sit them down with their head low, loosen anything tight "
+        "round the neck or waist, and ring 999 or 911 now: say the colour and any chest pain, "
+        "breathlessness or confusion. Don't give them food or drink, don't let them drive or walk "
+        "it off, and stay with them until the ambulance comes.",
+        "That colour with clammy skin is a body short of blood going round, so treat it as an "
+        "emergency rather than a faint to sleep off: sit them down, keep them still and ring 999 "
+        "or 911, and say if there is chest pain, a lot of blood lost, breathlessness or "
+        "confusion. Nothing to eat or drink, and don't leave them on their own.",
+    ),
+    # The same answer for the person who is asking about themselves: "sit them down" is advice
+    # about somebody else, and "i am pale and clammy" was told to open a window.
+    "pale_adult_self": (
+        "Sit down on the floor with your head low, loosen anything tight at your neck or waist and "
+        "ring 999 or 911 now: pale, grey or clammy skin with a cold sweat means blood is not "
+        "getting round, and that is a bleed, shock or a heart attack until it is checked. Don't "
+        "eat or drink, don't drive yourself in, and don't be on your own.",
+        "That is a call, not a rest: sit or lie down with your head low, loosen anything tight "
+        "and ring 999 or 911, and say you have gone pale and clammy. If you have chest pain, have "
+        "lost blood, or feel you might pass out, say that first. Don't drive and don't wait to see "
+        "if it passes.",
+    ),
     "child_fever": (
         "A temperature in a small child is worth a same-day check: ring 111 or your GP today and say "
         "how old they are and what the thermometer says. Keep fluids going and don't wrap them up "
@@ -934,6 +1052,20 @@ REPLIES = {
         "hard things away, time it on your phone, and don't hold them down or put anything in "
         "their mouth.",
     ),
+    # The same fit, said to the person who had it: no "lie them on their side", no "time it on your
+    # phone". A first fit is still the ambulance, and the things they can do alone are the ones in
+    # it - not driving, not being alone, not a bath.
+    "recent_fit_self": (
+        "Ring 999 or 911 now and say it was your first fit and how long it lasted: a first fit is "
+        "checked the same day, not next week. Don't drive, don't have a bath or shower on your own, "
+        "and ask someone to stay with you while you wait.",
+        "That was a fit, and a first one is a 999 or 911 call - say what happened and how long it "
+        "went on. Sit down somewhere safe, don't drive, and don't be on your own until you have "
+        "been seen; ring again if it starts up again.",
+        "Ring 999 or 911 and tell them you have just had a fit and how long it lasted. Nothing to "
+        "eat or drink yet, no driving, and keep someone with you - if it comes back before they "
+        "arrive, say so on the call.",
+    ),
     # Grunting is the sound of a chest working too hard, and it is easy to miss on a phone.
     "grunting_baby": (
         "Grunting is a 999 or 911 call now - it means a small chest is working hard. Keep them "
@@ -953,6 +1085,32 @@ REPLIES = {
         "wet nappies for the doctor.",
     ),
     # The same emergency said about the user themselves: "my neck is stiff and my head hurts".
+    # A red line running from a wound, or redness spreading from it, is lymphangitis: the
+    # infection has got into the channels that drain the wound. It is the same-day call, and the
+    # 999 call once a fever or a person going downhill is with it. Every shape of it was answered
+    # wrongly on main - the wound watch-and-wait ("shows up two or three days after"), a shrug, and
+    # once the chest-pain card - so the words are the plain ones: what it is, when to be seen, the
+    # word to say on the phone, and how to tell if it is growing.
+    "wound_streak": (
+        "A red line running up from a wound means the infection is tracking along the channels "
+        "that drain it, and that needs seeing today rather than watching: ring 111 or your GP now "
+        "and say you have a spreading red line from a wound, and get a same-day appointment. Draw "
+        "round the edge of the redness with a pen so you can see if it grows, keep the wound clean "
+        "and uncovered, and go to A&E if the redness reaches much further before you are seen.",
+        "Redness that is spreading from a wound is the infection on the move, so it is today, not "
+        "next week: ring 111 or your GP and get seen the same day, and say the redness is "
+        "spreading. Mark the edge with a pen so the next person can see if it has grown, and go "
+        "straight to A&E if it moves quickly.",
+    ),
+    "wound_streak_fever": (
+        "A spreading red line with a fever is 999 now: ring 999 or 911 and say you are worried "
+        "about sepsis and that there is a red line spreading from a wound - that is the word that "
+        "gets them there fast. Don't drive yourself, keep warm, and stay with them until the "
+        "ambulance comes.",
+        "A wound with a red line spreading from it and a temperature is an emergency, not a "
+        "wait-and-see: ring 999 or 911 and say sepsis and spreading redness from a wound. Stay "
+        "with them, keep them warm, and don't set off driving.",
+    ),
     "red_flags_self": (
         "Ring 999 or 911 now and say you're worried about sepsis or meningitis. Don't drive yourself "
         "and don't wait to see if it passes: stay where you are, keep warm, and have someone with "
@@ -983,6 +1141,18 @@ REPLIES = {
         "If you're outside, get somewhere busy and lit and call from there.",
         "Lock yourself in one room and ring 999 or 911 - the police would rather come for nothing. "
         "Don't put yourself between them and the door.",
+    ),
+    "chest_anxiety": (
+        "A tight chest that comes with anxiety is usually the fast breathing and the muscles "
+        "between the ribs, not the heart, and it eases as the breathing slows: sit down, shoulders "
+        "down, make the out-breath longer than the in-breath. Do get the first one looked at - a "
+        "same-day word with 111 or your GP - and ring 999 or 911 if it comes on at rest, spreads to "
+        "the arm, jaw or back, or comes with sweating, sickness or breathlessness.",
+        "Most tight chests that come with stress or a low mood are the breathing, and a slow "
+        "out-breath eases it within a few minutes. Sit down, drop the shoulders, breathe out for "
+        "longer than you breathe in. Get the first one checked the same day - 111 or your GP - and "
+        "ring 999 or 911 for pain that spreads to the arm or jaw, sweating, or breathlessness that "
+        "does not settle.",
     ),
     "breath_panic": (
         "Step out of the room for a minute and sit down, shoulders down, and breathe out for "
@@ -1068,6 +1238,16 @@ REPLIES = {
         "minute before you carry on; if anything aches now, ice it and keep moving gently.",
         "Glad you are alright. Rest whatever aches, ice it for ten minutes at a time today, and "
         "if a back or a knee is still sore in a few days, get it looked at.",
+    ),
+    "near_thing_other": (
+        "That is a proper near thing, and I am glad it was only nearly. Check that they are moving "
+        "everything and that their head is fine, get anything that hurts looked at today, and let "
+        "them know you would rather hear about it than not.",
+        "Ugh, that could have gone badly. Ask them how they are now rather than telling them to be "
+        "careful, and if a knee, a wrist or a head is sore, get it seen today rather than at the end "
+        "of the week.",
+        "Glad they are alright. Rest and ice whatever aches, and if a sore back or knee is still "
+        "there in a few days, that is a GP appointment.",
     ),
     "blue_cold": (
         "Blue lips from the cold mean warm up slowly: get out of the cold, dry off, add layers and "
@@ -1408,6 +1588,19 @@ REPLIES = {
         "number if the surgery is shut. Don't give it food, water or anything to make it sick, and keep "
         "it warm and still until you go.",
     ),
+    # An animal's burn is a vet's, and the person's burn card is the wrong card for it: it talks
+    # about a face, hands and joints, and a dog with a scalded pad is not going to hold still under a
+    # tap for twenty minutes on its own. Cool water first is the same, and the vet is the second half.
+    "pet_burn": (
+        "Cool it under cool running water for at least ten minutes - a pad or a nose can be held "
+        "under a tap or stood in a bowl of cool water - and don't put ice, butter or cream on it. "
+        "Then ring your vet today: a burn on a pad, an ear or near an eye needs looking at, and a "
+        "burnt nose or a burn that has blistered is an out-of-hours call.",
+        "Ten minutes of cool running water is the first thing, and a bowl of cool water does it for a "
+        "pad. Nothing from the bathroom cabinet goes on it, not even a cream made for people. Ring "
+        "the vet today and say what happened and what burnt it, and ring the out-of-hours line if a "
+        "pad, an ear or an eye is involved or the skin has blistered.",
+    ),
     # A pet that cannot get its air is a vet's night of its own: what helps on the way is being
     # still and cool, not the poison advice about bringing the packet.
     "pet_breath": (
@@ -1728,6 +1921,51 @@ REPLIES = {
         "Book a GP appointment this week: weeks of tightness is worth looking at properly. Anything "
         "crushing, spreading to the arm or jaw, or leaving you breathless is 999 or 911 straight away.",
     ),
+    # A wild animal's bite is the same small wound as a dog's: wash it, cover it, get it seen the
+    # same day, and check the tetanus. "a fox bit me" reached "Got it" on main (sleek-sparrow,
+    # #safety 96098).
+    # An insect bite is an itch: an antihistamine, a cold flannel and hands off it, and the only
+    # thing to watch for is an infection days later.
+    "insect_bite": (
+        "An antihistamine and a cold flannel on it settles the itch, and the one thing that matters "
+        "is not scratching it open, because that is how a bite turns into a sore. Ring 111 if a red "
+        "area spreads, it goes hot and tender, or you get a fever over the next few days.",
+        "Wash it, put a cold flannel on it and take an antihistamine if it is driving you mad - try "
+        "not to scratch, since broken skin is what gets infected. A bite that spreads red, swells up "
+        "hard or comes with a temperature a few days later wants a pharmacist or 111.",
+    ),
+    # A tick wants out properly and then a month of watching, which is nothing main answered.
+    "tick_bite": (
+        "Get it out with fine tweezers or a tick tool, gripping as close to the skin as you can and "
+        "pulling straight up without twisting or squeezing, then wash the spot. Over the next month, "
+        "watch for a round rash spreading out from it or a fever and aching like flu - if either "
+        "turns up, tell a GP you had a tick, because that is treated with antibiotics.",
+        "Fine tweezers, gripped close to the skin, straight up and no twisting - a squeezed tick puts "
+        "more into you. Then note the date: a spreading round rash, or a fever and aches in the next "
+        "few weeks, means a GP visit and the words \"tick bite\", which is a course of antibiotics.",
+    ),
+    "wild_bite": (
+        "Wash it under running water for five minutes, cover it with a clean dressing, and get it "
+        "seen today: a bite that breaks the skin needs a tetanus check, and one on the hand, the "
+        "face or over a joint goes to A&E rather than a wait. Ring 999 or 911 if the bleeding is "
+        "heavy or the wound gapes.",
+        "Rinse it under the tap for a good five minutes - animal bites infect easily - then cover it "
+        "and get it looked at today rather than waiting to see how it goes. Tell them when your last "
+        "tetanus was, and go to A&E if the bite is on a hand, the face or over a joint.",
+    ),
+    # A bat is the one bite where a mark that barely shows still needs a same-day call: bat rabies
+    # is in the UK and the vaccine course starts straight away, so this is a phone call today, not
+    # a plaster.
+    "bat_bite": (
+        "A bat bite or scratch needs a same-day call even if the skin barely breaks: wash it with "
+        "soap under running water for fifteen minutes, then ring 111 (or your doctor) today to ask "
+        "about rabies treatment. Treatment works best started straight away, so don't wait to see "
+        "how it looks.",
+        "Wash it under running water with soap for fifteen minutes and ring 111 today rather than "
+        "tomorrow: a bat bite or scratch carries a rabies risk even when the mark is tiny, and the "
+        "vaccine is a course that starts now. If you are not sure it broke the skin, ring and ask - "
+        "that is what the line is for.",
+    ),
     "dog_bite": (
         "Wash the bite under running water for a few minutes, then cover it with a clean dressing "
         "and have it looked at today - a bite on the face or hand goes to A&E. Ring 999 or 911 if "
@@ -1990,6 +2228,10 @@ WAITING = {
     "chest_slow": "Don't start aspirin or any other medicine on your own for this; note when the "
                   "tightness comes and what brings it on, and take that to the GP this week. Crushing "
                   "pain, or pain down the arm or jaw, is 999 or 911 instead.",
+    "wild_bite": "Wash it under the tap for five minutes and cover it, and get it seen today - a "
+                 "bite that breaks the skin wants a tetanus check, and a hand or face bite wants A&E.",
+    "bat_bite": "Wash it with soap under running water for fifteen minutes and ring 111 today: a bat "
+                "bite carries a rabies risk even when the mark is tiny.",
     "dog_bite": "Rinse it under the tap for a few minutes and cover it with a clean dressing; get it "
                 "seen today, and tell them when your last tetanus was.",
     "general": "Follow the ambulance call handler's instructions and stay with them; unlock the door "
@@ -2038,6 +2280,8 @@ AFTER = {
             "check it if confusion comes or it returns.",
     "chest_slow": "Keep that GP appointment and keep noting when it happens; if it turns crushing, "
                   "spreads to your arm or jaw, or you get breathless at rest, ring 999 or 911.",
+    "wild_bite": "Keep it covered and still get it seen today; tell them when your last tetanus was.",
+    "bat_bite": "Keep the wash going and make the 111 call today; the rabies course starts now.",
     "dog_bite": "Keep it covered and clean, and still get it seen today: bites infect easily, and a "
                 "bite on the face or a hand needs A&E rather than a wait.",
     "general": "Stay with them and follow the ambulance call handler's instructions until they "

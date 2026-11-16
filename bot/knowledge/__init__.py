@@ -129,6 +129,21 @@ def topics(found=None):
     return tuple(sorted(answered))
 
 
+def _with_one_more_test(guard, extra):
+    """A row's guard with one more condition folded in, either side allowed to be missing.
+
+    A guard says whether the row may answer, so two conditions are an `and`: the row answers
+    only when both agree it should. The row keeps whatever guard it already had, so this cannot
+    take a test away, and a row with none simply takes the new one.
+    """
+    if guard is None:
+        return extra
+
+    def guard_and_extra(understood):
+        return bool(guard(understood)) and bool(extra(understood))
+    return guard_and_extra
+
+
 def entries():
     """Every Entry in every domain, in a stable order (cached after the first call).
 
@@ -145,11 +160,20 @@ def entries():
             # to and the routine is the news. The hook is the same test an entry's `guard` is,
             # asked once for the domain rather than written into two hundred entries.
             stands_aside = getattr(module, "STANDS_ASIDE", None)
+            # And it may name one more condition for a row that already has a guard. An entry
+            # takes a single `guard=`, so a second condition written beside the first does not
+            # compile - which takes every answer in the file with it - and writing it into the
+            # same lambda means editing a line another change is also editing. A domain
+            # declares the extra test by row id instead, and it is folded in here, once.
+            guard_folds = getattr(module, "GUARD_FOLDS", None) or {}
             for item in getattr(module, "ENTRIES", ()) or ():
                 try:
                     item.domain = name
                     if stands_aside is not None and getattr(item, "guard", None) is None:
                         item.guard = stands_aside
+                    extra = guard_folds.get(getattr(item, "id", ""))
+                    if extra is not None:
+                        item.guard = _with_one_more_test(item.guard, extra)
                 except AttributeError:      # an entry from somewhere else keeps ""
                     pass
                 found.append(item)

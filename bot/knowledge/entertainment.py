@@ -7,6 +7,7 @@ and named works in the reply so there is always something concrete to pick up.
 import re
 
 from ..compose.repair import owns_the_deed
+from ..understanding.attempts import asks_for_one_more
 from .lookup import entry
 
 
@@ -16,6 +17,27 @@ from .lookup import entry
 # same way a holiday and a trip already are, and there are too many city names to list here - so
 # the row asks travel's own table whether the line named one.
 _AMBIGUOUS_CITY_WORDS = ("bath",)
+
+
+def _a_chess_line(understood):
+    """True when "castle" means the chess move, not the building you visit.
+
+    "what is a castle" is history, and it was the castling card because the row keys the noun.
+    A chess word in the line settles it, and so does the verb: "how do i castle", "when should i
+    castle" are the move even though they name no piece.
+    """
+    said = " ".join(str((understood or {}).get(key) or "")
+                    for key in ("clean", "norm_text", "text")).lower()
+    if _CHESS_WORDS.search(said):
+        return True
+    return bool(_CASTLING_VERB.search(said))
+
+
+_CHESS_WORDS = re.compile(r"\b(chess|chessboard|rook|rooks|king|kings|kingside|queenside|"
+                          r"queen|pawn|pawns|bishop|knight|checkmate|check mate|castling|"
+                          r"moves?)\b")
+_CASTLING_VERB = re.compile(r"\b(how|when|can i|should i|do i|where do i|why)\b[^.?!]{0,18}"
+                            r"\bcastl(e|es|ed|ing)\b")
 
 
 def _no_city_is_named(understood):
@@ -277,7 +299,89 @@ VIEWS = {
                      "the time of his life. The safest film there is for a mixed-age evening."),
     "everything everywhere all at once": ("Worth it if you have the energy for it: two hours "
                                           "twenty of noise, jokes and feeling, and the last "
-                                          "twenty minutes earn all of it. Have tissues."),
+                                          "twenty minutes earn all of it. Have tissues."),    "squid game": ("Yes - the first series is the one to start with: one game an episode, and "
+                   "the tension is in the rules rather than the blood. The later series are "
+                   "slower, so only go on if you liked the first."),
+    "the last of us": ("Worth it even if you never played the game: nine episodes, and the third "
+                       "one is a whole love story with almost nobody else in it. Bleak, so not a "
+                       "background watch."),
+    "shogun": ("Yes - a stranger in a strange court, and it is about power and translation more "
+               "than battles. Partly subtitled, and better for it."),
+    "slow horses": ("Yes: Gary Oldman as a filthy, brilliant spymaster, six short series, and it "
+                    "gets funnier as it gets darker. Start at the first."),
+    "severance": ("Worth it: office workers whose memories are split between work and home, and "
+                  "the slowest drip of information you will be glad of. Short episodes, and pay "
+                  "attention."),
+    "the boys": ("Yes if you like your superheroes filthy and angry - it is a satire with a lot "
+                 "of gore. If you want charm, this is not it."),
+    "money heist": ("Worth it for the first two parts, which are one long heist with a hostage "
+                    "negotiator; the later parts stretch a good idea a long way. Try the "
+                    "original audio rather than the dub."),
+    "bridgerton": ("Yes if you want gorgeous, silly, warm romance: each series is one couple and "
+                   "a lot of string-quartet pop. It is not trying to be serious."),
+    "the witcher": ("The first series is confusing on purpose and settles by the second; watch "
+                    "it for the monster-of-the-week episodes and Henry Cavill's growl."),
+    "gilmore girls": ("Worth it: seven series of very fast talking, a small town, and a mother "
+                      "and daughter who are friends. Comfort television rather than plot."),
+    "sex education": ("Yes - four series, funny and kind, about a teenager running an advice "
+                      "clinic at school, with Gillian Anderson as his mother."),
+    "normal people": ("Worth it: two people circling each other over twelve short episodes, and "
+                      "the most honest silences on television. Bleak in a quiet way."),
+    "bluey": ("Yes, and not only for the children: seven-minute episodes about a family of dogs "
+              "that are funnier and sadder than they need to be, and a parent gets more out of "
+              "it than the child."),
+    "avatar the last airbender": ("Worth it: three series of a cartoon that is really a war "
+                                  "story with a twelve-year-old in the middle, and it earns its "
+                                  "ending. Start at episode one, not the film."),
+    "the matrix": ("Yes, and it holds up: the first film is the one, and the effects still work "
+                   "because they serve the story. The sequels are for people who want more of "
+                   "the world."),
+    "inception": ("Worth it: a heist inside dreams, and it explains its own rules as it goes. "
+                  "Watch it without your phone and the ending lands."),
+    "interstellar": ("Yes, on the biggest screen you can: a father-and-daughter story with a "
+                     "black hole in the middle, and the sound is half of it. The middle act is "
+                     "slow."),
+    "everything everywhere all at once": ("Yes, and give it twenty minutes: it is silly and fast "
+                                          "and then it is about a mother and a daughter and you "
+                                          "are crying. The middle is a lot of noise."),
+    "barbie": ("Worth it: funny and strange and about more than the doll, and Ryan Gosling steals "
+               "it. Two hours, and it knows exactly what it is doing."),
+    "wonka": ("Worth it for a family evening: warm, colourful, songs you half know, and "
+              "Chalamet is charming. Nobody needed it, but it is a good time."),
+    "the holdovers": ("Yes - a grumpy teacher, a stranded student and a cook at a boarding school "
+                      "over Christmas. Small, funny, and it earns its ending."),
+    "past lives": ("Worth it: two childhood friends in different countries and twenty years of "
+                   "what-ifs. Quiet, short, and it does not go where you expect."),
+    "where the crawdads sing": ("Worth it if you want a slow, sad mystery about a girl raising "
+                                "herself in a marsh. The book is better and the film is "
+                                "faithful to it."),
+    "the midnight library": ("Worth it: a woman between life and death tries the lives she did "
+                             "not live. Gentle, quick, and the ending is the argument."),
+    "lessons in chemistry": ("Yes - a chemist in the 1960s turns a cooking show into a lecture, "
+                             "and it is funny and angry at once. A dog narrates a chapter."),
+    "the seven husbands of evelyn hugo": ("Worth it: an old film star tells her life story to a "
+                                          "reporter, and it is a soap opera in the best sense."),
+    "tomorrow and tomorrow and tomorrow": ("Yes - two friends making video games over thirty "
+                                           "years, and it is really about work, and love, and "
+                                           "the friend you do not marry."),
+    "a little life": ("Worth it, but be warned: it is long, it is about damage, and it is "
+                      "relentless. Read it when you have a fortnight and somebody to talk to "
+                      "about it."),
+    "klara and the sun": ("Worth it: an artificial friend watches a family and misunderstands "
+                          "beautifully. Quiet, and the ending stays with you."),
+    "the song of achilles": ("Yes - the Iliad told by Patroclus, and it is a love story first and "
+                             "a war epic second. Have the tissues ready."),
+    "circe": ("Worth it: the witch of the Odyssey tells her own story, and it is about power and "
+              "exile. Slow to start, then it grips."),
+    "piranesi": ("Worth it, and go in knowing nothing: a man lives in an infinite house of "
+                 "statues. Short, strange, and the reveal is the reward."),
+    "project hail mary": ("Yes - a man wakes alone on a spaceship and has to science his way out, "
+                          "with one very funny alien. Best read cold."),
+    "the martian": ("Worth it: one man, one planet, and a lot of problem-solving, and the most "
+                    "cheerful survival story there is."),
+    "sapiens": ("Worth it as an argument rather than a history: bracing and readable, and "
+                "confidently wrong in places, so read it with a pinch of salt."),
+
 }
 
 # The ask that wants a view on a named work. Kept to phrases with a judgement in them, so a
@@ -2082,6 +2186,35 @@ _PAINT_VERBS = frozenset(("paint", "paints", "painted", "painting", "repaint", "
                           "repainting", "varnish", "varnishing"))
 
 
+# The hobby of baking is about baked goods, and "bake" is also the verb for putting anything at all
+# in the oven: "how do i bake a potato", "how do i bake an aubergine", "how do i bake a chicken"
+# and "how do i bake a beetroot" were all given the sourdough-first answer, because "bake" is a
+# verb in the table below and a `how do i` in front of it is all this row asks. What tells the two
+# apart is whether the verb has a thing after it: "i cant bake" and "how do i start baking" name
+# no thing and are the hobby, while "bake a potato" names dinner and the kitchen answers it. Bread
+# and cakes are the same reading twice over - their own words are in the avoid list below.
+_A_THING_IS_BEING_BAKED = re.compile(
+    r"\b(?:bake|bakes|baked|baking)\s+"
+    r"(?:a|an|the|my|our|your|his|her|their|some|these|those|two|three|four|half)\s+"
+    r"([a-z][a-z'-]*)")
+# The words that can follow the verb there and name nothing to put in the oven: "how do i get into
+# baking a bit more", "how do i bake a lot at once", "how do i bake a good loaf". The last is a
+# loaf and is left alone - "loaf" is in the avoid list below - so only a quantity word stands here.
+_NOTHING_TO_BAKE = frozenset((
+    "bit", "bits", "lot", "lots", "few", "couple", "little", "while", "moment", "time",
+    "times", "start", "living", "change", "break", "go", "try", "batch", "whole", "good",
+    "better", "decent", "simple", "basic", "proper", "quick", "easy", "beginning",
+))
+
+
+def _a_thing_is_being_baked(text):
+    """Whether the line puts a thing in the oven rather than asking how to take baking up."""
+    for hit in _A_THING_IS_BEING_BAKED.finditer(text):
+        if hit.group(1) not in _NOTHING_TO_BAKE:
+            return True
+    return False
+
+
 def _a_surface_is_being_painted(words, padded):
     """Whether the painting in the line is a job on a thing rather than taking the hobby up."""
     if not (words & _PAINT_VERBS):
@@ -2104,6 +2237,10 @@ def _activity_start(memory, understood):
     if names_a_dish(understood):
         return None
     text = ((understood.get("clean") or "") + " " + (understood.get("norm_text") or "")).lower()
+    if _a_thing_is_being_baked(text):
+        # "how do i bake a potato" is the potato's question, not a first step into baking: the
+        # verb is shared by every food there is and the noun after it is what tells them apart.
+        return None
     # Whole words, not substrings: "sing" sits inside "using" and "bake" inside "baked beans",
     # so a plain `in` handed an oven question a choir, which is how this list used to be read.
     words = set(re.findall(r"[a-z']+", text))
@@ -2699,7 +2836,13 @@ def _book_about(memory, understood):
 # because neither carries that shape.
 _RESERVING_PHRASES = ("book a", "book an", "book the", "book my", "book our", "book some",
                       "to book", "booking a", "booking the", "booked a", "booked the",
-                      "book it", "reserve a", "reserve the", "reserved a")
+                      "book it", "reserve a", "reserve the", "reserved a",
+                      # a booking already made says when it is, and the thing booked comes
+                      # before the verb: "physio booked for friday", "the room is booked for
+                      # saturday", "we are booked in for the 3rd". Without these the line is a
+                      # book subject to the pick - "physio booked for friday" got a novel.
+                      "booked for", "booked in", "booked up", "booked with", "is booked",
+                      "are booked", "was booked", "were booked", "be booked", "got booked")
 
 # The same verb with nothing after it: a modal or the person in front ("should we book", "can i
 # book", "do we need to book", "worth booking"), or the time of it after ("book first", "book
@@ -2719,7 +2862,27 @@ _A_DETERMINER_JUST_BEFORE = re.compile(
 
 def _not_a_reservation(understood):
     """True when the line is not reserving something, for the row that answers book subjects."""
+    if _a_judged_work_named(understood):
+        return False
     return not the_book_is_a_reservation(understood)
+
+
+def _a_judged_work_named(understood):
+    """True when the line names a work of the table and asks for a view on it.
+
+    "is dune a good book" names *Dune* and carries a judgement, so it is a question about that
+    book and the verdict row answers it. The subject row matched it as well - "book" plus "good"
+    - and won on its bias, so `lookup.find` handed back a row whose reply then stood down for
+    want of a subject, and the answer underneath was correct while the row that gave it was not.
+    A line that names a work *and* judges it is never a request for a book on a subject, so this
+    row stands down instead. "recommend a book about the office" carries no judgement word and
+    is not touched.
+    """
+    text = ((understood.get("clean") or "") + " "
+            + (understood.get("norm_text") or "")).lower()
+    if not _work_named(text):
+        return False
+    return any(_says(word, text) for word in JUDGE_WORDS)
 
 
 def the_book_is_a_reservation(understood):
@@ -3011,6 +3174,13 @@ TV_MOODS = {
 PODCAST_FUNNY = ("For funny: *No Such Thing as a Fish* (four people, one bizarre fact each, about "
                  "half an hour), *The Adam Buxton Podcast* for long chats that wander, or *Off "
                  "Menu* where guests order their dream meal. All easy to dip in and out of.")
+# A crime podcast asked for by its subject. `podcast-history` holds the word "true" and
+# `podcast-mood` reads "true crime" as the real-lives mood, so the subject row was the one thing
+# missing: "true crime podcast" was three interviews and "crime podcast" was nothing at all.
+PODCAST_CRIME = ("*Serial* series one is where to start: one murder, a year of reporting, and the "
+                 "reason everyone else started making them. Then *Casefile* (calm, one case an "
+                 "episode), *Criminal* (short, strange cases, less grim) or *The Teacher's Pet* "
+                 "if you want one long story done properly.")
 PODCAST_MOODS = {
     "funny": PODCAST_FUNNY,
     "think": ("*The Rest Is History* (history with jokes), *Hidden Brain* (why people do what "
@@ -3168,8 +3338,15 @@ _WET_WORDS = ("rain", "rainy", "raining", "rains", "showers", "drizzle", "drizzl
 # never built.
 _WET_PHRASES = ("wet day", "wet days", "wet weekend", "wet weekends", "wet afternoon",
                 "wet weather", "wet out", "wet one")
-_EVENING_WORDS = ("night in", "tonight", "evening", "staying in", "stay in", "at home",
-                  "indoors", "cosy", "cozy", "this afternoon in", "day in")
+_EVENING_WORDS = ("night in", "tonight", "evening", "at home",
+                  "indoors", "cosy", "cozy", "this afternoon in", "day in",
+                  # "stay in" on its own is not the evening: it is the verb in every
+                  # timetable question ("how long do stitches stay in", "how long can you
+                  # leave a tampon in"), and it was pulling those onto the evening card.
+                  # The evening is said with a person and a time round it.
+                  "we are staying in", "were staying in", "im staying in",
+                  "i am staying in", "staying in tonight", "stay in tonight",
+                  "staying in this evening", "stay in this evening", "staying in all")
 
 
 def _typed_line(understood):
@@ -3485,12 +3662,26 @@ def _a_pick_of_the_other_mood(memory, understood):
     return _a_pick_in_any_medium(memory, understood)
 
 
+# The mood that is a length rather than a kind. A length says nothing about what the thing is,
+# so it is only an ask for a pick when the line or the chat names something to pick.
+A_LENGTH_MOOD = ("short",)
+
+
 def _a_pick_in_any_medium(memory, understood):
     """Something in the mood they named, in whichever medium the chat was already on."""
     understood = understood if isinstance(understood, dict) else {}
     line = "%s %s" % (understood.get("clean") or "", understood.get("norm_text") or "")
     got = _mood_of(line)
     if not got or not _chat_is_about_a_pick(understood, memory):
+        return None
+    # "short" is the one mood here that is a length, and every other mood says what the thing is
+    # like. A length describes anything - a walk, a nap, a recipe - so on a line that names
+    # nothing to pick, it is not a pick: "i fancy something spicy but quick" reached the film,
+    # series and book row through "quick" alone and answered a cooking line with *Before Sunset*,
+    # while "i fancy something spicy" without the length word gets the chilli. A medium named
+    # ("anything quick to read") or a chat already about a pick ("something shorter" after a
+    # list) still carries it.
+    if got[0] in A_LENGTH_MOOD and not (_pick_kind(line) or _pick_carry(memory, line)):
         return None
     # The mood has to be the person's own. A follow-up reaches this row with the turn before it
     # glued onto the line, so "i dont want a scary film what should i watch" then "anything a bit
@@ -3537,6 +3728,33 @@ def _a_pick_in_any_medium(memory, understood):
 # "what should I watch for overnight" is being alert to a symptom, not a viewing request.
 NOT_WATCHING = ("watch for", "watching for", "watch out", "look out for", "keep an eye out",
                 "signs of", "symptoms", "what to look")
+
+# ... but "a film to watch for the kids" is still a film. Only the *asking* form - "what should I
+# watch for", "what signs", "look out for", "keep an eye on" - is the alert, so that is what the
+# guard reads, and a line naming something to watch keeps the film rows whatever else it says.
+VIEWING = ("film", "films", "movie", "movies", "tv", "telly", "tele", "show", "shows", "series",
+           "episode", "episodes", "netflix", "dvd", "cinema", "documentary", "programme",
+           "programmes", "box set", "boxset", "sitcom", "cartoon", "cartoons")
+
+# "what should i watch" alone is a viewing ask ("what should i watch with my kids tonight"), so
+# every phrase here carries the sense of being alert: a "for", a sign, a symptom or an eye.
+ASKING_TO_WATCH_FOR = ("what should i watch for", "what do i watch for", "what to watch for",
+                       "what should i watch out", "what do i watch out", "watch out for",
+                       "look out for", "sign", "symptom", "keep an eye",
+                       "what to look for", "what should i look for", "what should i be looking")
+
+
+def not_asking_what_to_watch_for(understood):
+    """True unless the line asks what to be alert to and names nothing to watch."""
+    if not isinstance(understood, dict):
+        return True
+    said = str(understood.get("text") or understood.get("clean") or understood.get("norm_text")
+               or " ".join(understood.get("words") or ())).lower()
+    if not said:
+        return True
+    if any(word in said for word in VIEWING):
+        return True
+    return not any(asked in said for asked in ASKING_TO_WATCH_FOR)
 
 # --- quick creative asks ------------------------------------------------------
 # "Write me a haiku about rain" is not a fact question: no table of facts answers it and a
@@ -3761,6 +3979,13 @@ GENERIC_LIMERICK = ("There once was a {thing} I knew,",
 
 # The poem for any other subject: two couplets that lean on the same two rhymes, so it is a poem
 # rather than a list of lines, and the person's own word is named three times.
+# A second verse about the same thing, for "one more about the moon" after the first one: the
+# table holds one poem per thing, so the thing with no poem of its own comes back in this shape
+# the second time rather than word for word.
+GENERIC_POEM_TWO = ("The {thing} is here and the {thing} is plain,",
+                    "it comes round slowly and it comes round again.",
+                    "I have no better answer to give it than this,",
+                    "so I put it in a line and I let it exist.")
 GENERIC_POEM = ("I keep a little {thing} in mind,",
                 "the sort of {thing} that's hard to find.",
                 "It does not shout, it does not boast,",
@@ -3816,18 +4041,120 @@ ABSTRACT = ("lockdown", "pandemic", "covid", "coronavirus", "virus", "grief", "l
 # scans whatever noun they typed. Two openings, chosen by the word, so the same ask gets the same
 # story and a different ask gets a different one.
 STORY_OPENINGS = (
-    "It started with a {thing} nobody in the house had planned for.\n"
+    "It started with {a_thing} nobody in the house had planned for.\n"
     "The Tuesday came and went, and it was still there on the Wednesday.\n"
     "By Friday the whole street had an opinion, and no two of them matched.\n"
     "In the end they kept it, and it kept them.",
-    "The {thing} arrived in a box with no sender and no note.\n"
+    "{The_thing} arrived in a box with no sender and no note.\n"
     "It sat in the hall for a week, and then it started to hum.\n"
     "She unscrewed one corner, looked inside, and sat down on the floor.\n"
     "\"Well,\" she said to nobody at all, \"that changes the week.\"",
-    "He had carried the {thing} from one flat to another for eleven years.\n"
+    "He had carried {the_thing} from one flat to another for eleven years.\n"
     "The morning he finally opened it, the kettle boiled and the phone rang at the same time.\n"
     "He let the kettle win, and the phone stopped.\n"
-    "Then he sat at the table with the {thing} and read the whole thing twice.",
+    "Then he sat at the table with {the_thing} and read the whole thing twice.",
+)
+
+# A possessive is the person's own, so it is read off the line rather than guessed from the noun:
+# "write a rap about my nan" came back as "Yo, the nan is back and it is here to stay", and the
+# first fix answered that with a list of person words - which then gave "Yo, my baby is back" to a
+# line that said "write a rap about a baby", and "my nurse" to "the nurse". A possessive is only
+# there when the person typed it. Each of these is followed by the thing, so "my brother" and
+# "my little brother" both keep it and "mum's garden" keeps the owner.
+POSSESSIVE = ("my ", "your ", "our ", "his ", "her ", "their ", "its ", "mum's ", "dad's ",
+              "nan's ", "gran's ", "mum’s ", "dad’s ")
+
+# A verse with no thing named in it used to read the template's fill-in word out loud ("Yo, the
+# small thing is back"), which sounds like a form letter. A rap leans on the beat and a song on
+# the tune instead, the way the words would go if a person were making one up on the spot.
+NO_THING_IN_A_VERSE = {"rap": "beat", "song": "tune"}
+
+
+def _the_possessive_phrase(thing, said):
+    """"my nan", "his nurse", "my little brother" - the phrase as the person wrote it.
+
+    The possessive has to be theirs and it has to be attached: "write a story about my little
+    brother" is "my little brother" and not "the brother", while "my friend wants a rap about a
+    bike" is still "a bike", because two words are all that may sit between the possessive and
+    the thing.
+    """
+    if not said or not thing:
+        return ""
+    for word in POSSESSIVE:
+        start = 0
+        while True:
+            at = said.find(word, start)
+            if at < 0:
+                break
+            rest = said[at + len(word):]
+            spot = rest.find(thing)
+            if spot >= 0 and len(rest[:spot].split()) <= 2:
+                end = at + len(word) + spot + len(thing)
+                return " ".join(said[at:end].split())
+            start = at + 1
+    return ""
+
+
+def _article_for(thing, article="the", clean=""):
+    """The article a thing takes in these templates, as both a mid-sentence and a lead word.
+
+    The person's own possessive, when the line has one - "my nan", "his nurse", "mum's garden" -
+    and otherwise the article the template asked for, so "the sea", "a bike", "a baby" and "the
+    wedding" read as they did. Returned as a dict of the phrases the templates interpolate,
+    because "My nan arrived" at the start of a line needs the capital and "with my nan" in the
+    middle does not.
+    """
+    said = (clean or "").lower()
+    theirs = _the_possessive_phrase(thing, said)
+    if theirs:
+        return {"a_thing": theirs, "the_thing": theirs,
+                "The_thing": theirs[:1].upper() + theirs[1:]}
+    their = article + " "
+    return {"a_thing": "a " + thing, "the_thing": their + thing,
+            "The_thing": (their + thing)[:1].upper() + (their + thing)[1:]}
+
+# The verse, asked to be longer. "tell me a longer one", "can you make it longer", "write a
+# longer one", "and make it longer", "longer please": after a story or a poem this is the
+# commonest follow-up there is, and each of them answered with something else - the search hedge
+# ("I don't know enough to answer that honestly"), the listening line ("Thanks for telling me"),
+# and on "and make it longer" the hair-growth card. What "it" is is the verse just given, so the
+# continuation is written in the same form and about the same thing, and it is added to the verse
+# rather than replacing it: the person asked for more of what they were given.
+STORY_LONGER = (
+    "The weeks went by and it stopped being strange.\n"
+    "Things settled into a shape nobody had chosen, and the shape held.\n"
+    "Then one quiet morning there was nothing to decide,\n"
+    "and they found they missed the deciding more than they had expected.",
+    "There was a phone call in the spring that changed the plan.\n"
+    "Nothing was thrown out, though a few things were put away.\n"
+    "By summer the {thing} had a place of its own in the house,\n"
+    "and nobody could remember what had stood there before it.",
+    "It came up again at dinner, the way these things do.\n"
+    "Somebody said it out loud and everybody laughed, and then carried on eating,\n"
+    "which is how a thing stops being news.\n"
+    "After that the {thing} was simply part of the room.",
+    "Years later somebody asked where it had come from\n"
+    "and got four different answers, all of them true.\n"
+    "They settled on the shortest one, because it was the one\n"
+    "that left the {thing} where it was.",
+)
+VERSE_LONGER = (
+    "The {thing} is not what the morning planned,\n"
+    "it sits in the light and it will not be banned.\n"
+    "It is stubborn and it is small and it is here to stay,\n"
+    "and I have stopped arguing with it anyway.",
+    "There is more to the {thing} than the shape it shows,\n"
+    "more than the part that anybody knows.\n"
+    "So leave a little room and leave a little light,\n"
+    "and the {thing} will get through the rest of the night.",
+    "I said what I said and I meant every word,\n"
+    "the {thing} is not finished, or so I have heard.\n"
+    "So here is one more, and I will keep it plain,\n"
+    "for the {thing} and the weather it cannot explain.",
+    "The {thing} does not hurry and does not explain,\n"
+    "it takes the long way round and it comes back again.\n"
+    "So let the day go where it wants to go,\n"
+    "the {thing} knows the way and it is not slow.",
 )
 
 # A rap and a song work the same way: the rhyme words are fixed and the thing slots in where they
@@ -3850,16 +4177,16 @@ STORY_LEADING = {"story": "A short story about {subject}:",
 # rather than like a verse. The words are the same either way; only the lead changes.
 NO_SUBJECT_LEADING = {"rap": "A rap, then:", "song": "A song, then:",
                       "story": "Here is one, made up on the spot:"}
-GENERIC_RAP = ("Yo, the {thing} is back and it is here to stay,",
+GENERIC_RAP = ("Yo, {the_thing} is back and it is here to stay,",
                "I have been up since six and I am out all day.",
                "They said it was nothing, I said it was mine,",
-               "so the {thing} and me, we are doing just fine.")
+               "so {the_thing} and me, we are doing just fine.")
 # "I put the dog down" is what you say at the vet's, and a song about a dog is not that, so the
 # template leans on the thing instead of putting it anywhere.
 GENERIC_SONG = ("Verse:\nIt was a Tuesday, nothing much to say,\n"
-                "I thought about the {thing} and I walked away.\n"
-                "Chorus:\nOh, the {thing}, the {thing},\nit comes back around,\n"
-                "the {thing} comes back around.")
+                "I thought about {the_thing} and I walked away.\n"
+                "Chorus:\nOh, {the_thing}, {the_thing},\nit comes back around,\n"
+                "{the_thing} comes back around.")
 GENERIC_STORY_THING = "small thing"
 
 # A nickname is a thing people ask for and then write on a card, so it is two word lists and a
@@ -4279,11 +4606,23 @@ CALM = ("garden", "tea", "sea", "night", "morning")
 FORMS = {"haiku": HAIKU, "limerick": LIMERICKS, "poem": POEMS}
 
 
+# The lead a verse is written under: "A short story about a dog:", "A haiku about the sea,
+# 5-7-5:". Read off the bot's own reply, it says which form was written without another word
+# list to keep, and it is what a second one asked for in three words ("one more about a dog",
+# "another one about a dog") has to be written in.
+_A_VERSE_LEAD = re.compile(
+    r"^\s*(?:A|An)\s+(?:\w+\s+){0,2}(story|poem|haiku|limerick|rap|song|rhyme)\b", re.I)
+
+
 def _the_form_last_time(memory):
-    """The form of the poem the last exchange was about, if it was about one."""
+    """The form of the verse the last exchange was about, if it was about one."""
     turns = [one for one in (memory.get("turns") or [])[-2:] if isinstance(one, dict)]
     for turn in reversed(turns):
-        said = (str(turn.get("user") or "") + " " + str(turn.get("bot") or "")).lower()
+        bot = str(turn.get("bot") or "")
+        written = _A_VERSE_LEAD.match(bot)
+        if written:
+            return written.group(1).lower()
+        said = (str(turn.get("user") or "") + " " + bot).lower()
         for form in ("haiku", "limerick", "poem"):
             if form in said:
                 return form
@@ -4754,8 +5093,27 @@ def _story(memory, understood):
         return _offer("story", subject)
     lead = (STORY_LEADING["story"].format(subject=subject) if subject
             else "Here is one, made up on the spot:")
-    opening = _picked(STORY_OPENINGS, thing)
-    return lead + "\n" + opening.format(thing=thing)
+    opening = _the_opening_not_said_yet(thing, memory, clean)
+    return lead + "\n" + opening
+
+
+def _the_opening_not_said_yet(thing, memory, clean=""):
+    """The opening for `thing`, unless it is already on the screen: then the next one.
+
+    "tell me a story about a cat" then "another one about a cat" was the same story twice,
+    and the composer framed the second one "Same answer, and it covers this" - which is what
+    a machine says. A second story is another story, so the openings rotate past the ones this
+    chat has already been told, and only come back round when all of them have been used.
+    """
+    start = sum(ord(one) for one in thing) % len(STORY_OPENINGS) if thing else 0
+    told = " ".join(str(turn.get("bot") or "") for turn in ((memory or {}).get("turns") or [])
+                    if isinstance(turn, dict))
+    filled = dict(thing=thing, **_article_for(thing, clean=clean))
+    for step in range(len(STORY_OPENINGS)):
+        one = STORY_OPENINGS[(start + step) % len(STORY_OPENINGS)].format(**filled)
+        if one.split("\n", 1)[0] not in told:
+            return one
+    return STORY_OPENINGS[start].format(**filled)
 
 
 def _rap(memory, understood):
@@ -4765,11 +5123,11 @@ def _rap(memory, understood):
         return _a_report_answered(clean, understood)
     if _named_nothing(clean):
         return None
-    thing = _thing(clean) or GENERIC_STORY_THING
+    thing = _thing(clean) or NO_THING_IN_A_VERSE["rap"]
     subject = _subject(clean) or thing
     if thing in ABSTRACT:
         return _offer("rap", subject)
-    lines = [one.format(thing=thing) for one in GENERIC_RAP]
+    lines = [one.format(thing=thing, **_article_for(thing, clean=clean)) for one in GENERIC_RAP]
     lead = (STORY_LEADING["rap"].format(subject=subject) if _subject(clean)
             else NO_SUBJECT_LEADING["rap"])
     return _lines(lines, lead)
@@ -4782,13 +5140,13 @@ def _song(memory, understood):
         return _a_report_answered(clean, understood)
     if _named_nothing(clean):
         return None
-    thing = _thing(clean) or GENERIC_STORY_THING
+    thing = _thing(clean) or NO_THING_IN_A_VERSE["song"]
     subject = _subject(clean) or thing
     if thing in ABSTRACT:
         return _offer("song", subject)
     lead = (STORY_LEADING["song"].format(subject=subject) if _subject(clean)
             else NO_SUBJECT_LEADING["song"])
-    return lead + "\n" + GENERIC_SONG.format(thing=thing)
+    return lead + "\n" + GENERIC_SONG.format(thing=thing, **_article_for(thing, clean=clean))
 
 
 CHARACTER_NAME_RULES = (
@@ -4828,25 +5186,77 @@ def _nickname(memory, understood):
             "from something only you two know." % (picks[0], picks[1], picks[2]))
 
 
+# A second one, asked for in the words people use: "one more about a dog", "another one about a
+# dog", "now one about a cat", "can you do one about the sea". The extra words in front are the
+# natural way to ask ("can you do one about", "go on, another one about") and none of them is a
+# subject, so they are stepped over. The subject is the tail kept as the person said it: "a dog",
+# not "dog", because the verse's lead reads "A short story about a dog:".
+_A_SECOND_ONE = re.compile(
+    r"^\s*(?:(?:and|then|also|ok|okay|now|so|go on|come on|can you|could you|would you|please|"
+    r"do|give me|write|make|sing|tell|create)\b[\s,]*)*"
+    r"(?:one\s+more|one\s+other|another\s+one|another|one)\b"
+    r"(?:\s*(?:about|of|on)\s+(.+?))?\s*[.!?]*\s*$", re.I)
+# Neither of these is a verse: "one more thing", "one more question" is the other topic they are
+# on about, and "one more beer please" names a thing of its own.
+_NOT_A_VERSE_ASK = re.compile(
+    r"\b(?:thing|question|quick\s+question|moment|minute|sec|favour|favor|idea|point|"
+    r"thought|ask|time)\b", re.I)
+_ANOTHER_FORM = {"story": "_story", "poem": "_poem", "haiku": "_haiku",
+                 "limerick": "_limerick", "rap": "_rap", "song": "_song", "rhyme": "_rhyme"}
+
+
+def _the_second_one_asked_for(understood):
+    """The subject of a "one more about X" ask: "" when the line is not one, None for a bare one.
+
+    A bare "one more" is a second one with no subject, so it comes back as None and the caller
+    writes the same form again about something of its own choosing. The typed line is `plain` on
+    most turns, but a follow-up the reading has rewritten keeps its own words in `text` and the
+    folded line in `plain` ("write me a limerick about a one more about a dog"), and the folded
+    line cannot match a pattern anchored at both ends; every field is tried until one is the line.
+    """
+    for field in ("text", "plain", "clean"):
+        typed = " ".join(str((understood or {}).get(field) or "").split())
+        if not typed or _NOT_A_VERSE_ASK.search(typed):
+            continue
+        found = _A_SECOND_ONE.match(typed)
+        if found:
+            return (found.group(1) or "").strip(" .,!?") or None
+    return ""
+
+
 def _another_one(memory, understood):
     """"Another one", or "do one about the sea", after a poem: the same form, a new subject.
 
     A follow-up like this carries no form word of its own ("can you do one about the sea"), so
     the form has to come from the last exchange, which is the one thing the poem had that the
-    question does not.
+    question does not. A story, a rap and a song are written the same way: "one more about a dog"
+    after a story is another story, and it used to be read as "one more" and handed the words
+    "more tell story" as its subject.
     """
     form = _the_form_last_time(memory)
     if not form:
         return None
+    second = _the_second_one_asked_for(understood)
+    writer = globals().get(_ANOTHER_FORM.get(form, ""))
+    if second != "" and writer:
+        asked = "a %s about %s" % (form, second) if second else "a %s" % form
+        said = writer(memory, {"clean": asked, "text": asked})
+        if said:
+            return said
     clean = understood.get("clean") or ""
     thing = _thing(clean)
     if thing:
         return _say(form, thing, _subject(clean))
     # No subject: they asked for a change of mood, so pick from the form's own list, and a
-    # brighter one when they asked for something happier.
+    # brighter one when they asked for something happier. A line that asks for neither is not
+    # asking for a verse at all - "one more beer please" after a haiku was handed a quiet one
+    # instead of the beer - so the row stands aside and the turn is read as the line it is.
     brighter = re.search(r"happ|bright|cheer|funny|nicer|lighter|lift", clean)
+    calmer = brighter or re.search(r"calm|quiet|sooth|gentl|soft|slower|easier", clean)
+    if not calmer:
+        return None
     for key in (BRIGHT if brighter else CALM):
-        if key in FORMS[form]:
+        if key in FORMS.get(form, {}):
             lead = "Something brighter, then." if brighter else "Something quieter, then."
             return _lines(FORMS[form][key], lead)
     return None
@@ -4885,9 +5295,51 @@ _OFFER_TAIL = ("\nGive me one real thing from it - a sound, a smell or a day - a
                "write the {form} round that.")
 
 
+def _asked_for_what_they_already_tried(understood, *things):
+    """True when the thing a verse would be about is a thing the line says was already tried.
+
+    "we tried a bath n a story" at bedtime came back as a story made up on the spot: the word
+    "story" is a request to every reader that offers one, and the one line where it is not is the
+    line that says the story was already tried. The reading hands over the words of the attempt
+    (understanding/attempts.py), so an offer of one of them can stand down and let the line be
+    answered as a report.
+    """
+    tried = understood.get("tried")
+    if not isinstance(tried, list) or not tried:
+        return False
+    # A line that names a form, says it was rubbish and asks for another one in the same breath
+    # ("i tried a haiku but it was rubbish can you do one") is a person wanting one, not a person
+    # reporting the step they have finished with.
+    if asks_for_one_more(understood.get("norm")):
+        return False
+    tried = {str(word).lower() for word in tried}
+    for thing in things:
+        for word in re.findall(r"[a-z']+", str(thing or "").lower()):
+            if word in tried:
+                return True
+    return False
+
+
+# The words a line may use to ask for each of the fixed forms, so the offer of one can stand down
+# when the line says that form was already tried.
+_THE_FORM_NAMED = {
+    "story": ("story", "stories", "tale", "tales"),
+    "poem": ("poem", "poems", "verse", "sonnet", "ode", "couplet", "rhyme", "rhymes"),
+    "rhyme": ("rhyme", "rhymes", "rhyming"),
+    "haiku": ("haiku", "haikus"),
+    "limerick": ("limerick", "limericks"),
+    "rap": ("rap", "raps", "rapping"),
+    "song": ("song", "songs", "lyric", "lyrics"),
+}
+
+
 def _with_the_detail_asked_for(build, form):
     """The verse, then the one thing the template cannot know, asked for by name."""
+    names = _THE_FORM_NAMED[form] if form in _THE_FORM_NAMED else (form, form + "s")
+
     def answer(memory, understood):
+        if _asked_for_what_they_already_tried(understood, *names):
+            return None
         reply = build(memory, understood)
         if not reply:
             return reply
@@ -4903,12 +5355,47 @@ def _with_the_detail_asked_for(build, form):
     return answer
 
 
+def _a_second_one_read_first(writer, form):
+    """The form's own writer, with a second-one ask ("one more about a dog") read first.
+
+    Which entry a second-one line reaches first is not what decides the form: the row for a
+    limerick answers "one more about a dog" after a limerick from the folded reading and makes it
+    "A limerick about a one more", while the row for a story answers a second haiku as readily as
+    a second story. The form read off the last reply is the one that answers, and a bare "one
+    more" is written the same way about something the writer chooses.
+    """
+    def write(memory, understood):
+        second = _the_second_one_asked_for(understood)
+        if second != "":
+            chosen = _the_form_last_time(memory)
+            if chosen and chosen != form and chosen in _ANOTHER_FORM:
+                # The form just written answers, or nothing does: a rhyme has no verse for
+                # "stars", and the row for a story in its place wrote a story instead of the
+                # rhyme the person asked for a second of.
+                asked = ("a %s about %s" % (chosen, second) if second else "a %s" % chosen)
+                return globals()[_ANOTHER_FORM[chosen]](memory, {"clean": asked, "text": asked})
+            asked = "a %s about %s" % (form, second) if second else "a %s" % form
+            said = writer(memory, {"clean": asked, "text": asked})
+            # A bare "one more" with nothing written for it is read by the caller's own tables,
+            # not by the folded line: handed "one more", the story writer took "more tell story"
+            # for its subject.
+            return said if said else (None if second is None else writer(memory, understood))
+        return writer(memory, understood)
+    return write
+
+
 _haiku = _with_the_detail_asked_for(_haiku, "haiku")
 _limerick = _with_the_detail_asked_for(_limerick, "limerick")
 _poem = _with_the_detail_asked_for(_poem, "poem")
 _story = _with_the_detail_asked_for(_story, "story")
 _rap = _with_the_detail_asked_for(_rap, "rap")
 _song = _with_the_detail_asked_for(_song, "song")
+
+for _form_name, _form_word in (("_haiku", "haiku"), ("_limerick", "limerick"),
+                               ("_poem", "poem"), ("_story", "story"), ("_rap", "rap"),
+                               ("_song", "song"), ("_rhyme", "rhyme")):
+    globals()[_form_name] = _a_second_one_read_first(globals()[_form_name], _form_word)
+del _form_name, _form_word
 
 # --- what to watch or read, asked by company or by a limit ---------------------
 # The mood tables above answer a feeling ("something funny", "a film thats not too sad"). Most
@@ -5538,6 +6025,24 @@ def _pick_kind(line):
     return ""
 
 
+# "not a series", "no box sets", "anything but a movie tonight": the medium is the one being
+# ruled out, and `_pick_kind` reads the word as the ask - a person who says "not a series" after
+# a list of series was handed another list of series. The refusal is read before the medium is,
+# and the pick moves to the other screen medium, which is the only thing the word can mean there.
+_REFUSED_KIND = re.compile(
+    r"\b(?:not|no|dont want|don't want|do not want|rather not|anything but|except|instead of|"
+    r"i dont want|im not after|not after|sick of|tired of|bored of|watched all|seen all)\s+"
+    r"(?:a|an|any|another|the|more|of|some)?\s*"
+    r"(?P<kind>films?|movies?|series|box ?sets?|shows?|telly|episodes?|books?|novels?|"
+    r"podcasts?)\b")
+
+
+def _pick_refused(line):
+    """The medium the line rules out, or "" - "not a series" is not a request for a series."""
+    found = _REFUSED_KIND.search(" " + _plain_words(line) + " ")
+    return _pick_kind(found.group("kind")) if found else ""
+
+
 def _pick_who(line):
     """Who the evening is for, read off the line: parents, partner, friends, or "" for no one.
 
@@ -6143,6 +6648,20 @@ def _pick_plain(memory, understood):
     # book question is a book, and a pick in the wrong medium is worse than no pick. A line with
     # no medium anywhere is not a request this entry can honour, so it passes.
     kind = _pick_kind(line) or _pick_carry(memory, line)
+    refused = _pick_refused(line)
+    if refused and kind == refused:
+        # A medium behind a negator is not the medium being asked for: "not a book" never asked
+        # for a book, it took the word book. One turn after a film question it is still a film
+        # question, so the medium asked about a turn ago is what to answer with; with nothing to
+        # carry, a screen medium ruled out leaves the other screen, and a book or a podcast
+        # ruled out is not something this shelf can answer round.
+        carried = _pick_carry(memory, line)
+        if carried and carried != refused:
+            kind = carried
+        elif refused in ("film", "series"):
+            kind = "series" if refused == "film" else "film"
+        else:
+            return None
     if not kind or kind == "podcast":
         return None
     cinema = _cinema_of(line)
@@ -6523,6 +7042,318 @@ def _a_genre_is_the_taste(understood):
     text = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
     return not _LIKE_A_GENRE.search(text)
 
+# --- the verse asked for again, but longer ------------------------------------------------
+# "longer" is a length in eleven other senses before it is one about a verse (an essay, a phone
+# cable, a warranty, the days), so the line has to ask for more of the thing and the last turn has
+# to have been a verse. A haiku and a limerick are fixed counts of lines, so there is no longer
+# one to give, and those keep whatever answer they had.
+# "One more verse" is another verse, not a longer one: it is the count asked for again, and a
+# second verse of the same length is the ask (`the_next_verse` below). Only "add a verse" and
+# "longer" ask for the verse already on the screen with a part on the end.
+_LONGER_ASK = re.compile(
+    r"\b(?:a\s+)?longer(?:\s+(?:one|version|story|poem|verse|rhyme))?\b"
+    r"|\badd\s+(?:a\s+)?(?:verse|stanza)\b", re.I)
+_LONGER_NOT_THIS = ("essay", "essays", "letter", "hair", "lashes", "nails", "battery",
+                    "cable", "cables", "warranty", "warranties", "opening hours", "term",
+                    "sentence", "sentences", "trousers", "legs", "days", "hours", "holiday",
+                    "delay", "wait", "queue", "sleep", "run", "drive", "flight", "shift")
+_FIXED_COUNT_FORM = re.compile(r"\b(haiku|limerick)\b", re.I)
+# The form the verse announced in its own first line, which is what says which pool the extra part
+# comes from: "A short story about a dog:" takes the story lines, "A short poem about the sea:"
+# takes the rhymed ones.
+_POEM_FORM = re.compile(r"\b(poem|poems|poetry|rhyme|rhymes|verse|verses|rap|song|ode|sonnet|"
+                        r"ballad|couplet)\b", re.I)
+_VERSE_IN_THE_LAST_TURN = re.compile(
+    r"\b(story|stories|tale|tales|poem|poems|poetry|rhyme|rhymes|rap|song|verse|verses|"
+    r"limerick|haiku|couplet|ode|sonnet)\b", re.I)
+
+
+def the_verse_longer(text, memory):
+    """The verse just given with another part on the end, or None when that is not the ask.
+
+    The verse is kept rather than replaced: "make it longer" wants more of what was read out,
+    not a different one. The extra part is picked by the thing the verse was about, so the same
+    story asked for longer twice grows the same way.
+
+    Read by `bot/modules/answers.py` before any entry does, and given the typed line rather than
+    the reading: a reading of a follow-up leans on the last ask, so "tell me a story about my
+    holiday" would put "holiday" in the line and fence off the very ask that follows it.
+    """
+    line = " ".join(str(text or "").lower().split())
+    if not _LONGER_ASK.search(line):
+        return None
+    if any(one in line for one in _LONGER_NOT_THIS):
+        return None
+    said = ""
+    thing = ""
+    for turn in reversed([one for one in ((memory or {}).get("turns") or [])
+                         if isinstance(one, dict)]):
+        said = str(turn.get("bot") or "")
+        if said:
+            thing = _thing(str(turn.get("user") or ""))
+            break
+    if not said or "\n" not in said:
+        return None
+    if said.startswith("Once more"):
+        # the verse said again by the row above: its own lead is the second line
+        said = said.split("\n", 1)[1] if "\n" in said else said
+    lead, rest = (said.split("\n", 1) + [""])[:2] if "\n" in said else ("", said)
+    if not lead.rstrip().endswith(":"):
+        lead, rest = "", said
+    if not _VERSE_IN_THE_LAST_TURN.search(lead or rest.split("\n", 1)[0]):
+        return None
+    if _FIXED_COUNT_FORM.search(lead):
+        return None
+    thing = thing or GENERIC_STORY_THING
+    pool = VERSE_LONGER if _POEM_FORM.search(lead) else STORY_LONGER
+    more = _picked(pool, thing).format(thing=thing)
+    return (lead + "\n" + rest + "\n" + more) if lead else (rest + "\n" + more)
+
+
+# --- the same thing asked for another poem of ---------------------------------------------
+# "one more about the moon" after a poem about the moon answered "Got it - one more about the
+# moon." on main: the phrase names a subject and no form, so no row read it as a request, and the
+# story row stands down because the last verse was a poem. The form just given is the form asked
+# for again, and the table holds one poem per thing, so the second one is the generic verse with
+# the thing in it - a different one from the poem that is already on the screen.
+_SECOND_VERSE_ABOUT = re.compile(
+    r"\b(?:one\s+more|another\s+one|one\s+other|another|one)\s+about\b", re.I)
+# The subject of the verse on the screen, read out of its own lead: "A short story about a fox:"
+# was about a fox, so "one more" is another one about the fox.
+_THE_SUBJECT_IN_A_LEAD = re.compile(
+    r"\b(?:about|of|on|describing|called|named)\s+(.+?)\s*:\s*$", re.I)
+# The count asked for again ("one more", "another one") is a second verse in the form just given
+# whatever it names; a plain "one about the night" is the follow-up machinery's line, which writes
+# the same form about the new subject under its own lead ("A short poem about the night:").
+_THE_COUNT_AGAIN = re.compile(r"\b(?:one\s+more|another\s+one|one\s+other|another)\b", re.I)
+# The count asked for and nothing else: "one more", "another one", "one more please". These name
+# no subject at all, so the subject is the one the verse on the screen was about, taken from its
+# own lead. Read as words, "one more" is a subject like any other, and the line was given
+# "A short poem about more poem:" - the filler and the form word, with the thing missing.
+_THE_COUNT_WORDS = (
+    r"(?:one\s+more|another\s+one|another|one\s+other|again|once\s+more|more|go\s+on|"
+    r"(?:tell|give|do|write|make|say)\s+(?:me\s+)?(?:another|one\s+more|one\s+other))")
+# The form the ask names for itself can come after the count: "another poem", "one more story".
+_THE_FORM_AFTER_THE_COUNT = (
+    r"(?:\s+(?:poem|poems|verse|verses|story|stories|rap|song|rhyme|rhymes|tale|haiku|"
+    r"limerick|one))*")
+_BARE_COUNT_AGAIN = re.compile(
+    r"^(?:(?:ok|okay|yes|yeah|and|so|just|great|nice|lovely|good|perfect)\s+)?"
+    + _THE_COUNT_WORDS + _THE_FORM_AFTER_THE_COUNT +
+    r"(?:\s+(?:please|then|thanks|thank\s+you))?$")
+
+
+def _a_second_verse_is_asked_for(text):
+    """True when the line asks for another verse, about the thing it names or the last one's.
+
+    "tell me more about the moon" is a question about the moon and keeps whatever answer it had;
+    the ask has to be the count of verses ("one more", "another one"), not more of the subject.
+    A bare count names no subject, which is the same ask about the verse already on the screen,
+    and it is read first: "write me another" is the ask, not a request to be told how to write.
+    """
+    line = " ".join(str(text or "").lower().split())
+    if not line:
+        return False
+    if _BARE_COUNT_AGAIN.match(line):
+        return True
+    if re.search(r"\b(?:tell me more|more information|what else|explain|meaning|why is|how do i|"
+                 r"how to|write|writing|wrote|read|reading|book|books)\b", line):
+        return False
+    return bool(_SECOND_VERSE_ABOUT.search(line))
+
+
+# The words people put around the thing they name: "one more about rain please" names rain, and a
+# poem about "rain please" is not a thing anybody writes.
+_ASK_POLITENESS = re.compile(r"\b(?:please|thanks|thank you|ta|too|as well|also|again|now|then|"
+                             r"for me|for us|if you can|quick|quickly)\b", re.I)
+# A subject that points at something else named in an earlier turn is not a subject: there is no
+# poem about "it" or "that", so the line keeps whatever answer it had.
+_NO_SUBJECT = re.compile(r"^(?:it|its|it's|that|this|them|those|these|him|her|they|one|"
+                         r"the same|the other|the first|the last|another)$", re.I)
+
+
+def _the_subject_from_the_ask(after_the_ask):
+    """The thing a second-verse ask names: "one more about rain please" names rain."""
+    words = [one for one in str(after_the_ask or "").split() if not _ASK_POLITENESS.search(one)]
+    subject = " ".join(words).strip(" ,.!?;:")
+    if not subject or _NO_SUBJECT.match(subject):
+        return ""
+    return subject
+
+
+def _the_second_one_short(lead):
+    """The reply for a verse asked for again when its lead named nothing to be another of.
+
+    "tell me a poem" then "one more" wrote "A short poem about more:" - the ask read as a
+    subject. A verse about nothing has nothing to be another of, so the one word it needs is
+    asked for, which is what `_offer` does for a subject the form cannot carry.
+    """
+    form = "limerick" if re.search(r"\blimerick\b", lead, re.I) else \
+        "haiku" if re.search(r"\bhaiku\b", lead, re.I) else "poem"
+    return ("That last one was about nothing in particular - give me one word (the sea, my nan, "
+            "the bus) and the next %s will be about that." % form)
+
+
+def _a_child_story_lead(said):
+    """The lead of a story written for a listener ("A short one for a 5 year old: ..."), or ""."""
+    found = re.match(r"(A short one for [^:]{1,40}):\s", str(said or ""), re.I)
+    return found.group(1) + ":" if found else ""
+
+
+# The form a repeat ask names for itself: "another poem" after a story is a poem, and "one more
+# story" after a poem is a story. The name is the ask's, and the form just given is only the
+# answer when the ask names none.
+_FORM_OF_A_WORD = {
+    "poem": "poem", "poems": "poem", "poetry": "poem", "verse": "poem", "verses": "poem",
+    "ode": "poem", "odes": "poem", "sonnet": "poem", "sonnets": "poem", "ballad": "poem",
+    "rhyme": "rhyme", "rhymes": "rhyme", "rap": "rap", "raps": "rap", "song": "song",
+    "songs": "song", "lyric": "song", "lyrics": "song",
+    "story": "story", "stories": "story", "tale": "story", "tales": "story",
+    "limerick": "limerick", "limericks": "limerick", "haiku": "haiku",
+}
+
+
+def _the_form_a_repeat_ask_names(line):
+    """The form the ask names for itself ("another poem"), or "" when it names none."""
+    named = ""
+    for word in re.findall(r"[a-z']+", str(line or "")):
+        named = _FORM_OF_A_WORD.get(word) or named
+    return named
+
+
+def _the_form_of_the_lead(lead):
+    """The form the verse on the screen was written in, read out of its own lead."""
+    if re.search(r"\bhaiku\b", lead, re.I):
+        return "haiku"
+    if re.search(r"\blimerick\b", lead, re.I):
+        return "limerick"
+    if re.search(r"\bstor(?:y|ies)\b|\btale\b", lead, re.I) or re.match(
+            r"here is one\b", lead, re.I):
+        return "story"
+    if re.search(r"\brap\b", lead, re.I):
+        return "rap"
+    if re.search(r"\bsong\b", lead, re.I):
+        return "song"
+    if re.search(r"\brhyme\b", lead, re.I):
+        return "rhyme"
+    if _POEM_FORM.search(lead):
+        return "poem"
+    return ""
+
+
+def the_next_verse(text, memory):
+    """Another verse, in the form asked for or the form just given, or None.
+
+    A poem asked for "one more about the moon" gets a second poem about the moon and a story asked
+    the same way gets a second story, told from an opening this chat has not had yet. A bare count
+    ("one more", "again", "more please") is the same ask with the thing left out: the thing is the
+    one the verse on the screen was about, read from its own lead, because read as words "one more"
+    is a subject like any other and "A short poem about more poem:" is what that earns. The form
+    is the one the ask names ("another story" after a poem) and otherwise the one just given. A
+    haiku and a limerick are fixed counts of lines, so their second one comes from the form's own
+    list rather than from the table of things.
+    """
+    if not _a_second_verse_is_asked_for(text):
+        return None
+    line = " ".join(str(text or "").lower().split())
+    said = ""
+    for turn in reversed([one for one in ((memory or {}).get("turns") or [])
+                         if isinstance(one, dict)]):
+        said = str(turn.get("bot") or "")
+        if said:
+            break
+    if not said:
+        return None
+    told = " ".join(str(turn.get("bot") or "") for turn in ((memory or {}).get("turns") or [])
+                    if isinstance(turn, dict))
+    # A story for a named listener is written on one line ("A short one for a 5 year old: The duck
+    # who had forgotten how to quack ..."), so it has no lead to read and the second one is another
+    # story from the child pool. Read as a verse with no subject it was handed "He had carried the
+    # short from one flat to another", which is nobody's bedtime story.
+    child = _a_child_story_lead(said)
+    if child:
+        for story in CHILD_STORIES:
+            if story[:70] not in told:
+                return child + " " + story
+        return None
+    if "\n" not in said:
+        return None
+    lead = said.split("\n", 1)[0]
+    if not lead.rstrip().endswith(":"):
+        return None
+    form = _the_form_a_repeat_ask_names(line) or _the_form_of_the_lead(lead)
+    if not form:
+        return None
+    # The subject is whatever the ask asks about, taken from the typed line itself: "one more
+    # about the moon" and "and one about a dog" both end in the thing, and the reading's own
+    # subject reader keeps the filler ("and one about") when the line is a follow-up.
+    found = _SECOND_VERSE_ABOUT.search(line)
+    subject = _the_subject_from_the_ask(line[found.end():] if found else "")
+    # `_thing` reads a subject out of a phrase that names it, so a subject the ask named is read
+    # from the line and a subject taken from the lead is handed back as one: "the sea" is a
+    # subject and "one more" is not. A pointer ("another one about it") names nothing, and the
+    # verse on the screen is what it points at.
+    thing = _thing(line) if subject else ""
+    if not subject:
+        # The verse this chat is on, not only the last line of it: after "Another haiku:" (a lead
+        # with no subject in it) the subject is still the one the verse before that named, and
+        # asking for the word again two turns after it was given reads as not listening.
+        for one in reversed([str(turn.get("bot") or "")
+                             for turn in ((memory or {}).get("turns") or [])
+                             if isinstance(turn, dict) and turn.get("bot")]):
+            named = _THE_SUBJECT_IN_A_LEAD.search(one.split("\n", 1)[0])
+            if not named:
+                continue
+            # A fixed-count form's lead carries its own note after the subject ("A haiku about
+            # the sea, 5-7-5:"), and read as part of the subject it was asked back a second
+            # time: "A haiku about the sea, 5-7-5, 5-7-5".
+            subject = _the_subject_from_the_ask(named.group(1)).split(",")[0].strip()
+            if subject:
+                break
+    if not thing and subject:
+        thing = _thing("about " + subject)
+    if form in ("haiku", "limerick"):
+        # A fixed-count form with a subject named gets the form's own verse about it ("A haiku
+        # about the sea", "A limerick about my tortoise"); only when that one is already on the
+        # screen is there nothing left but another from the form's list.
+        about_it = _say(form, thing, subject) if subject and thing else None
+        if about_it and "\n" in about_it and about_it not in told:
+            return about_it
+        lines = NO_SUBJECT_VERSE.get(form)
+        if lines and lines[0] not in told:
+            return "Another %s:\n" % form + "\n".join(lines)
+        # Every verse of that form is spent, and the subject is still the one asked about: say so
+        # and write the short poem about it rather than shrug at a subject it has just answered.
+        verse = POEMS.get(thing) if thing else None
+        if verse:
+            lines = [one.format(thing=thing) for one in verse]
+            if lines[0] not in told:
+                return ("That is every %s I have about %s - a short poem about it instead:\n"
+                        % (form, subject)) + "\n".join(lines)
+        return _the_second_one_short(lead)
+    if form == "story":
+        if not subject or not thing:
+            return _the_second_one_short(lead)
+        return (STORY_LEADING["story"].format(subject=subject) + "\n" +
+                _the_opening_not_said_yet(thing, memory))
+    if not (_THE_COUNT_AGAIN.search(line) or _BARE_COUNT_AGAIN.match(line)):
+        # "one about the night" after a poem about the sea is a new poem about a new subject, and
+        # the follow-up machinery already writes it under "A short poem about the night:"
+        return None
+    if not subject or not thing:
+        return _the_second_one_short(lead)
+    # The second verse keeps the name it was given: a rap about your nan is another rap, and
+    # "another poem about my nan" after a rap is the wrong form handed back.
+    noun = form
+    for verse in (POEMS.get(thing), GENERIC_POEM, GENERIC_POEM_TWO):
+        if not verse:
+            continue
+        lines = [one.format(thing=thing) for one in verse]
+        if lines[0] not in told:
+            return "Another %s about %s:\n" % (noun, subject) + "\n".join(lines)
+    return "Another %s about %s:\n" % (noun, subject) + "\n".join(
+        one.format(thing=thing) for one in GENERIC_POEM_TWO)
+
 
 ENTRIES = [
     # "how do i make a birthday card" was given the traybake: the word "birthday" keys the cake
@@ -6552,11 +7383,17 @@ ENTRIES = [
                                 # "a film for teenagers" is the same ask for a bigger child, and
                                 # it reached nothing at all
                                 + ("teenager", "teenagers", "teen", "teens", "teenage")),
-          _family_film, avoid=WATCHING + SPORT + SCREEN_TIME, bias=1),
+          _family_film, avoid=WATCHING + SPORT + SCREEN_TIME,
+          guard=not_asking_what_to_watch_for, bias=1),
     # A "watch ... with my daughter" line has no "film" in it, so it needs its own way in.
+    # "a film to watch for the kids" is still a film, and "what should I watch for with my
+    # daughter" is a parent asking which symptoms to be alert to. The word list cannot tell them
+    # apart - "watch for" stands in both - so the guard reads the asking form and a viewing noun,
+    # and this row stands aside only for the ask that names nothing to watch.
     entry("watch-family", (("watch", "watching"),
                            ("family", "kids", "children") + CHILD),
-          _family_film, avoid=WATCHING + SPORT + SCREEN_TIME, bias=1),
+          _family_film, avoid=WATCHING + SPORT + SCREEN_TIME,
+          guard=not_asking_what_to_watch_for, bias=1),
     # "is it worth watching the wire", "should i read 1984", "whats the wire like": one
     # table of named works answers every way of asking for a view on one, and the ask phrases
     # are the entry's key, so a report ("i watched the wire last night") never reaches it.
@@ -7386,6 +8223,20 @@ ENTRIES = [
           ("*The Rest Is History* is the best all-round history podcast, with two hosts who are "
            "funny as well as accurate. For true stories, *Casefile* for crime and *This American "
            "Life* for real people's lives."), bias=1),
+    entry("podcast-crime", (("podcast", "podcasts", "listen", "listening"),
+                           ("true crime", "crime", "crimes", "murder", "murders", "serial killer",
+                            "serial killers", "killing", "homicide", "unsolved", "casefile",
+                            "like serial", "detective", "investigation")),
+          PODCAST_CRIME,
+          # A crime book, film, series or documentary is that medium's own question, and a murder
+          # mystery night is a party rather than a listen.
+          avoid=("book", "books", "novel", "novels", "read", "reading", "film", "films",
+                 "movie", "movies", "series", "netflix", "tv", "documentary", "documentaries",
+                 "drama", "mystery", "mystery night", "party", "how do i", "how to", "start a",
+                 "record", "edit", "mic", "microphone", "upload", "spotify", "apple"),
+          # "true" belongs to podcast-history and podcast-mood as well, and the subject the
+          # person named is the one they want, so this row outranks both of them.
+          bias=3),
     # A podcast asked for by its moment is still a podcast: "a podcast for a long drive" was
     # answered "For a long drive: *Rumours* by Fleetwood Mac and *Graceland* by Paul Simon",
     # because `listen-when` borrows the word "podcast" and its reply is albums. The shows win
@@ -7564,8 +8415,22 @@ ENTRIES = [
           ("*Dobble*, *UNO* and *Snakes and Ladders* work for a range of ages, and *Catan Junior* "
            "if they are ready for a proper board game. For a rainy afternoon, a treasure hunt "
            "round the house costs nothing and takes the longest.")),
-    entry("game-two-people", (("game", "games", "board game", "board games"),
-                              ("two", "couple", "partner", "2", "two of us", "both of us")),
+    entry("game-two-people", (("game", "games", "board game", "board games",
+                               # "what can two people play with cards" named no board and no kit,
+                               # so the row never saw it and the line was a search hedge
+                               "card game", "card games", "cards", "with cards",
+                               "something to play", "a game for",
+                               # "what can me and my partner play" names no game at all, so
+                               # the asking verb is the only word there is to key on, and the
+                               # second group still has to name the pair
+                               "play", "to play"),
+                              ("two", "couple", "partner", "2", "two of us", "both of us",
+                               "two people", "2 people", "for two", "two players",
+                               "two player", "2 players", "2 player", "the two of us",
+                               # "what can me and my partner play" is the same table of two,
+                               # said as the pair rather than as the number
+                               "me and my partner", "with my partner", "me and my wife",
+                               "me and my husband", "me and my friend")),
           ("*Patchwork*, *Jaipur* and *Hive* are the three best two-player games that are quick to "
            "learn. For a card game with no kit, gin rummy works just fine.")),
     # "board game ideas", "a good board game for tonight" and "what board game should i get" all
@@ -7765,6 +8630,65 @@ ENTRIES = [
           ask=("what", "which", "any", "best", "good", "should", "suggest"),
           avoid=("book", "books", "read", "reading", "course", "set", "board", "computer"),
           bias=1),
+    # The words of the game itself: a person playing a first game meets all four of them in the
+    # first hour, and "what is checkmate" was the search hedge.
+    entry("chess-checkmate",
+          (("checkmate", "check mate", "in check", "out of check", "being in check",
+            "check in chess", "a check in chess", "checks the king", "check the king"),
+           ("what", "whats", "mean", "means", "explain", "difference", "different", "vs",
+            "versus", "is it", "how do i", "avoid", "get out of", "stuck in", "in check")),
+          "Checkmate is a king in check with no legal way out: no square to move to, nothing to "
+          "block with, and nothing that can take the piece giving check. Being in check is not "
+           "checkmate - you can move the king, block the line or take the attacker, and only if "
+           "none of those work is the game over. Stalemate is the other ending, and it is a draw: "
+           "the king is not in check but has no legal move, which is why you never chase a lone "
+           "king into the corner without giving it a square.",
+          ask=("what", "whats", "how", "can", "is", "difference", "explain"),
+          avoid=("book", "books", "read", "reading", "opening", "openings", "grandmaster",
+                 "tournament", "club", "clock", "board game"),
+          bias=1),
+    entry("chess-stalemate",
+          (("stalemate",),
+           ("what", "whats", "mean", "means", "explain", "difference", "different", "vs",
+            "versus", "is it", "draw", "how do i")),
+          "Stalemate is a draw: the side to move is not in check but has no legal move at all, and "
+           "the game ends level even if they are a queen down. It usually happens with a lone king "
+           "in front of the enemy king with no square to go to. If you are winning, leave the "
+           "other king a square or move a pawn, and if you are losing, look for it on purpose - it "
+           "is half a point from nowhere.",
+          ask=("what", "whats", "how", "can", "is", "explain"),
+          avoid=("book", "books", "read", "reading", "opening", "openings", "talks", "negotiation"),
+          bias=1),
+    entry("chess-castling",
+          (("castle", "castles", "castling", "castled"),
+           ("what", "whats", "how", "when", "can i", "do i", "should i", "work", "works",
+            "why", "move", "rook", "king", "long", "short", "queenside", "kingside")),
+          "Castling moves the king two squares towards a rook and puts that rook on the other side "
+           "of it, and it is the one move where two pieces go at once. It takes one move, it is "
+           "only legal if neither the king nor that rook has moved, nothing is between them, the "
+           "king is not in check, and the king does not pass through or land on a square that is "
+           "attacked. Do it early, usually within the first ten moves: it puts the king behind "
+           "pawns and brings the rook into the game.",
+          ask=("what", "whats", "how", "when", "can", "do", "should", "why", "is"),
+          avoid=("sand", "beach", "scotland", "wales", "wedding", "visit", "hotel", "ruins",
+                 "book", "books", "read", "reading"),
+          guard=_a_chess_line,
+          bias=1),
+    entry("chess-pawn-moves",
+          (("pawn", "pawns", "en passant", "enpassant", "passant"),
+           ("move", "moves", "backwards", "backward", "forward", "two squares", "first move",
+            "how", "can", "why", "work", "works", "explain", "mean", "means", "promote",
+            "promotion", "take", "what", "whats", "what is", "is it", "a pawn")),
+          "A pawn moves one square forward and takes one square diagonally forward, so a pawn never "
+           "moves or captures backwards. From its starting square only it may go two squares, and "
+           "that is what lets the en passant rule exist: if a pawn goes two squares and lands "
+           "beside an enemy pawn, that pawn may take it as if it had moved one, on that move only. "
+           "Getting to the far end promotes it to a queen, rook, bishop or knight, and a queen is "
+           "almost always right.",
+          ask=("what", "whats", "how", "when", "can", "do", "why", "is"),
+          avoid=("book", "books", "read", "reading", "mortgage", "loan", "car", "camera",
+                 "pawn shop", "pawnbroker", "pawnbrokers", "uncle"),
+          bias=1),
     entry("chess-improve", (("chess",),
                             ("better", "improve", "learn", "start", "tips", "practise", "practice",
                              "beginner", "good at", "get into", "getting into", "begin")),
@@ -7815,6 +8739,12 @@ ENTRIES = [
                  "my house", "our house", "your house", "decorate", "decorating",
                  "decoration", "decorations", "renovate", "renovating", "renovation",
                  "house prices", "house price", "buy a house", "buying a house", "sell my house",
+                 # ... and a house being bought is the row above's own neighbours: the money
+                 # words were missing, so "i want to save for a house deposit, where do i
+                 # start" read "house" + "where do i start" and got a genre to begin with.
+                 "deposit", "house deposit", "mortgage", "remortgage", "save up", "saving up",
+                 "savings", "first home", "first house", "first flat", "stamp duty",
+                 "buying a flat", "buy a flat", "getting on the ladder", "housing ladder",
                  "selling my house", "moving house", "house plant", "house plants",
                  "housework", "rent", "landlord",
                  "metal band", "metal detector", "metal detecting", "detector", "detecting",
@@ -7930,6 +8860,15 @@ ENTRIES = [
                  "get rid of", "fishy", "tastes", "taste", "cooked", "fillet", "batter",
                  "chips", "monger", "fish market", "freezer", "kitchen smells",
                  "house smells", "after cooking",
+                 # the room an activity leaves behind is a job, not the first step into the
+                 # activity: "how do i clean up after baking" and "how do i bake without making
+                 # a mess" were told how to weigh the flour, because "baking" is an activity and
+                 # "how do i" reads as starting it. A cleaning verb with the activity's mess is
+                 # the kitchen's answer, and the mess-free-bakes row has the other one.
+                 "clean up", "cleaning up", "cleaned up", "clear up", "clearing up", "tidy up",
+                 "tidying up", "washing up", "wash up", "the wash up", "make a mess",
+                 "making a mess", "made a mess", "the mess", "a mess", "messy", "covered in",
+                 "all over the", "after baking", "after making", "clean the kitchen",
                  # and a fish to cook is the cooking domain's: "how do i cook fish" was the first
                  # step into angling, rod licence and day ticket, and "how do i know when fish is
                  # done" with it. The words are the cooking ones beside the fish, not "cooking"
@@ -8086,8 +9025,14 @@ ENTRIES = [
     # line carries no form word, so the row asks the last exchange for the form.
     entry("one-more-like-that", (("one about", "another one", "do one about", "one for",
                                  "something happier", "something brighter", "something calmer",
-                                 "one more please"),
-                                ("about", "can", "do", "another", "please", "mood", "happier")),
+                                 "one more please", "one more", "one other", "now one about",
+                                 # A second one with its subject on it, in the words people
+                                 # use: the phrase carries the "about", so the row still scores
+                                 # when the subject is the only other word in the line.
+                                 "one more about", "another one about", "and one about",
+                                 "one other about"),
+                                ("about", "can", "do", "another", "please", "mood", "happier",
+                                 "more", "one")),
           _another_one, avoid=GRAVE),
     # Stories, raps and songs are the same shape of ask as a poem, so they share the mechanism:
     # a fixed form with the person's own noun slotted in where the rhyme cannot break.
@@ -8280,13 +9225,19 @@ ENTRIES = [
           # "take up" is an asking word, not a topic: with it in the first half, "i'm 45 and
           # thinking about taking up the piano" lost its piano answer to this. The ask goes in
           # the second half, beside the hobby noun it needs.
+          # "how do i find a hobby" and "how do i get a hobby i will stick to" were both shrugs:
+          # the ask is a finding word, not only a starting one. The hobby noun still gates it, so
+          # a line about somebody else's hobby, or one that names the hobby, is untouched.
           (("hobby", "hobbies", "pastime", "something new to do"),
            ("new", "start", "take up", "should i", "what", "which", "ideas", "suggest",
             "learn", "beginner", "any",
             # "i need a hobby", "i want a hobby" and "how do i find a hobby" are the same ask in
             # other words, and each got something else: a question back ("What kind of hobby do
             # you usually go for?") and a search hedge on main.
-            "need", "want", "find")),
+            "need", "want", "find",
+            # and the same ask with the words a person actually uses about keeping one going
+            "how", "get a", "get into", "looking for", "fancy", "stick", "sticks",
+            "stuck with", "keep up", "advice", "recommend")),
           "Pick the one thing you would happily be bad at, and buy the cheapest version: a ten "
           "pound ukulele, a second-hand chess set, a supermarket sketchbook and pencils. Keep it "
           "in the room where you sit, and give it twenty minutes twice a week. The hobby that "
@@ -8356,7 +9307,7 @@ ENTRIES = [
             "stay in tonight", "staying in tonight", "cosy night", "cozy night",
             "cosy evening", "cozy evening", "quiet night in", "night indoors"),
            ("ideas", "idea", "what", "any", "something", "suggest", "recommend", "fun",
-            "do", "plan", "anything", "whats", "what's")),
+            "to do", "can do", "can we do", "plan", "anything", "whats", "what's")),
           "Three things, and the cooking is what makes it an evening rather than a sofa: a "
           "supermarket dough ball each to top yourselves, a slow thing in the oven, or a "
           "cocktail that takes two people. Then one film nobody in the house has seen, started "
@@ -8547,6 +9498,28 @@ ENTRIES = [
                  "in spain", "in france", "turn off", "turned off", "turn on", "turned on",
                  "enable", "disable", "size", "colour", "color", "sync", "delay", "tiny",
                  "missing", "gone", "wont turn", "won't turn", "appear", "come back")),
+    # A costume for a party is a make-it-yourself question and the bot had nothing for it: "how do
+    # i make a costume" and "my daughter has a party friday and wants a costume, what can i make
+    # at home" both reached "I don't know enough to answer that honestly", and "how do i make a
+    # fancy dress costume" was answered with salad dressing. The key is the costume plus the making
+    # of it, so a costume somebody is buying, hiring or wearing needs no change of its own.
+    entry("costume-at-home",
+          (("costume", "costumes", "fancy dress", "dress up", "dressing up", "world book day",
+            "what can i be", "what shall i be"),
+           ("make", "making", "made", "homemade", "home made", "at home", "last minute", "cheap",
+            "cheaply", "diy", "ideas", "what can i", "how do i", "out of things", "from things",
+            "no time", "quick")),
+          ("Make the shape, not the whole outfit: black leggings and a black top read as almost "
+           "anything, then one thing does the work - a cardboard box for a robot or a rocket, a "
+           "bin bag and a belt for a cape, a paper plate and elastic for a mask, a stripy top and "
+           "an eye patch for a pirate. Paint it the night before, not the morning of, and ask the "
+           "party's theme first. If it is for world book day, check the school's rules, because "
+           "some ban masks and face paint."),
+          # buying one, hiring one and getting paint out of one are other answers
+          avoid=("buy", "buying", "bought", "shop", "hire", "hiring", "rent", "price", "cost",
+                 "how much", "where can i", "in the wash", "stain", "stains", "too small",
+                 "alter", "altering", "hem", "sew", "sewing machine", "photo", "photos")),
+
 ]
 
 
@@ -8799,12 +9772,53 @@ _A_MUSIC_WORD = ("music", "musical", "song", "songs", "tune", "tunes", "melody",
 _NEEDS_A_MUSIC_WORD = frozenset(("hook", "beat", "riff", "sample", "tab", "interval"))
 
 
+# A thing of theirs in front of the word is the object, not the term: a key that is "my keys" is
+# a door key and a scale that is "my scale" is the bathroom one, and "wheres my keys" was answered
+# with the music definition. Only the words that are also an everyday possession are held back,
+# so "what key is my song in" and "what scale is that solo in" still get the music.
+# The words that make the next noun somebody's own thing ("my keys") rather than the name of a
+# music word. The two-word ones are here because "my mum's keys" is said as "my mums keys" and the
+# word straight in front of the noun is then "mums", which on its own is nobody's.
+_POSSESSIVE = ("my", "our", "his", "her", "their", "your", "my mums", "my dads", "our mums",
+               "our dads", "his mums", "her mums", "his dads", "her dads")
+_A_THING_OF_THEIRS = ("key", "keys", "scale", "scales")
+
+# `your` is the one possessive that is also how a definition is asked ("what is your key" is
+# nobody's keyring), so it only stands the row down in a line that is looking for the thing.
+_LOOKING_FOR_THE_THING = ("wheres", "where's", "where", "lost", "find", "seen", "mislaid",
+                          "misplaced", "cant", "can't", "missing", "look", "looking")
+
+
+def _somebodys_own_thing(said, at):
+    """True when the noun at `said[at]` is the person's own, so the music row is not the answer."""
+    if not at:
+        return False
+    before = said[at - 1]
+    if before not in _POSSESSIVE and not (at >= 2 and " ".join(said[at - 2:at]) in _POSSESSIVE):
+        return False
+    if before == "your" or " ".join(said[at - 2:at]).endswith("your"):
+        return any(one in said for one in _LOOKING_FOR_THE_THING)
+    return True
+
+
 def _music_elsewhere(understood):
     """False when the line's key word is the everyday word rather than the music one."""
     said = [str(word).lower() for word in (understood.get("words") or ())]
     flat = " ".join(said)
     for word in sorted(MUSIC_TERMS, key=len, reverse=True):
-        if word in said or (" " in word and word in flat):
+        # The row matches the plural of the same word ("keys" for "key") and the lookup adds the
+        # stem it matched to the words, so the guard has to read both forms and the word in front
+        # of whichever one is there - or the line that stands the row down never reaches it.
+        forms = [at for at, one in enumerate(said) if one == word or one == word + "s"]
+        if forms or (" " in word and word in flat):
+            # A line that also names a song or a tune is asking about the music even when it
+            # says "my keys" first: "wheres my keys and what key is this song in" is two
+            # questions and the music row answers one of them.
+            elsewhere = [one for one in _A_MUSIC_WORD if one not in (word, word + "s")]
+            if word in _A_THING_OF_THEIRS and any(
+                    _somebodys_own_thing(said, at) for at in forms) and not any(
+                        one in said or one in flat for one in elsewhere):
+                return False
             if word in _NEEDS_A_MUSIC_WORD and not any(
                     one in said or one in flat for one in _A_MUSIC_WORD):
                 return False
@@ -9265,7 +10279,12 @@ GAME_ASKS = ("recommend", "recommended", "recommendation", "recommendations", "s
              "calm", "relax", "relaxing", "chill", "stressed", "anxious", "short", "quick",
              "story", "co-op", "coop", "co op", "puzzle", "puzzles", "two of us", "together",
              # "a game for me and my wife" is a game for two however it is put
-             "me and my", "for the two", "for two")
+             "me and my", "for the two", "for two",
+             # A bare genre is the whole question when it is the whole line: "board games",
+             # "puzzle games", "co-op games" with nothing else in it. The kind word names the
+             # subject, so a line that only says the kind also has to reach here.
+             "board games", "board game", "puzzle games", "co-op games", "coop games",
+             "co op games", "video games", "switch games", "card games", "two player games")
 # Everything that only sounds like a game: a game of football, a game show, a gambling game, the
 # games people play with each other, a TV series with "game" in its name, and the party, group,
 # two-player, children's and short-rules rows that already answer their own lines.
@@ -9282,6 +10301,16 @@ NOT_A_GAME_PICK = ("football", "soccer", "rugby", "cricket", "tennis", "badminto
                    "how much", "price", "cost", "expensive", "cheap", "thrones", "squid game",
                    "mind games", "playing games", "game plan", "the game is",
                    "wedding", "funeral", "playlist", "music", "song", "songs", "radio",
+                   # the Co-op is also the shop: a line about the place being open, shut or
+                   # bought from is a venue question, whatever genre its name spells
+                   "opening", "opens", "opened", "open on", "open today", "open till",
+                   "closed", "closes", "closing", "shut", "shuts", "shutting", "what time",
+                   "shop", "shops", "store", "supermarket", "aisle", "aisles", "checkout",
+                   "meal deal", "sandwich", "milk", "bread", "receipt", "parking",
+                   "nearest", "near me", "closest", "postcode", "address", "directions",
+                   "whats the address", "which one is",
+                   # a job or a shift at the branch is about the place, not about a game
+                   "job", "jobs", "work at", "works at", "working at", "shift", "shifts",
                    "the guitar", "piano", "instrument", "character", "part in",
                    # a game for a child is the kids row's, and a list of video games is the
                    # wrong answer to "what can i play with my son who is 6"
@@ -9307,6 +10336,11 @@ NOT_A_GAME_PICK = ("football", "soccer", "rugby", "cricket", "tennis", "badminto
                    "at christmas", "on christmas", "christmas day", "christmas eve",
                    "for christmas", "over christmas", "xmas eve", "at new year",
                    "for new year", "new years eve", "new year's eve", "on new years eve",
+                   # an opinion about games is not a request for one: "video games make you
+                   # violent" was handed *Hades* once the word "games" counted as the ask
+                   "make you", "makes you", "making you", "make people", "makes people",
+                   "violent", "violence", "bad for you", "bad for kids", "rot your",
+                   "are addictive", "too much screen", "ruin",
                    # a game bought as a present is the gift row's line: "recommend a game as a
                    # christmas present" got *Hades* while main gave the how-to-choose-a-gift card
                    "present", "presents", "gift", "gifts", "stocking filler", "stocking fillers",
@@ -9408,6 +10442,11 @@ def _a_child_in_the_chat(memory):
 
 def _the_game_pick(memory, reading):
     """A game for what the line says about it: a platform, a mood, or someone to play with."""
+    from .kept_animals import keeping_an_animal
+    if keeping_an_animal(reading):
+        # "do i need a coop for chickens" is a hen house, not a co-op game: a word that is also a
+        # keeper's word belongs to the keeper's line, and that row answers it.
+        return ""
     line = "%s %s" % (reading.get("clean") or "", reading.get("norm_text") or "")
     line = line.lower()
     if _a_child_in_the_chat(memory):
@@ -9524,3 +10563,24 @@ ENTRIES.append(entry("game-picks", (GAME_KINDS, GAME_ASKS), _the_game_pick,
 # so "i live alone and the evenings are long" stays with the row that answers loneliness.
 ENTRIES.append(entry("game-solo", (GAME_SOLO_WORDS, GAME_SOLO_ASKS), _the_solo_game,
                      avoid=NOT_A_GAME_PICK, bias=3))
+
+
+# --- a phrase from a book review -----------------------------------------------------------
+# "what is a page turner" was a search hedge while "a gripping book" was already answered: the
+# word is a review's shorthand, so the answer says what it means and what to pick next.
+ENTRIES.append(entry(
+    "page-turner",
+    (("page turner", "page turners", "pageturner", "page-turner", "page-turners",
+      "unputdownable", "cant put it down book"),
+     ("what is", "whats", "what does", "mean", "means", "recommend", "suggest", "which",
+      "any", "good", "best", "book", "books", "novel", "read", "reading", "holiday")),
+    "A page turner is a book whose plot pulls you through - short chapters, a question you want "
+    "answered, a twist you did not see - rather than one you admire slowly. The shorthand comes "
+    "from book reviews because it says nothing about quality: a thriller can be a page turner and "
+    "so can a good memoir. If you want one, say what you last could not put down and I will find "
+    "something in the same shape; if you want a specific book, tell me the kind of story rather "
+    "than the word.",
+    # a bookmark, a page number and a printer are other things with the word page in them
+    avoid=("bookmark", "page number", "printer", "paper", "print", "browser", "website",
+           "web page", "homepage", "kindle", "page count"),
+    bias=1))

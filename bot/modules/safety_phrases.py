@@ -112,9 +112,22 @@ SELF_OWN_DYING = (
     r"\bsuicid\w*\b",
 )
 
+# The people a line can name. The carers are the ones people live with as much as their family, and
+# they were in none of the lists: "my support worker has collapsed", "the care worker is on the
+# floor and not responding", "my personal assistant collapsed" all got small talk. The
+# grandchildren are the same hole at the other end of the family: "my grandson collapsed" got
+# nothing, while "my granddaughter is unresponsive" only reached a card because "unresponsive" is a
+# word of its own.
 PERSON = (r"(?:mum|mom|mother|dad|father|son|daughter|husband|wife|partner|boyfriend|girlfriend|"
-          r"brother|sister|friend|flatmate|roommate|baby|child|kid|kids|children|boy|girl|man|woman|"
+          # Plural as well as singular: "my grandsons collapsed" and "my doctors are" are the same
+          # line said about more than one person, and the list is followed by \b in most patterns, so
+          # a bare "grandson" missed the plural whole (lilac-apple, #12389).
+          r"brother|sister|friend|flatmate|roommate|baby|child|kid|kids|children|"
+          r"grand(?:child|children|son|daughter|kid)s?|step(?:child|children|son|daughter)s?|"
+          r"boy|girl|man|woman|"
           r"lady|guy|bloke|neighbou?r|colleague|boss|gran|granny|nan|grandad|grandma|grandpa|mate|"
+          r"carers?|care\s+workers?|support\s+workers?|social\s+workers?|personal\s+assistants?|"
+          r"nurses?|midwives?|midwife|doctors?|gps?|physios?|therapists?|"
           r"patient|pupil|student|teacher|driver|passenger|singer|player|runner|swimmer)")
 
 PEOPLE = (r"(?:i|i'm|i've|he|he's|she|she's|they|they're|we|you|someone|somebody|anyone|everyone|"
@@ -130,7 +143,12 @@ OTHERS = (r"(?:he|he's|she|she's|they|they're|him|her|them|someone|somebody|anyo
 ABUSER = (r"(?:" + PERSON + r"|step(?:mum|mom|dad|mother|father|brother|sister|son|daughter|parent|"
           r"child|children)|ex|landlord|landlady|housemate|lodger|aunt|auntie|uncle|cousin|nan|nana|"
           r"grandparent|in-?laws?|father-?in-?law|mother-?in-?law|son-?in-?law|daughter-?in-?law|"
-          r"guardian|foster\s+parent|boy|friend|manager|supervisor)")
+          r"guardian|foster\s+parent|boy|friend|manager|supervisor|"
+          # A niece, a nephew and a grandmother are people you can be hurt by, and the list held
+          # only the family a household is made of. Since the strangle arm was fenced to a named
+          # person (merged), "im strangling my niece" was answered "Noted: you're strangling your
+          # niece." - a person being strangled, with the person not on the list.
+          r"nieces?|nephews?|grandmothers?|grandfathers?|grandparents?)")
 # The person saying *they* did it, in the first person: "i hit my wife last night", "i lost my
 # temper and hit my son", "i grabbed her by the throat". Every arm in this file is written for the
 # person it is done *to*, so these were answered with the row-repair script or "I'm listening" -
@@ -144,7 +162,8 @@ _THE_ONE_HIT = (r"(?:my\s+(?:partner|husband|wife|boyfriend|girlfriend|ex|fianc(
 # how a family hurries itself out of the house ("i pushed my daughter to practise"), so they take
 # the second arm, which wants the throat, the wall or the row.
 _THE_BLOW = (r"(?:hit|hitting|slap(?:ped|ping)?|punch(?:ed|ing)?|kick(?:ed|ing)?|beat|beating|"
-             r"chok(?:ed|ing)?|strangl(?:ed|ing)?|drag(?:ged|ging)?|threw|thrown|throwing)")
+             r"chok(?:ed|ing)?|strangl(?:ed|ing)?|drag(?:ged|ging)?|threw|thrown|throwing|"
+             r"scratch(?:ed|ing)|claw(?:ed|ing))")
 _THE_HAND = (r"(?:push(?:ed|ing)?|shov(?:e|ed|es|ing)|grab(?:bed|bing)?|pin(?:ned|ning)?|held|"
              r"hold|pulled|yank(?:ed|ing)?|twist(?:ed|ing)?)")
 I_HIT_SOMEONE = (
@@ -182,6 +201,22 @@ HIT_THING_NOT_PERSON = (
 # sport ("we were messing about", "sparring", "play fighting", "boxing"), a fight between children,
 # and the defence ("i hit him back") - all of those must stay out of it, or the reply accuses
 # someone of hitting their family when they said the opposite.
+# A blow that was a game. The person is the object of a hit or a beating in a match, a board game
+# or a playfight, and reading it as violence is the card accusing a family of a night the house
+# never saw: "i beat my partner at chess", "i hit my wife in the tennis final" (peach-hammer,
+# #5014), "my dad used to beat me at chess". One table, because three readers need the same list:
+# the line that says who it hit, and the two arms of HIT_AS_A_CHILD below.
+GAME_NOT_A_BLOW = (
+    r"\b(?:mess(?:ing)?\s+about|mucking\s+about|play(?:ing)?\s*(?:fighting|fight)|sparring|"
+    r"boxing|wrestl(?:ing|e)|judo|karate|rugby|football|practice|training|drill|"
+    r"a\s+game|snowball|water\s+fight|paintball|nerf|tickl(?:e|ing)|play)\b",
+    r"\b(?:at|in|during|on)\s+(?:the\s+)?(?:chess|cards?|scrabble|monopoly|backgammon|draughts|"
+    r"checkers|dominoes|poker|darts|snooker|billiards|pool|bowling|tennis|badminton|squash|"
+    r"golf|cricket|football|rugby|rounders|netball|basketball|hockey|table\s+tennis|"
+    r"video\s+games?|playstation|xbox|wii|board\s+game)\b",
+    r"\b(?:in|at|during)\s+(?:[\w-]+\s+)?(?:final|match|game|tournament|league|race|marathon|"
+    r"competition|championship|quiz)\b(?!\s+(?:argument|row|fight|bust-?up|falling\s+out))",
+)
 I_DID_NOT_HIT = (
     r"\b(?:never|didn'?t|didnt|don'?t|dont|wouldn'?t|wouldnt|not|have\s+never)\s+"
     r"(?:ever\s+)?(?:hit|hitting|hurt|hurting|touch|touched|lay\s+a\s+hand|laid\s+a\s+hand)\b",
@@ -189,9 +224,6 @@ I_DID_NOT_HIT = (
     r"\b(?:lose|losing|lost)\s+my\s+temper\s+(?:with|at)\s+(?:her|him|them|the\s+kids|"
     r"my\s+" + ABUSER + r")\b[^.?!]{0,30}\b(?:shout|shouted|shouting|yell|yelled|swore|swear|"
     r"snapped|said|slam|slammed|walked|rowing|row|argue|argued|arguing)\b",
-    r"\b(?:mess(?:ing)?\s+about|mucking\s+about|play(?:ing)?\s*(?:fighting|fight)|sparring|"
-    r"boxing|wrestl(?:ing|e)|judo|karate|rugby|football|practice|training|drill|"
-    r"a\s+game|snowball|water\s+fight|paintball|nerf|tickl(?:e|ing)|play)\b",
     r"\bwhen\s+we\s+were\s+(?:kids|children|little|lads|girls|boys)\b",
     r"\bwe\s+used\s+to\s+(?:fight|hit|scrap|wrestle)\b",
     # ...and the same said from one side of it. "i hit my brother when i was a kid" was the
@@ -207,41 +239,75 @@ I_DID_NOT_HIT = (
     r"\b(?:brother|sister|cousin|mate|friend|kids|kids|boy|girl)s?\b",
     r"\b(?:accident|accidentally|by\s+mistake|didn'?t\s+mean|didnt\s+mean|"
     r"in\s+my\s+sleep|sleepwalking|fidgeting)\b",
-    # A blow that happened on a board or a pitch. The person is the object and the verb is the
-    # game's, and the card would accuse somebody of a night the house never saw: "i beat my
-    # partner at chess", "i hit my wife in the tennis final" (peach-hammer, #5014).
-    r"\b(?:at|in|during|on)\s+(?:the\s+)?(?:chess|cards?|scrabble|monopoly|backgammon|draughts|"
-    r"checkers|dominoes|poker|darts|snooker|billiards|pool|bowling|tennis|badminton|squash|"
-    r"golf|cricket|football|rugby|rounders|netball|basketball|hockey|table\s+tennis|"
-    r"video\s+games?|playstation|xbox|wii|board\s+game)\b",
-    # ...and the word the sport uses for the scored hour itself. The `argument` arm is what keeps
-    # "in the final argument" - a real row - out of it.
-    r"\b(?:in|at|during)\s+(?:[\w-]+\s+)?(?:final|match|game|tournament|league|race|marathon|"
-    r"competition|championship|quiz)\b(?!\s+(?:argument|row|fight|bust-?up|falling\s+out))",
     # A kick to wake somebody up is the morning, not the bedroom door: "i kicked my partner awake
     # this morning".
     r"\b(?:awake|out\s+of\s+bed|to\s+wake\s+(?:me|him|her|them|the\s+kids))\b",
     # A dream names itself, so it is not a night in the house. The scene words only: "i hit my
     # wife and now i keep dreaming about it" is a disclosure, not a dream.
     r"\b(?:in\s+a\s+dream|dream(?:t|ed)\b|had\s+a\s+dream|nightmare)\b",
-)
+) + GAME_NOT_A_BLOW
 # A grown-up telling you what was done to them as a child. "my dad hit me when i was a kid" is not
 # a discipline question and it is not a live emergency either: the blow is years old, and what is
 # left of it is an injury that a GP can refer on. The time words are what make it that, and they
 # are also what made it a shrug or a toddler-advice answer.
+# The grown-ups of a childhood, named as the person who did it: "my dad", "my mum", "my parents".
+# One list, read by both arms of HIT_AS_A_CHILD below, because the second arm was written with a
+# copy of it and a word added to one copy is a hole in the other.
+MY_GROWN_UP = (r"(?:dad|father|stepdad|mum|mom|mother|stepmum|parents|uncle|aunt|auntie|brother|"
+               r"sister|cousin|carer|nan|nana|gran|grandma|grandad|grandpa|grandparents|"
+               r"foster\s+\w+)")
+# The verbs a blow is done to a child with, in one place because both arms of HIT_AS_A_CHILD below
+# read it: an arm written with its own copy of the list is a hole in the others, which is how "my
+# stepdad used to belt me" got the cheer for a day that went well.
+THE_BLOW_ON_A_CHILD = (
+    _THE_BLOW + r"|beat|belt(?:ed)?|strap(?:ped)?|cane(?:d)?|smack(?:s|ed|ing)?|lock(?:ed)?|"
+    r"starve(?:d)?|smother(?:ed)?|throttle(?:d)?|abuse(?:d|s)?|molest(?:ed|s)?|touch(?:ed|es)?"
+)
+# A missile is a blow, and a ball is not: the verb counts when what it moves is aimed at the person
+# ("throw things at me", "threw a plate at me") or is the surface they land on ("threw me against
+# the wall"). "my dad used to throw me a ball" is the ball going the other way and stays out.
+THROWN_AT_ME = (
+    r"(?:(?:throw|threw|thrown|throwing|hurl(?:ed|ing)?|chuck(?:ed|ing)?)[^.?!]{0,20}"
+    r"\bat\s+(?:me|us)\b"
+    r"|(?:threw|thrown|throwing|throw|hurled)[^.?!]{0,15}\b(?:against|into|down)\s+(?:the\s+)?"
+    r"(?:wall|door|floor|stairs|ground)\b)"
+)
+
+
 HIT_AS_A_CHILD = (
-    r"\bmy\s+(?:dad|father|stepdad|mum|mom|mother|stepmum|parents|uncle|aunt|auntie|brother|"
-    r"sister|cousin|carer|nan|nana|gran|grandma|grandad|grandpa|grandparents|foster\s+\w+)\b"
-    r"[^.?!]{0,40}\b(?:hit|hitting|beat|beating|punched|kicked|slapped|burn(?:ed|t)|scalded|"
-    r"whipped|belt|abused|molested|touched\s+me|locked\s+me)\b[^.?!]{0,40}"
+    r"\bmy\s+" + MY_GROWN_UP + r"\b"
+    r"[^.?!]{0,40}\b(?:" + _THE_BLOW + r"|burn(?:ed|t)|scalded|"
+    r"whipped|belt(?:ed)?|strap(?:ped)?|cane(?:d)?|smack(?:s|ed|ing)?|abused|molested|touched\s+me|"
+    r"locked\s+me|starved|smothered|throttled)\b"
+    r"[^.?!]{0,40}"
     r"\b(?:when\s+i\s+was\s+(?:a\s+)?(?:kid|child|little|young|small|teenager|teen|"
     r"at\s+school|in\s+school|\d{1,2})|as\s+a\s+(?:kid|child|little\s+\w+|teenager)|"
     r"growing\s+up|back\s+then|years\s+ago|decades\s+ago|my\s+whole\s+childhood|"
-    r"all\s+my\s+childhood)\b",
+    r"all\s+my\s+childhood|(?:used|would)\s+to\s+\w+\s+me)\b",
     r"\bi\s+(?:was|got)\s+(?:hit|beaten|abused|molested|whipped|slapped|kicked|punched)\s+"
     r"(?:as\s+a\s+(?:kid|child|little\s+\w+|teenager)|when\s+i\s+was\s+(?:a\s+)?"
     r"(?:kid|child|little|young|small|teenager|at\s+school)|growing\s+up|my\s+whole\s+"
     r"childhood)\b",
+    # The same disclosure written as the habit it was, with the time in "used to" or "would" rather
+    # than in a "when i was a kid": "my parents used to beat me", "my mum used to lock me in the
+    # shed", "my dad would hit me when he drank". Without this arm the first got the cheer for a
+    # day that went well ("Good to hear. What was the best bit?"), the second a shrug, and the
+    # third the card for a blow happening now. The blow is the grown-up's and the object is the
+    # person writing, and the verbs are the ones with no other meaning in a family (_THE_BLOW) -
+    # "my dad used to push me on the swings" is the swings.
+    r"\bmy\s+" + MY_GROWN_UP + r"\b[^.?!]{0,25}\b(?:used\s+to|would)\s+[^.?!]{0,20}\b(?:"
+    + THE_BLOW_ON_A_CHILD + r")\b[^.?!]{0,15}\b(?:me|us)\b",
+    # ...and when the thing that hit was thrown: "my dad used to throw things at me", "he would
+    # throw the remote at me". The missile arm is separate because the object is the point: what a
+    # grown-up throws at you is a blow, and what he throws you is a ball.
+    r"\bmy\s+" + MY_GROWN_UP + r"\b[^.?!]{0,25}\b(?:used\s+to|would)\s+[^.?!]{0,20}"
+    + THROWN_AT_ME,
+    # The same again with the household in the place of the person: "i used to get beaten at home",
+    # "i was hit at home as a kid". This is the shape that got the cheer for a day that went well
+    # ("How was it, overall?"), because nothing in it names a person for the arms above to hold.
+    r"\bi\s+(?:used|would)\s+to\s+(?:get|be)\s+(?:hit|beaten|beat|slapped|punched|kicked|"
+    r"whipped|belted|abused|smacked)\b[^.?!]{0,25}\b(?:at\s+home|by\s+my\s+" + MY_GROWN_UP +
+    r"|as\s+a\s+(?:kid|child)|when\s+i\s+was)\b",
 )
 # The childhood line is still going on when it says so, and then it is the present case, not the
 # old one: "my dad hits me when i was a kid" is a typo, but "my dad hits me and i am 30" is a
@@ -270,7 +336,8 @@ ABUSE_VERB = (r"(?:hits?|hitting|beat(?:s|ing)?|punch(?:es|ed|ing)?|kick(?:s|ed|
               r"bit\b|bite|bites|biting|spat\s+at|spit\s+at|throw(?:s|ing)?|threw|hurl(?:s|ed|ing)?|"
               r"yank(?:s|ed|ing)?|twist(?:s|ed|ing)?|wrench(?:es|ed|ing)?|swung\s+at|swing\s+at|"
               r"attack(?:s|ed|ing)?|savaged|mauled|lash(?:es|ed|ing)?\s+out\s+at|"
-              r"lunged\s+at|held\s+me\s+down|pinned\s+me)")
+              r"lunged\s+at|held\s+me\s+down|pinned\s+me|scratch(?:es|ed|ing)?|"
+              r"claw(?:s|ed|ing)?)")
 # A threat *with* something is this case when the something can hurt; a threat about a written
 # warning, a fine, an eviction or a letter is a bad job, a tenancy or a bill, and the abuse reply
 # names a person who is not doing anything violent ("my boss is threatening me with a written
@@ -405,8 +472,37 @@ ABUSE_HIT_ME = (
     r"(?:my|me\s+in\s+my)\s+(?:face|head|back|arm|arms|leg|legs|ribs?|stomach|"
     r"belly|jaw|eye|eyes|ear|ears|neck|throat|shoulders?|chest|side|hip|hips|thigh|mouth|nose|"
     r"teeth|wrist|knee)\b"
-    r"(?![^.?!]{0,24}\b(?:cake|cakes|cream|icing|jelly|bun|buns|flour|bunting|snow|"
-    r"snowdrift|leaves|foam|bubbles|jelly|pudding|pie|pillow\s+fight)\b)",
+    r"(?![^.?!]{0,40}\b(?:cake|cakes|cream|icing|jelly|bun|buns|pudding|pie|pies|flour|"
+    r"bunting|snow|snowdrift|leaves|foam|bubbles|mud|sand|dough|pillow\s+fight)\b"
+    # ...unless a blow is named in the same breath: "he pushed my face into the cake and then hit
+    # me" is two things, and the second is the card. The surface excuses the shove, not what comes
+    # after it.
+    # ...but a room that slaps a person on the back is pleased with them: "pushed my face into the
+    # cake and everyone slapped me on the back" is a party, and the back of the head is still a
+    # blow.
+    r"(?![^.?!]{0,60}\b(?:hit|hits|punch(?:ed|es)?|kick(?:ed|es)?|slap(?:ped|s)?|beat(?:s)?|"
+    r"chok(?:ed|es)?|shov(?:ed|es)?|push(?:ed|es)?)\s+me\b"
+    r"(?!\s+(?:on|round|in)\s+the\s+back\b))"
+    # ...and a line that says they could not breathe is not a snowball, however it is typed.
+    r"(?![^.?!]{0,60}\b(?:breath|breathe|breathing|breathless|blacked\s+out|passed\s+out|"
+    r"unconscious|choking|couldnt\s+breathe|could\s+not\s+breathe|no\s+air)\b))",
+    # A scratch is a blow when it lands on the face, the arms or the throat, and a kindness when it
+    # lands on the back: "he scratched my back" is an itch being dealt with. The two arms that read
+    # a blow landing on a place did not take the scratching verbs, so `he scratched my face` was a
+    # shrug and `my husband scratched my arms` was a cat-scratch card. This arm is last in the
+    # tuple because the arm before it closes a group it opened: an arm put between them leaves that
+    # group unclosed, and the whole case then fails to compile and is skipped without a word.
+    r"\b(?:he|she|they|hubby|my\s+" + ABUSER + r")\b[^.?!]{0,30}\b(?:scratch(?:es|ed|ing)?|"
+    r"claw(?:s|ed|ing)?)\s+(?:my|me\s+in\s+my)\s+(?:face|head|arm|arms|leg|legs|ribs?|"
+    r"stomach|belly|jaw|eye|eyes|ear|ears|neck|throat|shoulders?|chest|side|hip|hips|thigh|"
+    r"mouth|nose|teeth|wrist|knee)\b"
+    # ...and a scratch that names where it happened is the roses: "he scratched my arm on the
+    # bushes" is a walk through a garden, not a hand. A place after the part takes it out of this
+    # arm, unless the same line also says it bled, bruised, happened again or frightened them.
+    r"(?![^.?!]{0,30}\b(?:on|against|through|by)\s+(?:the|a|an|some|my|his|her|their|our)?\s*\w+)"
+    r"(?![^.?!]{0,40}\b(?:bleed|bleeds|bled|bleeding|blood|bruise|bruises|bruised|marks|"
+    r"scarred|again|police|scared|afraid|frightened|threaten\w*|strangl\w*|choke\w*|hit|hits|"
+    r"punch\w*|kick\w*|beat\w*)\b)",
 )
 # The subject of "has me pinned", including the way it is typed without the apostrophe: "hes got me
 # pinned to the wall" reached the worktop-cleaning answer because every arm wanted a bare "he".
@@ -983,6 +1079,40 @@ BLOW_THINGS = (r"(?:bottles?|glasses?|pans?|frying\s+pans?|saucepans?|bats?|base
                r"phones?|lamps?|vases?|ashtrays?|tools?|hands?|fists?|feet|foot|elbows?|knees?|"
                r"shoulders?)")
 
+# What a blow can be struck with and still be a joke. It is the *thing* being soft that makes the
+# head card wrong ("he hit my head with a pillow"), and it is the thing being named in a game that
+# makes the whole disclosure wrong ("we were mucking about and he threw a sponge at me"). Both of
+# those read this one list, so a new soft thing is added in one place.
+SOFT_HIT_THING = (
+    r"(?:pillow|cushion|duvet|blanket|quilt|snowball(?:s)?|ball(?:s)?|beach\s+ball|"
+    r"plastic\s+ball|tennis\s+ball|frisbee|sponge|flannel|tea\s+towel|towel|"
+    r"newspaper|magazine|paper|roll?ed[\s-]?up\s+(?:paper|newspaper|magazine|towel)|"
+    r"water\s?bomb|water\s?balloon|water\s+pistol|sock|slipper|plush\s+toy|teddy|toy|"
+    r"stickle\s?brick|lego|balloon|cushion\s+case)"
+)
+# A game that is named as a game: the activity itself, or a subject that includes the speaker
+# ("we were playing", "we both laughed"). It is deliberately NOT a feeling word. A bare "joke",
+# "laugh", "kids" or "mates" anywhere in the line is how a blow gets minimised or watched, and
+# standing the card down on those answers "he hit me with a cushion and then said he was only
+# joking" with a comfort line (steward-garnet-axe, #steward 88199).
+PLAY_NAMED = (
+    r"(?:pillow\s+fight|snowball\s+fight|water\s+fight|food\s+fight|play\s?fight\w*|"
+    r"nerf\s+(?:gun|war|fight)|paintball|tickl\w+|"
+    r"muck(?:ing)?\s+(?:about|around)|mess(?:ing)?\s+(?:about|around)|"
+    r"fool(?:ing)?\s+(?:about|around)|lark(?:ing)?\s+(?:about|around)|"
+    r"jok(?:ing|e)\s+(?:about|around)|banter|"
+    r"we\s+(?:were|was|are)\s+(?:only\s+|just\s+)?"
+    r"(?:playing|mucking|messing|fooling|larking|joking|having\s+a\s+laugh)|"
+    r"we\s+both\s+(?:laughed|were\s+laughing|laugh)|we\s+were\s+laughing|"
+    r"playing\s+(?:catch|football|rounders|netball|basketball|tag|a\s+game|games|together))"
+)
+# The verb a soft thing comes at you with, in either order: "he hit me with a pillow",
+# "he threw a cushion at me".
+SOFT_HIT_VERB = (
+    r"(?:hit|hits|hitting|slapped|slaps|smacked|whacked|pelted|threw|throws|thrown|"
+    r"sprayed|squirted|flicked|dunked|dumped|doused)"
+)
+
 ABUSE_FINE = (
     # Losing is not being hit: "my dad beats me at chess" and "he beats me at pool every friday"
     # are a game, and the board, the cards and the console are the whole of it. The game has to be
@@ -1132,6 +1262,31 @@ ABUSE_FINE = (
     # Said out loud as play, it is play: "my mum hit me on the arm playfully".
     r"\b(?:playfully|jokingly|in\s+play|for\s+fun|messing\s+about|playfight\w*|larking\s+about|"
     r"tickl\w+)\b",
+    # ...and the same said with another spelling of it. "mucking about", "fooling about" and
+    # "larking about" are the same claim as "messing about", and only the last one was listed, so
+    # "we were mucking about and he threw a sponge at me" kept the 999 card.
+    r"\b(?:muck(?:ing)?\s+(?:about|around)|mess(?:ing)?\s+(?:about|around)|"
+    r"fool(?:ing)?\s+(?:about|around)|lark(?:ing)?\s+(?:about|around)|"
+    r"jok(?:ing|e)\s+(?:about|around)|muck(?:ing)?\s+around)\b",
+    # A head or a face hit with a soft thing is a bumped head, not a disclosure. "he hit my head
+    # with a pillow", "he hit my head with a frisbee", "he hit my head with a ball" and "he hit my
+    # face with a snowball" all took the 999 card, and the bumped-head card answers every one of
+    # them. It is the two of them together that is the rule - a part of the body and a soft thing -
+    # so a hard thing keeps the card ("with a brick", "with a bottle"), and so does a part that is
+    # not the head ("he hit my nose with a ball" is a nosebleed, "he hit my arm with a ball" is a
+    # bruise), because the answers behind the card are better than a card nobody meant.
+    r"\b" + SOFT_HIT_VERB + r"\b[^.?!]{0,24}\b(?:my|the|his|her|your)\s+(?:head|face)\b"
+    r"[^.?!]{0,24}\bwith\s+(?:a\s+|an\s+|the\s+|some\s+)?" + SOFT_HIT_THING + r"\b",
+    # The game named in the line is the game, whatever was in the air during it: a pillow fight is
+    # not in the list above, so "we had a pillow fight and he hit me with a cushion" and "he hit me
+    # with a cushion, the kids were having a pillow fight" kept the card. Named either side of the
+    # blow, and the thing named before the person it hit.
+    r"\b" + SOFT_HIT_VERB + r"\b[^.?!]{0,40}\bwith\s+(?:a\s+|an\s+|the\s+|some\s+)?"
+    + SOFT_HIT_THING + r"\b[^.?!]{0,60}" + PLAY_NAMED + r"\b",
+    r"\b" + PLAY_NAMED + r"\b[^.?!]{0,60}\b" + SOFT_HIT_VERB + r"\b[^.?!]{0,40}\bwith\s+"
+    r"(?:a\s+|an\s+|the\s+|some\s+)?" + SOFT_HIT_THING + r"\b",
+    r"\b" + PLAY_NAMED + r"\b[^.?!]{0,60}\b(?:threw|throw|thrown|throws|pelted|sprayed|"
+    r"squirted)\b[^.?!]{0,20}\b" + SOFT_HIT_THING + r"\s+at\s+(?:me|us)\b",
     # An illegal lender threatening someone is intimidation over money, not domestic abuse: the
     # loan-shark answer owns that line, and it names 999 as well, so nothing is lost. The lender
     # arm is LENDER_FINE below and not one of these, because a line can name a partner as well

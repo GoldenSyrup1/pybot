@@ -6,28 +6,41 @@ from ..compose import fallback
 from ..compose import findout, gap
 from ..compose import moving
 from ..compose import quantity
+from ..compose import no_page
+from ..compose import the_course_of_it
 from ..compose import checking
 from ..compose import goodnews
+from ..compose import griefplea
+from ..compose import hands
 from ..compose import how_it_went
 from ..compose import liveask
 from ..compose import missing_half
 from ..compose import onscreen
 from ..compose import own_facts, plans
+from ..compose import stretches
+from ..compose import safety_doubt
 from ..compose import only_they_know
 from ..compose import rule
 from ..compose import their_day
+from ..compose import their_life
 from ..compose import taste
 from ..compose import the_turn_after
 from ..compose import find_a_place
+from ..compose import onmybehalf
+from ..compose import a_document_lives_with_an_office
 from ..compose import a_place_nobody_can_see
-from ..memory import detail, matters, obstacle, repeat, too_late
+from ..memory import ack, detail, matters, obstacle, repeat, too_late
 from ..compose import pleased
 from ..compose import rotten_luck
+from ..compose import said_about_me
 from ..compose import nottheirbest
+from ..compose import no_eyes
 from ..compose import who_to_see
 from ..compose import remark
 from ..compose import setting_off
 from ..memory import ack
+from ..memory import back_again
+from ..memory import their_feeling
 
 PRIORITY = -1000
 
@@ -84,6 +97,18 @@ def _a_line_pointing_back_at_nothing(clean, memory):
 
 
 def respond(text, memory):
+    # A "still" line - "still cold" after "my shower is cold", "it still clicks" after "my car
+    # wont start" - is the thing the chat is on, said again, and the store answers it from that
+    # thing. This module is only asked for the lines nothing else would answer, and this module
+    # is the last resort that answers them: main's short-line pools read the one word the line
+    # carries ("still cold" is the weather) and take the turn before the store's reading gets
+    # there, which replaces a good answer with a nod. The reading is asked first here, exactly as
+    # the presence pools are stood down for it in `bot/modules/chat.py`, so a "still" line that
+    # the store can carry never reaches the pools below (`bot/memory/tried.py`).
+    from ..memory import tried as not_moved
+    going_on = not_moved.reply_for(text, memory)
+    if going_on:
+        return going_on
     # A bare "do i need to see anyone" is answered by the someone the answer above already named:
     # after the dog-and-chocolate answer, which said "Ring your vet with the dog's weight ... don't
     # wait for symptoms", the line was met with "That's beyond what I know well, sorry" - the
@@ -91,6 +116,21 @@ def respond(text, memory):
     who = who_to_see.reply_for(text, memory)
     if who:
         return who
+    # A trouble the chat already had, said to be back ("i have a headache" then "its back", "how
+    # do i get rid of slugs" then "the slugs are back"). Nothing above this module claims the
+    # line, and the two replies it had were the nod that fits any message and an echo of the
+    # person's own words - while the thing coming back says the advice did not hold, which is the
+    # one thing worth answering (bot/memory/back_again.py).
+    came_back = back_again.reply_for(text, memory)
+    if came_back:
+        return came_back
+    # How somebody else in the chat is finding a thing the chat has named: "my son is 7" / "hes
+    # just started school" / "he hates it". Every feeling reader in the bot is about the person
+    # typing, so a third person's report got the note that fits any message
+    # (bot/memory/their_feeling.py).
+    about_them = their_feeling.reply_for(text, memory)
+    if about_them:
+        return about_them
     # The opening line of a chat pointing back at a turn that never happened (see A_REFERS_BACK).
     # There is nothing to agree with yet, and every pool under this module answers as though the
     # conversation were under way, so the honest line for the first turn is taken here.
@@ -147,6 +187,14 @@ def respond(text, memory):
     # of the nod that fits any message. Asked before the composer because the nod is the composer's
     # last resort, and a nod about the boiler leaves the next line ("is that dangerous") with no
     # subject at all (`detail.a_report_about_the_thing`).
+    # The answer to a question the bot has just asked about a noise or a smell - "it came from the
+    # loft", "like burning", "under the sink" - is the other half of that exchange, and there is
+    # no way to answer it here: the report rule below gives the sentence of the last answer that
+    # speaks to the line, which is the question that was just asked. Read before it, and only
+    # where the turn before was one of those questions, so no other line can reach it.
+    described = no_eyes.what_they_described(text, memory)
+    if described:
+        return fallback._choose(described, memory, text) or ""
     reported = detail.a_report_about_the_thing(text, memory)
     if reported:
         return reported
@@ -174,7 +222,49 @@ def respond(text, memory):
     tasted = taste.reply_for(text, memory)
     if tasted:
         return tasted
+    # "make it firm but polite" on the turn after a draft was handed over is an edit of words the
+    # bot itself printed, not a fact about the world. Every pool the composer has answered it with
+    # a shrug - "a quick search online will get you a solid answer", and once the drafting pool's
+    # own sample message, about a rota, said firmer - because the line names no subject for any of
+    # them. The draft is in the last reply, in quotes, and the tone is the only thing to change
+    # (bot/compose/tone_again.py, which stands down unless the line names a tone and nothing else
+    # and the bot handed a draft over within the last two turns).
+    from ..compose.tone_again import retone
+    retoned = retone(memory, text)
+    if retoned:
+        return retoned
+    # The composer's line for this turn is asked once, after the correction above has been written
+    # to the store, and every reading below that only replaces a receipt, a hedge or the floor
+    # reads that same reply: asking it twice is two passages through the pools for one turn.
+    # A bare doubt on top of a safety answer ("is that bad" over the breathing card, the abuse
+    # card, the crisis card) is the person checking the thing is as serious as it sounded, and the
+    # continuations below are written for lines inside an emergency: it was answered with the care
+    # pool of a symptom ("keep an eye on it and tell me if anything changes" over "i hit my wife")
+    # and with somebody else's crisis ("keep someone with you tonight" over "my husband hit me").
+    # Asked before the composer, because the composer's answer here is the fault.
+    serious = safety_doubt.reply_for(text, memory)
+    if serious:
+        return serious
     reply = fallback.reply_for(text, memory)
+    # A thing in the room - a noise, a smell, a light that flashes, half the lights going out -
+    # was answered with a placeholder ("Got it. Is there anything you'd like a hand with?",
+    # "Thanks for telling me - I'm here if you want to dig into any of that"), which fits any
+    # message and leaves the person with a thing in front of them and nothing said about it. The
+    # pool says what a thing in that state usually is and where the count or the code is read
+    # (bot/compose/no_eyes.py). Only a placeholder is replaced, so no real answer is touched.
+    if not a_comment:
+        in_the_room = no_eyes.a_thing_in_the_room_over_a_placeholder(text, reply)
+        if in_the_room:
+            return fallback._choose(in_the_room, memory, text) or ""
+        # A recording they are offering, or an address or a number handed over, is a thing the
+        # bot can read and nothing it can act on. The receipt ("Got it. Is there anything you'd
+        # like a hand with?") reads as though it had arrived, and the search hedge answered "its
+        # about 2 mins, can you listen" with a pointer to a search engine.
+        if no_eyes._is_a_placeholder(reply) or fallback.is_a_hedge(reply):
+            for pool in (no_eyes.a_contact_they_handed_over(text),
+                         no_eyes.a_recording_they_offer(text)):
+                if pool:
+                    return fallback._choose(pool, memory, text) or ""
     # A thing they have, said as a plain fact ("ive got a spare room", "weve got a greenhouse")
     # is not a day that happened. The composer's small-day pool reads the possessive "got" as a
     # past doing and cheers at it - "How was it, overall?", "Nice one. How did the rest of it
@@ -187,6 +277,25 @@ def respond(text, memory):
         of_mine = remark.a_thing_of_theirs_reply_for(text, text.split(), memory)
         if of_mine:
             return of_mine
+    # Somebody close has handed the person a verdict about themselves - "my mum says im not trying
+    # hard enough", "my sister says im a cow", "my boss says im too slow" - and the store files it
+    # and hands their own words back ("Noted: your mum says you're not trying hard enough"), or the
+    # composer asks what they like most about a cow. Those lines are about being spoken to that
+    # way, so the reply says the sting is real and asks the one thing that opens it up. Only a line
+    # that claims nothing is replaced, so an answer of the composer's own keeps the turn
+    # (bot/compose/said_about_me.py).
+    judged_line = said_about_me.reads_as_reported_judgement(text)
+    nothing_yet = (not reply or fallback._nothing_to_stand_behind(reply)
+                   # The floor can also answer somebody else's words as if they were the person's
+                   # own judgement of themselves - "my aunt says im a disappointment to the family"
+                   # got "That's a heavy way to feel about yourself" - which argues with the wrong
+                   # person about a judgement they did not make.
+                   or (judged_line and said_about_me.speaks_to_a_self_judgement(reply)))
+    if not a_comment and nothing_yet:
+        judged = said_about_me.answer_for(text, memory) or said_about_me.answer_followup(
+            text, memory)
+        if judged:
+            return judged
     # A break-up is not a broken bone. "broke up" sits next to "broke" in the words that say a
     # body is hurt, so a thread that had said it read as an injured patient and the ask after a
     # rough patch ("is she going to be ok") was answered with the pool that names whoever is
@@ -195,6 +304,13 @@ def respond(text, memory):
     not_a_body = breakup.answer_for(text, reply, memory)
     if not_a_body:
         return not_a_body
+    # A plea for a hand inside a bereavement ("i dont know what to do" the turn after "my mum
+    # died last month") is not a line to search for, and the composer had only the search hedge
+    # and the nod for it. Only those two are replaced, so a reading with something of its own
+    # keeps the turn (bot/compose/griefplea.py).
+    keeping_going = griefplea.reply_for(text, reply, memory)
+    if keeping_going:
+        return keeping_going
     # Nothing has been said yet, so a reply that picks an earlier thread back up is pointing at
     # turns that never happened: "sorry ive been quiet, its been a rough week" as the first line
     # of a chat was answered "No need to say sorry - I'm still here. Where were we?", which
@@ -209,6 +325,16 @@ def respond(text, memory):
     years_back = goodnews.reply_for_a_year_ago(text, reply, memory)
     if years_back:
         return years_back
+    # A stretch of the day already spent on one thing says how long it has been going on, and the
+    # composer had only the stock lines for it ("ive been waiting for the plumber since nine" ->
+    # "Got it. Is there anything you'd like a hand with?") or a receipt that asks for the one
+    # thing the line had just given ("You've been painting the fence all morning, how long have
+    # you been at it?"). The stretch is said back in the person's own time, and the shape of the
+    # doing - waiting on somebody, a job of their own, looking after a person - picks the one
+    # question that is left (bot/compose/stretches.py). Only a placeholder is replaced.
+    stretch = stretches.the_stretch_said_back(text, memory, reply)
+    if stretch:
+        return stretch
     # The same answer, and the person refuses the move rather than a thing: "theres a mouse in my
     # kitchen" then "i dont want to kill it" was met with the floor ("Got it. Is there anything
     # you'd like a hand with?"), a line that fits any message. A refusal is answered with the
@@ -219,6 +345,17 @@ def respond(text, memory):
         refused = obstacle.a_move_refused(text, memory)
         if refused:
             return refused
+    # A thing the person cannot use is a limit, not a dislike: "i cant do gyms", "i dont have a
+    # car". After an answer that has nothing to hand back without it, the composer has only the
+    # nod that fits any message ("Thanks for telling me - I'm here if you want to dig into any of
+    # that"), and the person's own limit is what the next reply should be about. Only a reply that
+    # answers nothing is replaced: an answer that adapts to what they have not got ("Skip the
+    # cheese: a frittata...") is better than any question
+    # (bot/memory/obstacle.py, `answer_for_a_thing_they_cannot_use`).
+    if reply and (fallback._nothing_to_stand_behind(reply) or fallback._is_a_hedge(reply)):
+        cannot_use = obstacle.answer_for_a_thing_they_cannot_use(text, memory)
+        if cannot_use:
+            return cannot_use
     # A short line that answers the last answer - the detail narrowed to one room, the first step
     # said back as done - is met with the composer's echo of the person's own words, and the part
     # of the answer they have not had yet is still on the screen behind it. It is said back here
@@ -226,12 +363,34 @@ def respond(text, memory):
     rest = the_step_they_have_not_had(text, memory, reply)
     if rest:
         return rest
+    # A verdict from somebody with authority - a trade, a clinician, a council - is reported back
+    # and the composer hands the person their own words again ("Got it - the plumber said the whole
+    # lot needs replacing", "Got it. Is there anything you'd like a hand with?"). What a friend adds
+    # is the decision that follows the verdict: a quote in writing and a second price, when to
+    # ring back, what the office's own next step is. It is said here instead, and only where the
+    # composer had nothing of its own (bot/memory/the_verdict.py) - a receipt, the floor, a hedge, or
+    # the small-day pool, which asks a person reporting a plumber's verdict how the afternoon went.
+    if reply and (fallback._nothing_to_stand_behind(reply) or fallback._is_a_hedge(reply)
+                  or fallback._in_a_pool(reply, (fallback.A_SMALL_DAY,))):
+        from ..memory.the_verdict import answer_for as _verdict_for
+
+        verdict_answer = _verdict_for(text, memory)
+        if verdict_answer:
+            return verdict_answer
     # A follow-up that asks only for a figure ("how long should i leave it", after the answer
     # that said "leave it somewhere warm and airy for at least 24 hours") names no thing, so no
     # entry is reached and the composer reaches for the search hedge - while the figure the person
     # is asking for is in the answer already on their screen. Only a hedge is replaced: when the
     # composer has a line of its own, that line is the reply (see `repeat.the_figure_asked`).
     if reply and fallback._is_a_hedge(reply):
+        # The same question, in the same words, asked again after a turn or two of something else:
+        # by then the pronouns in it point at whatever was said last, so the store stands down and
+        # the hedge is all that is left to say - while the chat already has the answer, word for
+        # word the one this line wants. It is handed back, and it is not handed back when anything
+        # said since changed the thing the answer was about (see `repeat.the_same_question_again`).
+        again_asked = repeat.the_same_question_again(text, memory)
+        if again_asked:
+            return again_asked
         # A bare "is she going to be ok" about somebody the talk has already said is ill or in
         # hospital has no card behind it, and the hedge ("I don't know enough to answer that
         # honestly. A search should sort you out quickly") is no answer to a person's worry: a
@@ -250,6 +409,15 @@ def respond(text, memory):
         figure = repeat.the_figure_they_gave(text, memory)
         if figure:
             return figure
+        # A verdict the composer cannot hold - "is it worth fixing", "is the castle worth the
+        # money", "are gore tex ones worth it" - wants the number to weigh and where that number
+        # comes from, and the hedge gives neither (bot/compose/is_it_worth_it.py). Only a hedge is
+        # replaced, and the shapes it reads are the ones where the pointer is certain; a job, a
+        # course, a relationship and anything medical keep the composer's own line.
+        from ..compose import is_it_worth_it  # noqa: PLC0415 - read here, where the reply is
+        worth = is_it_worth_it.is_it_worth_it(text, memory, reply)
+        if worth:
+            return worth
     # A recall ask the composer has answered with a line that does not carry the figure they
     # asked for: "how much was i putting away" was met with "I can't look up live prices, sorry"
     # and "what was my excess again" with "That is everything I have on that one, so I would only
@@ -269,6 +437,18 @@ def respond(text, memory):
         late = too_late.answer_for(text, memory)
         if late:
             return late
+    # A check on a thing in hand, asked after the bot has already named the checks - "what should
+    # i check before i pay", "anything i should be careful of" two turns after the price of a
+    # second-hand pram - is asking for the sentence the bot itself gave ("A second-hand one is
+    # fine if the frame is straight, the brakes hold and the fabric washes"). It reached the
+    # search hedge, and the bare form reached the neutral receipt instead, which is not an answer
+    # either. The list handed back is the bot's own sentence, so nothing is invented; only a hedge
+    # or a receipt is replaced (bot/compose/checking.py, `the_checks_already_named`).
+    if reply and (fallback._is_a_hedge(reply)
+                  or fallback._in_a_pool(reply, (fallback.NEUTRAL,))):
+        checks = checking.the_checks_already_named(text, memory)
+        if checks:
+            return checks
     # A question about how a thing of theirs went - "how was the wedding", "how did the scan go",
     # "how are the kids", "how is work" - reaches the same hedge, and a search cannot tell anybody
     # how their own week went. The bot was not there; what a friend does is ask and let them tell
@@ -286,6 +466,22 @@ def respond(text, memory):
         own = own_facts.answer_for(text, memory)
         if own:
             return own
+    # A question about the chats before this one - "can you see my chats with you from before", "is
+    # there a list of my chats" - reached the same hedge, and it is the line a search engine is
+    # certainly the wrong answer for: it cannot see their chats with this bot either, and the bot
+    # is the only thing that knows the answer, which is the shape of the program. Same file, same
+    # rule: only a hedge is replaced (`bot/compose/own_facts.py`).
+    if reply and fallback._is_a_hedge(reply):
+        past = own_facts.about_earlier_chats(text, memory)
+        if past:
+            return past
+    # And whether this chat teaches it anything - "do you learn from these chats", where its twin
+    # "do you learn from our chats" was already answered: no page knows how this program works, and
+    # the answer belongs in the conversation. Only a hedge is replaced.
+    if reply and fallback._is_a_hedge(reply):
+        taught = own_facts.learns_from_the_chat(text, memory)
+        if taught:
+            return taught
     # A plan the person has just told us about, asked about in the next breath - "we fly on the
     # 12th" then "what time do i need to leave" - reaches the same hedge, and a search engine
     # cannot answer a question about somebody's own booking. The plan is theirs and the missing
@@ -394,6 +590,25 @@ def respond(text, memory):
         own = their_day.own_fact_for(text, memory)
         if own:
             return own
+    # How to handle a person or a day of their own - "how do i manage my mum", "how do i handle
+    # christmas", "how do i sort my life out" - has no page to point at: it depends on the person
+    # and on them. The hedge sends them looking for something nobody has written down, so the
+    # reply names the parts the ask is really made of and asks which to take first
+    # (bot/compose/no_page.py). Only a hedge is replaced, so every how-to with a method behind it
+    # (a filter, a boiler, a tax return) and every body or dose question keep their reply.
+        parts = no_page.reply_for(text, memory)
+        if parts:
+            return parts
+    # A feeling asked about how long it lasts - "does it get easier", "will i ever feel normal
+    # again" - cannot be searched for: nobody can put a date on it. The hedge sends the person to
+    # look for a page that would be guessing too, so the reply says honestly that there is no
+    # date, gives the shape of it and asks one short question (bot/compose/the_course_of_it.py).
+    # Only a hedge is replaced, so a body, a medicine or a thing with a mechanism in it keeps the
+    # card that answers it.
+    if reply and (fallback._is_a_hedge(reply) or fallback._is_an_ask_which_bit(reply)):
+        course = the_course_of_it.reply_for(text, memory)
+        if course:
+            return course
     # A decision that turns on live information - "should i take a coat tomorrow", "is it open
     # today should i go now" - is answered above with the note about where to look, which says
     # what the bot cannot see and leaves the question itself on the floor. The person asked what
@@ -419,9 +634,31 @@ def respond(text, memory):
     # the words they asked with is the reply (`bot/compose/onscreen.py`). Last of the readers
     # that only run on a hedge, so no line with an answer of its own changes.
     if reply and fallback._is_a_hedge(reply):
+        # And the step of the answer just given, for a line that asks about it and names nothing
+        # of its own ("what do i put in it" after the washing-machine paragraph): it used to reach
+        # this hedge over an answer that had just said what to put in (`bot/memory/detail.py`,
+        # `the_plain_ask`). Over a hedge only, so a turn that already has an answer keeps it -
+        # "i twisted my ankle yesterday" then "ok so whats the best thing to do tonight" has a
+        # better one in the composer, "Get it seen today - you'll know either way".
+        if not a_comment:
+            plain = detail.the_plain_ask(text, memory)
+            if plain:
+                return plain
         on_screen = onscreen.the_answer_on_screen(text, memory)
         if on_screen:
             return on_screen
+    # The same fault one turn further back: the answer this chat gave three turns up, named again
+    # by a later line, is not on the screen any more and the composer has no card for the words of
+    # the line - "and how do i get some sleep" after the sleep answer reached the search hedge,
+    # which sends the person off to look up something the chat already answered. The store has
+    # the card, so the sentence of it that carries the words they asked with is said back, as the
+    # return it is (bot/memory/asked_about.py). Last of the readers that only run on a hedge.
+    if reply and fallback._is_a_hedge(reply):
+        from ..memory import asked_about  # noqa: PLC0415 - one reader, imported where it is used
+
+        asked = asked_about.the_answer_this_chat_gave(text, memory)
+        if asked:
+            return asked
     # A thing of theirs that has been damaged, taken, refused or fallen off is not a day that went
     # well, and the composer's small-day pool congratulates it: "we had a flood" got "Nice one. How
     # did the rest of it go?" and "someone keyed my car" got "Good to hear. What was the best
@@ -452,6 +689,21 @@ def respond(text, memory):
         only = only_they_know.answer_for(text, memory)
         if only:
             return only
+    # A record is held by one office rather than sold anywhere - "where do i get the deeds",
+    # "where can i find the log book for my car", "where can i get a probate record". The reader
+    # below answers that shape with a map app and a ring first, which is right for a bike tyre and
+    # sends somebody driving for a document that has a single holder. What the bot knows is which
+    # office holds which kind of record, and the office's own service is where the copy is ordered,
+    # so the reply says that first. Asked before the map-app reader, and over a hedge, that
+    # reader's own line, or a lost record the composer reads as a feeling ("we lost the log
+    # book" -> "That sounds rough"), so a card that names the office keeps the turn
+    # (bot/compose/a_document_lives_with_an_office.py).
+    if reply and (fallback._is_a_hedge(reply)
+                  or a_document_lives_with_an_office.a_map_app_line(reply)
+                  or a_document_lives_with_an_office.a_lost_record(text, reply)):
+        held = a_document_lives_with_an_office.answer_for(text, memory, reply)
+        if held:
+            return held
     # A question about where to get a thing, or somebody to do a job - "where do i get seed from",
     # "is there a launderette near me", "any decent chippy near me" - needs a map, a branch list
     # and today's times, and there is none of that on this side. The composer has
@@ -465,6 +717,18 @@ def respond(text, memory):
                 else find_a_place.answer_for(text, memory))
         if here:
             return here
+    # A line that hands the bot the errand itself - "search for flights for me", "book the
+    # tickets", "send me the recipe", "save this for later", "add milk to my shopping list" - is
+    # not small talk, and it was answered with one of the composer's flat readings ("Got it. Is
+    # there anything you'd like a hand with?"). Nothing here has hands, a browser, an account or a
+    # list that outlives the chat, so the true reply names that in a few words, says what the bot
+    # can still do, and leaves the errand where it happens (bot/compose/onmybehalf.py). Only those
+    # flat readings are replaced, so a line with an answer of its own never reaches it.
+    if reply:
+        handed = onmybehalf.answer_for(text, memory, reply)
+        if handed:
+            return handed
+
     # A judgement on a place or a thing the bot cannot see ("is benidorm ok with a toddler", "is the
     # old town doable", "is this area safe", "is my bike safe to ride", "is that a good trade")
     # reached the search hedge, which sends a person off to read reviews they could have found
@@ -476,6 +740,35 @@ def respond(text, memory):
         judged = a_place_nobody_can_see.answer_for(text, memory, reply)
         if judged:
             return judged
+    # A last reader of the hedge: a thing the person named, with a kind, and an ask about it that
+    # the kind does not decide on its own - a schedule, a cleaning, a figure. What the kind makes
+    # true is said, and the exact part is named as the place the rest lives
+    # (bot/compose/what_i_do_know.py). Only a hedge is replaced, so a card, an entry and every
+    # reader above keep their turn.
+    if reply and fallback._is_a_hedge(reply):
+        from ..compose import what_i_do_know  # noqa: PLC0415 - read here, where the reply is
+        known = what_i_do_know.reply_for(text, memory, reply)
+        if known:
+            return known
+
+    # A follow-up that asks for no figure at all - "do i need to prick them", "can i still eat
+    # it", "and should i cover it" - is still answered by the card on the screen: the sentence of
+    # it that says what is safe, or the step it gives first. It is asked here, after every reading
+    # of its own above and before the hedge, and only where the live reply is one that answers
+    # nothing - a hedge, the note that the answer above was all of it, a receipt, or one of the
+    # lines that hand the question back. Where the card has no such part, the part it does know
+    # still comes back, with the one thing it never said and the one place that settles it
+    # (bot/memory/repeat.py, `the_part_asked` and `what_it_knows`).
+    if repeat.answers_nothing(reply):
+        part = repeat.the_part_asked(text, memory)
+        if part:
+            return part
+        # Never over an answer that already sent them to 111, A&E or a vet: the step is given and
+        # the line after it is asking about everything else.
+        if not repeat.the_advice_was_to_get_seen(memory):
+            knows = repeat.what_it_knows(text, memory)
+            if knows:
+                return knows
 
     # The last thing this bot says to a question nothing answered is the search hedge, or one of
     # the three receipts that are not answers either ("Got it. Is there anything you'd like a hand
@@ -489,11 +782,15 @@ def respond(text, memory):
     understood = memory.get("understood")
     clean = ((understood.get("clean") if isinstance(understood, dict) else None)
              or " ".join(text.lower().split()))
+    # A hedge that names a page still gives way where the ask has a kind of its own: "how long is
+    # the wait" was answered with the Wikipedia pointer, and a page is not what was asked about the
+    # next hour (`findout.reads_as_busy`).
     thinner = bool(reply) and (fallback._in_a_pool(reply, (fallback.NEUTRAL,))
                                or (fallback._is_a_hedge(reply)
-                                   and not findout.says_where_to_look(reply)))
+                                   and (findout.reads_as_busy(clean)
+                                        or not findout.says_where_to_look(reply))))
     if thinner:
-        elsewhere = findout.pool(clean) or findout.more_about_the_journey(clean, memory)
+        elsewhere = findout.pool(clean, memory) or findout.more_about_the_journey(clean, memory)
         # A status word spent on a named road or line is an ask even where the reader above wants
         # the thing it is spent on to be one it knows ("delays on the a38"), and the receipt is
         # what it would otherwise get. Asked only on that receipt, so every kind above keeps its
@@ -502,6 +799,18 @@ def respond(text, memory):
             elsewhere = findout.pool_over_a_receipt(clean)
         if elsewhere:
             return fallback._choose(elsewhere, memory, clean)
+    # Most of the asks nothing answered are not look-ups at all: "do i need to be in for it" is
+    # answered by the delivery note in their hand and "what tools will we need" by the instruction
+    # sheet in the box. The bot cannot see either, but it does know which one it is, so the reply
+    # names the subject back, names the thing that carries the rest, and asks the one question that
+    # narrows it (`findout.on_the_thing`). Only a hedge is replaced, and this is asked after every
+    # reader that names its own subject, so each of those keeps its turn; it is asked before the
+    # `gap` reader below because a carrier is the more particular answer of the two ("do i need to
+    # be in for it" is settled by the delivery note, not by what the rules say).
+    if reply and fallback._is_a_hedge(reply):
+        looked = findout.on_the_thing(text, memory, memory.get("understood"))
+        if looked:
+            return looked
     # A gap whose answer is in no one place: a quote or a published rate, a verdict on one thing,
     # a fit, a figure about a place, whether it is allowed, how to do a thing. The reader above
     # needs a thing named in the line, so these reached
@@ -511,10 +820,40 @@ def respond(text, memory):
     # reply and a signpost (STYLE.md, "Not knowing, honestly"; bot/compose/gap.py). Only a shrug
     # or a pointer is replaced and only where the kind is read, so an answer of the composer's
     # own keeps the turn.
-    if reply and (fallback._is_a_hedge(reply) or gap.names_only_a_page(reply)):
+    if reply and (fallback._is_a_hedge(reply) or gap.names_only_a_page(reply)) \
+            and not gap.names_the_paper(reply):
         gap_lines = gap.pool(clean)
         if gap_lines:
             return fallback._choose(gap_lines, memory, clean)
+    # An ask the bot has no hands for - "set a timer for 20 mins", "play some music", "note that
+    # down" - is a job, and a job answered with the stock nod or with the person's own words said
+    # back reads as done. What it says instead is the limit in a few words and the half that can
+    # happen here (bot/compose/hands.py). A place means a hedge, the nod, or a receipt; a line the
+    # composer had something of its own to say about keeps it, and so does the pool for a job in
+    # the world unless the half the person asked for is the words.
+    # "read my emails for me" is the same fault one pool over: the composer took the imperative
+    # for an account of a day and answered "Good to hear. What was the best bit?", which hears a
+    # job and asks about an afternoon. So the small-day pleasantry is a place too - the line still
+    # has to read as a job, so an account of a day keeps its reply.
+    a_place = (fallback._is_a_hedge(reply)
+               or fallback._in_a_pool(reply, (fallback.NEUTRAL, fallback.A_SMALL_DAY))
+               or ack.reads_as_a_receipt(reply))
+    if not a_place and hands.writes_the_words(text):
+        a_place = fallback._in_a_pool(reply, (fallback.ACTS_FOR_ME,))
+    if a_place:
+        hands_reply = hands.reply_for(text, memory)
+        if hands_reply:
+            return hands_reply
+    # A particular of the person's own life - "do i like fish", "what does she do", "how old is
+    # he", "who is my friend coming with" - has no page anywhere: the only places it lives are the
+    # person in front of the bot and the people around them, so the search hedge sends them
+    # looking for something nobody has written down. The honest line says the bot has not met them
+    # and asks for the one thing it needs (bot/compose/their_life.py). Only a hedge is replaced, so
+    # a card, a thread that remembers, an own record and a safety answer keep their turn.
+    if reply and fallback._is_a_hedge(reply):
+        own_life = their_life.reply_for(text, memory)
+        if own_life:
+            return own_life
     return reply
 
 
@@ -835,6 +1174,8 @@ def the_step_they_have_not_had(text, memory, said):
     answer = str(turns[-1].get("bot") or "").strip() if turns else ""
     if not answer or not _answers_the_line(text, answer, turns):
         return ""
+    if _the_answer_again(answer, turns):
+        return ""
     if PUSHING_BACK.search(text):
         return ""
     if A_NEW_FACT_ABOUT_SOMEONE.search(text):
@@ -868,6 +1209,11 @@ def the_step_they_have_not_had(text, memory, said):
         low = leftover.lower()
         if len(leftover.split()) < 6 or low.startswith(SIGNING_OFF):
             continue
+        # The leftover has to be readable as the answer on its own. One that opens on a
+        # conditional, a conjunction or the hand-off sentence of a hedge is the second half of
+        # something, and a person handed it has to guess what the first half said.
+        if not detail.stands_alone(leftover):
+            continue
         # A question is not the step the person has not had yet: it is the thing the bot asked
         # them, and handing it back says the same sentence twice running. "my brother is a chef"
         # then "he works in town" was answered "what does a normal day look like for him?" on the
@@ -878,6 +1224,23 @@ def the_step_they_have_not_had(text, memory, said):
             continue
         return leftover
     return ""
+
+
+def _the_answer_again(answer, turns):
+    """True when the last reply is an earlier answer of the bot's, said again.
+
+    The memory store hands the last answer back with a short lead-in ("Sure - ...") when the person
+    asks to hear it again, and nothing in that is un-had: it is the answer they have just read.
+    After "come again?" over the Lisbon answer, the next line - a new fact about Sintra - was
+    answered with "May is warm and busy, so book the tower and the popular restaurants ahead", the
+    tail of the answer they had been given a moment before, instead of the fact being taken down.
+    """
+    low = " ".join(str(answer or "").lower().split())
+    for one in turns[:-1]:
+        earlier = " ".join(str(one.get("bot") or "").lower().split())
+        if len(earlier.split()) >= 6 and earlier in low:
+            return True
+    return False
 
 
 def takes_as_it_comes(text, memory):
@@ -899,3 +1262,19 @@ def takes_as_it_comes(text, memory):
 
 
 TAKES_AS_IT_COMES = takes_as_it_comes
+
+from ..memory import again as _said_before  # noqa: E402 - applied once the module is defined
+
+# Whatever this module answers, the last thing that happens to it is the earlier-turn
+# check (bot/memory/again.replied): `answers` alone served a card again on 59 deck turns.
+respond = _said_before.replied(respond)
+
+# The last thing that happens to a reply: the composer's own two acknowledgements are turned into
+# one short question about the thing the person just said. It is a wrapper rather than a branch
+# inside `respond` because it needs the finished reply and because the end of the function is
+# where every reader in the swarm is adding its own branch. Only "I'm listening - say more if it
+# helps", "Got it. Is there anything you'd like a hand with?" and the third of that pool are
+# replaced, so a card, a pool reply or a search hedge keeps its turn (bot/compose/a_detail_dropped.py).
+from ..compose import a_detail_dropped as _a_detail_dropped  # noqa: E402
+
+respond = _a_detail_dropped.turned(respond)

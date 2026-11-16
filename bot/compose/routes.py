@@ -457,6 +457,93 @@ CONTRACT = (
     "through a tenancy or an employment contract with you for free.",
 )
 
+# ---- what a place has, and what happens to the old one ---------------------------------------
+#
+# Two everyday asks with no answer written anywhere general, and both are the same fault as the
+# rest of this file: a card about something else took them, or the honest hedge did.
+#
+# "Is there a hairdryer in the room", "is there parking at the hotel": what is in a room is
+# decided per building, listed on the page you book on and settled by a call to reception. The
+# line to avoid is the price card - "is there parking at the hotel" is not "how much is parking",
+# and the charge is a separate line from whether the thing exists at all.
+A_PLACE = re.compile(
+    r"\b(?:hotel|guest ?house|b\s?and\s?b|hostel|campsite|caravan park|holiday park|cottage|"
+    r"villa|apartment|airport|station|venue|concert hall|leisure cent(?:re|er)|swimming pool|"
+    r"gym|restaurant|pub|club|theatre|cinema|hospital|surgery|office|rooms?|bedrooms?|the flat|"
+    r"the house|the cottage|the caravan|flat we(?:ve| have) booked|the building|building|"
+    r"the premises|the shop|the salon|the clinic|the garage)\b")
+# A facility or a thing a room may or may not have. "parking" is here rather than in a price list:
+# whether there is any at all is the first question, and the charge is the second.
+A_FACILITY = re.compile(
+    r"\b(?:parking|car park|wifi|wi-?fi|internet|pool|gym|spa|sauna|breakfast|air ?con(?:ditioning)?|"
+    r"kitchen(?:ette)?|lift|elevator|shower|bath|towels?|hairdryer|hair dryer|kettle|microwave|"
+    r"fridge|freezer|washing machine|iron|tv|television|safe|balcony|room service|charger|"
+    r"plug sockets?|"
+    r"toaster|crockery|cutlery|pans|a cot|cot bed|high ?chair|towels|bedding|linen|"
+    r"accessible|wheelchair|dog friendly|disabled access)\b")
+# The things a building has rather than a day out has: named alone they still belong to some place,
+# and the pool's own line asks which one. "is there a lift" is not a question about nothing.
+A_ROOM_FACILITY = re.compile(
+    r"\b(?:parking|car park|wifi|wi-?fi|internet|air ?con(?:ditioning)?|kitchen(?:ette)?|lift|"
+    r"elevator|shower|bath|towels?|hairdryer|hair dryer|kettle|microwave|fridge|washing machine|"
+    r"iron|tv|television|a safe|the safe|balcony|toaster|a cot|cot bed|high ?chair|"
+    r"plug sockets?|room service)\b")
+# ... and the ask that the answer to it is yes or no.
+A_HAS_ASK = re.compile(
+    r"\b(?:is there|are there|is there any|do they have|does (?:it|this|that|the [a-z]+) have|"
+    r"have (?:they|you) got|does it come with|will there be|is it got|got a|"
+    r"do (?:the|these|those|your) [a-z]+ have)\b")
+# A time or an opening is the venue's hours, which the place pools read, and a price is a price.
+NOT_A_HAS = re.compile(
+    r"\b(?:open|opens|opening|closed?|closing|hours|what time|how much|price|cost|charge|fee|"
+    r"parking permit|bus|train|tube|tram|roadworks|traffic)\b")
+
+# "Will they take the old fridge away", "can i keep the old boiler": what happens to the thing
+# being replaced is decided by who owns it and by whoever installs the new one, and neither is
+# written on a page about boilers. The two answers that are true of every swap: the installer
+# takes it if it is asked for at the quote, and a council collection is the free way to lose what
+# nobody wants.
+THE_OLD_ONE = re.compile(
+    r"\b(?:the|my|our|that|this|these|those) old (?:one|ones|unit|units|boiler|fridge|freezer|"
+    r"fridge ?freezer|washing machine|dishwasher|tumble dryer|cooker|oven|hob|bath|shower|toilet|"
+    r"radiators?|windows?|doors?|carpets?|sofa|settee|bed|mattress|tyres?|batteries|cupboard|"
+    r"wardrobe|kitchen|bathroom|fire|fireplace|water tank|tank)\b")
+MOVING_THE_OLD = re.compile(
+    r"\b(?:keep|keeping|take\b[^,.;]{0,30}\baway|getting? rid|get rid|dispose|"
+    r"disposal|recycl\w*|scrap\w*|trade ?in|remove|removed|removal|throw (?:it|them) out|"
+    r"skip|tip|leave (?:it|them)|what happens to)\b")
+# A food or a pet is not a fitted thing, whatever the sentence says about the old one.
+NOT_THE_OLD_ONE = re.compile(
+    r"\b(?:rice|potatoes?|bread|milk|chicken|meat|curry|soup|leftovers?|stock|pasta|veg|"
+    r"cat|dog|horse|rabbit|hamster|fish)\b")
+
+A_PLACE_HAS = (
+    "Whether a place has a thing is decided by that place and not by its name: the same chain "
+    "differs from one branch to the next, and a station, an office and a hotel each answer for "
+    "themselves. Its own site or the page you book on lists what comes as standard and what costs "
+    "extra, and one call to the place confirms what the page leaves out - ask for it in writing if "
+    "it matters on the day.",
+    "Facilities belong to whoever runs the place, so the current list is on their own page rather "
+    "than anywhere general, and anything charged for usually sits on a line of its own, so look for "
+    "both before you decide. If the page is silent, the place itself is the one that knows.",
+    "That turns on the building rather than the name above the door, and the people there know it "
+    "exactly. Ring or email the place itself and ask them to confirm it for the day you are going, "
+    "so you have it in writing if it turns out not to be there.",
+)
+
+THE_OLD_ONE_POOL = (
+    "The old one is usually the fitter's to take: whoever installs the new one carries the old "
+    "away for a small fee if you ask when the job is quoted, and a shop that only delivers will "
+    "not touch it. Ask about it with the quote and it is one less thing on the day.",
+    "Whether you can keep it turns on who owns it now: bought outright it is yours, and rented or "
+    "on finance it is not - that is in the agreement, not on any page. If it is yours and nobody "
+    "wants it, the council's own site lists the bulky collection, what they take and what it "
+    "costs.",
+    "Two things settle it: who owns it after the swap, and who will move it. The installer "
+    "answers the first when they quote, and a scrap merchant or the council's bulky waste service "
+    "answers the second - both are worth asking before the day rather than on it.",
+)
+
 def options(clean):
     """A pool of "here is where to find out" replies for this line, or None.
 
@@ -477,6 +564,13 @@ def options(clean):
     asking = bool(QUESTION.search(clean))
     if re.match(r"\s*(?:was|were)\b", clean):
         return None  # what was allowed at something that has already happened
+    if asking and THE_OLD_ONE.search(clean) and MOVING_THE_OLD.search(clean) \
+            and not NOT_THE_OLD_ONE.search(clean):
+        return THE_OLD_ONE_POOL  # who owns it and who carries it: the fitter and the council
+    if asking and (A_PLACE.search(clean) or A_ROOM_FACILITY.search(clean)) \
+            and A_FACILITY.search(clean) and A_HAS_ASK.search(clean) \
+            and not NOT_A_HAS.search(clean):
+        return A_PLACE_HAS  # what the building has is on the page you book on
     if asking and CANCEL_TERMS.search(clean):
         return TERMS  # the fee for calling it off is on the page it was sold on
     if asking and HARM_NOUN.search(clean) and re.search(r"\bcover(?:ed|s)?\b", clean):

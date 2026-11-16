@@ -31,8 +31,8 @@ from .facts import DAYS, KIN, MONTHS, NOT_PLACES, PLACE_VERBS
 # late", "we're going to see", "it's going to rain" and "going to try" are the same shape and not
 # a trip, so a place has to be named and it has to be the object of the going.
 GOING = re.compile(
-    r"\b(?:we're|we\s+are|were|we've|we\s+have|we|i'm|i\s+am|im|i've|i\s+have|i|"
-    r"they're|they\s+are|they've|they|he's|she's)\b\s*"
+    r"\b(?:we're|we\s+are|were|we've|weve|we\s+have|we|i'm|i\s+am|im|i've|ive|i\s+have|i|"
+    r"they're|theyre|they\s+are|they've|theyve|they|he's|shes|she's|hes)\b\s*"
     r"(?:(?:thinking\s+of|planning|hoping\s+to|looking\s+at|off|away)\s+)?"
     r"(?:going|off|heading|flying|driving|sailing|travelling|traveling|"
     r"booked|booking)\b", re.I)
@@ -57,6 +57,11 @@ BOOKED_PLACE = re.compile(r"\b(?:booked|book|booking)\s+(?:us\s+)?"
 NOT_A_TRIP = re.compile(r"^\s*(?:a|an|the|my|our|his|her)\s+(?:wedding|party|concert|gig|"
                         r"festival|funeral|match|game|show|play|hen|stag|birthday|christening|"
                         r"meeting|conference|interview|appointment|course|class|exam|test)\b", re.I)
+# An amount said after "in" is not a place: "cut my insulin in half" was read as a trip to Half
+# and answered "Half, lovely. When is it?", and the same shape reads "in two", "in bits", "in
+# pieces". A share is what is left of something, never somewhere the person is going.
+NOT_AN_AMOUNT = frozenset("""half halves quarter quarters third thirds two three four five six ten
+twenty hundred dozen bits pieces lumps chunks squares slices rounds""".split())
 NOT_A_PLACE = frozenset("""be get got go going do see try have check sort pick take make book
 lose losing lost sell selling sold lose win won keep quit leave leaving start stop manage afford
 ask tell call look find put buy eat drink work bed sleep town home hospital doctor dentist
@@ -72,6 +77,12 @@ pass faint collapse vomit throw sick black die choke bleed fit seizure
 # last thing a person who has just said they are stuck wants to hear. The words a loop is said with
 # are nobody's destination.
 circles circle loops loop
+# "book recommendations for my dad" is a person asking for a book to read, not a trip with their
+# father in it: "book" is the noun here, so the word behind it was read as the place and the reply
+# was "Recommendations is booked, then. Get the big days out booked now too". A word that asks for
+# a pick is never somewhere to go.
+recommend recommends recommended recommendation recommendations suggest suggests suggested
+suggestion suggestions ideas idea picks tips
 # A person going to harm themselves is not a trip to a place called Kill Themselves: with no
 # person named in the chat, "they are going to kill themselves" was answered "Kill Themselves,
 # lovely. When is it?".
@@ -80,7 +91,7 @@ myself yourself himself herself ourselves themselves
 school work church gym shop shops tesco asda aldi lidl mum mums dad dads nan gran grandparents
 kids children baby partner wife husband friend friends sister brother them him her you me us
 it that this there somewhere anywhere out in on up down back again now later today tomorrow
-tonight yesterday first last next""".split())
+tonight yesterday first last next""".split()) | NOT_AN_AMOUNT
 # A relative or a friend after "to" is the person being visited, not the place: "im off to my
 # brothers tonight" is an evening with family, and the trip reader was answering it "My Brothers,
 # lovely. What do you want to sort out first, where to stay or what to do while you are there?"
@@ -91,7 +102,8 @@ tonight yesterday first last next""".split())
 A_PERSON_IS_NOT_A_PLACE = re.compile(
     r"^(?:my|our|his|her|their)\s+(?P<person>(?:"
     + "|".join(sorted(KIN + ("kids", "children", "grandparents", "grandchildren", "family",
-                             "relatives", "folks", "twins", "mate"), key=len, reverse=True))
+                             "relatives", "folks", "twins", "mate", "in laws", "in-laws",
+                             "inlaws", "in law", "in-law", "inlaw"), key=len, reverse=True))
     + r"))(?P<plural>s)?(?P<poss>['\u2019]s?)?(?!\w)", re.I)
 # A word after the person is a thing of theirs - "my mums house", "my kids school", "my sisters
 # wedding", "my dads work" - and the possessive belongs before it, not after the whole phrase
@@ -154,6 +166,37 @@ DURATION = re.compile(r"^(?:" + NUMBER_WORD + r"\s+)?(?:second|minute|moment|hou
 # not a punt to a search engine: the answer is the month, the place and the people they named.
 PACKING = re.compile(r"^(?:and\s+|also\s+|oh\s+)?(?:what|anything)\s+(?:should|shall|do|would|"
                      r"will|to)?\s*(?:we|i|you)?\s*(?:pack|bring|take)\b(.*)$", re.I)
+# The same question said as a need rather than as "what": "should i take anything", "do i need to
+# bring towels", "will i need a coat". Nothing in the deck's follow-ups matched the shape above, so
+# a visit to family was answered with the card about somebody coming to stay instead.
+PACKING_SAID = re.compile(
+    r"^(?:and\s+|also\s+|oh\s+)?(?:should|shall|do|does|would|will|can|could)\s+"
+    r"(?:we|i|you)\s+(?:need\s+to\s+)?(?:pack|bring|take|need)\b(.*)$", re.I)
+# One thing they want to know about: "will i need a coat", "do i need an umbrella", "will i need my
+# boots". A visit's packing answer is what to take to somebody's house - a bottle for the table, a
+# bag for the night - and it was answering this with it: "we are going to my mums on sunday" /
+# "will i need a coat" got "For Your Mum's, nothing much: something for the table...", where the
+# coat card is what was asked. The thing named is the question, so the visit stands down and the
+# reader that knows about that thing answers. A vague word ("anything", "something", "much") names
+# no thing and stays the packing question it is.
+ONE_THING_NEEDED = re.compile(
+    r"^(?:and\s+|also\s+|oh\s+)?(?:should|shall|do|does|would|will|can|could)\s+(?:we|i|you)\s+"
+    r"need\s+(?!to\b)(?:a\s+|an\s+|my\s+|our\s+|some\s+|any\s+)?(?P<thing>[a-z]+)", re.I)
+NO_THING_NAMED = frozenset("""anything something nothing much else more anymore any
+another""".split())
+
+
+def _one_thing_they_need(low):
+    """The thing a "will i need ..." asks about, or "" when it names nothing in particular."""
+    found = ONE_THING_NEEDED.match(low)
+    if not found:
+        return ""
+    thing = found.group("thing").lower()
+    if thing in NO_THING_NAMED:
+        return ""
+    return thing
+
+
 # An invitation is not a destination: "im going to a picnic on sunday" then "what should i pack"
 # was answered "For A Picnic: layers, one warm thing for the evening, and shoes you can walk in" -
 # a walking list for a plate of food - because the trip reading takes anything after "to a" as the
@@ -200,6 +243,69 @@ PACKING_NO_PLACE_NO_MONTH = (
 )
 PACKING_WITH_KIDS = ("with the kids, one change of clothes each per day and a bag for the wet "
                      "things covers it.")
+# Going to family is not a holiday with a packing list: what they need is the thing you would put
+# on the table, and a bag if they are staying. "For Your Mum's: layers, one warm thing for the
+# evening, and shoes you can walk in" answered a dinner with their mum like a week in the Lakes.
+VISIT_PACKING = (
+    "for {place}, nothing much: something for the table - a bottle, a pudding or flowers - and a "
+    "bag for the night if you are staying over.",
+    "{place} is the easy kind of visit to pack for: a bottle or a pudding for the table, and "
+    "check whether they want you for the whole day or just the evening.",
+    "for {place}: what you would bring to a table, and a bag only if you are staying the night.",
+)
+# A visit for a meal has one thing to bring, and it is not a waterproof.
+VISIT_PACKING_FOR_A_MEAL = (
+    "take a bottle and something for after - a pudding, cheese and biscuits, or a box of chocolates "
+    "- so you are not competing for their oven. Ask what they are cooking, then bring the thing "
+    "that goes with it.",
+    "a bottle for the table and something for after, and ask what they are cooking so what you "
+    "bring goes with it rather than fighting for the oven.",
+)
+# A visit to somebody with a new baby is its own kind of visit, and the list is not a bottle for
+# the table: what they need is a meal they do not have to cook, and a visit that does not outstay.
+VISIT_PACKING_FOR_A_BABY = (
+    "nothing for the baby - they have more than they can use. Take food: a meal for the freezer "
+    "or something for lunch, and keep the visit to an hour unless they ask you to stay.",
+    "what a house with a new baby wants is a cooked meal and short visits, so take dinner in a "
+    "dish you do not want back, and ask before you hold the baby.",
+)
+# How long to stay is the question a visit brings, and the answer is about family rather than
+# about hotels: "how long should we stay" after "we are going to my in laws" was a search hedge.
+A_STAY_LENGTH = re.compile(r"\bhow (?:long|many (?:nights|days)) (?:should|shall|do|would|will) "
+                          r"(?:we|i) (?:stay|stop|be there|go for)\b", re.I)
+VISIT_HOW_LONG = (
+    "two nights is the sweet spot for family - long enough to settle in, short enough that you "
+    "are missed.",
+    "one night the first time, two if it is a long drive. Leave while everyone is still enjoying "
+    "it rather than when the conversation has run out.",
+    "a weekend is plenty unless there is something on: arrive Saturday, go home Monday, and say "
+    "when you are leaving before you get there.",
+)
+# How long a visit lasts is a different question from how long a holiday lasts: nobody goes to
+# their in-laws for the beach days. "we are going to my in-laws for a week" was answered "A week
+# gives you time for the beach days and a couple of trips out without rushing." - the week note
+# for a coast - because the visit reading left the length to the holiday notes.
+VISIT_A_WEEK = (
+    "a week with family is a long visit: agree the leaving day before you go, and keep an "
+    "afternoon or two that are just yours.",
+    "a week is plenty to be in somebody else's house - say when you are leaving, and plan one day "
+    "of it that is just yours.",
+)
+VISIT_A_FEW_DAYS = (
+    "a night or two is the easy length for a visit: enough to catch up, short enough that nobody "
+    "is hosting for too long.",
+    "one or two nights is right for family: bring something for the table, and leave while you "
+    "are both still enjoying it.",
+)
+VISIT_A_WEEKEND = (
+    "a weekend is the classic visit - one evening together, one day out, and home before the week "
+    "starts.",
+    "the weekend is enough for most visits: Friday night to Sunday afternoon, and say on the "
+    "Friday when you are heading back.",
+)
+A_MEAL = re.compile(r"\b(?:dinner|lunch|tea|supper|brunch|barbecue|bbq|roast)\b", re.I)
+A_NEW_BABY = re.compile(r"\b(?:new\s?born|new baby|just had a (?:baby|girl|boy)|had a baby|"
+                        r"baby (?:is|was) (?:born|due)|\dbaby)\b|\bnewborn\b", re.I)
 # "how long is the drive" is answered about the drive and not with a search hedge - we know the
 # place and the month, and the honest thing to add is how to make the journey bearable.
 THE_FLIGHT = re.compile(r"\bhow (?:long|far) (?:is|does) the flight\b")
@@ -443,6 +549,10 @@ def _low(text):
 
 
 BOOKED = re.compile(r"\bbook\w*\b", re.I)
+# A booking that has happened, as against one being asked about: "we booked flights to lisbon",
+# "ive booked the cottage". "should i book the vatican museums" is a booking ask, and the card
+# answers it.
+BOOKED_DONE = re.compile(r"\bbooked\b", re.I)
 # What was booked said after "booked" names the thing, not the trip, and the place it happens in
 # follows an "in": "we booked a cottage in cornwall for august" is a trip to Cornwall, and read
 # by BOOKED_PLACE alone the thing booked ("a cottage") was the place - the reply said "A Cottage
@@ -487,8 +597,43 @@ def _a_relation_not_a_place(place):
             or word in PLURAL_RELATIONS)
 
 
-def _places(line):
-    """The place a line says it is going to, in the person's own casing, or ""."""
+# Somebody in a hospital bed, a hospice or a care home is not a day out, and the words that say
+# so come after the person: "going to see my nan in a care home". The visit reading in
+# `not_a_trip` turns those lines away already, and this reader takes the same fence so that the
+# care home is not read as a destination of its own - the base named it "A Care Home" and asked
+# when it was, and the person rule said "Your Mum's, lovely" over a line about a ward. A caring
+# place named beside a real destination is a different line and keeps its trip.
+A_CARING_PLACE_HEAD = re.compile(
+    r"^(?:the\s+|a\s+|an\s+)?(?:hospital|hospice|care home|nursing home|residential home|"
+    r"clinic|infirmary|surgery|ward|a&e|ae|icu|intensive care|high dependency|coronary care)\b",
+    re.I)
+
+
+def _a_person_visited(line):
+    """The person a line is going to see, with the words that belong to them, or "".
+
+    "im off to my brothers tonight" and "we are going to my in laws" name a person, and a person
+    is not a destination - but the visit is still something to answer, and the shrug ("Worth
+    doing. What would you like help with first?") is not it. The words after "to" are kept as the
+    trip's place so `_as_a_visit` can say them back as theirs, and a visit said as the purpose of
+    the journey ("visiting my parents this weekend", "im going to see my sister on sunday") names
+    no place at all, so it is read from the line itself.
+    """
+    if not_a_trip.IN_A_CARING_PLACE.search(str(line or "")):
+        return ""
+    who = not_a_trip.the_visit(line)
+    if who:
+        return who
+    phrase = _places(line, a_visit=True)
+    return phrase if phrase and _a_relation_not_a_place(phrase) else ""
+
+
+def _places(line, a_visit=False):
+    """The place a line says it is going to, in the person's own casing, or "".
+
+    With a_visit the relation fence below stands aside: a person is not a place, and the visit
+    answer needs the words to say back ("my brothers"), not the trip card that names a town.
+    """
     booked = BOOKED.search(line)
     if booked and _the_thing_booked(_low(str(line)[booked.end():])):
         # "we booked a table for friday", "we booked tickets for the match": what people book is
@@ -531,6 +676,11 @@ def _places(line):
             continue
         if not place or low in NOT_A_PLACE or low in MONTHS or low in DAYS or SEASON & set(low.split()):
             continue
+        if A_CARING_PLACE_HEAD.match(low):
+            # A bed in a ward is where the person they are going to see is, not somewhere to go
+            # for a nice time: the reply for it is the one about the place being worrying, not
+            # "A Care Home, lovely. When is it?".
+            continue
         # "im going to visit her in the home tomorrow" is a visit to a care home, and the store
         # named it "The Home" and asked what the person hoped to do while they were there. A
         # bare "home" is already in NOT_A_PLACE, and the article was all that let this one
@@ -538,7 +688,10 @@ def _places(line):
         bare_place = re.sub(r"^(?:the|a|an)\s+", "", low)
         if bare_place in NOT_A_PLACE or bare_place in MONTHS or bare_place in DAYS:
             continue
-        if _a_relation_not_a_place(low):
+        # The person themselves is not the destination: "going to my mums" is a visit, not a
+        # trip to a place called Mum, and a visit is what the visit reading answers.
+        if not a_visit and _a_relation_not_a_place(low):
+            continue
             continue
         if low in ("the", "a", "an") or len(low) < 3:
             continue
@@ -555,7 +708,10 @@ def _places(line):
 # A place named after "in" ("we booked a cottage in cornwall") is the trip and is kept.
 BOOKED_THING = frozenset("""table tables ticket tickets seat seats row taxi cab minicab
 haircut appointment appointments slot court pitch room rooms booth class classes lesson
-lessons dinner lunch breakfast delivery takeaway table tennis""".split())
+lessons dinner lunch breakfast delivery takeaway table tennis
+physio physiotherapist dentist dental doctor doctors gp optician hygienist chiropractor
+osteopath vet vets clinic scan xray x-ray bloods surgery consultation checkup
+mot service servicing boiler plumber electrician garage engineer gas""".split())
 
 
 def _the_thing_booked(low):
@@ -617,9 +773,17 @@ def _when_phrase(line):
 
 # Who is going, counted and said without "with": "two kids" is the same detail as "with two
 # kids", and it was reaching the pool about a change that unsettles sleep.
+# The first group is not the whole group. "two adults and our 6 year old" was read as two adults,
+# so a trip the chat had already been told about was said back "Wales in August with two adults."
+# - the six year old gone from the reply and from the note about who is going. A second group
+# joined by "and" or "plus" is the same answer, so it is kept with the first.
+_GROUP = (r"(?:kids?|children|child|adults?|grown-?ups?|teenagers?|bab(?:y|ies)|toddlers?|"
+          r"boys?|girls?|year\s+olds?|pensioners?|grandparents?|parents?)")
+_COUNT = r"(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)"
 BARE_WHO = re.compile(r"^\s*(?:and\s+|oh\s+|also\s+|plus\s+)?"
-                      r"((?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
-                      r"(?:kids?|children|adults))\b", re.I)
+                      r"((?:" + _COUNT + r"\s+" + _GROUP + r"|\d+\s+year\s+olds?)"
+                      r"(?:\s+(?:and|plus)\s+(?:an?\s+|our\s+|my\s+|their\s+|the\s+)?"
+                      r"(?:" + _COUNT + r"\s+)?" + _GROUP + r")*)\b", re.I)
 
 
 def _who(line):
@@ -679,6 +843,105 @@ def _a_carded_place(place):
     return False
 
 
+def a_moved_destination(line, memory):
+    """The trip the conversation is on, with its place put right, or None.
+
+    "we moved it to florence" is not a trip of its own: it is the trip already in the chat, moved.
+    The month, who and how long come from that trip, so the reply says Florence in June rather
+    than asking when it is, and the store keeps the new place (`facts` moves the plan). With no
+    trip in the chat the place is all there is, and the reply asks the one thing a friend would.
+    """
+    if not isinstance(memory, dict) or not line or "?" in line:
+        return None
+    place = facts.a_moved_place(line)
+    if not place:
+        return None
+    if _the_last_line_named_an_animal(memory):
+        # "my dog is called rex" then "i changed it to max" is the dog renamed. The words are the
+        # ones that move a holiday, so the animal the chat is about is what tells them apart.
+        return None
+    live = _the_trip_so_far(memory)
+    if not live:
+        # A trip rebooked before it was ever said as a trip ("we booked porto" is a plan, not a
+        # trip): the place is the one thing the line gives, and the reply says it back rather
+        # than reading the line as a job finished.
+        return {"place": place, "month": "", "when": "", "who": "", "how_long": "", "by": ""}
+    if _low(_cap(live.get("place") or "")) == _low(place):
+        return None                  # already the place they said, so nothing has moved
+    _keep_the_new_place(memory, place, live.get("place") or "", line)
+    return dict(live, place=place)
+
+
+def _the_last_line_named_an_animal(memory):
+    """True when the line before this one gave an animal a name or asked about one.
+
+    Read through `facts.extract`, so every shape of naming an animal counts ("my dog is called
+    rex", "we're getting a puppy called Biscuit") and a line about anything else does not.
+    """
+    turns = [turn for turn in (memory.get("turns") or []) if isinstance(turn, dict)]
+    said = ""
+    for turn in reversed(turns):
+        words = turn.get("user")
+        if isinstance(words, str) and words.strip():
+            said = words
+            break
+    if not said:
+        return False
+    found = facts.extract(said)
+    return bool(found.get("pets") or found.get("pets_gone"))
+
+
+def _keep_the_new_place(memory, place, old="", said=""):
+    """The store keeps the place the trip is going to now, in place of the one it left.
+
+    The trip is already in the chat, so the plan is the same plan with a new destination: "we are
+    going to cornwall in august" then "no we changed it to devon" is a week in Devon, and the next
+    line that names nothing ("what should we do there") has to be read against Devon.
+
+    Only the trip's own entries move. Everything else the chat has been told stays where it was -
+    "my sister is coming in june" is not a holiday, and the store still has to be able to say
+    "you are going to Devon in August, and your sister is coming in June".
+    """
+    known = user(memory)
+    old_place = str(old or "").strip()
+    known["places"] = _the_place_put_right(known.get("places"), old_place, place)
+    known["plans"] = _the_place_put_right(known.get("plans"), old_place, place)
+    # The plan is the entry that names the new destination, so the month it was said with travels
+    # with it: "you are going to Devon in August", not a bare "Devon" beside it.
+    known["plan"] = next((entry for entry in known["plans"] if _low(place) in _low(entry)), place)
+    log = memory.get("facts_log")
+    if not isinstance(log, list):
+        log = memory["facts_log"] = []
+    log.append({"key": "places", "value": place, "turn": len(memory.get("turns") or []),
+                "text": said})
+    log.append({"key": "plan", "value": place, "turn": len(memory.get("turns") or []),
+                "text": said})
+
+
+def _the_place_put_right(entries, old, place):
+    """The chat's own list with the destination put right, and every other entry left alone.
+
+    The old place is replaced inside the entry that names it, so "Cornwall in august" becomes
+    "Devon in august" and keeps its month and its place in the list. Entries that name nothing
+    about the trip are copied as they are, and the new place is added only when no entry named the
+    old one.
+    """
+    kept = []
+    put_right = False
+    for entry in (entries if isinstance(entries, list) else []):
+        text = str(entry or "").strip()
+        if not text:
+            continue
+        if old and _low(old) in _low(text):
+            text = re.sub(re.escape(old), lambda _m: place, text, count=1, flags=re.I)
+            put_right = True
+        if text not in kept:
+            kept.append(text)
+    if not put_right and place not in kept:
+        kept.append(place)
+    return kept
+
+
 def a_trip(text, memory, cards=True):
     """The trip this line states, as {place, month, who, how_long, by}, or None.
 
@@ -698,17 +961,31 @@ def a_trip(text, memory, cards=True):
         return None
     if re.search(r"\bwent\b|\bhave been\b|\bwas in\b|\blast year\b", low):
         return None                     # a trip taken, not one coming up
-    if re.search(r"\b(?:when|where|how|what|why|should|shall|can|could|would|will)\b", low) \
+    if re.search(r"\b(?:when|where|how|what|why|should|shall|can|could|would|will|worth)\b", low) \
             and not re.search(r"\b(?:we're|were|we are|i'm|im|i am)\b", low):
         return None                     # a question about a trip, not a statement of one
+    visit = _a_person_visited(line)
+    if visit:
+        return {"place": visit, "month": _month(low), "when": _when_phrase(low),
+                "who": _who(low), "how_long": _how_long(low), "by": "", "visit": True,
+                "meal": bool(A_MEAL.search(low)), "baby": bool(A_NEW_BABY.search(low))}
     if not (GOING.search(low) or GOING_BARE.search(low)):
         return None
     place = _places(line)
     if not place:
         return None
-    if cards and _a_carded_place(place):
+    if cards and _a_carded_place(place) and not (BOOKED_DONE.search(low)
+                                                and (_month(low) or _when_phrase(low))):
         # "were off to rome next week": this line said out loud but the card says more, so the
         # card answers it, whatever the shape of the going (going, off to, heading, flying).
+        # A booking with a date on it is not that line. The card answers "what is there to do",
+        # and the guide stands back on the word "booked" itself (a booking ask is not a
+        # "what is there to do" ask), so the stand-back left a dated booking to the greeting pool:
+        #   we booked flights to lisbon in may   ->  "Nice one."
+        #   i booked a holiday to spain in june  ->  "Good - that's one off the list."
+        # The store is the reader that has the news and the date, so it keeps a dated booking. A
+        # booking with no date stays where it was: the card asks when it is, which is the useful
+        # question about it, and "i booked a holiday to spain" keeps that reply.
         return None
     if facts.extract(line).get("name"):
         # "im jess, we are going to spain next week" is two things at once, and the name is the
@@ -937,6 +1214,20 @@ def _when_note(month, memory, text, booked=False, place=""):
     else:
         return ""
     return _pick([n.format(month=_cap(month)) for n in notes], memory, text)
+
+
+def _the_visit_length(how_long, memory, text):
+    """The sentence a visit gets for how long it lasts, or "" when the line gave no length."""
+    if not how_long:
+        return ""
+    low = _low(how_long)
+    if "weekend" in low:
+        return _pick(VISIT_A_WEEKEND, memory, text)
+    if re.search(r"night|\bday", low):
+        return _pick(VISIT_A_FEW_DAYS, memory, text)
+    if re.search(r"week|fortnight|month", low):
+        return _pick(VISIT_A_WEEK, memory, text)
+    return ""
 
 
 def _who_note(who, how_long, memory, text, place=None):
@@ -1225,9 +1516,20 @@ def reply_for(text, memory, cards=True):
     line = " ".join(str(text or "").split())
     if not line:
         return None
+    moved = a_moved_destination(line, memory)
+    if moved:
+        # A destination put right is the trip already on the table with its place changed: "im
+        # going to rome in june" / "we moved it to florence" is Florence in June. Without this
+        # the line reached the pool that answers a job finished ("Good to hear. What was the best
+        # bit?"), because a plan said again is not a thing done.
+        return _start(_a_new_trip(line, moved, memory))
     trip = a_trip(line, memory, cards=cards)
     if trip:
         return _start(_a_new_trip(line, trip, memory))
+    if A_STAY_LENGTH.search(line):
+        live = _the_trip_so_far(memory)
+        if live and live.get("visit"):
+            return _start(_pick(VISIT_HOW_LONG, memory, line))
     somewhere = _somewhere_for(line, memory)
     if somewhere:
         # "and somewhere to eat" is a request, not a remark: read before the detail branch, which
@@ -1235,12 +1537,13 @@ def reply_for(text, memory, cards=True):
         return _start(somewhere)
     # A question about the journey or the packing is still a detail of the trip the chat is on,
     # so it keeps this module even with a question mark on the end.
-    about_the_trip = (PACKING.search(line) or THE_DRIVE.search(line) or THE_FLIGHT.search(line)
-                      or THE_JOURNEY_ASK.search(line))
+    about_the_trip = (PACKING.search(line) or PACKING_SAID.match(line) or THE_DRIVE.search(line)
+                      or THE_FLIGHT.search(line) or THE_JOURNEY_ASK.search(line))
     # A journey asked as a question ("how long will it take to drive") is about the trip the chat
     # is on, so it takes the detail branch with the question mark still on it. The ask names its
     # own mode, so the line is not a bare "how long" and no other module has a better claim.
-    if (JUST_A_DETAIL.match(line) or _only_a_length(line) or THE_JOURNEY_ASK.search(line)) \
+    if (JUST_A_DETAIL.match(line) or _only_a_length(line) or PACKING_SAID.match(line)
+            or THE_JOURNEY_ASK.search(line)) \
             and (not line.endswith("?") or about_the_trip):
         live = _the_trip_so_far(memory) or a_packing_question_about_the_trip(line, memory)
         if live:
@@ -1303,7 +1606,7 @@ def _the_month_answered(line, memory):
 # The group words that are people in the plural rather than one person's place: "my parents"
 # is "your parents'", not "your parent's", and "my kids" is "your kids'".
 _PLURAL_PEOPLE = frozenset(("parents", "grandparents", "children", "kids", "family", "relatives",
-                            "folks", "friends", "twins"))
+                            "folks", "friends", "twins", "in laws", "in-laws", "inlaws"))
 
 
 def _as_a_visit(place):
@@ -1369,7 +1672,8 @@ def _a_new_trip(line, trip, memory):
         # A visit is not a holiday: the month's season and "where are you staying" are not
         # things a friend asks about tea at their mum's. The length is still worth a sentence,
         # and when there is none the visit is the thing to ask about.
-        note = _who_note(who, trip["how_long"], memory, line)
+        note = _join([part for part in (_who_note(who, "", memory, line),
+                                       _the_visit_length(trip["how_long"], memory, line)) if part])
         if note:
             return _join([said, note])
         ask = _pick(ASK_VISIT, memory, line)
@@ -1442,9 +1746,10 @@ def _a_detail(line, trip, memory):
     told = []
     named = _mid(named)
     kids = re.search(r"\bkids?\b|\bchild|\bchildren\b|\bbaby\b|\btoddler", who or "")
-    packing = PACKING.match(low)
+    packing = PACKING.match(low) or PACKING_SAID.match(low)
     if packing:
         tail = packing.group(1).strip(" ?.!,")
+        said_as_a_need = bool(PACKING_SAID.match(low))
         if not place:
             # A trip with no place yet: the packing list is about the kind of trip and the month.
             kind = _the_kind_of_trip(trip.get("how_long") or "")
@@ -1453,7 +1758,19 @@ def _a_detail(line, trip, memory):
             else:
                 pool = [n.format(kind=kind) for n in PACKING_NO_PLACE_NO_MONTH]
             return _join([_pick(pool, memory, line)])
-        if tail and not (PACKING_FOR.match(tail) or _low(tail) == "for " + _low(place)):
+        if trip.get("visit"):
+            # A visit to family is not a holiday with a packing list.
+            if said_as_a_need and _one_thing_they_need(low):
+                # "will i need a coat" is a question about the coat: the visit list answers what
+                # to take to somebody's house, and this is not that.
+                return None
+            if trip.get("baby"):
+                return _pick(VISIT_PACKING_FOR_A_BABY, memory, line)
+            if trip.get("meal"):
+                return _pick(VISIT_PACKING_FOR_A_MEAL, memory, line)
+            return _pick([n.format(place=_mid(place)) for n in VISIT_PACKING], memory, line)
+        if tail and not said_as_a_need and not (PACKING_FOR.match(tail)
+                                                or _low(tail) == "for " + _low(place)):
             # Something else to pack for: not this trip, so not this module.
             return None
         if _an_event_not_a_place(place):

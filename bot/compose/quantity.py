@@ -66,6 +66,10 @@ LEAD = frozenset((
     # `INCOME` below - without it the line was a receipt and the sum was never done.
     "bring", "brings", "bringing", "brought", "take", "takes", "taking", "took", "home",
     "clears", "net", "nett",
+    # Money set aside is a rate too: "i put 300 a month away, is that a lot" was read as a
+    # question about the strain of saving and answered "when it's like that, everything else can
+    # wait". "save" was here and "put" was not.
+    "put", "puts", "putting",
 ))
 
 # The units, and what each family is. Time is kept in minutes, distance in miles, money in whole
@@ -153,6 +157,30 @@ TAIL = frozenset((
     "weeknight", "weeknights", "weekday", "weekdays", "morning", "mornings", "evening",
     "evenings", "night", "nights", "shift", "shifts", "tops", "plus", "minus", "if", "when",
 ))
+
+# The judgement asked on the same line as the figure it is about ("its 45 a month, is that a lot",
+# "the cleaner is 40 a week, is that fair"). It is the same question as the bare rate's caller asks
+# one line later, so it is taken off the tail and the rate is read as the rate.
+DOUBT_ON_THE_FIGURE = re.compile(
+    # up to three words between the rate and the judgement ("300 a month away, is that a lot",
+    # "12 a month for spotify, is that normal"), then the judgement itself, which has to be about
+    # the figure ("is that a lot") or name the money words on its own ("too much", "too dear").
+    r"^(?:[a-z',\u2019]+\s+){0,3}(?:is|isnt|isn'?t|was|wasnt|wasn'?t|too|thats|that'?s)\b\s*"
+    r"(?:that|this|it|they)?\s*(?:a\s+lot|too\s+much|too\s+dear|expensive|cheap|dear|pricey|"
+    r"steep|normal|about\s+right|fair|reasonable|good\s+value|worth\s+it|okay?)\b", re.I)
+
+# Money set aside is a rate like any other, and the sum it comes to is the same arithmetic. The
+# questions around it are not: "would you pay 3,600 up front for the same thing" is about buying
+# something, and to somebody putting 300 a month away it is nonsense. The saver gets the year and
+# a question about the saving.
+SAVINGS_AFTER_A_RATE = re.compile(
+    r"\b(?:savings?|save|saves|saving|saved)\b"
+    r"|\b(?:put|puts|putting|set|setting|pay|paying)\b[^.!?]{0,14}\b(?:away|aside|by|in|into)\b")
+SAVINGS = (
+    "{q} {period} is {year} a year. That is the figure to plan with, not the weekly one.",
+    "{q} {period} is {year} a year. Is it steady, or does it move with the month?",
+    "{q} {period} is {year} a year - the yearly figure is the one that adds up to something.",
+)
 
 # A rate across time. The sum is the point: a month of something is small and a year of it is not,
 # and the yearly figure is the one that decides.
@@ -510,6 +538,13 @@ def _read(clean, memory=None):
             period = name
             body = body[len(said.split()):]
             break
+    # "its 45 a month, is that a lot": the judgement on the figure is the question about that
+    # figure, so the rate is still the whole of what the line is about. Read as more than a rate
+    # the line reached no number pool at all, and the turn went to whatever else matched a word in
+    # it. Only the judgement shapes are taken off, and only once a period has been read, so
+    # "45 a month for the gym" and a bare "is that a lot" are untouched.
+    if period and DOUBT_ON_THE_FIGURE.match(" ".join(body).strip(" .,!?")):
+        body = []
     for word in body:
         plain = word.lower().strip(".,!?:")
         # A number, a unit or a word that says what the number is about; anything else means the
@@ -812,6 +847,61 @@ def reply_for(clean, memory):
     reply = _say(family, _q(phrase, unit), value, period, tail, memory, clean, unit)
     # A number is often the first word of the reply ("an hour: get everything out first", "£250 -
     # is that the whole budget?"), and a sentence does not start in lower case.
+    return reply[:1].upper() + reply[1:] if reply else None
+
+
+# A thing named as the person's own: "my mortgage", "our rent", "the energy". This is how a line
+# says what the rate is *for*, and it is the difference between a rate that can be judged and a
+# number that can only be summed - see `the_thing_they_pay_for`.
+THEIR_THING = re.compile(r"\b(?:my|our|the|his|her|their)\s+([a-z][a-z'-]{2,})")
+# Words that follow one of those words without naming a thing: a period, a quantity, or the
+# person themselves. "the last one" and "my whole bill" are not what is being paid for.
+NOT_A_THING = frozenset("""
+month months week weeks year years day days fortnight quarter hour hours minute minutes time
+times lot lots one ones thing things rest whole same other other's own money cash budget
+first last next same top bottom bill bills price prices cost costs total monthly weekly yearly
+""".split())
+
+
+def the_thing_they_pay_for(clean):
+    """What the rate in the line is for, or None when the line only gives the number.
+
+    "my mortgage is 900 a month, is that normal" names the thing, so the question can be answered
+    the way a person answers it - by comparing that thing with the same thing elsewhere, which is
+    what the price pool does. "its 45 a month, is that a lot" names nothing: there is no "it" in
+    the line to compare with anything, and the only answer about what they said is the sum it
+    comes to over a year. Same reading, one word apart, so the caller asks this before choosing.
+    """
+    said = " ".join(str(clean or "").lower().split())
+    for word in THEIR_THING.findall(said):
+        if word not in NOT_A_THING:
+            return word
+    return None
+
+
+def the_rate_they_asked_about(clean, memory=None):
+    """The arithmetic on a rate the line itself carries and judges, or None.
+
+    "its 45 a month, is that a lot" is a question about that rate. The comparison advice the price
+    pool gives - two or three places, the same thing - is for a price with no figure in the line,
+    because there is nothing to work out; here there is, and the sum it comes to over a year is
+    the one answer that is about what the person said. A line that does name the thing ("my
+    mortgage is 900 a month") is the other way round - see `the_thing_they_pay_for`.
+    """
+    value, family, unit, period, phrase, tail = _read(clean, memory)
+    if family != "money" or not period:
+        return None
+    from .prices import PRICE_JUDGEMENT
+    said = " ".join(str(clean or "").lower().split())
+    if not PRICE_JUDGEMENT.search(said):
+        return None
+    if SAVINGS_AFTER_A_RATE.search(said) and period in ("month", "week", "year"):
+        year = value * {"month": 12, "week": 52, "year": 1}[period]
+        said_period = {"month": "a month", "week": "a week", "year": "a year"}[period]
+        reply = pick(SAVINGS, memory, clean).format(
+            q=_q(phrase, unit), period=said_period, year=_fmt(year))
+        return reply[:1].upper() + reply[1:]
+    reply = _say(family, _q(phrase, unit), value, period, tail, memory, clean, unit)
     return reply[:1].upper() + reply[1:] if reply else None
 
 

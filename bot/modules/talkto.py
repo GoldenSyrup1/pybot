@@ -47,7 +47,17 @@ _ROUTES = tuple(sorted({who for _, who in WHO_TO_ASK}, key=len, reverse=True))
 
 
 def _the_entry_for(text):
-    """The entry the line's own words reach, or None when nothing fits."""
+    """The entry the line's own words reach, or None when nothing fits.
+
+    Asked about the line `bot/compose/talkto.py` read, with the named day taken out, because the
+    lookup has to see the thing named and nothing else: "can we talk tomorrow about my mum" reaches
+    the carers card only once "tomorrow" is out of the way, and with it in the lookup found the
+    small-talk opener instead and this module took a turn the card answers better.
+    """
+    try:
+        text = talkto.the_line_as_read(text)
+    except Exception:  # noqa: BLE001 - a reading that fails is the line as typed
+        text = text
     words = " ".join((text or "").lower().split())
     if not words:
         return None
@@ -126,6 +136,15 @@ def respond(text, memory):
     # the gap where nothing does: the childcare card, the tenants' advice, the carers card.
     if entry is not None and not _is_the_opener(entry):
         return None
+    # The understanding engine's reading loses a line with a day in it ("can we talk tomorrow about
+    # my mum" is read as asking for the ear and nothing else), so where it reached nothing the
+    # knowledge base is asked about the line this module read - the same line, with the day taken
+    # out - and a card that answers the thing named keeps the turn. Only asked where the reading
+    # reached nothing: on every other line this module behaves exactly as it did.
+    if entry is None:
+        found = _the_entry_for(text)
+        if found is not None and not _is_the_opener(found):
+            return None
     # And a route to somebody who does know beats an opener as well: Citizens Advice for the tax or
     # the landlord, MoneyHelper for the money. The composer has already said it, so there is
     # nothing to add. The opener row is the exception, because a route is not what was asked for

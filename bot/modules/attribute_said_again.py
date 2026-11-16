@@ -322,6 +322,48 @@ SLOT_STOP = frozenset("""i we you me us my our it its the a an to be been being 
 am do did does say said about that this of for in on at and but so then just again please oh ok
 okay actually""".split())
 
+# The attribute the ask names and the value the chat gave in other words. "what did i tell you his
+# age was" names the age, and the line that gives it is "hes a labrador, 9": the word "age" is in
+# the question and never in the answer, which is why the attribute reader above cannot find it and
+# the turn was answered "I don't know enough to answer that honestly." The same shape is said the
+# other way round - "how old did i say he was" - and with the person's own age.
+AGE_ASK = re.compile(
+    r"\b(?:what|how\s+old)\b[^.?!]{0,40}?\b(?:did|do)\s+i\s+"
+    r"(?:say|tell\s+you|told\s+you|think|thought|mention|mentioned)\b[^.?!]{0,30}?\b(?:age|old)\b"
+    r"|\bwhat\s+(?:was|is)\s+(?P<whose>his|her|their|my|our|its)\s+age\b"
+    r"|\bhow\s+old\s+(?:did|do)\s+i\s+(?:say|tell\s+you|told\s+you|think|mention)\b", re.I)
+# "how often did i say i go", "how many times a week did i say": the frequency they gave, asked
+# for by name when the line that gave it says "three times a week" ("often" is in neither).
+OFTEN_ASK = re.compile(
+    r"\bhow\s+often\b[^.?!]{0,30}?\b(?:did|do)\s+i\s+(?:say|tell\s+you|told\s+you|mention)\b"
+    r"|\bhow\s+many\s+times\b[^.?!]{0,30}?\b(?:did|do)\s+i\s+(?:say|tell\s+you|mention)\b"
+    r"|\bhow\s+often\s+(?:was|is)\s+it\b[^.?!]{0,12}?\bagain\b", re.I)
+# A number a person or an animal can be, said as a clause of its own: "hes a labrador, 9",
+# "im 42 and want to lose a stone". Only the number as a clause counts - a figure with a unit or
+# a thing after it is a different fact ("6 of us", "40 a week", "2 kids") - because the age is
+# what nobody says with the word "age" in it.
+AN_AGE_CLAUSE = re.compile(
+    r"(?:^|[,;]|\bis\b|\bwas\b|\bim\b|\bi'm\b|\bam\b|\b-\s*)\s*(?P<n>\d{1,3})\s*"
+    r"(?=$|[,.;!?]|\s+and\b|\s+but\b)",
+    re.I)
+# A line about a person or a pet is where an age clause belongs. "theres 6 of us" is a count
+# of people, not somebody's age, so a line counting them is passed over.
+SOMEBODY = re.compile(
+    r"\b(?:i|im|i'm|me|myself|he|she|him|her|his|they|them|their|my|our"
+    r"|son|daughter|lad|girl|boy|kid|kids|baby|toddler|mum|mom|dad|husband|wife|partner|brother"
+    r"|sister|nan|gran|grandad|dog|cat|pup|puppy|labrador|retriever|terrier|shepherd|spaniel"
+    r"|collie|hound|mutt|rabbit|hamster|horse)\b", re.I)
+A_COUNT_OF_PEOPLE = re.compile(r"\b\d+\s+(?:of\s+us|people|adults)\b", re.I)
+
+# The frequency they gave, as they said it. Only the shapes a person uses for a habit they keep,
+# so a date ("twice in june") and a count of something ("3 times a day" for pills) are not habits
+# the ask is about unless the ask is that one.
+A_HABIT_SAID = re.compile(
+    r"\b(?:(?:once|twice|three|four|five|six|seven|eight|nine|ten|\d+)\s+times?\s+"
+    r"(?:a|per|each)\s+(?:day|week|month|year)"
+    r"|(?:once|twice)\s+(?:a|per)\s+(?:day|week|month|year)"
+    r"|every\s+(?:day|week|weekend|morning|evening|night)"
+    r"|most\s+(?:days|weeks|mornings|evenings)|\bdaily\b)", re.I)
 
 def _the_slot_ask(low):
     """("when", "where" or "size", the subject words of the ask) or ("", set()) for a line
@@ -331,6 +373,11 @@ def _the_slot_ask(low):
         if match:
             rest = next((group for group in match.groups() if group), "")
             return slot, _the_subject(rest)
+    # The three attributes the chat gives without ever naming them: an age said as a number, how
+    # often they do something, and how many of them there are.
+    for slot, pattern in (("age", AGE_ASK), ("often", OFTEN_ASK), ("off_with", OFF_WITH_ASK)):
+        if pattern.search(low):
+            return slot, set()
     if _their_attribute(low):
         # "what size am i again" is a fact about them, not a size of something.
         return "", set()
@@ -444,6 +491,156 @@ def _the_money_recall(what, lines):
     return ""
 
 
+
+# An attribute asked for again with nothing named beside it: "and what size did i say", "how short
+# did i say it was", "what time did i say". Every reader above wants the thing the attribute
+# belongs to, and on these lines there is none - the thing it belongs to is the chat itself. So
+# the value is looked for in their own lines, newest first, and the line that holds it is the
+# answer, in the store's own idiom ("You said: ..."). What comes back has to be a value of the
+# kind the ask named, so "how long did i say it was" after a walk finds no length and the turn is
+# left alone.
+SAID_ASK = re.compile(
+    r"^(?:and\s+|so\s+|but\s+|also\s+|oh\s+|ok\s+|okay\s+)?"
+    r"(?:(?:what|which)\s+(?P<attr>[a-z][a-z' -]{1,20}?)\s+"
+    r"(?:did|do|have)\s+(?:i|we)\s+(?:say|give|mention|tell\s+you)"
+    r"|how\s+(?P<how>[a-z]+)\s+did\s+(?:i|we)\s+say)"
+    r"\b[^?.!]*$", re.I)
+
+# The value of each kind, as people write it. A kind is only read when the ask names it, so a
+# "how long" ask never lands on a price and a "what size" ask never lands on a day.
+# The single letters are whole tokens, not `\b` words: an apostrophe is a word boundary, so `i'm`
+# held an `m` and `it's` an `s`, and "i'm going to spain in june" answered "what size did i say"
+# with "You said m." - which is worse than the wrong card it replaced.
+SIZE_VALUE = re.compile(
+    r"(?:(?<![\w'])(?:xs|s|m|l|xl|xxl|xxxl)(?![\w'])"
+    r"|\b(?:small|medium|large|extra\s+large"
+    r"|size\s+\d{1,2}|(?:a\s+)?\d{1,2}\s*(?:-|to)\s*\d{1,2})\b)", re.I)
+LENGTH_VALUE = re.compile(
+    r"\b(?:long|short|shoulder[- ]length|past\s+(?:my\s+)?shoulders|bob|crop|pixie"
+    r"|just\s+(?:above|below)\s+\w+|\d+\s*(?:cm|inches|inch))\b", re.I)
+WEIGHT_VALUE = re.compile(
+    r"\b\d+(?:[.,]\d+)?\s*(?:kg|kilo|kilos|kilograms|st|stone|stones|lbs?|pounds)\b", re.I)
+AGE_VALUE = re.compile(
+    r"\b(?:\d{1,2}\s*(?:years?\s*old|yr|yrs)?|aged\s+\d{1,2})\b", re.I)
+COLOUR_VALUE = re.compile(
+    r"\b(?:red|blue|green|black|white|grey|gray|brown|beige|cream|navy|pink|purple|orange"
+    r"|yellow|gold|silver|teal|turquoise|burgundy|maroon|khaki|olive|charcoal)\b", re.I)
+
+# The ask word, and the kind of value it is asking for.
+VALUE_KINDS = {
+    "size": SIZE_VALUE, "shoe size": SIZE_VALUE, "ring size": SIZE_VALUE,
+    "colour": COLOUR_VALUE, "color": COLOUR_VALUE,
+    "weight": WEIGHT_VALUE, "age": AGE_VALUE,
+    "length": LENGTH_VALUE, "hair": LENGTH_VALUE,
+}
+HOW_KINDS = {
+    "short": LENGTH_VALUE, "long": LENGTH_VALUE, "tall": LENGTH_VALUE,
+    "big": SIZE_VALUE, "large": SIZE_VALUE, "small": SIZE_VALUE,
+    "heavy": WEIGHT_VALUE, "old": AGE_VALUE,
+}
+
+
+def _the_value_kind(attribute, how):
+    """The pattern a line has to hold to answer this ask, or None."""
+    attribute = " ".join(str(attribute or "").lower().split())
+    if attribute:
+        if attribute in VALUE_KINDS:
+            return VALUE_KINDS[attribute]
+        if attribute in ("time", "day", "date", "month", "year", "week"):
+            return _a_time
+        if attribute in MONEY_WORDS or attribute in ("price", "cost"):
+            return lambda line: A_MONEY.search(line)
+        return None
+    return HOW_KINDS.get(" ".join(str(how or "").lower().split()))
+
+
+# Their own questions are not a statement of a value: "can i exchange it for a large" holds the
+# word "large" and is not the size they gave ("a medium", two turns earlier).
+THEIR_QUESTION = re.compile(
+    r"^\W*(?:what|whats|what's|how|when|where|which|who|why|can|could|should|shall|would|will"
+    r"|does|do|did|is|are|was|were|have|has|any|anything|tell\s+me|remind\s+me)\b", re.I)
+
+
+def _the_line_that_says_it(text, memory):
+    """Their own line that holds the value asked for, or "".
+
+    Read newest first, and only the lines of theirs that are not themselves asks: reading back
+    "what size did i say" a turn later would answer the ask with an ask.
+    """
+    low = " ".join(str(text or "").lower().split())
+    match = SAID_ASK.match(low)
+    if not match:
+        return ""
+    kind = _the_value_kind(match.group("attr"), match.group("how"))
+    if kind is None:
+        return ""
+    turns = (memory or {}).get("turns") if isinstance(memory, dict) else None
+    if not turns:
+        return ""
+    for turn in reversed(turns):
+        line = " ".join(str((turn or {}).get("user") or "").split())
+        if not line or not (kind(line) if callable(kind) else kind.search(line)):
+            continue
+        if THEIR_QUESTION.match(line) or SAID_ASK.match(line.lower()):
+            continue
+        if _their_attribute(line.lower()):
+            continue
+        return line
+    return ""
+
+
+def _the_values_the_kind_takes(text, line):
+    """Every value of the kind the ask names that their line holds, as they said it.
+
+    One value is the answer on its own - "i ordered a coat in a medium" answers "what size did i
+    say" with "medium", which is what the store's own reader says - and more than one leaves the
+    ask ambiguous ("long and curly, past my shoulders"), so the line itself is the safest answer.
+    """
+    low = " ".join(str(text or "").lower().split())
+    match = SAID_ASK.match(low)
+    if not match:
+        return []
+    kind = _the_value_kind(match.group("attr"), match.group("how"))
+    if kind is None:
+        return []
+    if callable(kind):
+        value = " ".join(str(kind(line) or "").split())
+        return [value] if value else []
+    found, seen = [], set()
+    for hit in kind.finditer(line or ""):
+        value = " ".join(hit.group(0).split())
+        key = _stem(value)
+        if value and key not in seen:
+            seen.add(key)
+            found.append(value)
+    return found
+
+
+def _the_value_said(text, memory):
+    """The reply for an attribute asked for again with nothing named beside it, or None.
+
+    The store answers the asks it files a fact for - "how old did i say he was" is "Your son is
+    14." - and a quotation of the line is a worse answer than that, so this reader only speaks
+    when the store has nothing to say, and it says the value in the store's own voice whenever
+    one value is what the ask was for.
+    """
+    line = _the_line_that_says_it(text, memory)
+    if not line:
+        return None
+    from .memory_store import respond as _the_store_says
+    if _the_store_says(text, memory):
+        return None
+    values = _the_values_the_kind_takes(text, line)
+    said = values[0] if len(values) == 1 else line
+    reply = 'You said: "' + said + '"' if len(values) != 1 else "You said " + said + "."
+    last = _the_last_reply(memory)
+    if reply.lower().rstrip(".") in last.lower():
+        # This very answer is the last thing said: saying it again in the same words reads as a
+        # machine, so the second time says it is the same answer.
+        return "Still the same: " + said
+    return reply
+
+
 def _the_slot_recall(text, memory):
     """The reply for a line that asks after a slot of what they said, or None."""
     low = " ".join(str(text or "").lower().split())
@@ -455,6 +652,15 @@ def _the_slot_recall(text, memory):
     turns = (memory or {}).get("turns") if isinstance(memory, dict) else None
     if not turns:
         return None
+    if slot in ("age", "often", "off_with"):
+        value = ""
+        if slot == "age":
+            value = _the_age_they_gave(turns, low)
+        elif slot == "often":
+            value = _the_habit_they_gave(turns)
+        else:
+            value = _the_off_with_they_gave(turns)
+        return _the_slot_reply(value, memory) if value else None
     if slot.startswith("money:"):
         lines = [str((turn or {}).get("user") or "") for turn in turns]
         value = _the_money_recall(slot.split(":", 1)[1], lines)
@@ -477,6 +683,87 @@ def _the_slot_recall(text, memory):
             continue
         return _the_slot_reply(value, memory)
     return None
+# "and what was i off with again": the thing they were off sick with, which the chat said as
+# "ive been off sick since monday with a chest infection". The words "off" and "with" are in the
+# ask and nowhere in the line that gives it, so nothing could look it up.
+OFF_WITH_ASK = re.compile(
+    r"\bwhat\s+(?:was|is)\s+i\s+off\b|\bwhat\s+did\s+i\s+say\s+i\s+was\s+off\b"
+    r"|\bwhat\s+was\s+i\s+off\s+(?:sick\s+)?with\b", re.I)
+# The illness named after "with" in a line about being off: "off sick since monday with a chest
+# infection". Only the tail of the line, and only after a word that says they were off, so
+# "i went with my sister" names nobody's illness.
+OFF_WITH_SAID = re.compile(
+    r"\b(?:off\s+(?:sick|work|ill)|been\s+off|signed\s+off)\b[^.?!]*?\bwith\s+"
+    r"(?P<thing>an?\s+)?(?P<what>[a-z][a-z' -]{3,30})\s*$", re.I)
+
+
+def _the_age_they_gave(turns, low):
+    """The age said as a number of its own, with the owner from the ask, or "".
+
+    The newest line that gives one is the one answered from, and a line that counts people
+    ("theres 6 of us") is not an age: the number has to stand as a clause of its own.
+    """
+    whose = "their"
+    named = re.search(r"\b(his|her|their|my|our|its)\b[^.?!]{0,12}?\b(?:age|old)\b", low, re.I)
+    if named:
+        whose = named.group(1).lower()
+    else:
+        said_of = re.search(r"\b(he|she|they)\b", low, re.I)
+        if said_of:
+            whose = {"he": "his", "she": "her", "they": "their"}[said_of.group(1).lower()]
+    if whose == "my":
+        whose = "your"
+    for turn in reversed(turns):
+        line = str((turn or {}).get("user") or "")
+        if not line or A_COUNT_OF_PEOPLE.search(line) or not SOMEBODY.search(line):
+            continue
+        found = AN_AGE_CLAUSE.search(line)
+        if not found:
+            continue
+        number = found.group("n")
+        if not (0 < int(number) < 121):
+            continue
+        # "my son is 7" is answered by naming him, the way the store does it: "your son is 7"
+        # says whose age it is, where "his age was 7" leaves the person to work that out.
+        named_person = re.search(
+            r"\b(?:my|our)\s+(?P<who>[a-z]+)\s+(?P<was>is|was)\s+" + re.escape(number) + r"\b",
+            line, re.I)
+        if named_person:
+            return "your " + named_person.group("who").lower() + " " + named_person.group("was").lower() \
+                + " " + number
+
+        if whose in ("their", "its") and re.search(r"\b(?:i|im|i'm|am)\b", line, re.I):
+            return "your age was " + number  # their own age, said about themselves
+        if whose == "your":
+            return "your age was " + number
+        return whose + " age was " + number
+    return ""
+
+
+def _the_off_with_they_gave(turns):
+    """What they said they were off sick with, or ""."""
+    for turn in reversed(turns):
+        line = str((turn or {}).get("user") or "")
+        if not line:
+            continue
+        found = OFF_WITH_SAID.search(line)
+        if found:
+            thing = " ".join(found.group("what").lower().split())
+            article = "an " if (found.group("thing") or "").strip().lower() == "an" else "a "
+            return "you were off with " + article + thing
+    return ""
+
+
+def _the_habit_they_gave(turns):
+    """How often they said they do it, as they said it, or ""."""
+    for turn in reversed(turns):
+        line = str((turn or {}).get("user") or "")
+        if not line:
+            continue
+        found = A_HABIT_SAID.search(line)
+        if found:
+            return " ".join(found.group(0).lower().split())
+    return ""
 
 
 def _the_slot_reply(value, memory):
@@ -538,6 +825,9 @@ def _the_recall(text, memory):
     low = " ".join(str(text or "").lower().split())
     if not low:
         return None
+    said_value = _the_value_said(low, memory)
+    if said_value is not None:
+        return said_value
     slot = _the_slot_recall(low, memory)
     if slot is not None:
         return slot
@@ -592,7 +882,19 @@ def takes_as_it_comes(text, memory):
     the line takes it off a module underneath it whatever the bands say (`arbiter._as_it_comes`).
     On these lines the ask is about the person, so nothing about the world can answer it: the
     module says so itself rather than raising `PRIORITY` over every other line it reads.
+
+    The three shapes read off a line that gave the value in other words - an age, a habit, an
+    illness - are the exception, and they are not declared. The store keeps those facts itself
+    and answers those asks at 7000 in its own words ("how old did i say he was" -> "Your son is
+    14."), which is the answer a person already gets; declaring would take that turn off it and
+    say "You said his age was 14." only because this module read the same number twice. So the
+    new shapes answer only where nothing above them does, which is every line they were written
+    for: the ask the store, the cards and the store's own recall all passed on.
     """
+    low = " ".join(str(text or "").lower().split())
+    slot, _ = _the_slot_ask(low)
+    if slot in ("age", "often", "off_with"):
+        return False
     return _the_recall(text, memory) is not None
 
 

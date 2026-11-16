@@ -13,6 +13,12 @@ the stock line this file exists to replace:
 
 * only the whole line counts, so "im on the bus and my stop is coming up, how do i get to the
   station" is a question with a place in it and stays with the module that answers it.
+* a line that names where they are and nothing else is the same reading, and on main it was
+  answered with the shrug or the filing cabinet: "im at work", "im at the gym", "im at the
+  library", "im at nans", "im at the hospital". The reply is about being there with something to
+  ask, never about the place, so it fits every place equally. A job in progress ("im painting the
+  hall") is not here: the cards and the pools already answer that better than a line about being
+  somewhere would.
 * the pool is chosen by the shape of the line - a wait, a journey, a bed, a slow day - never by
   the words of the place in it, so the reply cannot be pasted onto a different kind of line.
 * not every line in a pool ends in a question. A question on the end of every reply turns a chat
@@ -109,6 +115,50 @@ _ON_A_BREAK = re.compile(
     r"|taking (?:a|my) (?:lunch )?break"
     r")" + _TAIL + _END, re.I)
 
+# At work, and the day is going on around the question. The office, the desk and the shift are the
+# same reading, so they share a pool rather than one line each.
+_AT_WORK = re.compile(
+    _LEAD + r"(?:"
+    r"(?:at|back at) (?:work|the office)|in (?:the )?office|at (?:my|the) desk"
+    r"|on (?:shift|shifts|nights|days|the clock)|working"
+    r")" + _TAIL + _END, re.I)
+
+# Working from home is not in the list above even though it is a place of work: the greeting
+# already reads that one properly ("the day has no edges unless you put them in. A walk at the end
+# of it stands in for the commute"), and a line about the clock would be the thinner answer.
+
+# The gym, where the question usually comes between sets.
+_AT_THE_GYM = re.compile(
+    _LEAD + r"(?:"
+    r"(?:at|in) the gym|working out|lifting|lifting weights|on the treadmill"
+    r"|doing (?:a|my) (?:workout|session|class)"
+    r")" + _TAIL + _END, re.I)
+
+# A hospital, a surgery or a dentist: the wait is only half of it, so the pool asks how it is
+# going rather than saying what a queue it is (`_WAITING` takes the waiting room on its own).
+_AT_A_DOCTOR = re.compile(
+    _LEAD + r"(?:"
+    r"(?:at|in|outside) (?:the |a )?(?:hospital|a&e|ae|casualty|clinic|surgery|doctors|"
+    r"doctor's|gp|dentist|orthodontist|pharmacy|chemist|walk in centre)"
+    r"|at the doctors waiting"
+    r")" + _TAIL + _END, re.I)
+
+# A place named on its own: "im at the library", "im at nans", "im at sainsburys". Any place at
+# all fits, because the reply is about being somewhere with a question to ask, not about the
+# place. The list below is what stops a state that merely starts with "at" - "im at my limit",
+# "im at breaking point", "im at a funeral" - from being read as a place.
+_AT_A_PLACE = re.compile(
+    _LEAD + r"(?:"
+    r"(?:at|over at|down at|round at|up at|outside|near) (?:the |a |my |our |me )?[a-z][\w'&]*(?: [a-z][\w'&]*){0,2}"
+    r"|at home"
+    r")" + _TAIL + _END, re.I)
+_NOT_A_PLACE = re.compile(
+    r"\b(?:limit|limits|loss|a loss|breaking point|end of my tether|wits end|wit's end|fault|"
+    r"risk|peace|war|odds|best|worst|least|most|first|last|standstill|stretch|push|glance|"
+    r"crossroads|disadvantage|loggerheads|pains|ease|large|hand|that age|my age|this|that|it|"
+    r"stage|point|end|end of my rope|loose end|again|once|twice|"
+    r"funeral|wake|christening)\b", re.I)
+
 WAITING_REPLIES = (
     "Queues are the worst of it. This is as good a way to spend one as any.",
     "Nothing to do but wait, then. What are you waiting on?",
@@ -149,6 +199,29 @@ BREAK_REPLIES = (
     "Enjoy it \u2014 half an hour goes faster than you think.",
     "A proper break, then. Anything you want a second opinion on?",
 )
+AT_WORK_REPLIES = (
+    "Work can wait for this. What is it?",
+    "Right, you're on the clock. What do you need?",
+    "Go on \u2014 I'll keep it short.",
+)
+AT_THE_GYM_REPLIES = (
+    "Good stuff. Cardio or the weights?",
+    "Nice. What are you working on today?",
+    "Go on then \u2014 what do you need between sets?",
+    "Better than sitting down. What's the question?",
+)
+AT_A_DOCTOR_REPLIES = (
+    "Waiting rooms are the worst of it. What do you need while you're there?",
+    "That's a long morning whatever it's for. How long have you been there?",
+    "Hope it goes quickly. What's on your mind?",
+    "Hospital or not, I'm here. What do you need?",
+)
+AT_A_PLACE_REPLIES = (
+    "What are you up to there?",
+    "Noted \u2014 what do you need while you're there?",
+    "Right you are. Anything you want a second opinion on?",
+    "I'll let you get on. What's on your mind?",
+)
 
 
 # A moment line is small talk, and small talk is not the answer when the chat is carrying
@@ -164,6 +237,23 @@ _HEAVY = re.compile(
     r"hurting me|threatened me|abused? me|assaulted|not safe|scared of|afraid of|"
     r"can'?t stop crying|can not stop crying|crying|in tears|so upset|upset about|devastated|"
     r"heartbroken|at the end of my tether)\b", re.I)
+
+
+# A moment is now. A line with a stretch of time in it - "im at home all day", "im at work every
+# day" - is the shape of their week, which is a fact about them and not small talk: after "should i
+# get a cat or a dog", "im at home all day" is the answer to it, and "What are you up to there?"
+# threw that away. The store files it instead, and the cat and dog conversation carries on.
+A_STRETCH_OF_TIME = re.compile(
+    r"\b(?:all|every|each|most|whole) (?:day|days|week|weeks|night|nights|morning|evening|"
+    r"time|summer|winter|year)|these days|most days|all the time|\d+ (?:days|weeks|hours) a week\b",
+    re.I)
+
+# The same for a day still to come: "im at the dentist on Tuesday" is an appointment, and the
+# detail in it (the day) is the thing worth keeping, so the module that holds plans answers it.
+A_DAY_TO_COME = re.compile(
+    r"\b(?:tomorrow|next (?:week|month|year|monday|tuesday|wednesday|thursday|friday|"
+    r"saturday|sunday)|on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b",
+    re.I)
 
 
 def _the_chat_is_heavy(memory):
@@ -192,6 +282,9 @@ def reply(text, memory):
     if _the_chat_is_heavy(memory):
         # Left to the module that carries the feeling on, which has the last answer in front of it.
         return None
+    if A_STRETCH_OF_TIME.search(clean) or A_DAY_TO_COME.search(clean):
+        # A habit or an appointment, not the moment they are in: the store keeps the fact.
+        return None
     seed = str(text or "")
     if _ON_A_BREAK.match(clean):
         return pick(BREAK_REPLIES, memory, seed_text=seed)
@@ -207,4 +300,14 @@ def reply(text, memory):
         return pick(SOFA_REPLIES, memory, seed_text=seed)
     if _SLOW.match(clean):
         return pick(SLOW_REPLIES, memory, seed_text=seed)
+    # The same reading with a place or a job in it. Read after the pools above, so a line that has
+    # a better reading there ("im in the waiting room" is a wait) keeps it.
+    if _AT_WORK.match(clean):
+        return pick(AT_WORK_REPLIES, memory, seed_text=seed)
+    if _AT_THE_GYM.match(clean):
+        return pick(AT_THE_GYM_REPLIES, memory, seed_text=seed)
+    if _AT_A_DOCTOR.match(clean):
+        return pick(AT_A_DOCTOR_REPLIES, memory, seed_text=seed)
+    if _AT_A_PLACE.match(clean) and not _NOT_A_PLACE.search(clean):
+        return pick(AT_A_PLACE_REPLIES, memory, seed_text=seed)
     return None

@@ -18,7 +18,26 @@ from ..memory import doubt
 # below the store (7000) and the safety band (9000 and up).
 PRIORITY = 400
 
+# The reading could not settle which thing the word means: "the bank was closed" was answered
+# with how to close a bank account and "the seal is broken" with "Ugh, those are fiddly". The
+# knowledge base stands down on these lines (bot/modules/answers.py), and this asks which one is
+# meant. See TWO_LIVES in bot/understanding/topics.py for the words and the cues that settle them.
+SUBJECT_UNCLEAR = (
+    "I'm not sure which {word} you mean - a word or two about it and I'll answer the right one.",
+    "Which {word} do you mean? Tell me a bit more and I'll take it from there.",
+    "There's more than one thing '{word}' could mean. What's the one you're asking about?",
+)
+
+
+def _the_question(text, word):
+    """One of the lines above, chosen by the line so the same chat does not repeat one."""
+    at = sum(ord(letter) for letter in (text or "")) % len(SUBJECT_UNCLEAR)
+    return SUBJECT_UNCLEAR[at].format(word=word)
+
 
 def respond(text, memory):
     """The reply to a doubt about the bot's own last answer, or None for every other line."""
+    understood = memory.get("understood") if isinstance(memory, dict) else None
+    if isinstance(understood, dict) and understood.get("subject_unclear"):
+        return _the_question(text, understood["subject_unclear"])
     return doubt.reply_for(text, memory)

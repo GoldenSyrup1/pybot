@@ -101,6 +101,80 @@ _LAWN_SCARIFY = ("Scarify in early autumn, or in spring on a lawn that has gone 
                  "need it at all.")
 
 
+# A raised bed is one box with five questions in it - how deep, what goes in the bottom, what to
+# fill it with, what it can sit on and what to build it from - and every one of them was arriving
+# somewhere else. The depth, the cardboard and the mix are the same in all five answers, so the
+# reply reads the line for which one was asked.
+_A_RAISED_BED_BOTTOM = ("bottom", "cheap", "cheaply", "cost", "fill it", "fill the", "filling",
+                        "what goes in", "put in", "line", "line it", "lining", "cardboard",
+                        "logs", "twigs", "leaves", "rubble", "gravel", "layer", "layers",
+                        "newspaper", "free", "for free", "bulk")
+_A_RAISED_BED_GRASS = ("grass", "lawn", "turf", "weeds", "dig", "digging", "no dig")
+_A_RAISED_BED_PAVING = ("paving", "concrete", "patio", "slabs", "slab", "driveway", "decking",
+                        "tarmac", "on the ground")
+_A_RAISED_BED_GROW = ("what can i grow", "what to grow", "grow in", "plant in", "grow this",
+                      "what will grow", "what should i grow", "crops", "vegetables in", "veg in")
+_A_RAISED_BED_SOIL = ("soil", "compost", "topsoil", "loam", "mix", "manure", "grit", "sand",
+                      "multipurpose")
+_A_RAISED_BED_AMOUNT = ("how much", "how many bags", "how many litres", "volume", "calculate",
+                        "work out", "cubic", "tonne", "tonnes", "bulk bag")
+_A_RAISED_BED_DRY = ("dries out", "drying out", "dried out", "dry out", "water", "watering",
+                     "water it", "wilt", "wilting", "mulch")
+_A_RAISED_BED_BUILD = ("build", "make", "wood", "timber", "sleepers", "sleeper", "bricks",
+                       "brick", "materials", "cost", "cheap", "should i use", "treated")
+
+
+def _a_raised_bed(memory, understood):
+    """The raised-bed question that was actually asked, with the depth and the mix in it."""
+    said = _words(understood)
+    if any(_has(said, word) for word in _A_RAISED_BED_AMOUNT):
+        return ("Work it out as a volume: length times width times depth, all in metres, and add "
+                "a tenth for settling. Bulk loam-based compost from a builders' merchant is far "
+                "cheaper than bags, and two parts topsoil to one part compost fills it better "
+                "than pure compost, which sinks.")
+    if any(_has(said, word) for word in _A_RAISED_BED_DRY):
+        return ("A raised bed dries out much faster than the ground, because the roots are above "
+                "it on all four sides: water when the top 2cm is dry, a good soak twice a week in "
+                "summer rather than a daily sprinkle, and a mulch of compost or grass clippings "
+                "holds it. Thirty centimetres of soil holds far longer than fifteen.")
+    if any(_has(said, word) for word in _A_RAISED_BED_BOTTOM):
+        return ("Line the bottom with cardboard to smother the weeds, then fill it free: logs, "
+                "twigs, leaves and any garden waste you have, then two parts topsoil to one part "
+                "compost on top. Skip rubble, gravel and plastic, and keep it no wider than about "
+                "1.2m so you can reach the middle from both sides without standing on the soil.")
+    if any(_has(said, word) for word in _A_RAISED_BED_GRASS):
+        return ("Straight onto the grass with no digging: mow it short, lay cardboard or four "
+                "layers of newspaper over the whole footprint, soak it, and fill on top - the "
+                "grass dies underneath and the worms pull it in. Keep it no wider than about 1.2m "
+                "so you can reach the middle from both sides.")
+    if any(_has(said, word) for word in _A_RAISED_BED_PAVING):
+        return ("On slabs or concrete it needs no cardboard and no digging: stand the frame on "
+                "the paving, leave a gap at the bottom edge so water runs off, and be ready to "
+                "water more, because a bed on slabs dries out faster than one on soil. Twenty "
+                "centimetres of soil is enough for salad, herbs and dwarf beans.")
+    if any(_has(said, word) for word in _A_RAISED_BED_GROW):
+        return ("In twenty centimetres of soil: salad, herbs, radishes, dwarf beans, onions and "
+                "carrots. Potatoes, tomatoes, courgettes and anything tall want forty or more, "
+                "because their roots and their water need the depth. Keep it no wider than about "
+                "1.2m so you can reach the middle from both sides without standing on the soil.")
+    if any(_has(said, word) for word in _A_RAISED_BED_SOIL):
+        return ("Fill it with a mix of topsoil and compost rather than pure compost, which dries "
+                "out and sinks: two parts topsoil to one part compost, and a handful of grit if it "
+                "holds water. Twenty centimetres is enough for salad, herbs and dwarf beans, "
+                "thirty for carrots, onions and beetroot.")
+    if any(_has(said, word) for word in _A_RAISED_BED_BUILD):
+        return ("Untreated timber is fine and cheap and lasts about five years; tanalised timber "
+                "8 to 10 years; old bricks or paving slabs cost nothing and last longer, and "
+                "creosoted railway sleepers stay away from anything you eat. Keep it no wider than "
+                "about 1.2m so you can reach the middle.")
+    return ("Twenty centimetres deep does salad, herbs and dwarf beans; thirty for carrots, onions "
+            "and beetroot; forty or more for potatoes and tomatoes. Untreated timber is fine and "
+            "cheap, line the bottom with cardboard to smother the weeds, and fill it with a mix of "
+            "topsoil and compost rather than pure compost, which dries out and sinks. Keep it no "
+            "wider than about 1.2m so you can reach the middle from both sides without standing on "
+            "the soil.")
+
+
 def _words(understood):
     """The line as one lower-case string with single spaces, for the small word tests below."""
     return " " + re.sub(r"[^a-z0-9' ]+", " ", str((understood or {}).get("clean")
@@ -180,6 +254,24 @@ def _a_kitchen_thing(understood):
     if not any(_has(line, word) for word in _KITCHEN_ROT):
         return False
     return not any(_has(line, word) for word in _GROUND_THING)
+
+
+# A leaf word is a question about the leaves, and "at the bottom" is where the lowest leaves are.
+# Without a black or rotting word in the line, the leaf is the subject and blossom end rot is not:
+# "my tomato plants have yellow leaves at the bottom" was told the fruit had rot.
+_LEAF_WORDS = ("leaf", "leaves", "yellow", "yellowing", "yellowed", "pale", "veins",
+               "curling", "curled", "curl", "limp", "drooping")
+_A_FRUIT_THAT_ROTS = ("black", "brown", "rot", "rots", "rotting", "rotten", "sunken", "squashy",
+                      "squishy", "mushy", "patch", "patches", "blossom end", "end rot", "eaten",
+                      "hole", "holes")
+
+
+def _a_leaf_problem_not_the_fruit(understood):
+    """True when the line names the leaves and says nothing about the fruit going black."""
+    line = _words(understood)
+    if not any(_has(line, word) for word in _LEAF_WORDS):
+        return False
+    return not any(_has(line, word) for word in _A_FRUIT_THAT_ROTS)
 
 
 def _lawn(memory, understood):
@@ -768,6 +860,54 @@ HERB_SOW_NOT = ("prune", "pruned", "pruning", "cut back", "cutting back", "cut",
 # pan that split. Every crop row, not just the ones whose name is a kitchen word, stands down on
 # the words of a kitchen. The harvest and the sick-plant rows keep their own lines, because those
 # do not say any of this.
+# The verbs of the pan. A cook's verb on a crop name is a cooking question, and the crop rows answer
+# growing ones: "how long do i soak beans" got "Beans are 10 to 16 weeks from seed", and so did
+# rinse, defrost, pickle, ferment, mash, blitz, stew, curry, grill, barbecue, preserve, chop, grate,
+# stuff, marinate and toast. The noun lists below could never catch it, because the nouns are the
+# cook's and the verb is what makes the line one.
+#
+# It lives in one place because two rows need it and one of them forgot: the sowing rows carry
+# KITCHEN_WORDS, and `crop-weeks-named` carries a list of its own, so a verb added to one was
+# missing from the other. A verb that also grows is not here: "dry" is how a crop is kept, "season"
+# is when a crop is ready, "peel" is what goes on the compost, and "sprout" and "can" name the plant
+# as often as the pan.
+PAN_VERBS = (
+    "soak", "soaks", "soaked", "soaking",
+    "rinse", "rinses", "rinsed", "rinsing",
+    "defrost", "defrosts", "defrosted", "defrosting",
+    "pickle", "pickles", "pickled", "pickling",
+    "ferment", "ferments", "fermented", "fermenting",
+    "mash", "mashes", "mashed", "mashing",
+    "blitz", "blitzed", "blitzing",
+    "stew", "stews", "stewed", "stewing",
+    "curry", "curried",
+    "grill", "grills", "grilled", "grilling",
+    "barbecue", "barbecued", "barbecuing", "bbq",
+    "preserve", "preserves", "preserved", "preserving",
+    "chop", "chops", "chopped", "chopping",
+    "grate", "grated", "grating",
+    "stuff", "stuffed", "stuffing",
+    "marinate", "marinates", "marinated", "marinating",
+    "toast", "toasts", "toasted", "toasting",
+)
+
+# The pans and machines themselves, for the same reason: "how long do beans take in a pressure
+# cooker", "how long do potatoes take in an air fryer", "how long do carrots take in a steamer",
+# "how long do beans take in a slow cooker" and "how long do carrots need in a soup maker" all got
+# the weeks from seed. "cook" is on the fence and "cooker" is a different word, so the appliance is
+# how a kitchen line says it is one without naming a single thing it does.
+PAN_KIT = (
+    "oven", "ovens", "fan oven", "hob", "microwave", "microwaves", "microwave oven",
+    "pressure cooker", "pressure cookers", "slow cooker", "slow cookers", "air fryer",
+    "air fryers", "deep fat fryer", "deep fryer", "fryer", "fryers", "steamer", "steamers",
+    "saucepan", "saucepans", "pan of water", "wok", "griddle", "grill pan", "soup maker",
+    "rice cooker", "bread maker", "yoghurt maker", "thermomix", "halogen oven", "actifry",
+    "sous vide", "casserole dish", "roasting tin", "baking tray", "tray bake",
+)
+# One name for both, because a kitchen line is a kitchen line whether it says what it is doing or
+# what it is doing it in, and both fences want the whole of it.
+A_PAN_LINE = PAN_VERBS + PAN_KIT
+
 KITCHEN_WORDS = (
     "soup", "soups", "salad", "salads", "mash", "mashed", "roast", "roasted", "roasting",
     "boil", "boiled", "boiling", "fry", "fried", "frying", "chips", "crisps", "bake",
@@ -776,7 +916,19 @@ KITCHEN_WORDS = (
     "curdle", "curdled", "curdles", "recipe", "recipes", "cook", "cooked", "cooking",
     "dinner", "lunch", "supper", "side dish", "wedges", "puree", "pur\u00e9e", "saute",
     "sauteed", "steam", "steamed", "microwave", "air fryer", "overcooked", "undercooked",
-    "went wrong", "too much", "not smooth")
+    "went wrong", "too much", "not smooth",
+    # "how long do carrots take to soften" read as a growing time ("Carrots are 12 to 16 weeks
+    # from seed") because soften is how a pan is spoken about and none of the kitchen words said
+    # it. A crop is softened, browned, simmered or blanched in a pan before anything sows it.
+    "soften", "softens", "softened", "softening", "tender", "tenderise", "tenderised",
+    "simmer", "simmered", "simmering", "blanch", "blanched", "parboil", "parboiled",
+    # "brown" and "crisp" are how a variety is named as well as what a pan does ("when do i sow
+    # brown onions", "crisp lettuce"), and in this list they lost the sowing answer, so the pan
+    # sense is said with the pan instead.
+    "brown in a pan", "brown the onions", "browned in", "browning in", "until crisp",
+    "go crisp", "al dente", "stir fry",
+    "stir fried", "saucepan", "pan", "pans", "hob", "drain", "drained", "draining",
+    "piping hot", "portion", "portions", "side") + A_PAN_LINE
 
 SOW_EXTRA_AVOID = {
     "basil": HERB_SOW_NOT,
@@ -1288,12 +1440,35 @@ A_PERSON_CARED_FOR = (r"(?:mum|mums|mother|mothers|dad|dads|father|fathers|paren
                       r"grandmas|grandad|grandads|nan|nans|aunt|aunty|auntie|uncle|uncles|"
                       r"cousin|cousins|friend|friends|neighbour|neighbours|relative|"
                       r"relatives|carer|carers|elderly|pensioner|pensioners)")
+# The person can stand on either side of the verb. "my mum cares for my dad" has the person
+# after it; "my son cares for me" has the person doing the caring first and only a pronoun after,
+# so the first pattern read that line as the garden's and answered "Water when the top couple of
+# centimetres of compost is dry". A pronoun after the care word is a person too - except "it",
+# which is the plant: "my dad gave me a plant, how do i care for it" stays the garden's.
+A_PERSON_CARED_FOR_BY_PRONOUN = re.compile(
+    r"\b(?:care|cares|cared|caring|look|looks|looking|take|takes|taking|took)\s+"
+    r"(?:after|for|of)\s+(?:me|us|him|her|them)\b")
 CARE_FOR_A_PERSON = re.compile(
     r"\b(?:care|cares|cared|caring|look|looks|looking|take|takes|taking|took)\s+"
-    r"(?:after|for|of)\s+(?:my|our|his|her|their|the|a|an)?\s*" + A_PERSON_CARED_FOR + r"\b")
+    r"(?:after|for|of)\s+(?:my|our|his|her|their|the|a|an)?\s*" + A_PERSON_CARED_FOR + r"\b"
+    r"|" + A_PERSON_CARED_FOR_BY_PRONOUN.pattern)
 A_PERSON_NEEDING_CARE = re.compile(
     r"\b(?:my|our|his|her|their)\s+" + A_PERSON_CARED_FOR
     + r"\b[^.!?]*\b(?:care|carers?|look after|looking after|help|needs help)\b")
+# An animal is not a pot plant either, and "care for" is the pet owner's word as much as the
+# plant owner's: "how do i care for a kitten" and "how do i care for a puppy" were both answered
+# "Water when the top couple of centimetres of compost is dry, not on a fixed day". The animal
+# being the one cared for is what settles it, the same way a person is: a line that names a plant
+# as well stays the garden's ("my kitten keeps eating my spider plant"), so `A_PLANT_IN_THE_LINE`
+# is still asked first.
+A_PET_CARED_FOR = (r"(?:dog|dogs|puppy|puppies|pup|pups|cat|cats|kitten|kittens|kitty|moggy|"
+                   r"rabbit|rabbits|bunny|bunnies|hamster|hamsters|guinea pig|guinea pigs|"
+                   r"gerbil|gerbils|rat|rats|mouse|mice|parrot|parrots|budgie|budgies|"
+                   r"fish|goldfish|horse|horses|pony|ponies|tortoise|tortoises|reptile|reptiles|"
+                   r"snake|snakes|lizard|lizards|pet|pets|animal|animals|puppies)")
+CARE_FOR_A_PET = re.compile(
+    r"\b(?:care|cares|cared|caring|look|looks|looking|take|takes|taking|took)\s+"
+    r"(?:after|for|of)\s+(?:my|our|his|her|their|the|a|an)?\s*" + A_PET_CARED_FOR + r"\b")
 # The plant words that settle a line with a person in it: the person is there to talk about the
 # plant, not to be cared for.
 A_PLANT_IN_THE_LINE = re.compile(
@@ -1311,6 +1486,8 @@ def _the_care_is_for_a_person(understood):
     if A_PLANT_IN_THE_LINE.search(said):
         return True
     if CARE_FOR_A_PERSON.search(said):
+        return False
+    if CARE_FOR_A_PET.search(said):
         return False
     return not A_PERSON_NEEDING_CARE.search(said)
 
@@ -2306,6 +2483,26 @@ COMPOST_STALLED = (
     "metre. In winter it will slow right down and start again in spring, which is normal.")
 
 
+# The sentence the compost row owes a whether-line that names something being put in the heap,
+# and the whether-lines it does not. "will my compost heap freeze in the cold" is a whether-line
+# on this row too, and it wants the frost answer; leading it with "No cooked food or meat, which
+# attracts rats" answered a question nobody asked. So the row declares a reading and not a shape
+# alone: the sentence leads when the line names a material - the thing the sentence is about -
+# and every other line keeps the card as it is written.
+NO_COOKED_FOOD = "No cooked food or meat, which attracts rats"
+_NAMED_A_MATERIAL = re.compile(
+    r"\b(?:cooked|meat|meats|bones?|food|foods|scraps?|bread|pasta|rice|dairy|cheese|milk|"
+    r"fish|chicken|oil|oily|fat|fats|grease|gravy|cat food|dog food|pet food|leftovers?)\b",
+    re.I)
+
+
+def _the_no_cooked_food(understood):
+    """The "no cooked food or meat" sentence for a line that names a material, else ""."""
+    said = " ".join(str((understood or {}).get("clean")
+                        or (understood or {}).get("text") or "").lower().split())
+    return NO_COOKED_FOOD if _NAMED_A_MATERIAL.search(said) else ""
+
+
 def compost_reply(memory, reading):
     line = str(reading.get("text") or reading.get("clean") or "").lower()
     for phrase in COMPOST_WHAT_IS:
@@ -2400,6 +2597,43 @@ _DIG_OVER_TARGETS = ("bed", "beds", "border", "borders", "plot", "allotment", "g
                      "patch", "veg", "vegetable", "garden")
 
 
+# "How do i get rid of a cold fast" was told to cover the tender plants, because "cold" is the
+# weather to this domain and the illness to the person typing. The shapes below are the ones that
+# make a cold a virus: getting rid of it, shifting it, catching it, treating it, the medicine for
+# it, the parts of the body it fills up. A garden line never says any of them about a "cold"
+# ("cover a cold frame" is a frame, and "a cold snap" is a snap), so the shape is the test and no
+# list of plants has to be kept up to date.
+_A_COLD_THAT_IS_AN_ILLNESS = re.compile(
+    # the verbs people use about a virus, each tied to the cold it is about: "how do i get rid of
+    # a cold", "how do i shift this cold", "how do i stop a cold getting worse". The tie is what
+    # keeps "the nights are getting cold" and "my hands getting cold" out.
+    r"\b(?:get|getting|got|shift|shifting|shake|shaking|fight|fighting|beat|beating|knock|"
+    r"kill|killing|cure|curing|treat|treating|stop|stopping|prevent|preventing|dodge|dodging|"
+    r"catch|catching|caught|come down with|coming down with|battling|suffering from)\s+"
+    r"(?:rid of\s+|off\s+|over\s+|through\s+)?(?:a|an|this|that|my|his|her|their|the|another)\s+"
+    r"(?:head |chest |bad |heavy |stinking |rotten |nasty |proper |lingering |summer )?colds?\b"
+    # the thing you buy for one, said right next to it
+    r"|\b(?:cold|flu)\s+(?:medicine|medicines|medication|tablets?|syrup|remedies?|cure)\b"
+    r"|\b(?:medicine|medicines|medication|tablets?|syrup|remedy|remedies|lemsip)"
+    r"\s+(?:for|against)\s+(?:a\s+|the\s+|my\s+|this\s+|that\s+)?colds?\b"
+    r"|\b(?:sore throat|runny nose|blocked nose|stuffy nose|sneez\w*|cough|coughing|fever|"
+    r"virus|flu|cold sore|cold sores|cold and flu|cold or flu)\b"
+    r"|\b(?:feeling|feel|felt|been|am|is|are)\s+(?:\w+\s+){0,2}(?:ill|unwell|poorly|sick)\b"
+    # a cold that is a part of the body is the circulation question: "how do i stop my hands
+    # getting cold" was answered with "bring pots and hanging baskets in"
+    r"|\b(?:keep|keeping|ward|stave|stay)\s+(?:away from\s+|off\s+)?(?:the\s+)?colds?\b"
+    r"|\b(?:hands?|fingers?|fingertips?|feet|foot|toes?|ears?|nose)\s+"
+    r"(?:are\s+|is\s+|get\s+|gets\s+|getting\s+|go\s+|goes\s+|going\s+)?cold\b"
+    r"|\bsymptoms?\b")
+
+
+def _the_cold_is_not_an_illness(understood):
+    """False when the "cold" in the line is a virus rather than the weather."""
+    line = " ".join(str((understood or {}).get("clean") or (understood or {}).get("text")
+                        or "").lower().split())
+    return not _A_COLD_THAT_IS_AN_ILLNESS.search(line)
+
+
 def _dig_over_bed(memory, understood):
     """The date first when the line asks when to dig, the spade first when it asks how."""
     line = _words(understood)
@@ -2408,7 +2642,40 @@ def _dig_over_bed(memory, understood):
     return _DIG_OVER_METHOD
 
 
-ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
+# "Do i need to cover my plants tonight" was the car-insurance card ("by law you need third-party
+# cover"), because "cover" is the same word. The garden's answer is a frost rule with a number in
+# it, so it is a row of its own rather than a line in the insurance card's avoid.
+_FROST_COVER = entry(
+    "frost-cover",
+    (("cover", "covering", "protect", "protection", "fleece", "cloche", "frost", "frosts",
+      "cold", "freezing", "snap", "hardy", "tender"),
+     ("plants", "plant", "seedlings", "seedling", "shoots", "tender plants", "veg",
+      "vegetables", "tomatoes", "tomato", "potatoes", "spuds", "flowers", "flower", "shrubs",
+      "shrub", "baskets", "hanging basket", "garden", "allotment", "greenhouse", "outside")),
+    "Cover tender plants when frost is forecast, which means a night at 2C or below at ground "
+    "level: the forecast for the town is often two or three degrees warmer than the garden, so "
+    "watch for a clear, still night. Fleece, an old sheet, a cloche or a bucket of water beside "
+    "them is enough, and take it off in the morning. Bring pots and hanging baskets in, water "
+    "before a frost rather than after, and lift any spuds still in the ground.",
+    # a cover for the car, the phone, the seat or the travel is another question with the same
+    # word; the duvet and the sofa are their own answers
+    guard=_the_cold_is_not_an_illness,
+    avoid=("insurance", "third party", "third-party", "policy", "car", "van", "vehicle",
+           "motorbike", "phone", "mobile", "travel", "seat", "pram", "buggy", "pushchair",
+           "cot", "quilt", "duvet", "sofa", "cushion", "mattress", "table", "bbq cover",
+           "barbecue cover",
+           # "can you freeze potatoes" and "how do i freeze strawberries" are about a freezer,
+           # not a frost: "potatoes" and "strawberries" are garden words as well as food, and
+           # the row's own "freezing" is the word that brought them here. A line that says what
+           # to do with food says it is the kitchen's question, so the garden stands down and
+           # the freeze row answers.
+           "can i freeze", "can you freeze", "can we freeze", "could i freeze",
+           "how do i freeze", "how to freeze", "how do you freeze", "should i freeze",
+           "is it ok to freeze", "is it okay to freeze", "freezer", "defrost", "thaw",
+           "cooked", "mashed", "leftover", "left over", "recipe", "batch cook"),
+    bias=2)
+
+ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [_FROST_COVER, 
 
     # The row below answers for a plant in a pot on a windowsill, and an "outside" in the line was
     # the only thing that stood it down - so "my outdoor plant is dropping flowers" was told about
@@ -2726,6 +2993,20 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
                  "steam", "steamed", "fry", "fried", "microwave", "recipe", "peel", "peeled",
                  "minutes", "jacket", "chit", "chitting", "chitted", "blight", "disease",
                  "rust", "mould", "rot", "this month", "month", "january", "february", "march",
+                 # the pan words: "how long do carrots take to soften" is a cooking time, and
+                 # this row keys the same crop and the same "how long". KITCHEN_WORDS is the
+                 # sowing rows' fence; this row carries a list of its own, so it needs the verbs.
+                 "soften", "softens", "softened", "softening", "tender", "tenderise",
+                 "simmer", "simmered", "blanch", "blanched", "parboil", "parboiled",
+                 "brown in a pan", "brown the onions", "until crisp", "al dente", "stir fry",
+                 "saucepan", "hob", "drain", "drained", "pan of", "in a pan",
+                 # A named dish is not a crop and its clock is the pan's: "how long does chilli
+                 # con carne take" was answered with "Chillies are 16 to 20 weeks from seed".
+                 # The dish words here are whole names, never a bare word that is also a crop -
+                 # "curry" is a curry leaf plant and "soup" is a soup pea, so neither is here.
+                 "con carne", "con carni", "chilli con", "bolognese", "stew", "casserole",
+                 # and the pan itself, which this row's own list was missing
+                 ) + A_PAN_LINE + (
                  "april", "may", "june", "july", "august", "september", "october", "november",
                  "december", "when do i sow", "when should i sow", "when do i plant",
                  "when should i plant", "what month", "sow", "sowing", "plant out",
@@ -2736,7 +3017,14 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
                  "how do i grow", "how to grow", "how do you grow", "how can i grow",
                  "how should i grow", "growing tips", "tips for growing", "best way to grow",
                  "beginner", "beginners", "for beginners", "first time", "new to growing",
-                 "start growing", "getting started"),
+                 "start growing", "getting started",
+                 # choosing a ripe one is not a count of weeks: "how do i pick a good tomato"
+                 # was answered with the 16 to 20 weeks from seed, because "pick" is a harvest
+                 # word here and the ripeness row is the one that answers how to choose one
+                 "pick a good", "pick good", "picking a good", "pick the best", "pick a ripe",
+                 "choose a good", "choosing a good", "choose the best", "choose a ripe",
+                 "how do i pick", "how do i choose", "how to pick", "how to choose",
+                 "which to pick", "which one to pick", "good one", "good ones", "best one"),
           # a nudge over the cook-time card, which ties on the same word ("how long do potatoes
           # take to grow" scored the same for this row and for the boiled-potato one). The
           # cooking vocabulary in avoid is what keeps the boil and roast lines where they were.
@@ -3781,6 +4069,10 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
                       # the heap in the cold is the same row's question too
                       "freeze", "freezing", "frozen", "frost", "winter")),
           compost_reply,
+          # "can i compost cooked food" and "can i compost bones" ask the row's second sentence,
+          # which the heap's method keeps behind it: the answer is the "no" and the reason, and
+          # the mixing comes after it. Declared whole, to its full stop, so no clause is cut.
+          lead=("yesno", _the_no_cooked_food),
           # a word for bought soil, and the pot it goes in, is a different job
           avoid=("houseplant", "houseplants", "house plant", "house plants", "potting",
                  "seed", "seedling", "seedlings", "orchid", "orchids", "cactus", "cacti",
@@ -3876,8 +4168,17 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
           guard=lambda understood: not _a_kitchen_thing(understood),
           # a fridge, a cupboard or a wheelie bin is storage, and wood is the DIY lane's: only a
           # crop that is still growing (or just lifted) is this question.
+          # a mouldy pot of compost is not a rotting crop: white furry mould on the surface is
+          # feeding on the compost, and the soil-mould row is the answer to that question
           avoid=("fridge", "freezer", "cupboard", "store", "stored", "storing", "keep for",
                  "use by", "best before", "bin day", "wheelie", "wood", "fence", "decking",
+                 "mould on", "mouldy soil", "mouldy compost", "mouldy pot", "white mould",
+                 "white stuff", "furry mould", "fuzzy mould", "plant pot mouldy",
+                 "on the soil", "on the compost", "pot of compost", "potting compost",
+                 "potting", "houseplant", "house plant",
+                 # bare "compost" used to stand here, and it stood the row down on a seedling
+                 # tray: "my seedling compost is mouldy" is damping off, which is this row, and
+                 # on main it was answered. The phrase is what a mouldy pot says.
                  "deck", "shed", "window frame", "joist", "beam", "floorboard", "tooth", "teeth",
                  # a tomato's black bottom already has its own table in this file
                  # (`tomato-end-rot`), which says the same thing in its own words: two rows for one
@@ -4324,14 +4625,27 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
           "the fruit cannot pull up enough calcium when watering swings from bone dry to soaked, "
           "so a dry spell then a flood sets it off. Water little and often at the base, mulch to "
           "hold the moisture, use a tomato feed, and take the marked fruit off because it will not "
-          "recover."),
+          "recover.",
+          # The fruit is what this is about, and "at the bottom" is where the leaves are too:
+          # "my tomato plants have yellow leaves at the bottom" was told its fruit had blossom end
+          # rot when the whole of the question was the leaves. A leaf word with no black or rot
+          # word in the line is the leaf question, which `tomato-yellow` answers; a line that
+          # names both keeps the rot, because the black word is the fruit.
+          guard=lambda understood: not _a_leaf_problem_not_the_fruit(understood)),
     # A crop that will not ripen, and a fruit that rots on the plant: the two complaints that
     # arrive with the crop named rather than the symptom, so the key starts at the plant and the
     # state it is in. "why are my tomatoes not turning red" was reaching the laundry answer.
     entry("tomato-ripening",
           (("tomato", "tomatoes", "toms", "tomato plant", "tomato plants"),
            ("not ripening", "not turning red", "not turning", "wont ripen", "will not ripen",
-            "still green", "stay green", "turning red", "ripening", "ripen")),
+            "still green", "stay green", "turning red", "ripening", "ripen",
+            # The same question asked as the harvest rather than the colour: "will my tomatoes
+            # still fruit this year" was answered "Botanically a tomato is a fruit that grows from
+            # the flower", and what the person wants to know is whether the green ones will come
+            # good. Both answers are in the paragraph below.
+            "still fruit", "will it fruit", "will they fruit", "fruit this year", "fruiting",
+            "set fruit", "setting fruit", "still crop", "will it crop", "will they crop",
+            "crop this year", "still produce", "get fruit")),
           "They ripen on warmth and the ethylene they give off themselves, so the two things that "
           "speed them up are heat and a crowd: keep them on the plant while the nights stay above "
           "about 10C, and once the weather turns pick the whole truss and bring it indoors. A ripe "
@@ -4384,8 +4698,9 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
           "leaves off, feed weekly, and water little and often rather than in floods; brown "
           "blotches or black bottoms are a different problem.",
           # the black-bottom question has its own answer, and so does a brown tip
-          avoid=("black", "bottom", "bottoms", "blossom end", "rot", "brown tips", "brown tip",
-                 "fruit", "fruits",
+          avoid=("black bottom", "black bottoms", "black at the bottom", "bottom is black",
+                 "bottoms are black", "blossom end", "sunken patch", "sunken patches",
+                 "rot at the bottom", "rot", "brown tips", "brown tip", "fruit", "fruits",
                  # a curling leaf is a climate question, and it was getting the yellow one
                  "curl", "curls", "curled", "curling", "rolled", "rolling", "rolling up")),
     entry("pot-herb-yellow",
@@ -4577,7 +4892,12 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
     "a mulch holds the moisture you have given them.",
     # a plant in the house, a lawn and a named hose or can are other rows; the sowing and feeding
     # questions have their own answers and are not about water
-    avoid=("houseplant", "houseplants", "house plant", "monstera", "peace lily", "snake plant",
+    avoid=("rinse", "rinsing", "rinsed",
+      # the verb is the half people change: "wash the rice until the water runs clear" stepped
+      # past a fence that only knew rinse, and this row took it on "water". Anything being
+      # washed, and the phrase about the water running clear, is not a tomato.
+      "wash", "washed", "washing", "water runs clear", "runs clear",
+      "houseplant", "houseplants", "house plant", "monstera", "peace lily", "snake plant",
            "cactus", "succulent", "orchid", "fern", "lawn", "grass", "hose", "watering can",
            "irrigation", "sprinkler", "butt", "water butt", "rain barrel", "feed", "fertiliser",
            "fertilizer", "tomato feed", "sow", "sowing", "plant out"),
@@ -4879,7 +5199,16 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
     entry("soil-mould",
           (("white mould", "white mold", "mould on the soil", "mould on the compost",
             "mould on top", "furry mould", "grey mould", "white stuff on the soil",
-            "mould in the pot"),
+            "mould in the pot", "going mouldy", "gone mouldy", "mouldy", "moldy",
+            "mouldy soil", "mouldy compost", "mouldy pot", "plant pot mouldy",
+            "mould in my pot", "mould on the surface", "green mould", "algae", "slimy soil",
+            # "how do i get rid of mould in a plant pot" is the same question as "mould on the
+            # soil" and was a pair of football boots: no phrase of this key matched it, so the
+            # row never proposed and "moulded" carried the boot row instead.
+            "mould in a plant pot", "mould in a pot", "mould in my plant pot",
+            "mould on a plant pot", "mould on my plant pot", "mould in the plant pot",
+            "mould in the soil", "mould in the compost", "get rid of mould",
+            "get rid of the mould", "mould in my soil"),
            ("mould", "mold", "white", "furry"),
            ("plant", "soil", "compost", "pot", "houseplant", "house plant", "indoor",
             "potting", "seedling", "seedlings")),
@@ -4889,7 +5218,21 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
            "repotting."),
           avoid=("bread", "wall", "walls", "bathroom", "shower", "ceiling", "window", "grout",
                  "tile", "tiles", "cheese", "jam", "fridge", "food", "clothes", "washing",
-                 "damp", "mushroom", "mushrooms"),
+                 "damp", "mushroom", "mushrooms",
+                 # A seedling tray is the one place white mould is not harmless: damping off
+                 # collapses the seedling at soil level, and that row says so. Measured on main
+                 # f7fe9dda1: "my seedling compost is mouldy" was the damping-off answer and this
+                 # row took it while "seedling" stood in its key.
+                 "damping off", "damping", "collapsed", "collapsing", "collapses",
+                 "pinched off", "pinched at", "thin stem", "stem has gone thin",
+                 "fell over", "fallen over", "keeled over", "toppled",
+                 # and a pot of food is not a pot of compost: "my pot of curry went mouldy" is the
+                 # gone-off answer, which bins it, and this row told the person to scrape the top
+                 # off and water less. Found by a reviewer, not by my own probe, because my probe
+                 # had "my soup has mould on it" and no line with "pot" in it.
+                 "curry", "stew", "soup", "sauce", "rice", "pasta", "noodles", "risotto",
+                 "casserole", "chilli", "chili", "broth", "gravy", "bolognese", "cooked",
+                 "leftovers", "leftover", "takeaway", "slow cooker", "jam", "yoghurt", "yogurt"),
           ask=INDOORS,
         ),
 
@@ -5322,18 +5665,35 @@ ENTRIES = SOW_ENTRIES + GROW_ENTRIES + _plant_entries() + [
           (("raised bed", "raised beds", "raised bed kit", "raised planter", "raised vegetable bed",
             "raised beds for vegetables"),
            ("how", "build", "make", "fill", "depth", "how deep", "what soil", "line", "should i",
-            "cheap", "best wood", "size", "how high")),
-          "Twenty centimetres deep does salad, herbs and dwarf beans; thirty for carrots, onions "
-          "and beetroot; forty or more for potatoes and tomatoes. Untreated timber is fine and "
-          "cheap, line the bottom with cardboard to smother the weeds, and fill it with a mix of "
-          "topsoil and compost rather than pure compost, which dries out and sinks. Keep it no "
-          "wider than about 1.2m so you can reach the middle from both sides without standing on "
-          "the soil.",
+            "cheap", "best wood", "size", "how high",
+            # The same box is asked about five ways and the row only answered two of them: on
+            # main `367a0236` "what do i put in the bottom of a raised bed", "how do i fill a
+            # raised bed cheaply" and "what can i grow in a raised bed" were a search hedge or the
+            # frost card, "raised bed on grass" was the bicarbonate-of-soda degreaser, "raised bed
+            # on concrete" was a chat shrug, "how do i line a raised bed" and "how do i stop a
+            # raised bed drying out" were the washing-line answer, and "how much soil do i need
+            # for a raised bed" was the gravel calculator. One box, one answer, split by what was
+            # asked, because the layers, the surface, the mix and the volume are four questions.
+            "cheaply", "cost", "what goes in", "bottom", "line it", "put in", "fill it",
+            "what to fill", "grass", "lawn", "turf", "paving", "concrete", "patio", "slabs",
+            "driveway", "what compost", "topsoil", "how much soil", "how many bags", "volume",
+            "dries out", "drying out", "water", "watering", "wood", "timber", "sleepers",
+            "bricks", "materials", "grow in", "plant in")),
+          _a_raised_bed,
           # the bed in the house has its own answer, and a bed frame or a mattress is not a
           # garden box
           # "bedding" is not here: its stem is "bed", which is half this row's own key.
+          # frost-cover reaches a bed through "bedding", so on this bench the box has to win the
+          # tie: "how do i fill a raised bed cheaply" was the frost card on main and is the box
+          # once the row is opened up, and no frost line names a raised bed.
+          bias=3,
           avoid=("mattress", "duvet", "sheet", "sheets", "bedroom", "hospital", "care home",
-                 "cot", "toddler", "pillow", "frame", "sleep", "hotel", "bunk", "bunk bed")),
+                 "cot", "toddler", "pillow", "frame", "sleep", "hotel", "bunk", "bunk bed",
+                 # a bed under frost is the frost card's question, not the box's
+                 "frost", "frosts", "fleece", "cloche", "snow", "freezing", "cold snap",
+                 # how big a bed should be is size-of-a-plot's question, and that row answers it
+                 # with the reach and the spacing; the box's own row had the tie on "raised bed"
+                 "wide", "width", "big", "large", "space", "size", "how many")),
 
     # --- a crop that makes flowers and no fruit, and the tomato that will not go red -----------
     # Four crops wear this one question and each needs a different first move, so the reply reads
@@ -6325,6 +6685,10 @@ ENTRIES.append(entry(
     "roughly four times faster than a whole round - which is the reason to split everything now "
     "and stack it, rather than leave the rounds in a heap until you need them.",
     avoid=("cost", "price", "cheap", "how much is", "stove", "burner", "best wood", "what wood",
+           # "how do i stop wood splitting when i nail it" holds "wood" and "when" and was told
+           # when to split a log. A nail is joinery, and home_craft.py has that row.
+           "nail", "nails", "nailed", "nailing", "pilot hole", "joist", "joists", "plank",
+           "skirting", "floorboard", "floorboards",
            "which wood", "chainsaw", "axe", "hire", "kiln", "kiln dried", "delivered",
            "seasoning of a pan", "cast iron", "frying pan",
            # "how long between coats of wood stain" holds "wood" and "how long", which is this
@@ -6434,10 +6798,34 @@ _SPLITTING = re.compile(
     r"sawing|saw)")
 
 
+# "Rings" in `_WOOD_WORDS` is a round of wood, and three other things own that word as well as
+# the phone and the piercing the `avoid` list above names: a cooker's ring, something worn on a
+# finger, and the mark a cup leaves. "how do i clean the rings on my cooker" and "... on the hob"
+# were both the axe and the chopping block, while the hob-cleaning row that answers them was
+# passed over. The wood is what the word means when nothing else claims it, so the other senses
+# are named here and the round of wood stands down for them. This is a guard rather than three
+# more `avoid` words because "burner", "stove" and "hob" are in good wood lines too ("how do i
+# split logs for the wood burner"), and only a line whose one wood word is the "ring" itself can
+# be about something else.
+_RING_IS_NOT_WOOD = re.compile(
+    r"\b(?:hob|hobs|cooker|cookers|stove|stoves|oven|ovens|burner|burners|element|elements"
+    r"|ring main|wedding|engagement|wedding band|finger|fingers|jeweller|jewellery|jewelry"
+    r"|gold|silver|diamond|tarnish|tarnished|worktop|worktops|counter|coffee table|cup|glass"
+    r"|mug)\b")
+# The wood words without "rings": a line naming any of them is still the wood's ("how do i split
+# a log ring", "logs for the wood burner"). Only the "ring" on its own can be another sense.
+_OTHER_WOOD = re.compile(
+    r"\b(?:logs?|timber|firewood|wood|wooden|piece of wood|log pile|posts?|stumps?|branches?"
+    r"|branch|trunks?|chopping block)\b")
+
+
 def _splitting_a_log(understood):
     """True when the line is about a round of wood, not about going round something."""
     said = " ".join(str((understood or {}).get(key) or "")
                     for key in ("clean", "norm_text", "text")).lower()
+    if re.search(r"\brings?\b", said) and not _OTHER_WOOD.search(said) \
+            and _RING_IS_NOT_WOOD.search(said):
+        return False
     if _WOOD_WORDS.search(said):
         return True
     return bool(_SPLITTING.search(said) and re.search(r"\brounds?\b", said))
@@ -6445,8 +6833,8 @@ def _splitting_a_log(understood):
 
 ENTRIES.append(entry(
     "split-a-log",
-    (("log", "logs", "round", "rounds", "ring", "rings", "logs i have", "piece of wood",
-      "log pile", "firewood"),
+    (("log", "logs", "log round", "log rounds", "rounds of wood", "logs i have",
+      "piece of wood", "log pile", "firewood"),
      ("split", "splitting", "chop", "chopping", "wedge", "maul", "axe", "how do i", "how to",
       "best way", "how can i", "without an axe", "stuck", "wont split", "won't split",
       "hard to split", "easier to split", "log splitter")),
@@ -6683,3 +7071,39 @@ ENTRIES.append(entry(
            "hedge", "hedges", "trim", "climbing", "climber", "vegetable", "veg", "potato",
            "tomato", "tomatoes", "grow", "growing", "compost", "bark", "mulch", "when should"))
 )
+
+
+# A plant chosen for a room with no window is its own question, and on main it got nothing: "i want
+# a plant for the bathroom" was the listening line and "theres no window in there" the same, so the
+# one thing the person needed - which plants hold on in the dark, and that they want less water -
+# never came. The row is a plant word against the room, because the room is what makes it the
+# question; the plant words that already have care rows of their own (yellow leaves, brown tips,
+# light) are untouched, and an outdoor bed or a garden stands the row down.
+ENTRIES.append(
+    entry("plant-for-a-windowless-room",
+          (("plant", "plants", "houseplant", "houseplants", "house plant", "house plants",
+            "pot plant", "pot plants", "pothos", "fern", "ferns", "orchid", "orchids", "palm",
+            "snake plant", "zz plant", "peace lily", "spider plant", "green"),
+           ("bathroom", "bathrooms", "loo", "toilet", "en suite", "ensuite", "shower room",
+            "hallway", "hall", "landing", "cellar", "basement", "cupboard", "shelf", "shelves",
+            "no window", "no windows", "windowless", "without a window", "no natural light",
+            "no light", "dark room", "dark corner", "dark hallway", "window in there")),
+          "For a room with no window, take the plants that cope with low light: pothos, snake "
+          "plant, ZZ plant, peace lily and spider plant will all hold on, and a bathroom's steam "
+          "suits a fern. Everything slows down in the dark, so water far less than the label says "
+          "- every two to three weeks, once the top of the compost is dry - or the roots rot. If "
+          "there is no daylight at all, no plant will live there: a lamp left on for twelve hours "
+          "is what keeps one going, and a good fake is the honest answer for a cellar.",
+          # an outdoor bed, a garden or a houseplant question about leaves is not this one
+          ask=("bathroom", "loo", "toilet", "ensuite", "en suite", "shower room", "hallway",
+               "hall", "landing", "cellar", "basement", "cupboard", "shelf", "shelves",
+               "window", "windowless", "room", "corner", "flat", "house", "home"),
+          avoid=("tomato", "tomatoes", "basil", "lawn", "grass", "tree", "trees", "rose", "roses",
+                 "cucumber", "courgette", "pepper", "chilli", "outside", "garden", "gardens",
+                 "border", "flowerbed", "flower bed", "allotment", "outdoor", "outdoors",
+                 "shrub", "shrubs", "hedge", "hanging basket", "veg patch", "vegetable patch",
+                 "yellow", "brown tips", "drooping", "wilted", "repot", "repotting",
+                 "overwater", "overwatering", "root rot", "fungus gnat", "gnats",
+                 "smell", "smells", "smelly", "damp", "mould", "mold", "condensation", "extractor",
+                 "lamp", "ceiling light", "light bulb", "headlight", "grow light"),
+          bias=2))

@@ -10,7 +10,7 @@ over ("not offside from a throw-in"), because that is the bit the person is real
 """
 import re
 
-from .lookup import A_WEATHER_ASK, PRESENT_ASK, entry
+from .lookup import A_HOUSE_WARMING_UP, A_WEATHER_ASK, PRESENT_ASK, entry
 
 # The topics this domain answers (bot/understanding/topics.py); answers.py declares the union.
 ANSWERS = ("sport", "fitness")
@@ -38,6 +38,27 @@ def _not_a_line_about_a_box(understood):
         return True
     return bool(re.search(r"\bbox(ing|er|ercise)\b|\bgloves\b|\bspar\b|\bring\b|"
                           r"\bkickbox|\bmuay thai|\bclub\b|\bgym\b|\bclass", text))
+
+def _not_a_timetable_that_runs(understood):
+    """False when the line is a bus or a train service, not the exercise.
+
+    `how-often-exercise` keys the word "run" and a "how often" tail, so a timetable question -
+    "how often does the bus run", "how often do the buses run", "how often does the train run" -
+    got "Three sessions a week is the number to aim for". No word list in the row can tell the two
+    apart, because the word is the same word: the reading can (bot/understanding/topics.py gives
+    "run" beside a service noun the travel topic), so the guard reads the topic instead.
+
+        how often does the bus run      -> a service: the row stands down
+        how often do the buses run      -> a service
+        how often should i run          -> fitness: answered here
+        how often should i run to lose weight -> fitness
+    """
+    said = understood if isinstance(understood, dict) else {}
+    if str(said.get("topic") or "") != "geography-and-travel":
+        return True
+    text = str(said.get("text") or said.get("clean") or "").lower()
+    return not re.search(r"\brun(s|ning)?\b|\bran\b", text)
+
 
 # The men's football World Cup, one row per final: the year, the winner and the line people
 # remember it by. Keyed by year, so "who won the world cup in 1966" and "who won in 2010" are the
@@ -128,14 +149,28 @@ _RACES = (
 _PLAN_WORDS = ("train", "training", "plan", "planning", "prepare", "preparing", "build up",
                "get ready", "ready", "start", "starting", "beginner", "couch", "c25k",
                "round", "finish", "complete", "improve", "faster", "signed up", "got a place",
-               "first one", "want", "wanting", "into", "run", "running", "jog", "jogging")
+               "first one", "want", "wanting", "into", "run", "running", "jog", "jogging",
+               # the same readiness words as the ask list, because the key needs one of them
+               # before the ask is read at all: "is it too soon to enter a half marathon" has
+               # no other training word in it
+               "too soon", "enter", "entering", "sign up", "signing up", "should i",
+               "am i ready", "ready for", "if i can only", "can only run", "only run",
+               "is it enough", "enough for me")
 # The distance has to be joined by a word that asks for the doing of it: "how long is a 5k" and
 # "how long does a 5k take" name the distance and want the distance or the time, and a training
 # plan under either of those is the wrong reply.
 _PLAN_ASK = ("train", "training", "plan", "planning", "prepare", "preparing", "build up",
              "get ready", "ready", "start", "starting", "beginner", "couch", "c25k", "want",
              "first", "help", "how do i", "how to", "round", "finish", "complete", "improve",
-             "faster", "signed up", "got a place", "work up to")
+             "faster", "signed up", "got a place", "work up to",
+             # a question about whether the distance is in reach is a question about the plan:
+             # "should i run a half marathon if i can only run 5k", "am i ready for a half", "is
+             # it too soon to enter a half". The distance is already in the line and what the
+             # person wants is what it takes - which is what the plan answers, in the first
+             # sentence. A verdict of my own ("that's your call") is worth nothing beside it.
+             "should i run", "should i enter", "should i sign up", "should i do", "should i try",
+             "too soon", "am i ready", "ready for", "if i can only", "can only run",
+             "only run", "only manage", "is it enough", "enough for me")
 # "I can run 5k but I want to get faster" is a speed question, not a beginner plan: the
 # person already runs the distance, and "want" plus "run" plus "5k" was reaching the plan
 # before the speed entry could answer it.
@@ -184,6 +219,10 @@ _TIME_AVOID = ("train", "training", "plan", "prepare", "preparing", "ready", "co
                # The two words stay, because "what is a good half marathon time" has a word
                # between them and the phrase "good time" never matches it.
                "trainers", "trainer", "shoes", "shoe", "kit", "gear", "garmin",
+               # what to wear on the day is the kit card's question, and "10k" plus "what do i
+               # wear" was answered with how long a 10k takes
+               "wear", "wearing", "what do i wear", "what to wear", "what should i wear",
+               "clothes", "put on", "rain", "raining", "rainy", "wet", "layers", "socks",
                "what time do", "what time does", "what time are", "what time is the",
                "start time", "start times", "start line", "starts", "start",
                "time of year", "best time of year", "season", "which month",
@@ -216,7 +255,11 @@ _TIME_AVOID = ("train", "training", "plan", "prepare", "preparing", "ready", "co
                # A good time to BUY is not a good finish time: "is now a good time to buy a
                # marathon place" was answered with 3 hours 30 to 4 hours 45.
                "buy", "buying", "bought", "place", "places", "entry", "enter", "entries",
-               "sign up", "signed up", "registration", "ballot", "charity place")
+               "sign up", "signed up", "registration", "ballot", "charity place"
+               # a rest or a recovery is not a time for the race either: "how long should i rest
+               # after a 5k" was told how long a 5k takes, when the figure wanted is the recovery
+               "rested", "recover", "recovers", "recovering", "days off", "day off",
+               "easy days")
 # A distance is run. "How long does it take to walk three miles" and "how long does it take to
 # drive 5k" are the same words with another way of covering the ground, and a race time for them
 # is a wrong fact: the walking and driving entries answer those.
@@ -233,7 +276,15 @@ _HALF_AVOID = ("half an hour", "half hour", "half a mile", "half mile", "half a 
                # cabbage and nothing else planned" was reaching the half-marathon plan on "half"
                # and "planned", and was told how many weeks the training takes. The nouns are
                # not listed because the list would never be finished."""
-               "half a", "half an", "half of")
+               "half a", "half an", "half of",
+               # A dose "in half" is not 13.1 miles: "im going to cut my insulin in half and see
+               # how i go" holds the word half and the word how, so the half's card answered a
+               # question about a prescription with the race distance. A medicine is not a
+               # distance, so the words for what is taken stand the race rows down. The inhaler
+               # is left out on purpose: "i take my inhaler before a run, how far is a half" is
+               # a running line with a medicine in it, and the distance is what it asks.
+               "my dose", "dose", "dosage", "insulin", "tablets", "pills", "capsules",
+               "medication", "medicines")
 
 # A clock hour after the word is the time of day, not 13.1 miles: "i start at half 5 now which is
 # grim" and "my shift starts at half five" were both answered with the half marathon plan. The
@@ -252,6 +303,54 @@ _SAID = ("clean", "norm_text", "text")
 _GOLF_SAID = ("golf", "putt", "putts", "putted", "putting", "green", "greens", "hole", "holes",
               "tee", "handicap", "fairway", "bunker", "club", "clubs", "course", "courses",
               "irons", "driver", "slice", "hook", "swing")
+
+
+# --- the goggles that fog ---------------------------------------------------
+# "how do i keep my goggles from fogging" was answered by the car's fog lights, because fog is
+# in that row's key and nothing else held the lens. The fix and the reason are two different
+# answers, so a line that asks why gets the reason first.
+_GOGGLES_FIX = (
+    "Spit in each lens, rub it round and rinse it out, or wipe a drop of baby shampoo over the "
+    "inside and let it dry - both leave a film the water cannot bead on. Then keep the seal "
+    "still: a mask that is too tight, or goggles pressed on with the strap under a swim cap, "
+    "squeezes out the warm air and fogs faster. Anti-fog sprays work for a session or two.")
+_GOGGLES_REASON = (
+    "The lens is colder than the warm, damp air coming off your face, so the water in that air "
+    "condenses on it as droplets. Anything that keeps the two closer in temperature or puts a "
+    "film on the inside stops the droplets forming - and a gap that lets the warm air out works "
+    "better than a tighter seal.")
+_SWIMMING_WORDS = frozenset((
+    "swim", "swims", "swimming", "swimmer", "swimmers", "pool", "pools", "length", "lengths",
+    "lane", "lanes", "dive", "dives", "diving", "snorkel", "snorkelling", "lido", "open water",
+    "underwater", "wetsuit",
+))
+
+
+def the_goggles_are_for_swimming(understood):
+    """True when the goggles in the line are the ones in a pool.
+
+    "my goggles keep fogging up" is pinned to the glasses card by a test, so a bare statement
+    about goggles stays where it is: this row takes a swimming word or an explicit how or why.
+    """
+    words = set((understood or {}).get("words") or ())
+    if words & _SWIMMING_WORDS:
+        return True
+    said = ((str((understood or {}).get("clean") or "")) + " " +
+            str((understood or {}).get("plain") or "") + " " +
+            str((understood or {}).get("text") or "")).lower()
+    for word in _SWIMMING_WORDS:
+        if word in said:
+            return True
+    asks = set((understood or {}).get("asks") or ())
+    return bool(asks & {"how", "what", "why"})
+
+
+def _goggles_fog(memory, understood):
+    said = str((understood or {}).get("text") or "").lower()
+    asks = set((understood or {}).get("asks") or ())
+    if "why" in said or "why" in asks:
+        return _GOGGLES_REASON + " " + _GOGGLES_FIX
+    return _GOGGLES_FIX
 
 
 def _a_put_is_not_a_putt(understood):
@@ -335,7 +434,56 @@ _RACE_ENTRIES = tuple(
                      + (_HALF_AVOID if _name == "half" else ())),
               guard=(_a_clock_half_is_not_the_race if _name == "half" else None),
               bias=10))
-) + (_HALF_DISTANCE,
+) + (entry("first-game-after-a-break",
+      (("five a side", "5 a side", "five-a-side", "football", "soccer", "rugby", "hockey",
+        "basketball", "netball", "badminton", "tennis", "squash", "rounders", "cricket"),
+       ("first time in years", "first time in ages", "first game", "first match", "first time",
+        "havent played", "haven't played", "not played for", "not played in", "back to football",
+        "back to playing", "playing again", "start playing again", "getting back into",
+        "how do i not get injured", "not get injured", "avoid injury", "avoid getting hurt",
+        "dont get hurt", "don't get hurt", "not hurt myself", "sore after", "ache after",
+        "will i be sore", "unfit", "out of shape")),
+      "Do less than you want to: play twenty minutes of it rather than the whole hour, and warm "
+      "up for five with a jog and a few short sprints before the first ball, because the sprint "
+      "cold is what goes. Boots with grip for the surface, water at the side, and expect to ache "
+      "for two days afterwards - that soreness is normal and walking helps it. If a joint swells "
+      "or gives way, or a pain is still there after a fortnight, that is a physio rather than "
+      "another game.",
+      # the warm-up, the boots and the fitness are their own answers
+      avoid=("warm up", "warm-up", "warming up", "warmup", "boots", "boot", "astroturf",
+             "astroturf", "studs", "moulded", "how fit", "get fit", "lose weight",
+             "how often", "how many times a week", "offside", "rules", "how long is a game",
+             "world cup", "watch", "on tv"),
+      bias=2),
+     entry("race-day-kit",
+      (("10k", "5k", "parkrun", "park run", "half marathon", "marathon", "marathons", "race",
+        "race day", "sportive", "triathlon", "cross country"),
+       # The weather is left out of this group on purpose: "a charity 10k in july and it will be
+       # hot, what should i wear" is the hot-day clothes answer, and "10k on sunday and it might
+       # rain" is the rain kit's, both of them more specific than a race-day list. The race is
+       # named and the ask is what to wear; that is enough.
+       ("wear", "wearing", "kit", "clothes", "what do i put on", "put on", "what should i wear",
+        "what to wear", "socks", "layers")),
+      "Nothing new on race day: the socks and shoes you did your long runs in, and dress for ten "
+      "minutes in - a thin wicking base layer, a warm thin layer over it and a windproof shell you "
+      "can tie round your waist, a cap for rain or sun, gloves for the first two miles and a "
+      "waterproof jacket if it is really coming down, because you warm up two or three miles in "
+      "and one layer fewer than feels right at the door is usually the right count. Vaseline on "
+      "the nipples and inner thighs, safety pins for the number, a dry top and a bin liner for "
+      "your bag at the finish, and a warm layer to pull on within ten minutes of stopping, which "
+      "is when the cold really lands.",
+      # how long it takes, how to train for it and what to eat round it are other rows
+      avoid=("how long", "how fast", "what time", "what pace", "pacing", "split", "splits",
+             "finish time", "training plan", "how many weeks", "how often", "bin bag",
+             "lose weight", "taper", "carbs", "carb load", "what should i eat", "fuel",
+             # which sock to put on with what is the sock's own card, and it answers the
+             # question asked rather than adding a sock to the whole race-day list
+             "what socks", "which socks", "socks for", "socks with", "socks to",
+             # a hot day has its own answer, and a race-day list with warm layers in it is
+             # wrong on it: "a charity 10k in july and it will be hot, what should i wear"
+             "hot", "sun", "sunny", "heat", "heatwave", "boiling", "30 degrees", "35 degrees"),
+      bias=2),
+     _HALF_DISTANCE,
      # The full race had a distance card and a training card but no time card, so "what is a good
      # time for a marathon" was a search hedge while the 5k, the 10k and the half all answered.
      # It is not in _RACES above because that would make a second training card as well, and
@@ -599,6 +747,9 @@ def _basketball_better(memory, understood):
 # The words that say the person is asking about the game rather than about a thing in it: how to
 # hold it, how to get better, what to practise. A line with one of these is about the game even
 # when the reading cannot settle the word "bat" from the rest of the sentence.
+# The words that are the bat itself, so a guard about the bat has something to guard.
+_A_BAT_WORD = frozenset("bat bats batting batsman batsmen batter batters".split())
+
 _ABOUT_THE_GAME = frozenset("""better improve improving practise practice technique coach
     coaching training nets net batting bowling swing grip stance footwork drills drill
     warm-up warmup season match club league innings""".split())
@@ -632,6 +783,10 @@ def _a_bat_that_is_not_the_game(understood):
         return True
     words = {str(word).lower() for word in ((understood or {}).get("words") or ())}
     words.update(str((understood or {}).get("clean") or "").lower().split())
+    # A line with no bat in it cannot be the bat in the loft: "how do i bowl a yorker" says a ball
+    # and a delivery and no bat at all, and it was stood down for not saying what the game is.
+    if not (words & _A_BAT_WORD):
+        return True
     return bool(words & _ABOUT_THE_GAME)
 
 
@@ -670,6 +825,7 @@ _CRICKET_WORDS = frozenset((
                    "test", "t20", "ashes", "innings", "stumps", "stump", "pitch", "slip",
                    "cover", "midwicket", "spinner", "spinners", "spin", "seam", "seamer",
                    "keeper", "keeper's", "yorker", "bouncer", "crease", "googly", "googlies",
+                   "no ball", "no balls", "wicketkeeper",
                    "off stump", "leg stump", "long on", "mid off", "cover drive",
                    "bowling action", "spin bowling", "third man", "fine leg",
                    "short leg")) - _BOWL_WORDS
@@ -732,6 +888,28 @@ def _football_boots(memory, understood):
            "the toe, and go half a size up for a child whose feet are still growing. ")
     new = ("Wear a new pair around the house an evening at a time and never in a match first; a "
            "leather boot softens within a week. ")
+    # "where can i get cheap ones" is a shop question, and the surface is only half its answer:
+    # the pair a child grows out of in a season is the one not to spend on, and a club's kit sale
+    # is where the near-new ones go.
+    where = ("Buy them anywhere that lets you try them on: a sports shop, a supermarket's own "
+             "brand, the big online retailers, or a club's second-hand kit sale, where "
+             "out-grown pairs go for a few pounds. ")
+    cheap = ("Do not spend much on a child's boots - feet grow a size a season - but do buy the "
+             "right sole for the pitch, because a cheap boot in the wrong stud is worse than no "
+             "stud at all. ")
+    # "when should i buy football boots" is a calendar question about boots, and the answer is the
+    # end of a season or the week before pre-season, not the January sales on winter coats.
+    when = ("Boots are cheapest at the end of a season, in April to June, and again when a new "
+            "colourway comes out and last year's drop; for a child the club's kit sale just before "
+            "the season starts is the moment, because that is when the out-grown pairs come in. ")
+    if any(word in text for word in ("when", "what month", "which month", "best time", "time to buy",
+                                     "month")):
+        return when + surface
+    if any(word in text for word in ("cheap", "cheaper", "cheapest", "afford", "budget", "price",
+                                     "prices", "cost", "costs", "spend", "sale", "second hand",
+                                     "secondhand", "where", "shop", "shops", "store", "online",
+                                     "order", "buy from")):
+        return where + cheap + surface + fit
     if any(word in text for word in ("tight", "small", "smaller", "size", "sizing", "wide",
                                      "narrow", "blister", "blisters", "hurt", "hurts", "rubbed",
                                      "10 year old", "9 year old", "8 year old", "11 year old",
@@ -890,6 +1068,69 @@ _A_SHORTER_RACE_CARD = entry(
     guard=_a_shorter_race_is_the_question,
     bias=2)
 
+# How long the recovery takes depends on what was done, so each distance carries its own figure
+# and its own reason. The phrases are written the way people type them, and "a marathon" and
+# "half marathon" are phrases rather than bare words so "half an hour" and a marathon's length
+# are not caught.
+_RECOVERY_BY_DISTANCE = (
+    (("a marathon", "full marathon", "26.2", "42.2", "42k"),
+     "Three to four weeks before anything hard: easy running or walking the first week, short easy "
+     "runs the second, and a tempo or a long run only around a month out. The fitness comes back "
+     "faster than the legs do, which is what catches people who feel fine on day five."),
+    (("a half marathon", "half marathon", "half-marathon", "13.1", "21k"),
+     "A week to ten days: three or four short easy runs in the first week, nothing hard for ten "
+     "days, and a normal week after a fortnight. Most people feel fine after three days, and going "
+     "hard then is how the second week goes wrong."),
+    (("10k", "10 k", "ten k", "6.2", "six miles", "six mile"),
+     "Three or four easy days and then normal training: a 10k at effort takes more out of the legs "
+     "than the distance suggests, and the second day after is usually the sorest."),
+    (("5k", "5 k", "five k", "three miles", "parkrun"),
+     "A day or two of easy running: a hard 5k costs your legs about 48 hours, and an easy run the "
+     "day after does more good than a full day off."),
+)
+
+# How many turns back a distance still counts: "im 45 and havent run since school" then "how long
+# to train" then "and how long to recover" is the same run, and the six-turn window is the one the
+# other lookback answers use.
+_RECOVERY_LOOKBACK = 6
+
+
+def _a_distance_is_named(understood):
+    """True when the line names a race distance, so its "rest" is a runner's rest.
+
+    A guard rather than a word: "how long should i rest a leg of lamb", "how long should i rest
+    it" about a knee and "how long to rest between gym sessions" were all told to scale their
+    recovery to a 5k when the rest row keyed the naked verb. A distance in the line is what makes
+    the rest after it a session's.
+    """
+    text = str(understood.get("plain") or understood.get("clean") or "").lower()
+    return any(phrase in text for phrases, _line in _RECOVERY_BY_DISTANCE for phrase in phrases)
+
+
+def _recovery_time(memory, understood):
+    """How long the recovery takes, in the figure the session asks for.
+
+    "how long to recover after a run" was answered with the cold-and-flu rule and "how long to
+    recover after a marathon" with how many miles a marathon is: both are on the subject and
+    neither is a recovery time. A recovery depends on what was done, so the distance named - in
+    this line, or in one just before it - picks the figure, and a line that names none gets the
+    ladder.
+    """
+    text = str(understood.get("plain") or understood.get("clean") or "").lower()
+    for phrases, line in _RECOVERY_BY_DISTANCE:
+        if any(phrase in text for phrase in phrases):
+            return line
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    for turn in reversed(turns[-_RECOVERY_LOOKBACK:] if isinstance(turns, list) else []):
+        said = str(turn.get("user") or "").lower() if isinstance(turn, dict) else ""
+        for phrases, line in _RECOVERY_BY_DISTANCE:
+            if any(phrase in said for phrase in phrases):
+                return line
+    return ("Scale it to what you did: a day or two easy after a hard 5k, three or four days after "
+            "a 10k, a week to ten days after a half marathon, and three to four weeks before "
+            "anything hard after a marathon. A gym session is about 48 hours for the same muscle "
+            "group. Soreness shifts faster with a short easy effort than with total rest, and if "
+            "you are still stiff on the stairs after a week, you went back too soon.")
 # The circle throws differ in the implement and the release, and agree on the rest: the hips lead
 # and the arm follows last. The line names which one, so the card answers for that one.
 def _a_circle_throw(memory, understood):
@@ -942,7 +1183,15 @@ def _a_card_is_named(understood):
 _A_BLOCK_IN_THE_WATER = re.compile(
     r"\b(?:can'?t|cannot|couldn'?t|won'?t|unable|struggl\w*|scared|afraid|frightened|"
     r"terrified|nervous|panic\w*|hate[sd]?|dread\w*|worr\w*|refus\w*|phobia|"
+    # "a fear of going under water" is the same block as "scared of going under water", and the
+    # noun was standing the row down, so the line fell to the drowning card instead.
+    r"fear\w*|"
     r"don'?t like|do not like|not (?:able|confident|brave))\b"
+    # The breath is the other half of the block, but only where the water is in the same line:
+    # "i hold my breath when i go under water" is a nervous swimmer, and "i held my breath for 90
+    # seconds today" is a swimmer telling you how it went, which stays its own answer.
+    r"|\b(?:hold|holds|holding|held)\b[^.?!]{0,25}\b(?:my|his|her|their|your)\s+breath\b"
+    r"[^.?!]{0,40}\b(?:under|underwater|swim\w*|pool|dive\w*|dove|water)\b"
     r"|\bhow (?:do|can|should|would) i\b|\bhow to\b|\bhelp me\b|\bteach me\b"
     r"|\blearn\w*\b|\btips?\b|\badvice\b|\bwhat can i do\b",
     re.IGNORECASE)
@@ -991,6 +1240,128 @@ def _a_short_game_to_play(understood):
     return not _A_GAME_WORD.search(line)
 
 
+# What to wear for a match in rain or cold. "What should I wear to a football match in the rain"
+def _says(clean, phrases):
+    """True when one of these phrases is in the line as a word, not inside a longer word.
+
+    `phrase in clean` matches "take" inside "mistake" and "wear" inside "swear", which is how a
+    row ends up answering a line that never asked it. Every phrase is anchored at a word start.
+    """
+    return re.search(r"(?<!\w)(?:%s)" % "|".join(re.escape(p) for p in phrases), clean) is not None
+
+
+# was the stadium arrival card ("arrive 45 minutes early ... bag searches"), because "match" and
+# "football" are that row's key and this line spends its words on clothes and weather. A kit
+# question is a different question, and it splits in two: the person playing and the person
+# standing on the touchline need different things, so the row leads with whichever it names.
+_WET_MATCH_PLAYING = (
+    "Layers you can take off: a base layer and shorts under a thin waterproof top, "
+    "gloves once it is under about 8C, and boots to suit the surface - moulded studs on grass, "
+    "astro trainers on 3G, long studs only on a soft winter pitch. A towel and a dry top in the "
+    "bag for after, because you cool fast once you stop."
+)
+_WET_MATCH_WATCHING = (
+    "A waterproof over everything and something to keep your legs dry: a coat with a hood, "
+    "boots or wellies, and a dry top waiting in the car. Two hours standing in wind and rain is "
+    "colder than the forecast sounds, so a hat and gloves even in spring."
+)
+_WET_MATCH_WEATHER = ("rain", "rains", "raining", "rainy", "wet", "drizzle", "showers",
+                      "cold", "freezing", "bitter", "snow", "snowing", "wind", "windy",
+                      "muddy", "sleeting")
+_WET_MATCH_WEAR = ("wear", "wearing", "kit", "clothes", "clothing", "outfit", "boots",
+                   "shin pads", "what do i need", "what does he need", "what do we need",
+                   "what should i take", "what should he take", "what should she take",
+                   "bring", "bringing", "pop", "take with", "pack", "shall i wear",
+                   "should i wear", "what should we wear", "what do we wear",
+                   "should he wear", "should she wear", "dress him", "dress her")
+_WET_MATCH_SPORT = ("football", "football match", "soccer", "rugby", "hockey", "netball",
+                    "match", "matches", "five a side", "game", "cup tie", "training")
+_WET_MATCH_WATCHING_WORDS = ("watch", "watching", "support", "supporter", "spectator",
+                             "spectators", "stands", "touchline", "sit in the",
+                             "go to the game", "my husband plays", "my partner plays")
+# The first-person ones are the only playing words that beat a watching word: "watch my son
+# play" has "play" in it and the person being dressed is still the one on the touchline.
+_WET_MATCH_I_PLAY = ("im playing", "i'm playing", "i am playing", "i play", "im in the team",
+                     "i'm in the team",
+                     # someone else who is playing: "my son has a football match saturday"
+                     "has a match", "has a game", "has a football match", "has a rugby match",
+                     "is playing", "he plays", "she plays", "they play", "we play", "were playing",
+                     "we are playing")
+# A bare "play" is weaker than a watching word ("watch my son play") but beats nothing: with no
+# "watch" and no first person, "what should i wear to play football" is still the player.
+_WET_MATCH_PLAYS = ("to play", "play ", "playing", "training", "five a side", "kick about")
+# Buying boots is a shopping question, drying them a care question, and what to eat before is the
+# nutrition row's: this row holds the line that asks what to put on.
+_WET_MATCH_NOT = ("buy", "buying", "should i buy", "should i get", "which boots", "best boots",
+                  "cheap", "price", "cost", "how much",
+                  # a bare "dry" stood the row down on the very line it is for: "what should i
+                  # wear to football in the rain to stay dry" is the wear question, and "dry" is
+                  # how people say it. The drying questions are the phrases, not the word.
+                  "how do i dry", "how to dry", "drying", "to dry", "dry them", "dry it",
+                  "dry out", "dry my", "dry the", "dry off", "get them dry", "keep them dry",
+                  "clean", "cleaning",
+                  "smell", "smelly", "eat", "eating", "food", "breakfast", "before the game",
+                  "after the game", "recovery", "injured", "injury", "hurt", "knee", "ankle")
+
+
+def _a_wet_match(reading):
+    """True for a line that asks what to wear, bring or take to a match in bad weather.
+
+    A guard takes the reading, not the memory: it is asked whether this row may answer at all.
+    """
+    clean = " " + str((reading or {}).get("clean") or "").lower() + " "
+    if not _says(clean, _WET_MATCH_SPORT):
+        return False
+    if not _says(clean, _WET_MATCH_WEATHER):
+        return False
+    if not _says(clean, _WET_MATCH_WEAR):
+        return False
+    return not _says(clean, _WET_MATCH_NOT)
+
+
+def _kit_for_a_wet_match(memory, understood):
+    """What to wear for a match in the rain, led by the playing or the watching half."""
+    clean = " " + str((understood or {}).get("clean") or "").lower() + " "
+    if _says(clean, _WET_MATCH_I_PLAY):
+        return _WET_MATCH_PLAYING
+    if _says(clean, _WET_MATCH_WATCHING_WORDS):
+        return _WET_MATCH_WATCHING
+    if _says(clean, _WET_MATCH_PLAYS):
+        return _WET_MATCH_PLAYING
+    # Going to the match with nothing said about playing it is the touchline: "what should i
+    # wear to the rugby in the cold" wants a coat, not studs.
+    return _WET_MATCH_WATCHING
+
+
+_GYM_KIT_WORDS = ("what should i bring", "what do i bring", "what should i take",
+                  "what do i take", "what should i wear", "what do i wear", "what to bring",
+                  "what to wear", "shall i bring", "should i bring", "do i need to bring",
+                  "do i need", "what do i need", "what will i need", "need to bring",
+                  "need to take", "need to wear", "what kit", "kit list",
+                  "bring", "bringing", "wear", "wearing", "take", "taking")
+_GYM_INDUCTION_KIT = (
+    "Bring trainers with a clean, non-marking sole, a towel, water and a padlock for the locker, "
+    "and wear something you can move in - shorts or leggings and a t-shirt. A gym induction is a "
+    "walk round with a trainer: they set the seat heights and write you a plan, so nothing else "
+    "is needed on the day."
+)
+_GYM_INDUCTION = (
+    "Take the free induction: staff walk you round the machines and set the seat heights, "
+    "which is the bit that puts people off. Then keep it simple - a warm-up on the bike, "
+    "then two or three sets of 8-12 reps on five or six machines covering legs, back, chest "
+    "and shoulders, light enough that you could still do three or four more reps. Write the "
+    "weights down and add a little next week."
+)
+
+
+def _the_gym_induction(memory, understood):
+    """What to bring to the induction, or what to do with it, whichever the line asked."""
+    clean = " " + str((understood or {}).get("clean") or "").lower() + " "
+    if _says(clean, _GYM_KIT_WORDS):
+        return _GYM_INDUCTION_KIT
+    return _GYM_INDUCTION
+
+
 ENTRIES = [
     # A drink to carry is a running question, and there was no row for it: "how do i stay hydrated
     # on a run" was a shrug, "how do i keep water cold on a run" and "do i need water on a half
@@ -1013,7 +1384,13 @@ ENTRIES = [
           "long run can make you feel worse, not better.",
           # the reverse question - sore eyes or joints from running - is not about a drink, and
           # a water bill, the water in a recipe and a wet floor are other rows
-          avoid=("eyes", "eye", "knee", "knees", "ankle", "ankles", "shin", "shins", "pain",
+          # "rinse the rice until the water runs clear" is a kitchen line that reached this row
+          # on the words "water" and "runs"; the rice-and-water rows answer it.
+          avoid=("rinse", "rinsing", "rinsed",
+                 # "wash the rice until the water runs clear" is the same kitchen line with the
+                 # other verb, and this row kept it on "water" and "runs"
+                 "wash", "washed", "washing", "water runs clear", "runs clear",
+                 "eyes", "eye", "knee", "knees", "ankle", "ankles", "shin", "shins", "pain",
                  "hurts", "sore", "injury", "injured", "bill", "meter", "leak", "recipe",
                  "boil", "bath", "shower", "plant", "plants", "garden", "floor", "filter",
                  "softener", "swimming", "pool", "sea", "lake", "well",
@@ -1305,7 +1682,13 @@ ENTRIES = [
                                 # coming back, or gives an age, is this answer
                                 ("start", "again", "adult", "adults", "beginner",
                                  "beginning", "back into", "40", "fifty", "forty", "old",
-                                 "too old", "am i too old")),
+                                 "too old", "am i too old",
+                                 # "is rugby safe for kids" asks the same thing a parent asks
+                                 # before the first session, and it reached the search hedge
+                                 # while "is rugby ok for an 8 year old" got this answer. Only
+                                 # "safe": "kids" read "my kids need new football boots" as a
+                                 # club question, and the boots row owns that.
+                                 "safe", "safety")),
           "Look for a club that advertises a beginners' or \"back to\" session rather than a team "
           "trials night — most sports now run them, and the standard is friendly. Try three in a "
           "month before you judge, and go twice before deciding you are unfit for it, because the "
@@ -1316,10 +1699,18 @@ ENTRIES = [
           # question, so the two tie and this entry is listed first.
           # a return from an injury is the healing answer, not the beginner's-session one:
           # "when can i play football again after a broken leg" was sent to a taster night
+          # A body that is already complaining is not a first session: "is it safe to play rugby
+          # with a bad back" is the injury answer's, and "safe" in this entry's key would take it.
           avoid=("join", "joining", "near me", "where can i", "taster",
+                 # kit is bought, not started again: "football boots for a 9 year old, where to
+                 # buy" was a beginners'-session answer because "old" was in the key
+                 "boots", "boot", "studs", "astro", "shin pads", "trainers", "kit", "shirt",
+                 "shorts", "socks", "gloves", "gum shield", "goggles", "racket", "bat",
                  "broken", "broke", "fracture", "fractured", "cast", "plaster", "sprain",
                  "sprained", "injury", "injured", "operation", "surgery", "heal", "healing",
-                 "physio", "crutches", "recovery"),
+                 "physio", "crutches", "recovery",
+                 "bad back", "bad knee", "sore", "aches", "aching", "heart condition",
+                 "asthma", "pregnant", "pregnancy"),
           bias=1),
     # "how long does it take to get fit" reached nothing at all. The timeline is the same for
     # everyone starting out, and it is the question people ask before they begin, so it has its
@@ -1422,6 +1813,11 @@ ENTRIES = [
                  "drink", "drinks", "drinking", "water intake", "how much water",
                  "not breathing", "isnt breathing", "couldnt breathe", "limp", "unresponsive",
                  "sank", "didnt come up", "fell in", "pulled out", "drowned", "drowning",
+                 # A body that lost consciousness is not a child learning to swim: "my son
+                 # blacked out in the pool" was this row's answer ("most children swim somewhere
+                 # between five and eight") while a boy on the bottom of a pool was typed in.
+                 "blacked out", "blacking out", "passed out", "passing out",
+                 "fainted", "fainting", "unconscious", "knocked out", "seizure",
                  "river", "canal", "lake", "reservoir", "sea", "beach", "lifeguard",
                  # what to eat before a gala is the pre-race food row's question, and "my
                  # daughter" used to carry that line to the baby card
@@ -1455,10 +1851,29 @@ ENTRIES = [
             "water in his face", "water in her face", "water in my face", "water in the face",
             "water in his eyes", "water in her eyes", "water up his nose", "water up her nose",
             "getting water in his face", "getting water in her face", "splash in his face",
-            "splash in her face", "water on his face", "water on her face"),
+            "splash in her face", "water on his face", "water on her face",
+            # The fear has a noun as well as an adjective, and the noun is how most people
+            # introduce it: "i have a fear of going under water", "i dread going under water",
+            # "i fear going under water" and "my son has a fear of going under water" were all
+            # the drowning card ("say he was in the water") and are this row's line.
+            "fear of going under", "fear of going under water", "fear of going underwater",
+            "fear going under", "fear of the water", "fear of water", "fear of the pool",
+            "phobia of the water", "phobia of water", "phobia of going under",
+            "dread going under", "dread going under water", "dreads going under",
+            "dread the water", "dread getting in",
+            # ...and the breath is what a nervous swimmer worries about, so a line that says
+            # what the breath does when the head goes under is this row's too: "i hold my
+            # breath when i go under water", "i always hold my breath when i go underwater",
+            # "he holds his breath when he goes under".
+            "hold my breath", "holds my breath", "holding my breath", "held my breath",
+            "hold his breath", "holds his breath", "holding his breath",
+            "hold her breath", "holds her breath", "holding her breath",
+            "hold their breath", "holds their breath", "hold your breath"),
            ("head", "face", "swim", "swimming", "pool", "lesson", "lessons", "scared",
             "afraid", "frightened", "terrified", "nervous", "wont", "won't", "cant", "can't",
-            "cannot", "hate", "hates", "hated", "struggle", "panic", "goggles", "nose")),
+            "cannot", "hate", "hates", "hated", "struggle", "panic", "goggles", "nose",
+            "fear", "fears", "feared", "fearful", "phobia", "dread", "dreads", "dreaded",
+            "breath")),
           "Start where you can stand up: hold the rail in the shallow end and put your chin in, then "
           "your mouth, then blow bubbles with your nose and mouth under for a second, and build it up "
           "over a few visits - goggles, and a nose clip if the water up your nose is the worst of it, "
@@ -1473,6 +1888,11 @@ ENTRIES = [
           avoid=("not breathing", "isnt breathing", "isn't breathing", "couldnt breathe",
                  "couldn't breathe", "limp", "unresponsive", "blue", "didnt come up",
                  "didn't come up", "slipped", "sank", "face down", "pulled out", "fell in",
+                 # a body that lost consciousness is a person to check, not a lesson in
+                 # putting the head under: "i held my breath too long and blacked out" and
+                 # "my son blacked out in the pool" are the blackout card's lines.
+                 "blacked out", "black out", "blacking out", "passed out", "passing out",
+                 "fainted", "fainting", "unconscious", "ambulance", "drowning",
                  "boiler", "leak", "leaking", "radiator", "drain", "flood", "sink",
                  "phone", "watch", "kettle", "washing machine", "dishwasher", "water broke",
                  # a baby's first time in the water is the baby-swimming card (the temperature and
@@ -1513,7 +1933,29 @@ ENTRIES = [
           # "how do i referee a football match" and "how do i get tickets for a match" both key
           # "match", and neither is what to expect at the turnstiles
           avoid=("referee", "refereeing", "run the line", "linesman", "whistle", "offside",
-                 "get tickets", "buy tickets", "ticket for a match")),
+                 "get tickets", "buy tickets", "ticket for a match",
+                 # a pitch that is too wet is a different afternoon from the turnstiles, and the
+                 # row below answers it
+                 "wet", "too wet", "pitch", "waterlogged", "frozen", "snow", "frost", "muddy",
+                 "called off", "play", "playing", "training", "kids", "junior")),
+    # "is the ground too wet to play football" was "arrive 45 minutes early": "ground" is the
+    # pitch to a footballer and the stadium to a visitor, and the first one is the question.
+    entry("wet-pitch", (("wet", "raining", "rain", "waterlogged", "frozen", "snow", "frost",
+                         "muddy", "mud", "ground", "pitch", "called off"),
+                        ("football", "match", "game", "pitch", "ground", "play", "playing",
+                         "called off", "go ahead", "training", "kids", "junior")),
+          "The referee decides, not the forecast: a pitch with standing water or frozen ground is "
+          "called off, and a soft, muddy one usually still plays. Take moulded studs or boots for "
+          "soft ground, a change of socks and a spare towel, and check the club's page or the "
+          "league's feed an hour before you leave. Junior games are called off sooner than adult "
+          "ones, and there the league, not the referee, has the last word.",
+          avoid=("arrive", "turnstiles", "tickets", "stadium", "stand", "seated", "kick-off",
+                 "away", "premier league", "tv", "watch", "how many", "capacity", "parking",
+                 # who pays the money back is the refund row's question, and it answers it: "can i
+                 # get a refund if the match is called off" was sent to the referee's card, which
+                 # says nothing about a ticket
+                 "refund", "refunds", "money back", "get my money", "claiming"),
+          bias=1),
     entry("wimbledon-titles", ("wimbledon", ("record", "titles", "wins", "won", "most",
                                              "most titles", "serena", "federer")),
           "Martina Navratilova has nine singles titles, the record, and Roger Federer has eight "
@@ -1827,7 +2269,16 @@ ENTRIES = [
                              "without stopping", "non stop", "nonstop", "keep going",
                              "all the way",
                              # the same beginner's ask in its tip-and-advice clothes
-                             "tips", "tip", "advice", "any advice", "pointers")),
+                             "tips", "tip", "advice", "any advice", "pointers",
+                             # "i can barely jog 5 minutes" is the same ask from somebody who
+                             # has already tried: the distance run is the fact, and "barely" /
+                             # "only manage" is the ask. A run word still gates it, so "barely"
+                             # in a line about anything else stays where it was.
+                             "barely", "barely jog", "cant even", "can't even",
+                             "can only", "only manage", "manage to jog", "manage to run",
+                             "struggle", "struggling", "really hard", "so hard",
+                             "for a minute", "two minutes", "2 minutes", "a few minutes",
+                             "30 seconds", "thirty seconds")),
           "Start with run-walk: one minute of easy jogging, two minutes of walking, repeated for "
           "20 minutes, three times a week with a rest day between. Each week add a minute to the "
           "jog and take one off the walk, and in about eight weeks you will run 20 minutes "
@@ -1847,6 +2298,15 @@ ENTRIES = [
                  # "how do i start running without injury" is a plan. The bare word cannot tell
                  # them apart, and holding it out whole cost the beginner's card every line that
                  # said what it wanted to avoid ("without getting injured" still has its answer).
+                 # A body that complains is a question about the body, not a beginner's plan.
+                 # "so hard" / "really hard" / "struggle" are the key's asks and a run word gates
+                 # them, so "jogging hurts my knees so hard" and "my knee is really hard to bend"
+                 # took the run-walk plan; the complaint stands the card down and the sore-knee
+                 # entry answers. The words are held as whole forms, so "how do i start running
+                 # without hurting myself" keeps the plan.
+                 "knees", "ankles", "shins", "calves", "achilles", "plantar", "soreness",
+                 "hurt", "hurts", "hurting", "pain", "pains", "painful", "ache", "aches",
+                 "aching", "stiff", "swollen", "swelling", "bend", "bending", "limp", "limping",
                  "my injury", "the injury", "an injury", "injury is", "injury has",
                  "injury wont", "injured my", "got injured", "been injured", "was injured",
                  "am injured", "is injured", "back from injury", "back from an injury",
@@ -1935,7 +2395,12 @@ ENTRIES = [
           "walk it off. Leave two hours between a proper meal and a run, and warm up for five "
           "minutes before you pick up the pace.",
           guard=_not_a_stitch_in_a_wound),
-    entry("sore-after-exercise", (("sore", "aching", "achy", "stiff", "stiffness", "tender"),
+    entry("sore-after-exercise", (("sore", "aching", "achy", "stiff", "stiffness", "tender",
+                                   # "hurts" and "ache" are how most people say sore, and without
+                                   # them the decision rule stepped out of "my back hurts after
+                                   # the gym, should i see a doctor" for this row to answer, and
+                                   # the person got the booking script instead
+                                   "hurt", "hurts", "hurting", "ache", "aches"),
                                   ("gym", "workout", "exercise", "run", "running", "weights",
                                    "lifting", "next day", "day after", "two days", "walking")),
           "That ache a day or two after new exercise is normal and it is not damage: it is the "
@@ -1998,7 +2463,70 @@ ENTRIES = [
           "the same for running, the gym or swimming. The health guideline is 150 minutes of "
           "something that makes you breathe harder each week, which is three 50-minute sessions "
           "or five half hours. Two or three weeks in, that gets easier and you can add a session.",
-          avoid=("rest", "marathon", "10k", "parkrun", "race")),
+          avoid=("rest", "marathon", "10k", "parkrun", "race"),
+          guard=_not_a_timetable_that_runs),
+    # The figure a recovery question wants, scaled to what was done. "how long to recover after a
+    # run" was the cold-and-flu rule and "how long to recover after a marathon" was how long a
+    # marathon is - both on the subject, neither a recovery time. The distance in the line (or in
+    # a line just before it) picks the figure; a line that names none gets the ladder.
+    entry("recovery-time",
+          (("recover", "recovers", "recovery", "recovering", "rest up", "ease back",
+            "easy days", "legs recover"),
+           ("how long", "how many days", "how much rest", "days", "how soon", "when can i",
+            "time off", "how many weeks")),
+          _recovery_time,
+          # a recovery is about a session, and the line that asks how long it takes says so in its
+          # own words or leans on the session just before it; the ask keeps the other "recover"
+          # senses - a password, a deleted file, a car - out of the answer entirely
+          ask=("recover", "recovers", "recovery", "recovering", "rest up", "ease back",
+               "easy days", "legs recover"),
+          bias=3,
+          avoid=("ill", "illness", "flu", "cold", "fever", "sick", "virus", "covid",
+                 "chest infection", "cough", "throat", "tonsillitis", "pneumonia",
+                 "surgery", "operation", "hospital", "injury", "injured", "physio",
+                 "broken", "fracture", "fractured", "sprain", "sprained", "strain",
+                 "strained", "sore", "pain", "hurt", "hurts", "addiction", "grief",
+                 "divorce", "breakup", "depression", "burnout", "bereavement",
+                 # "recover" is also what a phone, an account and a car do
+                 "password", "account", "email", "file", "files", "laptop", "phone",
+                 "car", "van", "vehicle", "truck", "deleted", "data", "photos",
+                 "position", "room", "service", "boiler", "heat", "waste", "copper",
+                 "gold", "oil", "sleep", "nap", "baby", "birth", "caesarean",
+                 # a body coming back from something is never this row's question, and the vet's
+                 # recovery is the pets answer: "how long does a cat take to recover from
+                 # neutering" was told to scale it to a 5k
+                 "cat", "cats", "dog", "dogs", "puppy", "puppies", "kitten", "kittens",
+                 "pup", "vet", "neuter", "neutering", "neutered", "spay", "spayed",
+                 "stitches", "wound", "scar", "burn", "bruise", "twisted", "eye", "eyes",
+                 "vision", "screen", "screens", "bug", "virus", "vomit", "vomiting",
+                 "diarrhoea", "stomach", "food poisoning", "migraine", "tooth", "teeth",
+                 "dental", "wisdom", "extraction", "jet lag", "hangover",
+                 # an operation has its own timeline - "how long is recovery after a hip
+                 # replacement" was told to scale it to a 5k - and so does a body part that is
+                 # healing: knee, hip and shoulder names are the hospital answer's question
+                 "replacement", "replacements", "hip", "hips", "knee", "knees", "shoulder",
+                 "shoulders", "joint", "joints", "heal", "heals", "healing", "healed",
+                 "cast", "plaster", "physiotherapy", "physiotherapist", "consultant",
+                 "operation", "operated",
+                 # the rest between two sets is a session's own question
+                 "sets", "set", "reps", "rep", "between sets", "each set")),
+    # The same figure under the word people more often use: "how long should i rest after a 5k"
+    # was handed how long a 5k takes to run. The guard is the distance in the line, so the rest of
+    # a roast, of a knee and between gym sessions stays with its own answer.
+    entry("rest-after-a-distance",
+          (("rest", "resting", "rest up", "rest day", "rest days", "day off", "days off"),
+           ("how long", "how many days", "how much rest", "days", "how soon", "time off",
+            "how many weeks")),
+          _recovery_time,
+          guard=_a_distance_is_named,
+          bias=3,
+          avoid=("ill", "illness", "flu", "cold", "fever", "sick", "injury", "injured",
+                 "hurt", "hurts", "pain", "sore", "surgery", "operation", "hospital",
+                 "replacement", "replaced", "hip", "knee", "shoulder", "joint", "heal",
+                 "healing", "cast", "plaster", "physio",
+                 "meat", "steak", "roast", "roasted", "chicken", "turkey", "lamb", "beef",
+                 "pork", "brisket", "ribs", "joint of", "carving", "carve", "foil", "oven",
+                 "sets", "set", "reps", "between sets", "each set")),
     entry("badminton-basics", ("badminton", ("play", "rules", "score", "scoring", "how", "court",
                                              "points", "serve")),
           "Games go to 21 points, and you score on every rally whoever served, so a game is quick; "
@@ -2183,7 +2711,11 @@ ENTRIES = [
           "email and ask what they provide before you buy anything.",
           # a kit question used to get the joining reply again, because "start playing netball"
           # was in both keys
-          avoid=("which boots", "what boots", "football boots", "studs", "studded", "moulded", "firm ground", "soft ground", "astro turf", "3g", "4g", "boot size", "what size", "break them in", "break in", "blister", "blisters", "too tight", "too small", 
+          # a kit list is for starting a sport; a line about buying one pair of boots is the
+          # boots' own question, and "cheap astro boots for my daughter" was spending its turn on
+          # shin pads and a water bottle
+          avoid=("which boots", "what boots", "football boots", "studs", "studded", "moulded", "firm ground", "soft ground", "astro turf", "3g", "4g", "boot size", "what size", "break them in", "break in", "blister", "blisters", "too tight", "too small",
+                 "astro boots", "turf boots", "boots for", "cheap boots", "boots cheap", "boots under", "new boots", "where to buy boots", "where can i get boots",
                  "smell", "smelly", "wash", "washing", "lost", "forgot", "leaving", "left"),
           bias=1),
     entry("protein-safety", (("protein", "high protein diet", "high protein"),
@@ -2292,11 +2824,7 @@ ENTRIES = [
                                  "where do i start", "where to start", "how do i use",
                                  "use the machines", "machines", "induction",
                                  "what should i be doing", "tips", "advice")),
-          "Take the free induction: staff walk you round the machines and set the seat heights, "
-          "which is the bit that puts people off. Then keep it simple - a warm-up on the bike, "
-          "then two or three sets of 8-12 reps on five or six machines covering legs, back, chest "
-          "and shoulders, light enough that you could still do three or four more reps. Write the "
-          "weights down and add a little next week.",
+          _the_gym_induction,
           # a gym membership question is a different answer and it has one
           avoid=("cancel", "cancelling", "cancel my", "membership", "contract", "refund",
                  "quit", "leaving", "close my",
@@ -2370,8 +2898,10 @@ ENTRIES = [
           "are warm, then a couple of light sets of whatever you are about to do - the same "
           "movement at half the weight, for 10 reps. That is a warm-up; the long stretches are for "
           "afterwards, when the muscles are warm.",
-          # a warm-up before a match is a different answer, and that entry gives it
-          avoid=("match", "game", "playing", "football", "rugby", "netball", "hockey", "sport")),
+          # a warm-up before a match is a different answer, and that entry gives it; a house
+          # that is warming up is not a session at all
+          avoid=("match", "game", "playing", "football", "rugby", "netball", "hockey", "sport")
+          + A_HOUSE_WARMING_UP),
 
     # The order of a session needs both halves in the line. With "cardio" alone in the key this
     # row answered "should i do cardio in the morning or at night", "should i do hiit or steady
@@ -2440,7 +2970,16 @@ ENTRIES = [
     entry("eat-before-run", (("eat", "eating", "food", "breakfast", "snack"),
                              ("before a run", "before i run", "before running", "before the gym",
                               "before i go", "before exercise", "before a workout", "running",
-                              "workout", "gym")),
+                              "workout", "gym",
+                              # The same question about a match: "playing five a side sunday,
+                              # first time in years, what should i eat before" was answered
+                              # with a list of twenty-minute dinners, because the row named
+                              # only the run and the gym and "eat before" was the cook menu's.
+                              "before a match", "before the match", "before a game",
+                              "before the game", "before playing", "before i play",
+                              "before i train", "before training", "before sport",
+                              "before five a side", "five a side", "football", "rugby",
+                              "netball", "hockey", "cricket", "a match", "the match")),
           "Something small and mostly carbohydrate, an hour or two before: a banana, a round of "
           "toast, a small bowl of porridge. Leave longer after a big meal - three hours - or you "
           "will feel it. For a short easy run first thing, plenty of people go out with nothing but "
@@ -2450,7 +2989,11 @@ ENTRIES = [
           # wrong half of the question: nutrition.py answers the after.
           avoid=("after a run", "after the run", "after running", "after the gym", "afterwards",
                  "recover", "recovery", "after a workout", "after exercise", "post workout",
-                 "post-workout", "after my run", "after i run")),
+                 "post-workout", "after my run", "after i run"),
+          # "what should i eat before a workout" was answered with a training plan, because the
+          # plan row also matches the bare word workout and won the tie: a line that says eat is
+          # asking about food, and this row has the eat word in its key.
+          bias=1),
     # The rules question a new fan asks, and the answer is the format: points versus knockout.
     entry("league-and-cup",
           (("league", "cup", "the cup", "premier league", "champions league", "fa cup",
@@ -2462,7 +3005,14 @@ ENTRIES = [
           # league cup is two knockouts, and the premier league against the champions league is
           # two tables within a continent, so this answer would be confidently about neither.
           avoid=("my team", "we lost", "we won", "score", "kick off", "kick-off", "ticket",
-                 "who won", "result")),
+                 "who won", "result",
+                 # A table is a list in a league and a piece of furniture in a restaurant, so
+                 # "whats the notice for cancelling a restaurant table" was told how a season is
+                 # decided. The booking words are the whole of the other sense: the row stands
+                 # down on them and the booking card answers.
+                 "restaurant", "restaurant table", "booking", "book", "booked", "reservation",
+                 "reservations", "cancel", "cancelling", "cancellation", "notice", "dinner",
+                 "lunch", "dining", "table for", "pub")),
     # --- the body that hurts when you use it -------------------------------
     # Pain that comes on with load is not the stairs question and not the noisy-knee answer:
     # it is a muscle-and-mileage job, and a knee that gives way is neither.
@@ -2500,7 +3050,12 @@ ENTRIES = [
                  "cant breathe", "can't breathe", "baby", "babies", "child", "children",
                  "kid", "kids",
                  # cold hands or cold feet after a session are a circulation question, not this rule
-                 "hands", "hand", "fingers", "feet", "foot", "toes", "toe")),
+                 "hands", "hand", "fingers", "feet", "foot", "toes", "toe"),
+          # A person who is ill and training is asking whether to train, and the plan is the
+          # wrong answer: "i am training for a half marathon and i have a cold, should i still
+          # run" got twelve to sixteen weeks. The cold word is in this row's own key, so the
+          # bias only decides the tie against the plan.
+          bias=3),
 
     # The starter kit answer is right about shin pads and wrong about the boots: astro boots on
     # grass give no grip, and the surface is what decides the boot. The reply is a callable
@@ -2563,6 +3118,35 @@ ENTRIES = [
           avoid=("buy", "buying", "bought", "price", "prices", "cost", "cheapest", "which one",
                  "second hand", "second-hand", "fix", "repair", "broken", "motor", "belt",
                  "squeak", "squeaking", "noise", "noisy", "lubricant"),
+          bias=1),
+    # The cold has a note and the heat did not: "is it too hot to run" was a shrug, and it is the
+    # commonest weather question of a summer week. The numbers are the point of it.
+    entry("run-in-the-heat", (("hot", "heat", "heatwave", "warm", "boiling", "scorching",
+                               "humid", "muggy", "sun", "sunny", "degrees", "30c", "25c"),
+                              ("run", "running", "jog", "jogging", "cycle", "cycling", "ride",
+                               "walk", "exercise", "exercising", "football", "tennis",
+                               # A phrase in both groups makes the pair do nothing: "hot" is in
+                               # the first group, so "too hot" here satisfied both and any line
+                               # with "too hot" in it - "that chilli was too hot what do i do" -
+                               # got the running numbers. The second group is the doing.
+                               "safe")),
+          "Above about 25C, slow down rather than stop: expect 20 to 30 seconds a kilometre "
+          "slower for every 5C over 15C, and let the pace go. Run early or late, drink to thirst "
+          "before and after, take walk breaks, and wear light, loose clothes. Stop and get into "
+          "shade if you go dizzy, get a headache, feel sick or stop sweating. The first hot week "
+          "is the worst one, and the body adapts in about ten days.",
+          avoid=("baby", "babies", "pram", "buggy", "dog", "dogs", "car", "cars", "van",
+                 "house", "flat", "bedroom", "room", "sleep", "sleeping", "radiator",
+                 "heating", "boiler", "sunburn", "sun cream", "sunscreen", "spf", "uv",
+                 "weather", "forecast", "washing", "laundry",
+                 # an oven asked "how hot" is a dial and not the weather: "how hot should my oven
+                 # be" was told how much to slow down at 25C. A cooking appliance word stands the
+                 # heat-and-exercise row down, and the oven row has the dial answer.
+                 "oven", "ovens", "fan oven", "cooker", "hob", "grill", "bake", "baking",
+                 "roast", "roasting", "gas mark", "air fryer", "barbecue", "bbq", "kiln",
+                 # a fever, a hot flush and a hot water bottle are not the weather
+                 "fever", "temperature of", "hot flush", "flushes", "menopause", "period",
+                 "hot water bottle"),
           bias=1),
     entry("run-in-the-rain", (("run", "running", "jog", "jogging", "cycle", "cycling",
                                "walk", "walking", "train", "training"),
@@ -2651,7 +3235,18 @@ ENTRIES = [
                               "futsal", "sports hall", "muddy", "wet", "surface", "which",
                               "what", "son", "daughter", "child", "kid", "need", "get", "wear",
                               "buy", "size", "first pair", "shin pads", "break in",
-                              "breaking in", "break them in", "blister", "blisters", "too tight")),
+                              "breaking in", "break them in", "blister", "blisters", "too tight",
+                              # a pair is bought before it is played in: "cheap football boots"
+                              # and "where can i get football boots for a kid" are this row's
+                              # question, and the price words were only in the calendar row's
+                              # key, which answered them with the January sales on coats
+                              "cheap", "cheaper", "cheapest", "afford", "budget", "price",
+                              "prices", "cost", "spend", "sale", "second hand", "secondhand",
+                              "where", "shop", "shops", "store", "online", "order", "pair",
+                              "pairs", "years old", "year old", "age", "foot", "feet",
+                              # a calendar question about boots is about boots, not about the
+                              # winter coat's January sales
+                              "when", "what month", "which month", "best time", "time to buy")),
           _football_boots,
           guard=_not_a_study_line,
           # no ask gate: the avoid list keeps the lookalikes out, and the lane's own test builds
@@ -2659,6 +3254,10 @@ ENTRIES = [
           # a walking boot, a wellington and the boot of a car are other questions, and so is the
           # boot bag that gets left on the bus
           avoid=("hiking", "walking", "walk", "wellies", "wellington", "welly", "snow boots",
+                 # a ski boot has buckles and a piste, not studs: "what ski boots should i buy"
+                 # was told which studs to buy for grass
+                 "ski", "skis", "skiing", "ski boots", "ski boot", "snowboard", "snowboarding",
+                 "piste", "slope", "slopes", "mountain", "chalet", "apres", "apres ski",
                  # a boot for the cold is a boot for the street, and "what boots are good for
                  # winter" reached the studs because a bare "what" was enough key
                  "winter", "winter boots", "snow", "ice", "icy", "grit", "slush", "frost",
@@ -2825,6 +3424,20 @@ ENTRIES = [
                  # because "fish" plus "need" is this entry's whole key.
                  "oxygen", "breathe", "breathes", "breathing", "gills", "underwater",
                  "under water", "why do fish", "do fish need air", "need air",
+                 # a fish being served is a dinner, not an angler: "what can i have with fish"
+                 # said "you need a rod licence", because "fish" plus "can i" is this key. A
+                 # serving frame is never about the sport, and none of these contains the word
+                 # that would fold back onto this row's own key.
+                 "have with", "have it with", "eat with", "goes with", "go with", "serve with",
+                 "serving with", "pairs with", "alongside", "on the side", "as a side",
+                 "side dish", "same with",
+                 # a fish to cook with is a dinner too: "what can i make with smoked fish" said
+                 # "you need a rod licence", because "fish" plus "can i" is this key and the
+                 # serving frames above are all about what goes beside it rather than what the
+                 # person is holding. A smoked fish is the clearest case - nobody angles for one.
+                 "make with", "make from", "make out of", "do with", "use up", "using up",
+                 "cook with", "cooking with", "recipe for", "a recipe", "smoked fish",
+                 "smoked haddock", "smoked mackerel", "smoked trout", "kipper", "kippers",
                  ) + PRESENT_ASK),
     _RACE_COMPARED_CARD,
     _A_SHORTER_RACE_CARD,
@@ -3105,6 +3718,133 @@ ENTRIES += [
                  # the entry already held are not the order these come in
                  "how do i know", "do i know", "can i tell", "is my", "do i have one",
                  "feel like")),
+    entry("goggles-that-fog",
+          (("goggles", "goggle", "mask", "lens", "lenses", "swim cap"),
+           ("fog", "fogging", "fogged", "foggy", "steam", "steams", "steamed", "steaming",
+            "mist", "misting", "misted", "clear", "blurred", "condensation", "swim", "swim",
+            "swimming", "pool", "lens")),
+          _goggles_fog,
+          # the car in fog, the bathroom mirror and the glasses are other rows' questions
+          avoid=("car", "driving", "headlights", "windscreen", "wipers", "motorway", "road",
+                 "mirror", "bathroom", "shower", "window", "windows", "spectacles",
+                 "glasses", "walking", "walk"),
+          # the car's fog row scores the same on a line that says fog and how, and it was
+          # winning the tie, so this row has to outrank it
+          guard=the_goggles_are_for_swimming,
+          bias=2),
+    entry("basketball-layup",
+          (("layup", "lay up", "lay-up", "layups", "lay ups", "drive to the basket",
+            "finish at the rim", "under the basket"),
+           ("basketball", "basket", "hoop", "rim", "backboard", "ball", "how")),
+          "Go up off the foot opposite your shooting hand - right hand, left foot - and take the "
+          "last dribble with the outside hand a stride before you jump. Bring the ball up in two "
+          "hands and let it go softly off the backboard into the top corner of the square, rather "
+          "than throwing it at the rim. Aim to jump up rather than forward: most missed layups are "
+          "a jump that was too long and too fast.",
+          ask=("how", "what", "should", "help", "better"),
+          avoid=("rules", "foul", "points", "positions", "travel", "travelling", "highway")),
+    entry("spin-a-cricket-ball",
+          (("spin", "spinner", "spinning", "leg spin", "off spin", "turn the ball", "ripping"),
+           ("cricket", "ball", "bowl", "bowling", "bowler", "off break", "leg break", "googly",
+            "seam", "fingers")),
+          "Spin comes from the fingers and the wrist, not the shoulder: hold the ball across the "
+          "seam in the fingers rather than deep in the palm, and as the arm comes over give it a "
+          "sharp clockwise rip from the third finger so it turns off the pitch. Keep the arm "
+          "straight and the run-up slow - spin is a skill of the hand, and the slower ball turns "
+          "more. Practise on a line until the ball lands where you look.",
+          ask=("how", "what", "should", "help", "better"),
+          avoid=("rules", "points", "wicket", "score", "overs", "match", "spin class",
+                 "spin cycle", "washing machine", "spin dryer", "spin doctor", "spinning class",
+                 "spin bike", "road bike"),
+          bias=2),
+    entry("tennis-backhand",
+          (("backhand", "back hand", "two handed backhand", "one handed backhand",
+            "double hander"),
+           ("tennis", "court", "racket", "racquet", "ball", "how", "hit", "swing")),
+          "Turn your shoulders as the ball comes and take the racket back with both hands if it is "
+          "a two-hander, then meet the ball out in front of your front hip with a flat face and "
+          "swing low to high so the ball lifts. Hold the finish over your shoulder rather than "
+          "stopping at the ball - the follow-through is where the control comes from. Practise "
+          "the turn first: most backhands fail on the shoulders, not the arm.",
+          ask=("how", "what", "should", "help", "better"),
+          # a backhanded compliment is the snide-email card's question, and the vegetable is not
+          # this row's: fencing "squash" sent "how do i improve my backhand at squash" to a
+          # butternut squash recipe, so the game keeps the card it had
+          avoid=("backhanded compliment", "backhanded remark", "backhanded comment",
+                 "a compliment", "rules", "score", "butternut", "roast squash", "squash soup",
+                 "squash the", "table tennis", "padel", "drive"),
+          bias=2),
+    entry("rugby-drop-goal",
+          (("drop goal", "drop goals", "drop kick", "dropkick", "drop kicked", "three points"),
+           ("rugby", "posts", "over the posts", "conversion", "penalty try", "score")),
+          "For a drop goal, catch the pass and hold the ball out in front of you with its point "
+          "down, then drop it and kick it off the ground as it starts to bounce - the ball has to "
+          "touch the ground first, so the timing is the whole skill. Watch the ball rather than "
+          "the posts, keep your head down, and strike through the bottom half so it goes up and "
+          "over. Practise from ten metres until you can do it without looking at your feet.",
+          ask=("how", "what", "should", "help", "better"),
+          avoid=("goal setting", "set a goal", "smart goal", "goals for", "new year", "target",
+                 "aim", "resolution"),
+          bias=2),
+    entry("football-throw-in",
+          (("throw in", "throw-in", "throw ins", "throw-ins", "throw the ball in",
+            "take a throw", "long throw"),
+           ("football", "soccer", "touchline", "pitch", "keeper", "corner", "byline",
+            "the line", "how")),
+          "Both feet stay on the ground behind the line, and the ball goes back over your head "
+          "with both hands on it from behind - a foot over the line or a hand that comes round "
+          "the side turns it over. Plant both feet shoulder width, get some bend in the elbows and "
+          "throw it flat to a teammate's feet rather than high and looping. The long throw is a "
+          "run-up and a bigger arch of the back, and it is worth learning only if you can reach "
+          "the box.",
+          ask=("how", "what", "should", "help", "better"),
+          avoid=("bin", "bins", "rubbish", "trash", "away", "out", "recycle", "laundry",
+                 "washing", "clothes", "old", "throw the ball at", "throw up")),
+    entry("learn-to-skateboard",
+          (("skateboard", "skateboards", "skateboarding", "skate", "longboard", "ollie",
+            "cruiser"),
+           ("learn", "start", "beginner", "first", "how", "begin", "ride", "balance")),
+          "Find flat, empty tarmac and a line to stand on, and learn to push and stop before you "
+          "try anything else: front foot across the board at an angle, back foot on the ground, "
+          "and three pushes then both feet on. Bend your knees and keep your weight over the "
+          "board rather than leaning back, and look where you are going, not at your feet. A "
+          "helmet and wrist guards cost less than an evening in A&E, and pads make you braver.",
+          ask=("how", "what", "should", "help", "start", "begin"),
+          # a skateboard on the road is a road question, and the transport card answers it
+          avoid=("price", "cheap", "buy", "gift", "present", "brand", "skating on thin ice",
+                 "ice", "rules", "on the road", "road", "roads", "traffic", "street",
+                 "cycle lane", "pavement")),
+    entry("snooker-break-off",
+          (("break off", "break off shot", "breaking off", "opening shot", "break shot",
+            "first shot"),
+           ("snooker", "cue", "billiards", "pool table", "reds", "baulk", "pack", "frame",
+            "table")),
+          "Put the cue ball just off the side cushion and hit the outside of the pack thinly with "
+          "screw, so the cue ball comes back up the table and tucks behind baulk rather than "
+          "sitting in the open. A soft, thin contact brings a red out to the side pocket for the "
+          "next shot, and the safety is the point: the break-off is not a shot to win the frame "
+          "with. Do not hit the pack straight on, because that leaves the cue ball in the middle.",
+          ask=("how", "what", "should", "help", "better"),
+          avoid=("rules", "points", "score", "ball count", "how many", "take a break", "break up",
+                 "break in", "breaking in", "tea break", "lunch")),
+    entry("golf-putting",
+          (("putt", "putts", "putting", "putter", "green", "lag putt", "three putt"),
+           ("golf", "hole", "score", "better", "improve", "how", "practice", "practise")),
+          "For most club golfers the pace matters more than the line: pick a spot a foot past the "
+          "hole on the high side and try to roll the ball over it, because a putt that finishes "
+          "close is holed eventually and one that is hit too hard is not. Keep the wrists still "
+          "and rock the shoulders, with the same length back and through. On long putts, aim to "
+          "leave it inside a metre rather than to hole it.",
+          ask=("how", "what", "should", "help", "better", "improve"),
+          # the aim-and-the-tee row already answers "how do i improve my putting", and it says it
+          # better than this one does: this row is for the stroke itself
+          avoid=("put the kettle", "put off", "put on", "put up with", "put down", "put away",
+                 "putting on", "putting off", "putting up", "put it", "rules", "handicap",
+                 "improve my putting", "better at putting", "putting tips", "my putting",
+                 "putting stroke", "putting lesson",
+                 # a bare "put" is read as this row's "putting", so "how do i put a zip in a
+                 # dress" was the pace-of-putting answer. A zip is not a putt.
+                 "zip", "zips", "zipper", "zippers", "sew", "sewing", "seam", "hem")),
     # --- getting better at a game ------------------------------------------
     # "how do i get better at tennis" was a shrug, and the same ask for cricket, basketball,
     # darts and badminton reached the rules card, because those rows carry the bare word "how"
@@ -3211,7 +3951,12 @@ ENTRIES += [
           guard=_a_put_is_not_a_putt),
     entry("cricket-get-better",
           (("get better", "get better at", "improve", "better at", "practice", "practise",
-            "technique", "batting", "bowling", "score runs", "my batting", "my bowling"),
+            "technique", "batting", "bowling", "score runs", "my batting", "my bowling",
+            # the ask side of the bowling half: "how do i bowl a yorker" names the ball and the
+            # delivery but no word on this side, so the row never matched and the line got the
+            # search hedge
+            "bowl", "bowled", "bowling a", "how do i bowl", "my action", "run up", "no ball",
+            "no balls", "yorker"),
            # the words of the bowling half: "how do i bowl a yorker" matched nothing but the
            # ordinary "bowl" before, and the guard now wants a cricket word beside it
            ("cricket", "nets", "bowler", "batting", "bowling", "wicket", "batsman", "batter",
@@ -3836,6 +4581,14 @@ ENTRIES += [
           # the generic race window is a worse answer than that one.
           avoid=("parkrun", "park run", "pharmacy", "chemist", "shop", "supermarket", "bank",
                  "post office", "pub",
+                 # A house sale is not a fixture. "when will we exchange" and "when do we get the
+                 # keys" reached here and were answered with "No date from you on that one" - the
+                 # sport row asking for a date, because "when do" is its first group and a bare
+                 # "when" is in its second. The sale has its own row; these words stand this one
+                 # down so the sale's row can take them.
+                 "contracts", "contract", "completion", "complete", "exchange", "keys", "key",
+                 "house", "flat", "mortgage", "solicitor", "conveyancer", "sale", "seller",
+                 "buyer", "landlord", "tenancy",
                  "restaurant", "open", "opens", "opening", "close", "closes", "closing", "shut",
                  "shuts", "pill", "pills", "tablet", "tablets", "dose", "insulin", "ferry",
                  "flight", "train", "bus", "sunrise", "sunset", "shift", "appointment",
@@ -3966,7 +4719,11 @@ ENTRIES += [
           "and join a local league. Ask for a mentor for your first games, arrive an hour early and "
           "blow the whistle loud: players test a quiet one.",
           avoid=("paid", "pay", "earn", "salary", "reference", "feed the referee", "var",
-                 "how many points"),
+                 "how many points",
+                 # "how do i ask someone to be my referee" is a job reference with the same word,
+                 # and the bare "referee" plus "how" was enough for two points and this card
+                 "be my referee", "my referee", "referee for my", "referee for a job",
+                 "job reference", "for a job application", "for my job application"),
           bias=1),
     entry("referee-pay",
           (("referee", "referees", "ref", "whistle", "linesman", "assistant referee"),
@@ -3978,4 +4735,16 @@ ENTRIES += [
           "secretary what the fee and the travel rate are before your first appointment.",
           avoid=("job", "reference", "references", "employer", "cv", "application"),
           bias=2),
+
+    # A kit question for a wet match: the weather words keep it off the boots-buying row and the
+    # arrival-times row, and the guard needs all three parts (a sport, weather, a wear verb).
+    entry("kit-for-a-wet-match",
+          (_WET_MATCH_SPORT, _WET_MATCH_WEAR + _WET_MATCH_WEATHER),
+          _kit_for_a_wet_match,
+          # bias=3 because "what should i take to my sons rugby match, its freezing" tied with
+          # family.py's child-too-cold row (bias=2, keyed "son" + "freezing"), which answers about
+          # a baby's neck. That row's question is a child's body at night; this line's "freezing"
+          # is the weather at a match. family.py is over the file cap so it cannot be fenced here,
+          # and the guard above is what keeps this row narrow.
+          ask=_WET_MATCH_WEAR, guard=_a_wet_match, bias=3),
 ]

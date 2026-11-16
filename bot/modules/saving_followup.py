@@ -133,6 +133,17 @@ def TAKES_AS_IT_COMES(text, memory):
 
 def _read(text, memory):
     """The reply this line asks for as part of a saving plan, or ""."""
+    gap = saving.the_gap_left(text, memory)
+    if gap:
+        # "how far off am i" is two figures the chat already holds worked against each other. On
+        # main it reached the countdown reader and got a date - "That's about 3 weeks away" -
+        # because the pot line ("im on 4 thousand") had filed the 4th of the month as a date.
+        return gap
+    position = saving.the_pot_position(text, memory)
+    if position:
+        # The same two figures said without a question: "im on 4 thousand" was answered with an
+        # echo of the figure ("On 4 thousand, then."), which is the one thing a friend never does.
+        return position
     more_a_month = saving.the_extra_a_month_asked(text, memory)
     if more_a_month:
         # "and how much more a month would do it" is the question the verdict a turn ago invited:
@@ -286,3 +297,9 @@ def _read(text, memory):
         if answer:
             return answer
     return None
+
+from ..memory import again as _said_before  # noqa: E402 - applied once the module is defined
+
+# Whatever this module answers, the last thing that happens to it is the earlier-turn
+# check (bot/memory/again.replied): `answers` alone served a card again on 59 deck turns.
+respond = _said_before.replied(respond)

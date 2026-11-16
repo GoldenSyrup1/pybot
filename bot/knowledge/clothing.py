@@ -12,6 +12,7 @@ answer on its own.
 """
 import re
 
+from .wording import A_JOB_LEFT_UNDONE
 from .lookup import (ASK_ABOUT, A_WEATHER_ASK, a_food_is_being_kept, entry,
                      only_a_container)
 
@@ -89,6 +90,32 @@ A_MACHINE_RUNNING_WARM = (
     "pc", "console", "phone", "monitor", "printer", "hoover", "vacuum", "appliance")
 
 
+# A zip is two different jobs and the garment word does not tell them apart. "how do i sew a zip
+# into a dress" and "how do i put a new zip in a jacket" are the putting-in card, and the fault row
+# won both on the garment ("dress") and on "new" alone; the needle word, or the phrase for fitting
+# one, is what separates them. A line that also names a fault ("my zip is stuck, can i sew it")
+# stays with the fault card, so this is a guard on the fault row rather than an avoid word.
+_ZIP_NEEDLE = re.compile(
+    r"\b(?:sew|sews|sewing|sewn|stitch|stitches|stitching|unpick|unpicks|unpicking|baste|"
+    r"basting|tack|tacking|insert|inserts|inserting|zip foot|zipper foot|invisible zip)\b")
+_ZIP_FITTING = re.compile(
+    r"\b(?:put(?:ting)? (?:a |an |the )?(?:new )?zip|put in a zip|new zip|replace|replacing|"
+    r"replace the zip|fit a zip|fitting a zip|change the zip|changing the zip|zip needs "
+    r"replacing)\b")
+_ZIP_FAULT = re.compile(
+    r"\b(?:stuck|jammed|jam|fix|fixing|wont|won't|broken|broke|split|slider|teeth|repair|"
+    r"mend|mending|coming down|comes down|undone|unzipping|unzip|came off|come off|fell off|"
+    r"pull|pull tab|zip pull|zipper pull|zip tab|slider)\b")
+
+
+def _not_fitting_a_zip(understood):
+    """True unless the line is about putting a zip in, which is the sewing card's job."""
+    said = " ".join(str(understood.get(k) or "") for k in ("text", "clean", "norm_text")).lower()
+    if _ZIP_FAULT.search(said):
+        return True
+    return not (_ZIP_NEEDLE.search(said) or _ZIP_FITTING.search(said))
+
+
 def _the_date_night_is_a_meal(understood):
     """False when the date night is a meal: "what should i cook for a date night" is dinner.
 
@@ -157,6 +184,32 @@ def _a_hair_line(understood):
     text = str(understood.get("norm_text") or understood.get("clean")
                or understood.get("text") or "").lower()
     return bool(_HAIR_LINE.search(" " + text + " "))
+
+
+# A colour in front of "one" is a preference between two things, not a colour of washing: "do
+# you want the white one or the grey one" was answered "Wash white cotton at the hottest
+# temperature the label allows", because the whites wash keys on "white" and the shirt in the line
+# was only the colour of a choice. Nothing in the wash knows what the thing is, so the row stands
+# down. Same reading as `dishes.COLOUR_CHOICE`, where the vegetable rows were taking a "green".
+_A_COLOUR_CHOICE = re.compile(
+    r"\b(?:the|this|that|these|those|my|your|his|her|their|our|a|an)\s+"
+    r"(?:green|blue|red|black|white|grey|gray|brown|pink|purple|orange|yellow|beige|cream"
+    r"|navy|gold|silver)\s+(?:one|ones|thing|things|version|colour|color)\b", re.I)
+
+# A determiner alone is not a choice: the choice has to be put. Same reading as
+# `dishes._CHOICE_FRAME`, so the two rows agree on what a colour choice is.
+_A_CHOICE_FRAME = re.compile(
+    r"\bor\b|\bvs\b|\bversus\b|\bbetween\b|\bwhich\b|\bshall i\b|\bshould i\b"
+    r"|\bdo you want\b|\bwould you\b|\brather\b|\bprefer\b|\bpick\b", re.I)
+
+
+def _not_a_colour_choice(understood):
+    """False when the line is choosing between two colours, so no wash answers it."""
+    said = ""
+    if isinstance(understood, dict):
+        said = str(understood.get("norm_text") or understood.get("clean")
+                   or understood.get("text") or "")
+    return not (_A_COLOUR_CHOICE.search(said) and _A_CHOICE_FRAME.search(said))
 
 
 def _not_a_pane(understood):
@@ -368,6 +421,65 @@ _A_FAULTY_MACHINE = ("smell", "smells", "smelly", "stink", "musty", "damp", "mil
                      "stopped", "noise", "noisy", "banging", "rattle", "rattling", "flood",
                      "flooded", "stuck", "blocked", "smoking", "tripping", "fuse", "repair")
 
+# A sock is not a sock: "what socks go with a suit" reached no card at all and "which socks for
+# a wedding" was answered with when to book a hotel room, because "for a wedding" is the travel
+# row's key. What a person asks about a sock is which one to put on with what, so this is a card
+# of its own with the pairings people actually ask for. A sock being washed, smelling or full of
+# holes is a laundry or a repair line, and those words stand this row down.
+_SOCKS_FORMAL = re.compile(
+    r"\b(?:suit|suits|wedding|weddings|interview|interviews|funeral|funerals|smart|formal|"
+    r"black tie|office|work|dress|trousers|shirt|shirts)\b", re.I)
+_SOCKS_CASUAL = re.compile(
+    r"\b(?:jeans|trainer|trainers|sneaker|sneakers|shoe|shoes|plimsoll|plimsolls|gym|"
+    r"shorts|casual|sports?|running|walking|hiking|boots?)\b", re.I)
+_SOCKS_COLOUR = re.compile(
+    r"\b(?:brown|black|navy|grey|gray|white|tan|blue|beige)\b", re.I)
+
+
+# The two words that say the pairing is the question: "can i wear black socks with brown shoes" is
+# not a general colour rule, it is that pair.
+_SOCKS_BLACK_AND_BROWN = re.compile(r"\bblack\b.*\bbrown\b|\bbrown\b.*\bblack\b", re.I)
+_SOCKS_SPORT = re.compile(
+    r"\b(?:run|running|jog|jogging|marathon|half marathon|10k|5k|parkrun|gym|cycling|"
+    r"walking|hiking|sport|sports|football|rugby|netball|hockey)\b", re.I)
+
+
+def _socks(memory, understood):
+    """Dark and long with anything smart, plain and matching the trousers with everything else."""
+    said = _the_line(understood)
+    if _SOCKS_SPORT.search(said):
+        return ("For running, walking or the gym, wear a thin synthetic or merino-wool sock with a "
+                "flat seam across the toe, in the same shoe you train in: cotton holds sweat "
+                "against the skin and that is what blisters come from. Two thin pairs are warmer "
+                "and rub less than one thick pair, and the sock should be tight enough not to "
+                "bunch under the arch.")
+    if _SOCKS_BLACK_AND_BROWN.search(said):
+        return ("Black socks with brown shoes is the pairing to avoid: the sock should match the "
+                "trousers, so with brown shoes wear a dark brown, navy or charcoal sock, or keep "
+                "the shoes for a lighter suit. Nobody notices a sock that matches the trousers "
+                "and everybody notices one that fights the shoes.")
+    if _SOCKS_FORMAL.search(said):
+        return ("Dark socks that match the trousers rather than the shoes, long enough to cover "
+                "the calf so no bare leg shows when you sit down: navy, charcoal or black in "
+                "wool or a wool blend, plain unless the suit is patterned. Black socks with "
+                "brown shoes is the one pairing that looks wrong, so match the trousers and let "
+                "the shoes be their own colour.")
+    if re.search(r"\bwhite\b", said, re.I) and _SOCKS_CASUAL.search(said):
+        return ("White socks are fine with trainers, shorts and gym kit, and wrong with a suit "
+                "or smart trousers: with those, wear a dark sock that matches the trousers, long "
+                "enough that the calf stays covered when you sit down.")
+    if _SOCKS_CASUAL.search(said) or _SOCKS_COLOUR.search(said):
+        return ("Go by the trousers rather than the shoes: a plain sock a shade darker than the "
+                "trousers is the safe pairing, which means dark grey or navy with jeans and "
+                "charcoal or black with smart trousers. Cotton for everyday, wool or a wool "
+                "blend when the foot will be in a shoe all day, because cotton stays wet against "
+                "the skin.")
+    return ("Match the trousers rather than the shoes, dark navy, charcoal or black, and long "
+            "enough that no bare leg shows when you sit down. Cotton for everyday and wool or a "
+            "wool blend for a shoe you are in all day, and thin wool rather than thick cotton "
+            "with anything smart, because a thick sock makes a well-fitted shoe tight.")
+
+
 # The laundry that needs 60C rather than the everyday 30: a dial question that names one of these
 # is not the shirts-and-jeans question, and the answer leads with the heat they need.
 NEEDS_SIXTY = re.compile(
@@ -561,6 +673,29 @@ def _jeans_to_buy(memory, understood):
     return ("Jeans are fitted by three numbers, so try a size either side of the one you think "
             "you are: " + fit + ". Look for 98% cotton with a little elastane, which holds its "
             "shape without clinging, and a leg that is long enough not to ride up when you sit.")
+
+
+# A child who will not wear the thing is not a question about which one to buy. The refusal is the
+# morning card's question (bot/knowledge/family.py), and every wording of it puts a refusing verb
+# right beside the garment: wont wear, refuses to wear, wont put it on, fights getting dressed. The
+# buying row declines on that shape rather than on a list of the phrases people use, because the
+# phrases are endless and the shape is one.
+A_CHILD_REFUSING_A_GARMENT = re.compile(
+    r"\b(?:wont|won'?t|will not|refuses?|refusing|refused|hates?|hate wearing|fights?|fighting|"
+    r"screams?|cries?)\b[^.?!;]{0,40}"
+    r"\b(?:wear|wears|wearing|wore|put\b[^.?!;]{0,12}\bon|"
+    r"get (?:it|them) on|dressed|dressing|dress)\b", re.I)
+
+
+def not_a_fight_about_clothes(understood):
+    """False when the line is a child fighting the clothes, so a buying row stands down.
+
+    Public because bot/knowledge/family.py has the other two rows this shape reaches: the first
+    shoes ("my toddler wont wear his shoes" is the morning fight, not the size of the next pair)
+    and the sibling fight ("my son fights getting dressed" names one child and a wardrobe). The
+    verb-beside-the-garment shape is one shape, so one test serves all three.
+    """
+    return not A_CHILD_REFUSING_A_GARMENT.search(_the_line(understood))
 
 
 def _child_coat(memory, understood):
@@ -877,9 +1012,29 @@ _DRY_DOWN_WORDS = ("puffer", "puffa", "gilet", "gilets", "down jacket", "down co
                    "down gilet", "down sleeping bag", "down bag", "feather jacket")
 
 
+# The dryer is a machine, and a machine that is not drying the load is a fault rather than a drying
+# job: this row holds "dryer" in its key and answered "the tumble dryer leaves everything damp" with
+# "Hang the washing on a rack in the warmest room", which is advice for somebody who has no dryer.
+# The fault answer is written once, in home.py beside every other appliance fault, and read here.
+_A_DRYER = ("tumble dryer", "tumble drier", "washer dryer", "washer drier", "washer-dryer", "dryer",
+            "drier", "tumbler")
+
+
+def _the_dryer_at_fault(reading_said):
+    """Whether the line is a dryer of the person's own that is not drying the load."""
+    if not any(name in reading_said for name in _A_DRYER):
+        return False
+    if "hair dryer" in reading_said or "hairdryer" in reading_said:
+        return False
+    return any(phrase in reading_said for phrase in A_JOB_LEFT_UNDONE)
+
+
 def _drying_it(memory, understood):
     """How to dry the thing the line names, from the one drying card."""
     words = " ".join(str(one) for one in ((understood or {}).get("words") or ())).lower()
+    if _the_dryer_at_fault(words):
+        from .home import _dryer_heat
+        return _dryer_heat(memory, understood)
     # A down jacket is the one coat that must not drip dry: hanging it wet leaves the down in
     # clumps that never loft again, so the coat branch below is the wrong advice for it. The bare
     # word "down" is not enough on its own ("dry my coat down"), so a down word, or "down" beside
@@ -931,6 +1086,13 @@ _HAIR_HOME_DARKER = (
     "Going darker is the forgiving direction: a box dye adds colour rather than lifting it, so it "
     "covers grey and can go several shades at once - the risk is a flat, matte result rather than "
     "a shade that will not take.")
+# The length of time the dye stays on, for the person asking how long rather than which shade:
+# the card opened on choosing a shade and buried the minutes in a later sentence.
+_HAIR_HOME_LENGTH = (
+    "Go by the box: most permanent dyes want 20 to 30 minutes and a semi-permanent 10 to 20, and "
+    "the roots go on first with the colour pulled through the ends for the last ten minutes only, "
+    "so they are not done twice. Do the 48-hour patch test first, rinse in cool water until it runs "
+    "clear, then condition.")
 _HAIR_HOME_DARK_WORDS = ("black", "darker", "dark", "brown", "brunette", "chocolate", "espresso",
                          "deep", "navy", "auburn", "mahogany", "chestnut")
 _HAIR_HOME_GREY = (
@@ -938,6 +1100,38 @@ _HAIR_HOME_GREY = (
     "salon. Pick a shade one lighter than you want, because grey takes colour cooler and darker "
     "than the swatch, and use a permanent rather than a semi if you want the grey gone rather than "
     "blended for a few washes.")
+
+
+# A cut and a colour are two different fixes, and the answer has to lead with the one they said.
+# "i got a bad haircut" wants the trim, the growing out and the free correction; "my hair dye went
+# wrong" wants a colourist and a toner, and leading with "it will grow out" for the colour is a
+# fluent answer to the wrong half of the complaint.
+_BAD_COLOUR_WORDS = ("dye", "dyed", "dyeing", "colour", "color", "bleach", "bleached",
+                     "highlights", "toner", "patchy", "brassy", "orange", "went green",
+                     "turned green", "too dark", "went too dark", "came out too dark")
+
+_THE_BAD_CUT = (
+    "It will grow out: a bad cut stops being noticeable in two to three weeks, and until then it "
+    "needs one small, even trim rather than a rescue at home. Go back within a week and say plainly "
+    "which part you do not like - most salons and barbers put a cut right for free, and you can ask "
+    "for a different stylist. A fringe that went too short is three weeks of wearing it to the side "
+    "with a pin. Take a photo today, because that is what a refund or a free correction rests on if "
+    "they will not have it back.")
+
+_THE_BAD_COLOUR = (
+    "That one is fixable at a salon rather than at home: a colourist can tone a patchy, brassy or "
+    "too-dark result in ten to twenty minutes, usually £20 to £40, and a toner adds no damage the "
+    "way another box dye does. Go back within a week and say what you do not like, because most "
+    "salons correct their own colour free. If it was a box dye at home, give it three weeks: it "
+    "fades, and a clarifying shampoo speeds that up. Do not put a lightener over an orange or "
+    "patchy result yourself - that is how a cheap fix turns into a salon correction.")
+
+
+def _the_bad_haircut(memory, understood):
+    """The cut answer or the colour answer, whichever they complained about."""
+    if _any_word(_the_line(understood), _BAD_COLOUR_WORDS):
+        return _THE_BAD_COLOUR
+    return _THE_BAD_CUT
 
 
 def _hair_colour_home(memory, understood):
@@ -948,6 +1142,12 @@ def _hair_colour_home(memory, understood):
     brassy. The rest of the card is the same advice, so only the opening sentence changes.
     """
     said = _the_line(understood)
+    # A how-long is the dye's own clock, not the shade to pick: "how long should i leave a hair
+    # dye on". "How long does a box dye last" is the bottle's shelf life, so "last" stays out.
+    if ("how long" in said or "how many minutes" in said or "leave it on" in said
+            or "leave on for" in said):
+        if not _any_word(said, ("last", "lasts", "keep", "keeps", "shelf", "expire", "go off")):
+            return _HAIR_HOME_LENGTH
     if _any_word(said, ("grey", "gray", "greys", "grays", "white hair", "going grey")):
         return _HAIR_HOME_GREY + _HAIR_HOME_TAIL
     if (_any_word(said, _HAIR_HOME_DARK_WORDS)
@@ -1004,6 +1204,121 @@ def _grease_is_not_a_burn(understood):
     if not _A_BODY_PART.search(text):
         return True
     return not any(word in text for word in _ONTO_A_PERSON)
+
+
+# A height said in feet is not the feet. "im 5 foot 2 and i need trousers for work, what do i
+# look for" was answered by the standing-all-day card on main `256b47bd`: the row keys "foot" and
+# "for work", and a measurement in the same line made it look like a shift on the feet. The test
+# is not the measurement alone, though - "5ft 2 and standing all day at work kills my feet" is a
+# day on the feet with a height in it - so the row stands down only when the line measures
+# somebody and nothing else in it is about the feet, a shift or a shoe.
+_A_HEIGHT = re.compile(
+    r"\b(?:one|two|three|four|five|six|seven|eight|nine|1|2|3|4|5|6|7|8|9)"
+    r"\s*(?:foot|feet|ft|')\b"
+    r"|\b\d+\s*(?:foot|feet|ft)\b"
+    r"|\b(?:foot|feet)\s+tall\b"
+    r"|\bfeet\s+and\s+(?:a\s+half|inches)\b")
+
+# The words that make a line about a day on the feet rather than about a measurement: a complaint
+# in the feet, a shift, or a shoe. They keep the row even when the height is in the line.
+_ON_THE_FEET = re.compile(
+    r"\b(?:on (?:my|her|his|their|our) feet|standing|stand|stood"
+    r"|feet (?:hurt|ache|are killing|are sore|are tired|are swollen)"
+    r"|foot (?:hurts|aches)|sore feet|aching feet|killing me|blister|blisters"
+    r"|shoes?|trainers?|boots?|insoles?|mat)\b")
+
+
+# "what should i wear to a wedding" already has a card - the white-and-cream one, which is a
+# neighbour's contract (`tests/test_a_wedding_outfit_is_not_a_hotel.py`), and a named code has its
+# own card too. So the outfit-shortage row keeps only the line that says it has nothing to put on,
+# or asks for ideas; every other what-shall-i-wear line stays with the card that already answers it.
+_A_WEDDING_SHORTAGE = re.compile(
+    r"\b(?:nothing (?:to wear|that fits|at all to wear|in my wardrobe|i can wear)"
+    r"|no (?:outfit|idea what to wear)"
+    r"|haven'?t got (?:anything|a thing|an outfit|nothing)"
+    r"|don'?t have (?:anything|an outfit|a thing)"
+    r"|need (?:something|an outfit|a suit|a dress)"
+    r"|any ideas|ideas|suggestions|suggest|help)\b")
+
+# A code the line names has its own answer (black tie, morning dress), and so does a single
+# garment or accessory asked about by name. The shortage row stands down for those.
+_A_NAMED_DRESS_CODE = re.compile(
+    r"\b(?:black tie|white tie|morning dress|lounge suit|bow tie|dress code|cocktail|smart casual"
+    r"|colour|color|jumpsuit|hat|shoes?|tie)\b")
+
+
+def _an_outfit_shortage(understood):
+    """True to keep the wedding-outfit row: the line has nothing to wear or asks for ideas."""
+    text = " ".join(str((understood or {}).get(key) or "")
+                    for key in ("clean", "norm_text", "text", "raw", "rewritten", "plain"))
+    words = (understood or {}).get("words") or ()
+    text = (text + " " + " ".join(str(word) for word in words)).lower()
+    if _A_NAMED_DRESS_CODE.search(text):
+        return False
+    return bool(_A_WEDDING_SHORTAGE.search(text))
+
+
+# A garment that no longer fits is not a garment that needs ironing, and the ironing row keys
+# "clothes" and "none" - so "none of my jeans fit me now" and "none of my clothes fit after a
+# year off" were both sent to the no-iron card. The size words are what tell them apart.
+_A_FIT_OR_A_SIZE = re.compile(r"\b(?:fits?|fitting|tight(?:er)?|loose[rd]?|baggy|sizes?|"
+                              r"smaller|bigger|slimmer|heavier)\b")
+
+
+def _the_line_is_not_about_fit(understood):
+    """True to keep the ironing row: the line is about creases, not about a size."""
+    text = " ".join(str((understood or {}).get(key) or "")
+                    for key in ("clean", "norm_text", "text", "raw", "rewritten", "plain"))
+    words = (understood or {}).get("words") or ()
+    text = (text + " " + " ".join(str(word) for word in words)).lower()
+    return not _A_FIT_OR_A_SIZE.search(text)
+
+
+# Weight that comes off without trying is one of the few lines in a chat like this worth a
+# check, and the wardrobe answer is the wrong place to tell somebody to buy two pairs of
+# trousers. "i lost weight and none of my clothes fit" was this row's, and the health card
+# ("weight that comes off by itself shouldn't be ignored") said it better, so the check goes
+# first in front of the advice rather than the row standing down: somebody whose clothes no
+# longer fit still needs to know what to buy once they have been checked.
+_A_WEIGHT_COMING_OFF = re.compile(
+    r"\b(?:lost|losing|lose|shed|dropped|dropping)\s+"
+    r"(?:a\s+|an\s+|some\s+|loads\s+of\s+|lots\s+of\s+)?"
+    r"(?:lot\s+of\s+|bit\s+of\s+|few\s+|little\s+)?"
+    r"(?:weight|stones?|pounds?|lbs?|kilos?|kg)\b"
+    r"|\bweight\s+(?:loss|lost|off|coming off|coming down|dropped|falling|gone)\b"
+    r"|\bslimmed down\b|\bdown\s+(?:a\s+)?(?:stone|dress size|size or two)\b")
+
+
+_A_WARDROBE_ADVICE = (
+    "Buy the size you are now, not the one you were: two pairs of trousers and three tops that "
+    "fit at the shoulder and the waist cover most of a week, and a straight cut or a little "
+    "stretch forgives more than a fitted one. Measure yourself once with a tape over what you "
+    "wear underneath and buy to those numbers, because the label varies by shop by as much as "
+    "two inches - try the two nearest sizes and keep the one that sits right. Restock one thing "
+    "at a time, in colours that go with what you already have, and don't buy a whole wardrobe "
+    "until your weight has been steady for a couple of months.")
+
+
+def _the_size_you_are(memory, understood):
+    """The restocking advice, with the weight check in front when the weight came off alone."""
+    said = _the_line(understood)
+    if _A_WEIGHT_COMING_OFF.search(" " + said + " "):
+        return ("If the weight came off without you trying, get it checked first: that is worth "
+                "one appointment, and weight that comes off by itself shouldn't be ignored. "
+                "Then, when you restock, " + _A_WARDROBE_ADVICE[0].lower()
+                + _A_WARDROBE_ADVICE[1:])
+    return _A_WARDROBE_ADVICE
+
+
+def _the_feet_are_not_a_height(understood):
+    """True to keep a feet row: the line is not just measuring somebody."""
+    text = " ".join(str((understood or {}).get(key) or "")
+                    for key in ("clean", "norm_text", "text", "raw", "rewritten", "plain"))
+    words = (understood or {}).get("words") or ()
+    text = (text + " " + " ".join(str(word) for word in words)).lower()
+    if not _A_HEIGHT.search(text):
+        return True
+    return bool(_ON_THE_FEET.search(text))
 
 
 ENTRIES = [
@@ -1238,7 +1553,8 @@ ENTRIES = [
                  "black", "blacks", "black clothes", "black clothing", "navy", "charcoal",
                  "black top", "black tops", "black t shirt", "black t shirts", "black shirt",
                  "black shirts", "black trousers", "black dress", "black dresses",
-                 "black jeans", "black leggings", "black socks")),
+                 "black jeans", "black leggings", "black socks"),
+          guard=_not_a_colour_choice),
     entry("musty-laundry", (("musty", "smelly", "smell", "smells"),
                             ("washing", "laundry", "towels", "clothes", "machine", "tumble",
                              # a bedding that has gone sour is the same job as a towel that has:
@@ -1489,6 +1805,11 @@ ENTRIES = [
                  # "shine" here plus "get rid" was enough
                  "nose", "face", "faces", "forehead", "chin", "skin", "cheeks", "cheek",
                  "t-zone", "t zone", "greasy skin", "oily skin", "my face", "greasy face",
+                 # ... and the same shine on any other part of a person is not a garment's either:
+                 # "how do i get rid of the shine on my hands" was told to sponge it with white
+                 # vinegar and cover it with a pressing cloth once the mark-on-skin row stood down.
+                 "hands", "hand", "fingers", "finger", "knuckles", "wrist", "wrists", "palm",
+                 "palms", "neck", "thighs", "knees", "arms", "armpits", "scale", "scalp",
                  "polishing", "floor", "flooring", "tiles", "worktop", "sofa", "settee", "car",
                  "paint", "paintwork", "hair",
                  # "glossy" is one edit from "gloss", so "how do i strip old gloss off a door"
@@ -1699,8 +2020,13 @@ ENTRIES = [
                  "no longer heats", "no longer heating", "no longer gets hot", "doesnt heat",
                  "doesn't heat", "does not heat", "stopped heating", "istant working"),
           bias=2),
-    entry("yellow-pillows", (("pillow", "pillows"), ("yellow", "wash", "whiten", "smell",
-                                                       "stains", "old")),
+    # A pillowcase is a pillow to the wash, and the word people use for it is the whole line's
+    # only pillow word: "how do i whiten yellowed pillowcases" was the search shrug, because the
+    # key took "pillow" and the reading of "pillowcases" never contains it.
+    entry("yellow-pillows", (("pillow", "pillows", "pillowcase", "pillowcases", "pillow case",
+                              "pillow cases"),
+                             ("yellow", "yellowed", "yellowing", "wash", "whiten", "smell",
+                              "stains", "old")),
           "Wash them two at a time on a hot cycle with a scoop of oxygen bleach and a little "
           "detergent, then dry them thoroughly in a tumble dryer with a clean tennis ball to "
           "fluff them up. If they stay yellow or smell after that, replace them: pillows last "
@@ -1761,9 +2087,17 @@ ENTRIES = [
           "in a net bag. Keeping your nails smooth, your feet smooth and putting them on with "
           "damp hands is what stops the next one.",
           # a ladder, a hole, a snag or a run has to be named: "tight" is a form of "tights",
-          # so without this a tight calf and a tight pair of jeans got the nail-polish answer
-          ask=("ladder", "ladders", "laddering", "snag", "snagged", "snags", "hole", "holes",
-               "torn", "rip", "rips", "run in", "runs in", "a run")),
+          # so without this a tight calf and a tight pair of jeans got the nail-polish answer.
+          # And the ladder has to be the one in the fabric: a bare "ladder" is a thing you climb,
+          # so "i cant keep going up and down the ladder all day" got nail polish and a net bag.
+          # A run in a stocking is "a ladder in", "a laddered pair", or the tights themselves
+          # named in the line, and none of those is said about a stepladder.
+          # "laddered" and "laddering" are forms of "ladder" to the matcher, so they name the
+          # stepladder as readily as the stocking: the phrase that carries the fabric is the
+          # preposition ("a ladder in") or the garment itself.
+          ask=("ladder in", "ladders in", "snag", "snagged", "snags",
+               "hole", "holes", "torn", "rip", "rips", "run in", "runs in", "a run",
+               "tights", "stockings")),
     # Putting the winter things away in spring is not folding them and not packing them: it is a
     # storing question with its own answer, and main had none - "how do i store winter clothes"
     # was given the 2-to-8C packing list for a cold city break.
@@ -1801,8 +2135,10 @@ ENTRIES = [
           (("hem", "hems", "hemming", "hemline", "shorten", "shortening", "take up", "taking up",
             "turn up", "turned up", "turnups", "turn ups", "too long", "to long", "drag",
             "drags", "dragging", "let down"),
-           ("jeans", "denim", "trousers", "pants", "chinos", "skirt", "dress", "curtains",
-            "sleeves", "coat", "shirt", "t shirt", "legs")),
+           # "how do i take up a hem" names no garment at all, and it was a hedge for that
+           # reason: what is being shortened is the hem itself, so the hem counts as the thing
+           ("hem", "hems", "hemline", "jeans", "denim", "trousers", "pants", "chinos", "skirt",
+            "dress", "curtains", "sleeves", "coat", "shirt", "t shirt", "legs")),
           _take_up_hem,
           # a pair to be bought, brought in or stretched is the rows above, and a wash, a stain
           # or a hole is the care rows'
@@ -1821,6 +2157,18 @@ ENTRIES = [
                           "keeps coming down", "comes down", "come apart", "came apart",
                           "broken", "split", "teeth", "slider", "pull", "fly", "coat",
                           "repair", "mend", "replace", "new",
+                          # the verbs people use for a zip that will not move: "how do i
+                          # unjam my zip" went to the archive card and "how do i unstick a
+                          # zip" to nothing, because only "stuck" and "jammed" were here
+                          "unjam", "unjamming", "unstick", "unsticking", "loosen",
+                          "loosening", "free", "free it up", "moves", "wont move",
+                          "won't move", "stiff", "gritty", "grit",
+                          # a zip that opens itself is the slider worn, the same fault as a
+                          # stuck one: "how do i stop a zip coming undone" was answered with how
+                          # to unpack a .zip file, and the pencil wax and new slider are the fix
+                          "coming undone", "comes undone", "keeps unzipping", "unzipping",
+                          "wont stay up", "won't stay up", "wont stay done up",
+                          "wont stay fastened", "slides down",
                           "trousers", "jeans", "skirt", "dress", "boots", "boot", "hoodie",
                           "sleeping bag", "tent", "suitcase", "bag")),
           "Don't force it: rub a pencil point or a little candle wax along the teeth, pull the "
@@ -1828,7 +2176,7 @@ ENTRIES = [
           "zipping it back on from the bottom usually fixes it; otherwise a tailor can replace the "
           "whole zip.",
           # a zip that is doing its job is not a fault, and the archive words keep a zip file out
-          bias=2,
+          bias=4,
           avoid=("file", "files", "folder", "download", "upload", "email", "attachment",
                  "compressed", "zip code", "postcode",
                  # A zip that broke is two questions, and this card answers only one of them.
@@ -1839,7 +2187,40 @@ ENTRIES = [
                  "took it back", "send it back", "sent it back", "arrived with", "arrived broken",
                  "arrived damaged", "came broken", "came damaged", "faulty", "consumer rights",
                  "my rights", "warranty", "guarantee", "under guarantee", "reject it",
-                 "money back", "bought it", "i only bought")),
+                 "money back", "bought it", "i only bought"),
+          guard=_not_fitting_a_zip),
+    # Put the zip in, rather than do the zip up. "how do i sew a zip in" was answered with how to
+    # unpack a .zip file, and "how do i stop a zip coming undone" with the same, because the
+    # archive rows ask for a bare "how" beside "zip" and nothing told them a needle was involved.
+    # The fault rows own a zip that is stuck or broken; this one owns a zip that is being sewn,
+    # replaced or will not stay done up.
+    entry("sewing-a-zip",
+          (("zip", "zips", "zipper", "zippers"),
+           ("sew", "sewing", "sewn", "stitch", "stitching", "unpick", "unpicking", "baste",
+            "basting", "tack", "tacking", "insert", "inserting", "put in", "put a new",
+            "zip foot", "zipper foot", "invisible zip", "fabric", "hem", "seam", "dressmaking",
+            "replace", "replacing", "new zip",
+            # how people actually word it: the verb and the zip are rarely next to each other
+            # ("how do i put a zip in a dress", "how do i put a zip fly in", "how do i shorten
+            # a zip"), and "put in" only matched when the two sat side by side.
+            "put a zip", "zip in", "sewing a zip", "sew a zip", "zip fly")),
+          "Open the seam where the zip goes and press it flat, then pin the zip face down on the "
+          "right side with the teeth on the seam line and baste it by hand - the basting is what "
+          "keeps the two sides level, and a zip foot lets the needle run close to the teeth "
+          "without catching them. Stitch one side, close the zip, check the seam lines up, then "
+          "stitch the other side and unpick the basting. To replace one, unpick the old zip "
+          "without cutting the seam allowance and reuse its opening. A zip that slides open "
+          "behind the slider is the slider worn, so pinch it gently with pliers or fit a new "
+          "slider; if the teeth have gone, the zip has to come out.",
+          ask=("sew", "sewing", "sewn", "stitch", "stitching", "unpick", "baste", "insert",
+               "zip foot", "fabric", "hem", "seam", "put", "putting", "new", "fit", "fitting",
+               "change", "changing", "replace", "replacing"),
+          avoid=("file", "files", "folder", "folders", "download", "upload", "email", "attachment",
+                 "compressed", "compress", "zip code", "postcode", "unzip", "extract",
+                 "stuck", "jammed", "wont close", "won't close", "wont zip", "won't zip",
+                 "return", "returns", "refund", "send it back", "faulty",
+                 "arrived", "warranty", "guarantee", "sleeping bag", "tent", "suitcase"),
+          bias=2),
     # the smell is what is asked for and the feet are the subject: bare "feet" in a key group
     # beside "what" and "help" made this entry answer "my feet hurt after standing all day"
     entry("smelly-feet", (("smelly feet", "feet smell", "foot odour", "foot odor", "stinky feet",
@@ -1936,6 +2317,13 @@ ENTRIES = [
                  # "what temperature for towels" is this row's own question and its answer names
                  # towels, so towels are read here; a towel that needs washing carries no heat word
                  "dishwasher", "tumble dryer", "dryer", "bath mat", "flannel",
+                 # the weather and the line are not the dial: "is it too cold to hang the washing
+                 # out" read this row's "cold" and "washing" and was told to treat 30C as the
+                 # everyday setting. `home_craft.washing-outside` is the answer to those lines.
+                 "hang", "hanging", "hung", "out on the line", "on the line", "washing line",
+                 "outside", "outdoors", "drying", "dries", "dry outside", "air dry", "airer",
+                 "weather", "forecast", "today", "tomorrow", "rain", "raining", "wind", "windy",
+                 "frost", "sunny", "sunshine",
                  # a duvet or a pillow is its own card, which says which ones even go in a
                  # machine: "can i wash a duvet at 60" is not the everyday dial
                  "duvet", "duvets", "pillow", "pillows",
@@ -1962,7 +2350,10 @@ ENTRIES = [
           # "i wash them at 40" and "i tried a hot wash already" are the machine's past, and this
           # row read both as an ask
           ask=("what", "which", "should", "is", "does", "do i", "can i", "could", "would",
-               "will", "how", "temperature", "temp", "need", "best", "right")),
+               "will", "how", "temperature", "temp", "need", "best", "right"),
+          # "is it cold enough for a coat" is a coat question: this row read its own "cold" and
+          # "enough" and told a person going out to treat 30C as the everyday setting
+          guard=lambda understood: not _the_enough_is_about_a_garment(understood)),
 
     entry("wash-wool-temp",
           (("wool", "woollen", "woolen", "merino", "lambswool", "cashmere", "jumper", "jumpers",
@@ -1979,11 +2370,26 @@ ENTRIES = [
           # wool that has already shrunk is the restore card, a wool coat is its own thing, and a
           # stain on wool is a stain
           avoid=("shrank", "shrunk", "shrunken", "coat", "coats", "stain", "stains", "smell",
-                 "moths", "pilling", "bobble", "bobbles", "dry clean", "iron"),
+                 "moths", "pilling", "bobble", "bobbles", "dry clean", "iron",
+                 # choosing one is the knitwear-buy row below, and "warm" is the temperature
+                 # question in this row's ask as well as the warmth one in that row's key:
+                 # "i want a warm jumper for winter" was answered with how to wash wool
+                 "buy", "buying", "bought", "best", "warmest", "warmer", "warm enough",
+                 "for winter", "which jumper", "what jumper", "cheap", "price", "cost",
+                 "present", "gift"),
           # the heat is this row's question and the cleaning.py hand-wash card answers "how do i
           # hand wash a cardigan": without this guard every wool how-to came here instead
           ask=("temperature", "temp", "degrees", "30", "40", "60", "90", "hot", "hotter", "warm",
-               "cold", "cool")),
+               "cold", "cool"),
+          # "i washed my wool jumper hot" then "is it ruined": the card above is already on the
+          # screen, and what the person wants is whether the jumper is gone. It is not - felted
+          # wool does not come all the way back, and a half hour in cool water and a stretch gets
+          # the size back - and saying that is the whole answer.
+          outcomes=(("survives",
+                     "Not gone, but not what it was: a hot wash felts wool, so it comes out "
+                     "smaller and thicker and does not go all the way back. Half an hour soaking "
+                     "in cool water with a little hair conditioner or wool wash, then stretch it "
+                     "back to shape while it is wet and dry it flat, gets most of the size back."),)),
     # --- stains ---------------------------------------------------------------
     # A yes-or-no about the first wear is an answer, not a weighing-up: this went to the shrug
     # "can't call that one for you, say what you'd lose either way".
@@ -2056,6 +2462,12 @@ entry("stain-engine-oil",
                  "stool", "stools", "bench", "benches", "cabinet", "cabinets", "wardrobe",
                  "fence", "shed", "garden", "model", "figures", "canvas", "picture", "cartoon",
                  "nails painted", "what colour", "which colour", "what color", "which color",
+                 # A colour that came out wrong is not a stain to lift, and "my gloss came out too
+                 # dark" and "my varnish came out too dark" were met with washing-up liquid and
+                 # cold running water because the line says "came out" and names a paint. What a
+                 # finish that dried too dark needs is the decorating answer.
+                 "too dark", "darker", "too pale", "too light", "too strong", "too bright",
+                 "wrong colour", "wrong color", "went dark", "dried dark",
                  "thin", "thinning", "dilute", "peeling", "bubbling", "blistering",
                  "drying time", "dry time", "how long to dry", "coats", "two coats",
                  # a tin is what to do with the paint you have left, not a stain
@@ -2279,7 +2691,18 @@ entry("stain-engine-oil",
                  # "soft" is a key word here because of a stiff pair of shoes, and an egg has a
                  # soft yolk: "how do i get a soft yolk" was told to cover it with a blister
                  # plaster. A yolk is never a rubbed heel, so the egg stands this row down.
-                 "yolk", "yolks", "egg", "eggs", "boiled", "boil", "poached", "scrambled")),
+                 "yolk", "yolks", "egg", "eggs", "boiled", "boil",
+                 "poached", "scrambled",
+                 # "soft" is a key word here because a stiff new pair of shoes is this row's
+                 # question, and it is also the soft in a soft reset, a soft light and a soft
+                 # close. That made "how do i soft reset my android" answer "cover it with a
+                 # proper blister plaster" - it tied with the phone's own card and this row is
+                 # read first. A line that names a machine is the machine's, so this row stands
+                 # down on the device words.
+                 "phone", "iphone", "android", "tablet", "ipad", "kindle", "laptop",
+                 "computer", "pc", "screen", "software", "reset", "factory reset", "app",
+                 "apps", "wifi", "wi-fi", "router", "battery", "charger", "keyboard",
+                 "mouse", "settings", "device", "console", "controller", "printer")),
     # a floor, a job and a pair of feet: the ache is the question, and nothing else in the
     # domains answers it, so the smell, blister and cold-feet lines are left to their own entries
     entry("aching-feet", (("feet", "foot", "heels", "arches", "soles"),
@@ -2346,6 +2769,7 @@ entry("stain-engine-oil",
            "ankles swell. If the heel is worst on your first steps in the morning, that is plantar "
            "fasciitis rather than the standing, and it wants stretching rather than a mat."),
           bias=1,
+          guard=_the_feet_are_not_a_height,
           # a swelling, a smell, a blister, a shoe to buy and the ache after a run are five other
           # answers, and a bare "my feet hurt" keeps the arch card it has always had
           ask=("on my feet", "standing", "stand all day", "stood all day", "standing up all day",
@@ -2523,6 +2947,10 @@ entry("stain-engine-oil",
                  "white", "canvas",
                  "buy", "buying", "which", "fit", "fits", "size", "blister", "cheap",
                  "price", "cost", "shop", "brand",
+                 # choosing a pair is the buying question, and it is said with "get":
+                 # "what boots should i get for playing in the rain" was the newspaper answer
+                 "should i get", "what boots", "best boots", "good boots", "what trainers",
+                 "best trainers", "what shoes", "best shoes", "recommend", "worth it",
                  "car", "cars", "van", "trunk", "boot of", "in the boot", "boot floor",
                  "boot space", "car key"),
           bias=2),
@@ -2702,7 +3130,16 @@ entry("stain-engine-oil",
                  "pillow", "balloon", "paint", "floor", "flatmate", "flatmates", "flat pack",
                  "flat-pack", "flat white", "flat rate", "rent", "landlord", "beard", "beards",
                  "moustache", "mustache", "stubble", "eyebrows", "eyebrow", "speaker",
-                 "speakers", "tv", "television", "phone", "laptop")),
+                 "speakers", "tv", "television", "phone", "laptop",
+                 # "wont go down" is in the key above, and now that the two spellings of a
+                 # contraction are the same words it also reads "will not go down". Water, a
+                 # price and the swelling on a knee go down without any hair in the line: "the
+                 # sink is blocked and the water will not go down" was answered with pressing
+                 # the lengths down instead of the plughole.
+                 "water", "sink", "drain", "drains", "plughole", "pipe", "pipes", "tap", "taps",
+                 "toilet", "loo", "blocked", "blockage", "plunger", "boiler", "radiator",
+                 "pressure", "price", "prices", "cost", "costs", "cheaper", "inflation",
+                 "swelling", "swollen", "knee", "ankle", "temperature", "fever", "sun")),
     entry("greasy-hair", (("greasy", "oily", "limp"),
                           ("hair", "wash", "shampoo", "less", "roots", "every day")),
           "Shampoo just the roots, condition only the ends, and finish with cool water. Washing "
@@ -2738,6 +3175,38 @@ entry("stain-engine-oil",
     # home" was a shrug and "how do i cover my grey roots" was the plant-roots card. One row
     # per decision, the way the hair-care rows above are split: putting colour in, lifting it
     # out, the roots, taking a colour back off, and hair that is already damaged.
+    # A parent asking about a 14 year old's hair is not asking how to colour their own:
+    # "my daughter is 14 and wants to dye her hair" was answered with the shade and patch-test
+    # card for an adult doing a box dye.
+    entry("hair-colour-teen",
+          (("daughter", "son", "teenager", "teenagers", "teen", "child", "kid", "my girl",
+            "my boy", "year old", "13 year old", "14 year old", "15 year old", "16 year old",
+            "12 year old", "is 13", "is 14", "is 15", "is 16"),
+           ("hair dye", "hair colour", "hair color", "dye", "dyed", "dyeing", "bleach",
+            "highlights", "streaks", "permanent", "semi permanent", "semi-permanent",
+            "wash out",
+            # the colour is only this row's when it is the colour of the hair: a bare "pink"
+            # beside "daughter" is pink shoes, and "covered in blue paint" was answered with a
+            # semi-permanent hair colour
+            "pink hair", "blue hair", "green hair", "purple hair", "red hair", "blonde hair",
+            "blond hair", "unnatural colour", "unnatural color", "bright colour",
+            "colour her hair", "colour his hair", "color her hair", "color his hair")),
+          "Let them start with a semi-permanent or a wash-out colour: it fades out in six to "
+          "eight washes, so a mistake costs a month rather than a year, and it needs no bleach. "
+          "Read the box together for the 48-hour patch test and do that first, then colour over a "
+          "basin with gloves and an old towel, and keep anything lighter than two shades of their "
+          "own colour for a salon - a home bleach on a teenager is what goes orange. Check the "
+          "school's rule on 'unnatural' colours before you buy, because that is the argument you "
+          "actually want to avoid.",
+          # the ask words are the question words and the report words, because a parent very
+          # often tells you the thing rather than asks it: "your daughter wants highlights" was
+          # answered "Noted: your daughter wants highlights"
+          ask=("my", "your", "can", "should", "is", "what", "how", "would", "want", "wants",
+               "wanted", "asked", "asking", "keeps asking", "is asking", "has asked"),
+          avoid=("tattoo", "tattoos", "piercing", "piercings", "ear", "ears", "belly button",
+                 "nails", "makeup", "make up", "prom", "wedding", "grey", "gray",
+                 "carpet", "sofa", "towel stain", "off my skin", "off my hands",
+                 "shampoo", "haircut", "cut her hair", "cut his hair")),
     entry("hair-colour-home",
           (("hair", "hair dye", "box dye", "roots"),
            ("dye", "dyed", "dyeing", "dye my hair", "colour it", "color it", "tint",
@@ -2795,8 +3264,11 @@ entry("stain-engine-oil",
           ask=("hair", "bleach", "bleached", "bleaching", "blonde", "lighter", "lighten",
                "highlights", "henna", "go"),
           # "can i dye it without bleach" is the dye job's question, and it is answered by the
-          # row above, which says what a box dye will and will not do on its own
-          bias=1,
+          # row above, which says what a box dye will and will not do on its own.
+          # 2, not 1: _rank gives a point for every key word that exactly one row in the domain
+          # uses, and hair-colour-teen now says dye, dyed, dyeing and highlights too, so this
+          # row lost that point and "how do i dye my hair blonde" fell to the box-dye card.
+          bias=2,
           avoid=("bathroom", "kitchen", "toilet", "loo", "mould", "mold", "mildew", "drain",
                  "white shirt", "whites", "laundry", "washing machine", "tea towel", "towel",
                  "bedding", "sheets", "wood", "floor", "grout", "tile", "tiles", "dog",
@@ -2849,11 +3321,58 @@ entry("stain-engine-oil",
                  # a shirt, a towel or a cushion is not a head of hair
                  "shirt", "t-shirt", "top", "clothes", "fabric", "jeans", "cushion", "curtain",
                  "tie dye", "tie-dye", "egg", "eggs", "wood", "leather", "shoes", "sofa",
+                 # a sock, a scarf and a pair of trousers are worn rather than dyed: "what colour
+                 # socks with grey trousers" was answered with touching up the roots
+                 "sock", "socks", "scarf", "trousers", "trouser", "shirt", "jumper", "cardigan",
                  # "touch up" is in this row's ask and its key, so "how do i touch up a scratch
                  # on my car" answered itself with roots and regrowth: a car's paint is the
                  # cars row's business, and a scratch is nobody's hair
                  "car", "cars", "van", "vans", "bonnet", "bumper", "bodywork", "paintwork",
                  "scratch", "scratches", "scratched", "stone chip", "stone chips", "lacquer")),
+    # "The blame half of this stays with the refund card in `consumer.py`: "the barber cut it too
+    # short", "she cut my hair too short" and "the hairdresser cut too much off" are a complaint
+    # about somebody's work, and a test there names `services-ruined` for them, so the key here
+    # is the softer shape - a cut they are unhappy with and no one blamed yet, which is the
+    # commoner way people bring it up ("i got a bad haircut", "i hate my new haircut").
+    # A bad haircut is a small, fixable thing, and the rows around it did not see it at all:
+    # "i got a bad haircut" and "i got a bad dye job" were congratulated ("Nice one"), "my
+    # haircut is awful" and "my hair dye went wrong" got the consumer refund card, "i hate my
+    # new haircut" got a sympathy nod and "how do i fix a bad haircut" got the trim schedule.
+    # The two jobs in it - a cut that needs evening up and a colour that needs correcting - are
+    # one card, because it is the same visit back to the same person.
+    entry("bad-haircut",
+          (("bad haircut", "my haircut", "my new haircut", "haircut gone wrong",
+            "haircut went wrong", "haircut is awful", "haircut looks awful", "terrible haircut",
+            "awful haircut", "botched haircut", "hate my hair", "hate my haircut",
+            "hate my new haircut", "regret cutting my hair", "regret my haircut",
+            # a length and a "bad cut" are not a complaint about the hair on its own: "cut too
+            # much off" and "too short" are the refund card's words (a test there names those
+            # lines), "my trousers are too short" is a hem, and "this steak is a bad cut" is
+            # dinner
+            "bad dye job", "dye job", "dye went wrong", "colour went wrong", "color went wrong",
+            "dye came out wrong", "colour came out wrong", "color came out wrong",
+            "patchy colour", "patchy color", "patchy dye", "messed up my hair",
+            "nothing like i asked", "not what i asked for",
+            "cut my fringe", "fringe too short", "bangs too short"),
+           # a complaint about a cut is a request for what to do next, so most lines have one
+           # of these in them; the key is the cut, and this is only to keep the row off a line
+           # that says "bad haircut" in passing while talking about something else
+           ("fix", "fixed", "fixing", "now", "what", "how", "should", "do", "can", "help",
+            "advice", "again", "instead", "my", "is", "it", "ive", "i've", "got", "have",
+            "had", "am", "went", "gone", "off", "much", "too", "really", "so", "very",
+            "look", "looks", "looking", "short", "wrong", "badly", "bad")),
+          _the_bad_haircut,
+          ask=("hair", "haircut", "cut", "dye", "dyed", "colour", "color", "barber",
+               "hairdresser", "salon", "fringe", "bangs", "trim", "fixed"),
+          # the refund card in `consumer.py` also fits "my hair dye went wrong", and it is the
+          # right card for "i want my money back" - but for a bad cut what a person wants first
+          # is how to get it put right, so this row outranks it on the lines that are about the
+          # hair rather than the money. The refund lines keep their card: they say refund,
+          # complain, compensation or money back, and those words are avoided here
+          avoid=("refund", "refunds", "money back", "compensation", "complain", "complaint",
+                 "trading standards", "small claims", "sue", "solicitor", "charge", "charged",
+                 "cost", "costs", "price", "prices", "how much"),
+          bias=3),
     entry("hair-colour-remove",
           (("hair",), ("get the dye out", "get the colour out", "get the color out", "too dark",
                        "colour remover", "color remover", "strip the colour", "strip the color",
@@ -3247,6 +3766,20 @@ entry("stain-engine-oil",
     # "why" line and the "how" line get the same advice from the same entry.
 
     # --- what to wear --------------------------------------------------------
+    entry("which-socks",
+          (("sock", "socks"),
+           ("go with", "goes with", "match", "matches", "wear", "wearing", "which", "what",
+            "suit", "suits", "smart", "wedding", "interview", "shoes", "trainers", "jeans",
+            "formal", "colour", "color", "white", "black", "brown", "right", "ok", "okay")),
+          _socks,
+          # a sock being washed, smelling, holed or swollen is another answer: the laundry, the
+          # shoe that rubs and the foot are all their own lines and this card would answer
+          # "my socks smell even after washing" with which sock to wear with a suit
+          avoid=("wash", "washing", "washed", "laundry", "dirty", "smell", "smells", "smelly",
+                 "whiff", "stink", "stinks", "hole", "holes", "holed", "darn", "darning",
+                 "blister", "blisters", "athlete", "sweaty", "damp",
+                 "put on", "putting on", "lost", "missing", "one sock", "odd socks",
+                 "dry", "drying", "shrink", "shrunk", "elastic", "fell down")),
     entry("interview-outfit", (("job interview", "interview"),
                                ("wear", "outfit", "dress", "clothes", "smart", "suit", "jeans",
                                 "tie", "put on")),
@@ -3254,6 +3787,34 @@ entry("stain-engine-oil",
           "trousers or a skirt, and closed shoes; a suit only if the company is formal. Check the "
           "office on their website or LinkedIn and dress one step smarter than that.",
           guard=_put_on_is_clothes),
+    # "got an interview thursday and nothing smart fits me any more, what do i wear" is not the
+    # interview-outfit card's question: the shape of it, the shirt, the shoes are all fine and the
+    # trouble is that the clothes in the wardrobe stopped fitting. It was answered "smart casual
+    # is the safe bet" and left the person where they started, so the constraint is the key here
+    # and the interview row above keeps the plain line.
+    entry("interview-when-nothing-fits",
+          (("interview", "interviews", "interviewing", "interviewer", "interviewers",
+            "job interview"),
+           ("nothing fits", "nothing smart fits", "nothing fits me", "nothings fits",
+            "nothing to wear", "doesnt fit", "doesn't fit", "dont fit", "don't fit",
+            "no longer fits", "too tight", "too small", "put on weight", "put on a stone",
+            "outgrown", "grown out of", "no suit", "cant afford", "can't afford",
+            "nothing smart", "two sizes", "nothing that fits")),
+          "Buy one pair of dark trousers in the size that fits you now and one plain shirt, this "
+          "week rather than on the morning: those two do more for how you look than an expensive "
+          "jacket that does not button. Ask for the trousers to be taken up while you are in the "
+          "shop. "
+          "Supermarkets and charity shops sell both for under 30 pounds, and a dark pair of "
+          "unripped jeans and a clean shirt pass everywhere outside law, finance and the civil "
+          "service. Polish the shoes you already have, take a "
+          "spare shirt if the day is long, and wear the jacket open or leave it off; nobody is "
+          "measuring the label, they are looking at whether the shirt is clean and the shoulders "
+          "sit where they should.",
+          # a line that asks what smart casual means, or that names the fit of one garment, is
+          # another row's question
+          avoid=("what does smart casual mean", "what is smart casual", "smart casual mean",
+                 "dress code", "how should jeans fit", "should jeans fit"),
+          bias=3),
     entry("wedding-white", (("wedding",
                              # A wedding named as the event rather than the word: "my friend is
                              # getting married what do i wear" was a search hedge, and it is the
@@ -3266,6 +3827,13 @@ entry("stain-engine-oil",
                              "my cousin is getting married", "a friend is getting married",
                              "friend is getting married", "sister is getting married",
                              "brother is getting married", "cousin is getting married"),
+                            # Where the do is decides the shoes, and a wedding in a field is
+                            # the question that says so: "i'm going to my sister's wedding in a
+                            # field and my feet hurt, what should i wear" was answered with the
+                            # foot-pain card, which tells somebody whose feet already hurt to
+                            # check their running shoes.
+                            ("field", "fields", "marquee", "in a tent", "a tent", "grass",
+                             "on the beach", "beach"),
                             ("white", "cream", "wear", "wearing", "guest", "dress",
                                         "rude", "okay", "ok",
                                         # The guest asking about one garment named it and no
@@ -3276,6 +3844,13 @@ entry("stain-engine-oil",
                                         # wearing something to a wedding is this row's.
                                         "hat", "hats", "fascinator", "shoes", "shoe", "heels",
                                         "heel", "outfit", "outfits", "jumpsuit", "jumpsuits",
+                                        # The feet come up in the describing clause of the
+                                        # question ("my feet hurt, what should i wear") and a row
+                                        # that does not name them stands down for the foot-pain
+                                        # card, which tells somebody whose feet already hurt to
+                                        # check their running shoes. What to put on them is this
+                                        # card's to answer.
+                                        "feet", "foot",
                                         "colour", "color", "dress code",
                                         # "what should i put on for a wedding" is the same ask
                                         "put on")),
@@ -3291,6 +3866,35 @@ entry("stain-engine-oil",
           avoid=("speech", "speeches", "toast", "toasts", "best man", "vows",
                  "say no", "saying no", "decline", "declining", "turn down", "turned down",
                  "not going", "can't go", "cant go", "tell them no"),
+          guard=_put_on_is_clothes),
+    # The couple's own question is not the guest's, and it was reaching nothing: "we're getting
+    # married in june and i've put on weight, what colour should i wear" was answered with a
+    # strength plan, "we are getting married next year, what colour should my suit be" with "I'm
+    # not sure about that one", and "we're getting married in a registry office, what should i
+    # wear" with the job-interview answer. The guest card above stays the guest card - its key
+    # says so in as many words - and this row takes the line that says the wedding is the
+    # person's own.
+    entry("wedding-couple",
+          (("getting married", "get married", "our wedding", "our big day", "my wedding",
+            "the wedding we are planning", "we are marrying", "we are eloping"),
+           ("what should i wear", "what do i wear", "what to wear", "what colour", "colour",
+            "color", "outfit", "dress", "suit", "wear", "wearing")),
+          ("Wear what you feel good in, and get it fitted: white or ivory is yours to wear as the "
+           "couple, and a dress or suit that fits beats a dearer one that does not. Try it on "
+           "with the shoes and sit, walk and raise your arms in it for an hour at home. If it is "
+           "outside, keep the hem off the grass and take a wrap for the evening, because the day "
+           "outlasts the photographs. In a suit, navy, charcoal or mid-grey photographs well and "
+           "wears again afterwards.",
+           "White or ivory is the couple's to wear, so pick the colour you like and put the money "
+           "into alterations rather than labels: a cheap outfit that fits looks better than an "
+           "expensive one that does not. Wear it in at home with the shoes, and take a wrap - the "
+           "evening cools down whatever the month says. A suit in navy, charcoal or mid-grey is "
+           "the one you will wear again."),
+          # the guest's question, the wedding party's, and anything about the day's arrangements
+          # rather than the couple's clothes
+          avoid=("guest", "guests", "plus one", "mother of the bride", "mother of the groom",
+                 "father of the bride", "bridesmaid", "bridesmaids", "best man", "speech",
+                 "invited", "invitation", "hen do", "stag do"),
           guard=_put_on_is_clothes),
     # "what should i wear as the mother of the bride" was a shrug on main, though it is one of the
     # most-asked outfit questions there is and the guest answer above is not it: the mother of the
@@ -3694,10 +4298,73 @@ entry("stain-engine-oil",
                  "emergency contraception", "plan b", "levonelle", "ellaone", "nhs", "gp",
                  "appointment") + _BOOT_CARE,
           bias=2),
+    # A knit is chosen for warmth and bought once, and the washing row next door will take any
+    # line with "warm" in it: "i want a warm jumper for winter" came back as a wool-wash
+    # temperature. The garment and the warmth (or buying) word are the key here, and every care
+    # word stands the row down.
+    entry("knitwear-buy",
+          (("jumper", "jumpers", "sweater", "sweaters", "cardigan", "cardigans", "knitwear",
+            "knit", "woolly", "woollies", "wooly", "pullover"),
+           # the choosing words only: "bought", "new" and "need" made a shop return ("the shop
+           # wont take back a jumper i bought online") and a child's ordinary new jumper into a
+           # question about fibre, which neither of them is
+           ("warm", "warmest", "warmer", "winter", "cosy", "thick", "thicker", "buy",
+            "buying", "best", "which", "what", "choose", "choosing", "worth", "recommend",
+            "look for",
+            # a comparison of two of the same garment is this question: "is a wool jumper
+            # better than acrylic" was a search hedge beside this row
+            "better", "worse")),
+          "Go by the fibre first: merino is the warmest for its weight and the softest against the "
+          "neck, lambswool is thicker and cheaper, and a wool-rich blend of 80 per cent wool and 20 "
+          "per cent nylon keeps its shape where a high-acrylic knit pills and holds damp. Buy it "
+          "big enough to wear over a shirt, and treat a wool jumper as one you air rather than wash - "
+          "that is what keeps it warm for years.",
+          avoid=("wash", "washing", "washed", "shrink", "shrank", "shrunk", "stain",
+                 "stains", "smell", "smells", "moth", "moths", "bobble", "bobbles",
+                 "pilling", "pills", "iron", "dry clean", "store", "storing", "hang",
+                 "fold", "repair", "hole", "holes", "darn", "mend", "size up", "too small",
+                 # yarn is not a jumper: "what is double knit wool" is a knitting question,
+                 # and the knit in the key is the garment, not the ball of wool
+                 "yarn", "double knit", "dk", "aran", "worsted", "chunky", "ply", "skein",
+                 "ball of wool", "crochet", "knitting", "knitting pattern", "needles",
+                 "tension", "gauge", "stitch", "stitches", "pattern",
+                 # a jumper that was bought and is not wanted is a consumer question
+                 "take back", "taken back", "refund", "refunded", "return", "returned",
+                 "returns", "faulty", "shop wont", "wont take back", "online", "wrong size",
+                 "doesnt fit", "doesn't fit", "dont like", "don't like"),
+          # "which jumper will keep me warm in winter" is this row's line said with "keep", and
+          # the cold-weather row reaches the same words: the garment named in the key is what
+          # makes this the row for it, so it wins that tie.
+          bias=3),
+    # Flat feet are a fit question, and the replacement row answered them with when to throw a
+    # pair away: "which trainers for flat feet" came back as "replace them once the midsole has
+    # gone flat". The foot shape is the key here, the shoe is the second half, and an injury is
+    # the body rows' line.
+    entry("flat-feet-shoes",
+          (("flat feet", "flat foot", "fallen arches", "fallen arch", "high arches",
+            "arch support", "arches", "arch"),
+           ("shoe", "shoes", "trainer", "trainers", "boot", "boots", "support", "insole",
+            "insoles", "best", "which", "what", "buy", "buying", "wear", "walking",
+            "comfortable", "help", "need", "choose",
+            # "are flat feet a problem" and "is it bad to have flat feet" are the same question
+            "problem", "a problem", "bad", "ok", "okay", "matter", "worry", "normal")),
+          "Support under the arch matters more than cushioning: a shoe with a firm heel counter and "
+          "a removable insole you can swap for an arch-support one (about \u00a320 to \u00a340 from a "
+          "pharmacy) is enough for most people with flat feet. A lace-up trainer with a straight "
+          "shape and a snug midfoot holds the foot better than a slip-on, and if your feet, shins or "
+          "knees hurt when you walk, or one arch has dropped recently, a podiatrist is worth the "
+          "visit.",
+          avoid=("sprain", "sprained", "broken", "fracture", "numb", "tingling", "swollen",
+                 "swelling", "shin splints", "plantar", "heel pain", "surgery", "operation",
+                 "baby", "babies", "toddler", "child", "children", "kid", "kids"),
+          bias=1),
     entry("trainers-to-buy",
           (("trainers", "sneakers", "sneaker", "trainer"),
            ("falling apart", "fallen apart", "worn out", "wore out", "wearing out", "new pair",
             "need new", "go with", "wear with", "pair with", "suit", "smart", "navy",
+            # "when should i replace my trainers" is the replacement question this row answers,
+            # and the word it is asked with was in neither half of the key
+            "replace", "replacing", "replacement", "time for new",
             "trousers", "chinos", "shirt", "office", "interview", "wedding") + _BUYING_WORDS),
           _trainers_to_buy,
           # an old pair is washed, bleached, deodorised or broken in, and a pair for sport or for
@@ -3711,7 +4378,15 @@ entry("stain-engine-oil",
                  # answers it better than "replace the midsole" does: "i need new trainers for
                  # work" was written for the shop floor, not for a worn-out sole
                  "standing", "all day", "on my feet", "work", "nurse", "nursing", "hospital",
-                 "warehouse", "kitchen", "shop floor", "shift"),
+                 "warehouse", "kitchen", "shop floor", "shift",
+                 # "what socks with trainers" is a question about the sock, and this row answers
+                 # it with the trainers to buy: the sock has its own card
+                 "sock", "socks",
+                 # the shape of the foot is the fit row's question, and it was being answered
+                 # here with "replace them when the midsole goes flat"
+                 "flat feet", "flat foot", "fallen arches", "fallen arch", "high arches",
+                 "arch support", "arch", "arches", "insole", "insoles", "orthotic",
+                 "orthotics"),
           bias=2),
     entry("jeans-wear-between-the-legs",
           (("jeans", "jean", "denim", "trousers", "chinos"),
@@ -3769,6 +4444,10 @@ entry("stain-engine-oil",
             "toddler", "toddlers", "boy", "girl", "year old", "car seat", "pram",
             "pushchair", "buggy")),
           _child_coat,
+          # "my son wont wear his coat" is not a coat to choose: the fight with it on is the
+          # morning card's question, and this row was answering every wording of it with what to
+          # look for in a hood.
+          guard=not_a_fight_about_clothes,
           # a grown-up's coat is the shopping row's, and the coat a child already has is a wash,
           # a stain or a zip
           avoid=("school shoes", "uniform", "shoes", "trainers", "wellingtons", "wellies",
@@ -3825,6 +4504,19 @@ entry("stain-engine-oil",
                  # "how do i warm up before a run" was told what to wear
                  "warm up", "warm-up", "warming up", "warmup", "before a run", "before i run",
                  "before training", "before exercise", "cool down", "cool-down",
+                 # An occasion is the subject and the weather is a detail of it: "im going to a
+                 # wedding in june and its outdoors, what should i wear" was dressed for a run
+                 # ("a thin wicking base layer... warm by the first mile") because "outdoors" and
+                 # "wear" are this card's two keys. Whatever the party is, the clothes question is
+                 # about the party, so every occasion named in a line stands this card down and
+                 # the occasion's own card answers it.
+                 "wedding", "weddings", "funeral", "funerals", "christening", "baptism",
+                 "graduation", "interview", "interviews", "job interview",
+                 "school concert", "nativity", "prize giving", "leavers", "prom",
+                 "party", "parties", "birthday", "anniversary", "dinner", "dinner dance",
+                 "meal out", "night out", "first date", "date", "wedding reception",
+                 "reception", "theatre", "theater", "the pictures", "church", "service",
+                 "court", "tribunal", "hearing",
                  # a wet walk is the walking-kit card's own line, and it names the trousers and
                  # the boots this note does not
                  "wet walk", "rainy walk", "walking in the rain", "walk in the rain",
@@ -3897,7 +4589,13 @@ entry("stain-engine-oil",
                  # answered with layers and a waterproof because the line carries "walk" and
                  # "take" (@broad-cypress, #answers 111187).
                  "centre", "center", "clinic", "wait", "waiting", "queue", "hospital",
-                 "appointment"),
+                 "appointment",
+                 # a quantity is not a kit list: "how much water should i take on a hike" and
+                 # "how many litres do i need for a long walk" carry "take" and "long walk" and
+                 # were answered with layers and a waterproof, when the figure they asked for is
+                 # travel.py's half a litre an hour.
+                 "how much water", "how much to drink", "how much should i drink",
+                 "how much liquid", "how many litres", "how many liters"),
           bias=2),
     # A jacket that has started letting water in is a job, not a purchase: "my jacket leaks in
     # the rain" was the listening turn on main, and the coat rows answer how to choose one.
@@ -3982,6 +4680,10 @@ ENTRIES.append(entry(
     "a complete sentence, and it does more than a second row about the same jumper.",
     # a wash, a stain or a size is a different entry, and so is the shop
     avoid=("wash", "washing", "stain", "stains", "iron", "ironing", "size", "fit", "fits",
+           # "take my measurements" is the tape measure, not a jumper going missing: this row's
+           # "take my" is what won the line, so the measuring words stand it down
+           "measure", "measures", "measuring", "measured", "measurement", "measurements",
+           "measure myself", "tape measure", "size guide", "size chart", "what size to order",
            "shop", "shops", "sale", "sales", "refund", "returns policy", "parcel", "moth",
            "moths", "sew", "hem", "alter",
            # what to put on for an occasion is the dress-code entries' question, and "what shoes
@@ -4010,6 +4712,173 @@ ENTRIES.append(entry(
     ask=("how do i", "how can i", "how should i", "what should i say", "what do i say",
          "what can i do", "how do i tell", "should i"),
     bias=1))
+
+
+# --- choosing a garment: one line per garment ------------------------------------------------
+# The rows above cover boots, trainers, jeans and a coat, so "what coat should i get" answered
+# while "what shirt should i buy" and "what shoes should i buy" reached the search box: the
+# knowledge was there for four garments and not for the rest. What decides a garment is two or
+# three measurements, and they are not the same ones from garment to garment - a shirt by the
+# collar and the shoulders, a jacket by the shoulders alone, trousers by the waist and the seat,
+# a shoe by length and width - so the table below is one line per garment and the entry is built
+# from it. A garment not in the table still gets the shared advice on how to try one on, which is
+# what the fallback row at the end is for.
+_OWNING_NOT_CHOOSING = (
+    "too tight", "too big", "too small", "too long", "too short", "doesnt fit", "doesn't fit",
+    "does not fit", "hole", "holes", "rip", "ripped", "torn", "mend", "mending", "darn",
+    "darning", "sew", "sewing", "alter", "altering", "alteration", "shorten", "take up",
+    "shrunk", "shrink", "shrank", "stretched", "stretch", "iron", "ironing", "press", "steam",
+    "wash", "washing", "clean", "cleaning", "cleaner", "dry clean", "dryer", "bleach", "stain",
+    "stains", "smell", "smells", "smelly", "moth", "moths", "bobble", "bobbles", "pilling",
+    "child", "children", "kids", "kid", "son", "daughter", "baby", "toddler", "school",
+    "uniform", "my ", "the one i", "i already", "already got", "already have",
+    # whether something is acceptable to wear somewhere is not how to choose one: "can i get
+    # away with smart trousers and a shirt" is about a dress code, and the choosing rows were
+    # answering it with how a collar should fit
+    "get away with", "got away with", "ok to wear", "okay to wear", "ok for", "okay for",
+    "be ok", "be okay", "appropriate", "too formal", "too casual", "dress code", "smart enough",
+    "casual enough", "would it be", "is it ok", "is it okay", "can i wear", "could i wear",
+    "go with", "goes with", "wear with", "wearing with", "match", "matches", "suit me",
+    "look good on",
+    # and a garment that is already in the wardrobe is styled or altered, not chosen: "how do i
+    # make a cheap dress look expensive" was answered with how a dress should fit
+    "make a", "make my", "make this", "make it look", "look expensive", "looks expensive",
+    "look cheap", "looks cheap", "look better", "looks better", "style", "style it", "styled",
+    "restyle", "upcycle", "refashion", "accessorise", "accessorize", "outfit", "outfits")
+
+GARMENT_FIT = (
+    (("shirt", "shirts", "blouse", "blouses", "dress shirt", "dress shirts"),
+     "Shirts are decided by the collar and the shoulders, so check those two before anything "
+     "else: with the top button done, two fingers should slide inside the collar, and the "
+     "shoulder seam should end on your shoulder bone rather than hanging past it. A sleeve is a "
+     "cheap alteration and a shoulder is not, so buy for the shoulder and shorten the sleeve to "
+     "the wrist bone. In a shop, raise both arms: if the cuffs ride up past your wrist or the "
+     "front buttons gape, it is a size too small.",
+     ("print", "printed", "tie", "ties", "cufflinks", "collar stays")),
+    (("t-shirt", "t-shirts", "tshirt", "tshirts", "tee", "tees", "t shirt", "t shirts"),
+     "A t-shirt is decided by the shoulder seam and the neck: the seam should sit on the bone, "
+     "and the neck should lie flat with no gap at the collarbone, because a stretched neck is "
+     "what makes an old one look old. Cotton of about 180g to 200g a square metre holds its "
+     "shape through washes, where a thin 140g one goes limp in a month. Buy a size that fits "
+     "now rather than one to shrink into, and expect a plain cotton one to lose a little length "
+     "in the first hot wash.",
+     ("print", "printing", "printed", "design", "logo", "slogan", "band", "band t", "bleach",
+      "tie dye", "tie-dye", "stain", "yellow", "sweat")),
+    (("trousers", "trouser", "pants", "chinos", "chino", "slacks"),
+     "Trousers are decided by the waist and the seat, and the label size is only a starting "
+     "point: the waistband should sit snug with no gap at the back when you sit down, the seat "
+     "should be smooth rather than pulling across the pockets, and the pockets should lie flat "
+     "instead of flaring out. Then check the length standing in the shoes you will wear them "
+     "with - a single break on the shoe, not a puddle. Sit, squat and climb a stair before you "
+     "buy: the pair that fails is nearly always tight across the seat.",
+     ("hem", "hems", "turn up", "turnups", "waistband", "zip", "button", "pocket", "belt")),
+    (("shoes", "shoe", "smart shoes", "leather shoes", "heels", "court shoes"),
+     "Shoes are decided by length and width, so buy for the longer foot and the wider one - the "
+     "two are rarely the same - and try them late in the day when your feet are at their "
+     "biggest, in the socks or tights you will wear. A thumb's width at the toe, the widest part "
+     "of the shoe at the widest part of your foot, and no lift at the heel when you walk: if the "
+     "heel slips, a smaller size will pinch the toe instead. Leather gives a little, so a "
+     "leather shoe should be snug rather than roomy, and a synthetic one will not give at all.",
+     ("trainers", "trainer", "sneakers", "boots", "boot", "walking", "hiking", "running", "run",
+      "gym", "football", "rugby", "studs", "astro", "school", "blister", "blisters", "rub",
+      "rubbing", "hurt", "hurts", "aching", "smell", "smelly", "polish", "suede", "laces",
+      "insoles", "heels hurt", "width")),
+    (("suit", "suits", "jacket", "jackets", "blazer", "blazers"),
+     "A jacket is decided by the shoulders and nothing else matters as much: the shoulder seam "
+     "should end on your shoulder bone, and the padding should follow your own line rather than "
+     "sit out past it, because a shoulder is the one thing a tailor cannot change much. Then "
+     "check the chest - you should be able to slide a flat hand inside the buttoned jacket - the "
+     "sleeve, which should end at the wrist bone and show about a centimetre of shirt cuff, and "
+     "the seat, where the jacket should just cover it without flaring. Button the middle button "
+     "only and sit down in it before you decide.",
+     # a jacket for the weather is the coat row's: "should i buy a waterproof jacket" is a
+     # shell, not a shoulder seam
+     ("hire", "hiring", "rent", "renting", "wedding suit", "groom", "morning suit", "tux",
+      "tuxedo", "waistcoat", "tails", "waterproof", "water proof", "rain", "rainy", "shower",
+      "winter", "warm", "warmest", "cold", "puffer", "padded", "down", "insulated", "windproof",
+      "fleece", "keep me dry", "keep dry")),
+    (("dress", "dresses", "frock"),
+     "A dress is decided by the bust, the waist seam and the hips together, so try it on in the "
+     "order the seams fall: the bust should sit inside the darts rather than above or below them, "
+     "the waist seam should land on your natural waist, and the skirt should hang from the hip "
+     "without pulling across the front. Then sit down, raise your arms and take a few steps: a "
+     "dress that rides up when you sit or lifts when you reach will not get worn. Buy for the "
+     "widest of the three and have the rest taken in, which is the cheap direction to alter.",
+     ("wedding", "bridesmaid", "prom", "evening", "black tie", "white", "ivory", "hem", "zip",
+      "straps", "sleeves")),
+    (("jumper", "jumpers", "sweater", "sweaters", "cardigan", "cardigans", "knitwear", "knit"),
+     "Knitwear is decided by the shoulder seam and the armhole: the seam should sit on the bone, "
+     "and the armhole should let you raise your arms without the whole jumper riding up, which is "
+     "what happens when it is cut too narrow across the chest. Wool with a little nylon - about "
+     "10% - wears far longer at the elbows than pure wool, and a tightly spun fine knit pills less "
+     "than a loose fluffy one. Hold it up to the light: if you can see through it easily it will "
+     "go thin at the elbows within a winter.",
+     ("wash", "washing", "wool wash", "hand wash", "dry", "drying", "dryer", "bobbles",
+      "bobble", "pilling", "pills", "itchy", "itch", "moth", "moths", "hole", "ladder", "snag")),
+    (("skirt", "skirts"),
+     "A skirt is decided by the waistband and by how it moves: the waistband should sit on your "
+     "hip bone rather than riding up to your ribs, and it should not twist round when you walk, "
+     "which is the sign it is too loose. Sit down and cross your legs in the fitting room - a "
+     "pencil skirt that rides up or pulls across the thighs will not get worn - and check the hem "
+     "sits level all the way round, because a skirt cut on the bias can hang unevenly.",
+     ("hem", "hemline", "shorten", "take up", "zip", "pleat", "pleats", "wedding", "school")),
+)
+
+# A garment bought for an activity is fitted for that activity, and the row that answers the
+# activity already knows the number: in a chat that started "i want to start running but my knees
+# are shot", "what shoes should i get" is the pair a running shop fits and the 500km replacement,
+# not the width of a leather shoe. So a garment ask reads the use off the last few lines and
+# answers for it; with no use named it gets the garment's own fit points. One line per use.
+_A_USE_OF_A_GARMENT = (
+    (("run", "running", "jog", "jogging", "5k", "10k", "parkrun", "marathon", "half marathon"),
+     "For running, go to a running shop and let them watch you run: it costs nothing, they fit "
+     "for how your foot lands, and £90 to £130 buys the pair that stops the injuries a cheap "
+     "trainer causes. Replace them every 500 to 800km, or when the midsole feels flat under the "
+     "ball of your foot, and keep a second pair to alternate if you run most days."),
+    (("cycling", "cycle", "bike", "commute", "pedal"),
+     "For a commute you do not need special shoes: flat pedals with ordinary shoes are fine, and "
+     "a stiff sole is the only thing that helps on a long ride. Clip-in shoes are worth it only "
+     "once you ride most days and want the pull on the upstroke - then a mountain-bike style "
+     "cleat you can walk in beats a road cleat, and budget about £60 with the pedals."),
+    (("gym", "weights", "lifting", "deadlift", "squat", "crossfit"),
+     "For the gym, a flat, firm sole is what you want: a cheap canvas plimsoll or a proper "
+     "lifting shoe keeps you stable under a weight where a cushioned runner wobbles. Save the "
+     "cushioned pair for running and use the flat one for anything with a bar."),
+    (("walking", "hiking", "hill", "hills", "trek", "mountain", "muddy"),
+     "For walking, the boot or shoe should be waterproof with a deep rubber tread and stiff "
+     "enough under the arch to stop a stone bruising your foot. Try them late in the day in the "
+     "socks you will walk in, with a thumb's width at the toe and no lift at the heel, and break "
+     "them in around the house before a long day out."),
+    (("standing all day", "on my feet", "shift", "nurse", "hospital", "warehouse", "kitchen"),
+     "For standing all day, put the money into a cushioned sole and room at the toes, and buy at "
+     "the end of the day when your feet are at their biggest. Two pairs worn alternately last far "
+     "longer than one, and a snug heel matters more than a soft one."),
+)
+
+
+def _a_garment_to_choose(fit):
+    """The use's answer when the chat named one, and the garment's fit points otherwise."""
+    def answer(memory, understood):
+        for words, reply in _A_USE_OF_A_GARMENT:
+            if _said_lately(memory, words, turns=4):
+                return reply
+        return fit
+    return answer
+
+
+for _garment_words, _garment_fit, _garment_own in GARMENT_FIT:
+    ENTRIES.append(entry(
+        "choosing-" + _garment_words[0].replace(" ", "-"),
+        (_garment_words,
+         ("buy", "buying", "bought", "choose", "choosing", "pick", "picking", "look for",
+          "which", "recommend", "worth", "size", "sizing", "fit", "fits", "fitting",
+          "cheap", "budget", "price", "spend", "quality", "last", "best", "get", "getting",
+          "need", "need a", "shops", "shop for")),
+        _a_garment_to_choose(_garment_fit),
+        # a garment already owned is a wash, a repair or a stain, and that is another row's
+        # question: the words that say "the one I have" stand this row down
+        avoid=_OWNING_NOT_CHOOSING + _garment_own,
+        bias=2))
 
 # --- what to wear somewhere ------------------------------------------------------------
 # "What should I wear to a barbecue", "what do I wear to a graduation" and "is there a dress
@@ -4149,6 +5018,281 @@ OCCASION_WEAR = {
                "that makes a long flight feel better, and a scarf doubles as a blanket."),
 }
 
+# What to wear in the weather is the same question as what to wear to a wedding, so the weather
+# rows are built with the occasion machinery rather than a new one. They are not in the table
+# above because their ask is wider: "what do i need to take if its snowing" and "what should i pack
+# for a wet day" are the same question as "what should i wear", and "take" and "pack" cannot join
+# WEAR_ASKS, where "what should i take to a wedding" is a present.
+_WEATHER_ASKS = WEAR_ASKS + ("take", "bring", "pack", "need", "dressed", "dress for", "kit")
+
+# The weather itself, and what it asks a person to put on. These rows exist because the science
+# rows for rain, snow and wind were answering them: those now stand down on the wearing ask
+# (A_WHAT_TO_WEAR in lookup.py), and what is left has to be a clothes answer or the person gets
+# nothing. The reply is written for the day, not for the physics.
+_WEATHER_WEAR = {
+    "rain": (("rain", "raining", "rains", "rainy", "wet", "downpour", "drizzle", "drizzling",
+              "showers", "showery", "dreich", "pouring", "chucking it down"),
+             "A waterproof with a hood is the one thing that decides the day, with a thin layer "
+             "underneath rather than a thick coat, because rain gear is warm once you move. Wear "
+             "shoes that keep water out - leather or a waterproof boot rather than canvas, which "
+             "soaks and stays wet - and take a second pair of socks. Cotton next to the skin is "
+             "what makes a wet day cold, so a synthetic or wool base layer is worth more than an "
+             "extra jumper."),
+    "snow": (("snow", "snowing", "snowy", "sleet", "slush", "icy", "ice"),
+             "Layers, a waterproof outer and boots with real tread: snow is fine, ice is what puts "
+             "people on the ground, so a deep sole beats a smooth one and anything you can lean on "
+             "beats a handbag. Cover the ears, hands and neck, and wear wool or a synthetic base "
+             "layer rather than cotton, which holds the damp and chills you. Take the layers off "
+             "indoors rather than sweating in them and then going back out."),
+    "cold": (("cold", "freezing", "frost", "frosty", "chilly", "bitterly", "cold snap", "minus",
+              "below zero", "perishing"),
+             "Three thin layers beat one thick one: a base layer, a jumper and a windproof coat, "
+             "so you can take the middle off indoors. Cover the neck, ears, wrists and ankles, "
+             "which is where the cold gets in, and keep your feet warm with a thicker sock or a "
+             "boot rather than a second pair of tights. A hat is worth more than it looks, because "
+             "a lot of heat goes off a bare head."),
+    "hot": (("hot", "heat", "heatwave", "heat wave", "warm", "sunny", "sun", "scorching",
+             "boiling", "humid", "muggy", "sweaty"),
+            "Loose, light cotton in a pale colour is the coolest thing to wear, because it lets "
+            "air through and reflects the sun; a wide hat and sunglasses are worth more than "
+            "another layer of sunscreen. Keep shoulders covered over a long day and wear shoes you "
+            "can walk in on hot tarmac. Dark, tight and synthetic is what makes a hot day feel "
+            "worse."),
+    "wind": (("wind", "windy", "gales", "gale", "gusty", "gusts", "blustery"),
+             "A windproof outer layer is the whole trick: a shell over a jumper feels far warmer "
+             "than a thick coat the wind goes straight through. Keep it done up at the neck and "
+             "wrists, tie long hair back, and skip anything loose or long that flaps. A hat that "
+             "covers the ears and a bag with a zip finish the job."),
+}
+
+# The weather words "cold" and "hot" are also the names of how a person feels, so a line that
+# takes something for one of them is a medicine question, not a clothes one:
+#
+#     what should i take for a cold   -> "Three thin layers beat one thick one"
+#
+# The same holds for "pack for a hot holiday", where the weather is the setting of a trip the
+# travel rows answer. So the weather rows are only for a line that either asks with a wearing
+# word, or is about the weather at all: a health or travel line whose ask is a taking one leaves
+# the weather rows alone and keeps whatever those domains had.
+# "boiling" is weather in "its boiling out there" and a saucepan in "do i need to boil water to
+# kill germs", which was told to wear loose cotton. The hot row reads the word, so the thing being
+# boiled is what tells the two apart.
+_BOILING_SOMETHING = re.compile(
+    r"\bboil(?:ing|ed)?\s+(?:water|the water|an egg|eggs|a kettle|the kettle|rice|pasta|"
+    r"potatoes|milk|a bottle|the bottle|nappies|nappy|clothes|the wash|a pan)\b"
+    r"|\bto kill germs\b|\bkills? germs\b|\bsterilis\w*|\bsteriliz\w*|\bkettle\b")
+
+# The other order: "how long do potatoes take to boil" puts the spud before the word, and the hot
+# row was told to wear loose cotton - twice, for potatoes and for sprouts. A time asked for is not
+# a wearing ask at all, so a line that asks how long something takes, and names a pan or a pan
+# word, is never the weather. The list is read loosely, because "boiled", "frying" and "oven" are
+# the same signal as "boil".
+_A_PAN_WORD = re.compile(
+    r"\b(?:boil|boils|boiled|boiling|simmer|simmered|simmering|poach|poached|poaching|steam|"
+    r"steamed|steaming|roast|roasted|roasting|bake|baked|baking|fry|fried|frying|grill|grilled|"
+    r"grilling|toast|toasted|toasting|microwave|microwaved|oven|hob|pressure cook(?:er|ing)?|"
+    r"slow cook(?:er|ing)?|air fry(?:er)?|saucepan|poach|blanch|blanched|parboil|parboiled)\b")
+_A_TIME_ASKED_FOR = re.compile(
+    r"\bhow long\b|\bhow many (?:minutes?|hours?|secs?|seconds?)\b|\bwhat temperature\b"
+    r"|\bhow hot (?:should|do|does)\b")
+
+_TAKING_AND_NOT_DRESSING = ("health", "geography-and-travel")
+_DRESSING_WORD = re.compile(r"\b(?:wear|wearing|wears|worn|outfit|outfits|dressed|dress"
+                            r"|clothes|coat|jacket|shoes)\b")
+
+
+# "I need to get rid of my cold by friday" was answered with three thin layers, because the
+# understanding calls a line like that a general one, so the question was not read as health and
+# the clothes row took it. The shapes below say the cold is a virus - ridding yourself of it,
+# shaking it, the medicine for it - and no clothes line says them about the weather. A "hot" line
+# keeps its row: "how do i stop feeling hot" is a fever, but "do i need a coat, its hot" is the
+# weather and names the coat.
+_A_COLD_YOU_HAVE = re.compile(
+    r"\b(?:get|getting|got|shift|shifting|shake|shaking|fight|fighting|beat|beating|knock|"
+    r"kill|killing|cure|curing|treat|treating|stop|stopping|prevent|preventing|dodge|dodging|"
+    r"catch|catching|caught|come down with|coming down with|battling|suffering from)\s+"
+    r"(?:rid of\s+|off\s+|over\s+|through\s+)?(?:a|an|this|that|my|his|her|their|the|another)\s+"
+    r"(?:head |chest |bad |heavy |stinking |rotten |nasty |proper |lingering |summer )?colds?\b"
+    r"|\b(?:cold|flu)\s+(?:medicine|medicines|medication|tablets?|syrup|remedies?|cure)\b"
+    r"|\b(?:medicine|medicines|medication|tablets?|syrup|remedy|remedies|lemsip)"
+    r"\s+(?:for|against)\s+(?:a\s+|the\s+|my\s+|this\s+|that\s+)?colds?\b"
+    r"|\b(?:sore throat|runny nose|blocked nose|stuffy nose|sneez\w*|cough|coughing|fever|"
+    r"virus|flu|cold sore|cold sores|cold and flu|cold or flu)\b"
+    r"|\b(?:feeling|feel|felt|been|am|is|are)\s+(?:\w+\s+){0,2}(?:ill|unwell|poorly|sick)\b"
+    # a cold that is a part of the body is the circulation question: "how do i stop my hands
+    # getting cold" was answered with "bring pots and hanging baskets in"
+    r"|\b(?:keep|keeping|ward|stave|stay)\s+(?:away from\s+|off\s+)?(?:the\s+)?colds?\b"
+    r"|\b(?:hands?|fingers?|fingertips?|feet|foot|toes?|ears?|nose)\s+"
+    r"(?:are\s+|is\s+|get\s+|gets\s+|getting\s+|go\s+|goes\s+|going\s+)?cold\b"
+    r"|\bsymptoms?\b")
+
+
+def _the_weather_is_the_question(understood):
+    """False when the weather word in the line is the ailment or the setting of a trip."""
+    if not _put_on_is_clothes(understood):
+        return False
+    said = " ".join(str(word).lower() for word in (understood.get("words") or ()))
+    if _A_COLD_YOU_HAVE.search(said):
+        # the cold in the line is a virus, and a virus has no dress code
+        return False
+    # a saucepan is not weather, whatever the thermometer says
+    if _BOILING_SOMETHING.search(said):
+        return False
+    # and neither is a pan in front of the word: "how long do potatoes take to boil" is a time,
+    # not a thing to wear
+    if _A_TIME_ASKED_FOR.search(said) and _A_PAN_WORD.search(said):
+        return False
+    if str(understood.get("topic") or "") not in _TAKING_AND_NOT_DRESSING:
+        return True
+    return bool(_DRESSING_WORD.search(said))
+
+
+# A named occasion carries its own weather with it: "what should i wear to a funeral when its
+# cold" is the funeral, and the weather row is only there for a line whose weather is the whole
+# question. The occasion words are read off the table above rather than typed again, so an
+# occasion added there is fenced off here the same day.
+_OCCASION_PLACES = tuple(sorted({word for _places, _reply in OCCASION_WEAR.values()
+                                 for word in _places}
+                                # the big days have their own rows rather than a place in the
+                                # table, and a wedding is not a weather question
+                                | {"wedding", "weddings", "funeral", "funerals", "wake",
+                                   "interview", "interviews", "christening", "prom", "first date",
+                                   "date night", "black tie", "smart casual"}))
+
+# "Is it cold enough for a coat?" is the same question as "what should I wear", and on main it
+# was answered with the laundry dial: that row keys "cold" and "enough", and this line names both
+# without naming a wash at all. The shape is a weather word, "enough for", and a thing you wear -
+# the garment is what makes it a clothes question - so the row below keys the garment and the
+# "enough", and the dial stands down on the same shape. "Is it hot enough for a fan" keeps the
+# fan's own answer, because a fan is not something you wear.
+_ENOUGH_FOR_A_GARMENT = re.compile(
+    r"\b(?:cold|warm|hot|cool|wet|dry|windy|sunny|chilly|freezing|mild|damp) enough for "
+    r"(?:a |an |the |my |your )?(?:coat|thick coat|jacket|jumper|cardigan|fleece|shorts|"
+    r"wellies|wellies|boots|hat|gloves|scarf|t-shirt|tshirt|tee shirt|dress|sandals|"
+    r"sun hat|raincoat)\b")
+
+_WEARABLE_THINGS = ("coat", "coats", "jacket", "jackets", "jumper", "jumpers", "cardigan",
+                    "fleece", "shorts", "wellies", "boots", "hat", "gloves", "scarf",
+                    "t-shirt", "tshirt", "dress", "sandals", "raincoat")
+
+
+def _the_enough_is_about_a_garment(understood):
+    """True when the line asks whether it is <weather> enough for something you wear."""
+    said = " ".join(str(word).lower() for word in (understood.get("words") or ()))
+    return bool(_ENOUGH_FOR_A_GARMENT.search(said))
+
+
+# A number of degrees is the other way people bring the weather into a clothes question, and no
+# word list can hold it: "what should i wear when its 35 degrees" was the university pass-mark
+# card, because 35 degrees reads as a mark. The reply below reads the figure and answers the day.
+_A_TEMPERATURE = re.compile(r"(?:^|\s)(-?\d{1,3})\s*(?:degrees?|deg\b|°|c\b|degrees c\b)")
+
+def _the_temperature_said(understood):
+    """The number of degrees the line names, or None."""
+    line = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    found = _A_TEMPERATURE.search(line)
+    if not found:
+        return None
+    try:
+        return int(found.group(1))
+    except ValueError:
+        return None
+
+
+def _dress_for_the_temperature(memory, understood):
+    """What to put on for the number of degrees the line names."""
+    degrees = _the_temperature_said(understood)
+    if degrees is None or degrees >= 24:
+        return ("In real heat, loose light cotton in a pale colour is the coolest thing you can "
+                "wear, because it lets air through and reflects the sun. A wide hat and sunglasses "
+                "are worth more than another coat of sunscreen, and shoes you can walk in matter on "
+                "hot tarmac. Dark, tight and synthetic is what makes it feel worse.")
+    if degrees <= 6:
+        return ("Three thin layers beat one thick one: a base layer, a jumper and a windproof coat, "
+                "so you can take the middle off indoors. Cover the neck, ears, wrists and ankles, "
+                "which is where the cold gets in, and a hat is worth more than it looks. Wool or a "
+                "synthetic base layer stays warm where cotton goes cold and damp.")
+    return ("Layers you can take off, and one of them waterproof: a thin base layer, a jumper and a "
+            "shell over the top sees you through a day that starts cold and warms up. Shoes with a "
+            "sole rather than canvas, and a bag with a zip, because the British version of this "
+            "number comes with rain.")
+
+
+for _weather, (_weather_words, _weather_reply) in _WEATHER_WEAR.items():
+    ENTRIES.append(entry("clothes-" + _weather, (_weather_words, _WEATHER_ASKS), _weather_reply,
+                         avoid=WEAR_NOT + ("ice cream", "ice lolly", "ice lollies", "ice cube",
+                                           "ice cubes", "sun cream", "sunscreen", "sun lotion")
+                         + _OCCASION_PLACES,
+                         bias=2, guard=_the_weather_is_the_question))
+
+# The same question asked with a number instead of a weather word. The guard is the figure, so a
+# line about a degree course ("a history degree", "did my degree help") never reaches it.
+ENTRIES.append(entry("clothes-degrees",
+                     (("degree", "degrees", "deg", "°c", "celsius", "centigrade"), _WEATHER_ASKS),
+                     _dress_for_the_temperature,
+                     avoid=WEAR_NOT + _OCCASION_PLACES,
+                     bias=2,
+                     guard=lambda understood: (_the_temperature_said(understood) is not None
+                                               and _the_weather_is_the_question(understood))))
+
+# The commonest clothes question of all has no weather in it: "what should i wear today" and "do i
+# need a coat today" were both answered with the shrug, and a friend answers them with the forecast
+# and a rule of thumb rather than with a card. The day word is what makes it today's question, so
+# the weather rows (bias 2) still win a line that names the weather, and a named occasion, a
+# garment that has to fit or a shop stands down as it does there.
+_COAT_ASKS = ("coat", "coats", "jacket", "jackets", "jumper", "jumpers", "cardigan",
+              "layers", "layering")
+_DAY_WORDS = ("today", "tonight", "tomorrow", "this morning", "this afternoon", "this evening",
+              "right now", "later on", "this week", "out today", "out tonight")
+
+
+def _today_is_the_question(understood):
+    """False when the day word belongs to a job, a school or a bed rather than to the weather."""
+    if not _put_on_is_clothes(understood):
+        return False
+    return True
+
+
+ENTRIES.append(entry(
+    "clothes-today",
+    (_COAT_ASKS + WEAR_ASKS, _DAY_WORDS),
+    "Go by the forecast for the hours you will actually be out rather than for the whole day, and "
+    "dress for the coldest and wettest of those hours. As a rule of thumb: under about 10 degrees "
+    "a proper coat, between 10 and 18 a jumper with something windproof over it, over 18 no coat "
+    "and loose cotton instead. Then one layer you can take off, and a hood or an umbrella if there "
+    "is any rain in the forecast - being caught wet on the way home is what ruins a day, not the "
+    "temperature.",
+    avoid=WEAR_NOT + _OCCASION_PLACES
+    + ("work", "working", "office", "school", "college", "uni", "university", "gym", "run",
+       "running", "cycle", "cycling", "swim", "swimming", "bed", "sleep", "hospital",
+       "court", "travel", "flight", "plane", "interview",
+       # a coat being bought, mended or measured is another row
+       "buy", "buying", "worth", "worth it", "which coat", "best coat", "choose", "choice",
+       "price", "cost", "cheap", "repair", "sew", "alter", "size", "fit", "fits"),
+    ask=_COAT_ASKS + ("wear", "wearing", "dressed", "clothes", "outfit", "need", "should"),
+    bias=1,
+    guard=_today_is_the_question))
+
+# The coat-weather shape, which had the laundry dial for an answer. It is its own row rather than
+# a wider clothes-today, because the garment is the question here and the day word is optional.
+ENTRIES.append(entry(
+    "clothes-enough",
+    (_WEARABLE_THINGS, ("enough",)),
+    "That is a question about the hours you will actually be out, not about the day: under about "
+    "10 degrees, yes, and a proper coat with a jumper under it if you will be standing about; "
+    "between 10 and 18 a jumper and something windproof is enough, and over 18 you carry the coat "
+    "rather than wear it. Rain decides it more often than cold does, so a waterproof beats a "
+    "warmer one that lets water through, and the bits that feel it first are the neck, ears, "
+    "hands and feet.",
+    avoid=WEAR_NOT + _OCCASION_PLACES
+    + ("buy", "buying", "worth", "price", "cost", "cheap", "repair", "sew", "alter", "size",
+       "fit", "fits", "which coat", "best coat", "waterproof coat", "washing", "wash"),
+    # 3, because the shape is exact and the rows it meets are about owning the thing rather than
+    # going out in it: "is it wet enough for wellies" was the pair-already-soaked card, and the
+    # coat it named was being bought
+    bias=3,
+    guard=_the_enough_is_about_a_garment))
+
 # bias 2, not 1: the words in WEAR_ASKS are the question, so a line that carries one of them and
 # the place is a clothes question whatever else it sounds like. At bias 1, "what should i wear to
 # a house party" lost to the music row that keys "house" with "what should", and "what should i
@@ -4244,6 +5388,13 @@ ENTRIES.append(entry(
            "hedge trimmer", "air purifier", "dehumidifier", "fan", "heater", "wood burner",
            "log burner", "chimney", "flue", "liner", "gutter", "gutters", "water butt",
            "what should i wear", "wear to", "to wear",
+           # A card that stores photos has a size, and so does a dress: "what size sd card do i
+           # need" was answered with the UK-to-EU clothes table, because "size" was the only
+           # word it shared with this row.
+           "sd card", "sd cards", "memory card", "memory cards", "micro sd", "microsd",
+           "sim card", "sim cards", "storage card", "flash card", "usb stick",
+           "hard drive", "ssd", "storage", "phone", "iphone", "ipad", "tablet",
+           "battery", "card slot",
            # a child's clothes are sized by age, not by country
            "year old", "years old", "month old", "months old", "toddler", "baby", "babies",
            "child", "children", "kids", "kid", "school", "uniform", "newborn"),
@@ -4299,6 +5450,86 @@ ENTRIES.append(entry(
            "plug", "plugs", "voltage", "time difference", "shipping", "post it", "send it",
            "cost", "price", "cheap", "buy it", "worth", "tax", "live", "living", "moving",
            "work there", "til", "until", "duration", "how long"),
+))
+
+# ---- the shops are cut small ----------------------------------------------------------------
+#
+# "im a size 20 and the shops are cut small", "im a size 16 but i have to buy a 20", "clothes sizes
+# are not what they used to be" and "why do i need a bigger size than i used to" were a nod, a
+# listening noise, the consumer-rights card about goods matching their description, and the card
+# about the version of the rules in force. The size table next door answers a conversion, and the
+# question here is why the number moved and what to do about it, which is a measurement, the shop's
+# own chart, and the fit of the widest part rather than the label.
+_SIZES_MOVED = ("cut small", "cut big", "cut narrow", "runs small", "run small", "runs tight",
+                "bigger size", "bigger", "one size up", "two sizes", "size up", "sizes up",
+                "not what they used to be", "used to be", "sizes have changed", "changed",
+                "different in every shop", "every shop", "each shop", "another shop",
+                "stopped doing my size", "stopped making my size", "nothing in the shops",
+                "nothing fits", "nothing ever fits", "doesnt fit", "doesn't fit", "dont fit",
+                "don't fit", "never fits", "wont fit", "won't fit", "too tight", "too small",
+                "too long", "too short", "hate shopping", "hate clothes shopping",
+                "have to buy", "have to get", "have to size", "need a bigger", "need the bigger",
+                "big bust", "big boobs", "broad shoulders", "wide hips", "tall", "short",
+                "lost weight", "put on weight", "went up", "gone up", "size 20", "size 22",
+                "size 24", "size 26", "size 18", "plus size", "curvy")
+ENTRIES.append(entry(
+    "sizes-are-cut-small",
+    (("size", "sizes", "dress size", "clothes size", "clothing size", "jeans size",
+      "shops", "shop", "clothes", "clothing", "fit", "fits", "fitted",
+      # the line that names no garment and no number: "im short and everything is too long"
+      "everything is", "everything fits", "nothing is", "everything in the shops"),
+     _SIZES_MOVED),
+    ("Sizes are not measurements, so treat the number on the label as a shop's opinion: women's UK "
+     "sizes have crept up about two steps in fifty years, so a 1970s 16 is roughly today's 12, and "
+     "every chain runs its own chart, which is why you can be a 20 in one shop and a 24 in the next "
+     "door. Measure yourself once with a tape - bust at the fullest point, waist at the narrowest "
+     "bit above the navel, hips at the widest, about 20cm below the waist - write the numbers in cm "
+     "and use that shop's own size guide for that garment. Then fit the widest part of you and have "
+     "the rest taken in, which is £10 to £20 at a dry cleaner's, and look at the tall, petite and "
+     "curve ranges, because they are cut on those same measurements rather than on a number. A "
+     "bigger size is a fact about the pattern, not about you."),
+    # a shoe, a hat, a drill bit, a bed and a curtain have their own sizes, and the conversion table
+    # is a different question from this one
+    avoid=("shoe", "shoes", "trainer", "trainers", "boot", "boots", "sneaker", "bra size",
+           "cup size", "hat", "gloves", "ring size", "drill", "drill bit", "wall plug", "screw",
+           # jeans have their own fitting answer and it says how the three numbers work
+           "jeans", "jean",
+           # "where can i buy clothes for a size 22" asks for a shop and not for a tape measure
+           "where can i buy", "where to buy", "where do i buy", "which shops", "what shops",
+           "which shop sells", "where sells",
+           "screws", "bolt", "bolts", "pipe", "pipes", "tank", "boiler", "radiator", "mattress",
+           "bed", "duvet", "pillow", "sheet", "curtain", "curtains", "rug", "tv", "sofa",
+           "suitcase", "bike", "bicycle", "in europe", "in european", "in the eu", "in eu",
+           "in the us", "in us", "in usa", "in america", "convert", "conversion",
+           "equivalent", "inches", "centimetres", "centimeters", "cm"),
+))
+
+# "how do i take my measurements for clothes" was answered "Ask for the one thing, with a day on
+# it", and "how do i know what size to order online" with the fourteen-day returns rule: the tape
+# measure and the two-sizes-and-send-one-back trick belong together, because that is how an order
+# gets its size right.
+ENTRIES.append(entry(
+    "measure-for-clothes",
+    (("measurements", "measure myself", "measure yourself", "my measurements",
+     "take my measurements", "take my measure", "how do i measure myself",
+     "size guide", "size chart", "size to order", "what size to order", "order online",
+     "order clothes", "ordering clothes", "order a size"),
+     ("clothes", "clothing", "dress", "jeans", "trousers", "shirt", "top", "jacket", "coat",
+      "online", "how", "what size", "which size", "my size", "suit", "bra")),
+    ("Measure in a bra or a thin top, tape snug but not tight and level all the way round, and "
+     "write three numbers in cm: bust at the fullest point, waist at the narrowest above the navel "
+     "(bend sideways and the crease is it), and hips at the widest, about 20cm below the waist. "
+     "Add your height and inside leg and you have everything a size guide asks for. Then read the "
+     "chart for that particular garment, since a shop's trousers and its coats are cut differently, "
+     "and check the reviews for 'runs small' before you choose. On the day, order two sizes and "
+     "send one back: you have 14 days to change your mind on anything bought online, and one "
+     "return postage is cheaper than a garment that does not fit."),
+    avoid=("shoe", "shoes", "trainer", "trainers", "boot", "boots", "drill", "wall plug", "screw",
+           "curtain", "curtains", "blind", "blinds", "mattress", "bed", "duvet", "rug", "rugs",
+           "tank", "boiler", "radiator", "shed", "window", "door", "room", "carpet", "wall"),
+    # "how do i take my measurements for clothes" was the borrow-something card, which read
+    # "take" and "for" and answered with a request for a day
+    bias=1,
 ))
 
 # ---- a lace and a ribbon bow -----------------------------------------------------------------
@@ -4482,4 +5713,324 @@ ENTRIES.append(entry(
            "wont let me", "won't let me", "refuses", "hates having", "screams", "fighting me",
            "kicks off", "cries when i brush", "crying when i brush", "cries when i comb",
            "hates me brushing", "pubic", "dog", "cat", "pet", "vacuum", "drain", "shower"),
+    bias=1))
+
+
+# ---- the item a line asks for, not the word beside it -----------------------------------------
+#
+# A line with a clause and then a question is read from the clause. Four from the board on main
+# `256b47bd`, each answered by a card that was about the clause rather than the thing wanted:
+#
+#   im 5 foot 2 and i need trousers for work, what do i look for   -> the standing-all-day foot card
+#   my son starts school in september and needs his uniform        -> school-trip costs
+#   its my first day at the gym tomorrow and i havent got any kit  -> a cardio starter plan
+#   my daughter has a dance show in may and needs a costume        -> "May: Greece or Croatia"
+#
+# The half that belongs here is coverage: no row was keyed on the item, so the clause word won by
+# default. Each row below is keyed on the item - trousers, a uniform, kit, a costume, what to wear
+# to a wedding - and the ask is what it answers.
+ENTRIES.extend([
+    entry("work-trousers",
+          (("trousers", "trouser", "pants", "work trousers", "work pants", "chinos", "slacks",
+            "workwear", "smart trousers"),
+           ("work", "office", "for work", "at work", "job", "look for", "what to look for",
+            "buy", "buying", "fit", "fits", "smart", "comfortable", "long day",
+            "on a shift", "all day")),
+          "For work, four things decide it: the fabric, the rise, the length and the pockets. A "
+          "wool-poly blend or a cotton twill with a little stretch creases less and gives when you "
+          "sit and stand; a mid rise that sits at the waist stays put through a shift; and the hem "
+          "should break once on the shoe, so buy the length that fits you - short and petite "
+          "lengths are sold off the rail and cost no more than a tailor. Check a phone goes in the "
+          "pocket without pulling, and two pairs of one dark colour is the cheapest way to always "
+          "have a clean pair.",
+          ask=("work", "office", "look for", "buy", "fit", "what"),
+          # a stain, a hem to take up, a muddy pair and an iron are four other answers
+          avoid=("stain", "stains", "mud", "muddy", "hem", "take up", "taking up", "shorten",
+                 "iron", "ironing", "wash", "washing", "shrink", "shrunk", "rip", "torn",
+                 "split", "repair", "suede", "wedding", "funeral", "black tie")),
+    entry("school-uniform",
+          (("uniform", "uniforms", "school uniform", "school uniforms", "pe kit", "school shoes",
+            "school jumper", "school trousers", "blazer"),
+           ("school", "buy", "buying", "get", "where", "order", "label", "labels",
+            "son", "daughter", "child", "children", "kids", "september",
+            "reception", "year 7", "secondary", "primary")),
+          "Shop early and buy to sizes you can see: the badge items - the jumper, the blazer, the "
+          "PE top - come from the school or its named supplier and the plain shirts, trousers, "
+          "skirts and shoes are cheaper in a supermarket, at the same sizes. Go one size up in the "
+          "jumper and the coat and buy two of the shirts and trousers, because those are what get "
+          "dirty fastest, and go in the first week of August: by the end of the month the common "
+          "sizes have gone. Label everything with a laundry marker, shoes and water bottle "
+          "included, and ask about second-hand rails - most schools have one.",
+          ask=("buy", "buying", "get", "where", "need", "needs", "order", "label", "what"),
+          # the school-trip cost card keys "school" and "kit", and the item asked for here is the
+          # uniform, so the specific row wins the tie
+          bias=3,
+          # term dates, admissions, trip costs and a nervous first day are four other answers,
+          # and so are washing, ironing and mending: this row is the buying half only
+          avoid=("term dates", "term", "admission", "admissions", "apply", "application",
+                 "catchment", "trip", "trips", "cost", "costs", "fees", "nervous", "anxious",
+                 "worried", "crying", "bully", "bullied", "friends", "teacher", "homework",
+                 "wash", "washing", "washed", "iron", "ironing", "stain", "stains", "stained",
+                 "shrink", "shrunk", "lost", "missing", "get out", "gets out", "come out",
+                 "gum", "ink", "paint", "mud", "blood", "grease", "glue", "crayon", "marker",
+                 "pen", "felt tip", "blot", "remove")),
+    entry("gym-kit",
+          # "what to wear" was in the key and "need"/"buy"/"wear"/"pack" filled the second half, so
+          # this card answered every "what to wear to a funeral" line as well - nine of sixteen
+          # typed occasion lines came back with the first-session list. The words that say the
+          # person is asking are the ask below; both halves of the key are the gym itself.
+          (("kit", "gym kit", "gym bag", "gym clothes", "what to wear", "wear", "wearing",
+            "outfit", "need", "needs", "buy", "pack", "nothing to wear"),
+           ("gym", "first session", "changing room")),
+          "For a first session you need very little: shorts or leggings that stretch, a t-shirt, "
+          "trainers with a bit of support, a water bottle, a small towel and a padlock for the "
+          "locker. That is the whole list - no gym turns anyone away for supermarket kit, and the "
+          "machines are set up for exactly that. Wear what you already own, wash it after each "
+          "session, and only buy a second set once you know you are going twice a week.",
+          ask=("need", "needs", "what", "wear", "buy", "pack", "havent got", "haven't got",
+               "what to wear", "nothing to wear", "kit"),
+          # the beginner's plan and the induction card key "gym" too, and this is the kit question
+          bias=2,
+          # a plan, a routine and a beginner's programme are the fitness rows' questions
+          avoid=("plan", "programme", "program", "routine", "schedule", "how often", "how many",
+                 "beginner", "start running", "weights", "cardio", "sore", "ache", "hurts",
+                 "membership", "cancel", "contract", "price", "cost", "shoes for running",
+                 "five a side", "football", "rugby", "hockey", "cricket", "netball", "match",
+                 "pitch", "astro", "shin pads", "studs", "racket", "swimming", "cycling",
+                 # what to bring is `a-gym-bag-kit`'s list, which names the towels, the padlock
+                 # and the bottle; this row answers what to wear and what a first session needs
+                 "bring", "bringing", "take with", "packing")),
+    entry("a-show-costume",
+          (("costume", "costumes", "fancy dress", "outfit for the show", "leotard", "tutu",
+            "show costume", "nativity costume"),
+           ("dance", "show", "play", "school play", "nativity", "performance", "concert",
+            "ballet", "where", "get", "buy", "hire", "make", "find", "need", "needs")),
+          "Ask the teacher or the dance school first: for a show they usually name a supplier, "
+          "sell the costume themselves or keep a rail of spares, and buying the wrong shade of "
+          "leotard wastes the money. If it is yours to sort, hiring costs less than buying for one "
+          "night, fancy-dress shops and second-hand marketplaces have plenty a week before, and a "
+          "plain base layer with two bought accessories reads perfectly well from the audience.",
+          ask=("where", "get", "buy", "hire", "make", "find", "need", "needs", "what"),
+          # a party to go to, a dress code and a gig are other rows
+          avoid=("party", "halloween", "dress code", "black tie", "cocktail", "gig", "festival",
+                 "sewing machine", "pattern", "fabric shop")),
+    entry("wedding-guest-wear",
+          (("wedding", "weddings"),
+           ("nothing to wear", "wear", "wearing", "outfit", "what do i wear", "dress", "suit",
+            "guest", "guests", "smart"),
+           # the third part is how the question is asked: the registry and gift rows key
+           # "wedding" and one other word, so a what-shall-i-wear line has to carry the asking
+           ("ideas", "any ideas", "what should i wear", "what do i wear", "nothing to wear",
+            "suggestions", "help", "need", "needs", "should", "suitable", "appropriate")),
+          "Start from the invitation: the dress code, the time and the venue settle nearly all of "
+          "it, because a 2pm church wedding and a 6pm hotel one want different clothes. With no "
+          "code, go one step up from your smartest everyday outfit - a mid-length dress or a "
+          "tailored trouser suit in a dark or jewel colour, closed shoes that cope with grass, and "
+          "a layer for the evening. Borrow or hire if it is one wear; nobody remembers a guest's "
+          "outfit twice, and comfort is what you will notice on the day.",
+          ask=("wear", "wearing", "outfit", "ideas", "dress", "suit", "smart"),
+          # the gift amount and the white-dress card both key "wedding"; what is asked here is
+          # what to wear. The gift card answers "nothing to wear" too if the tie is left alone,
+          # so this row carries the nudge rather than a fence on the gift card.
+          bias=2,
+          # every other what-shall-i-wear line keeps the card it has: the white-and-cream answer,
+          # the black-tie answer, the hat and the shoes. Only a shortage is ours.
+          guard=_an_outfit_shortage,
+          # the gift, the white dress, the speech, the music and the seating are other answers
+          avoid=("gift", "gifts", "present", "how much", "money", "white", "ivory", "speech",
+                 "seating", "plus one", "rsvp", "invite", "invitation wording", "photographer",
+                 "music", "song", "songs", "playlist", "dj", "band", "toast", "reading")),
+    # --- the clothes that no longer fit -----------------------------------------
+    # Not a laundry question and not a shopping-size question about one garment: somebody has
+    # changed shape and the whole drawer is the problem. "none of my clothes fit after a year
+    # off, what should i buy first" was answered by the ironing card, because "clothes" and
+    # "none" are its words, and "my clothes dont fit anymore" was a punt.
+    entry("clothes-that-no-longer-fit",
+          # no "jeans": a pair of jeans that no longer fits is the jeans-size card's line, and
+          # that card is the more useful answer ("fitted by three numbers, try either side")
+          (("nothing fits", "none of my clothes", "my clothes", "my trousers",
+            "my shirts", "my dresses", "my tops", "wardrobe", "clothes", "trousers",
+            "shirts", "shirt", "dresses", "dress", "tops", "outfits", "outfit", "dress size",
+            "sizes", "size"),
+           ("dont fit", "don't fit", "doesnt fit", "doesn't fit", "does not fit",
+            "no longer fit", "not fitting", "nothing fits", "fits", "fit", "too tight",
+            "too small now", "gone up", "gone up a size", "gone up two sizes",
+            "dress sizes", "dress size", "new wardrobe",
+            "buy first", "what do i buy", "what should i buy", "where do i start",
+            "start again", "replace", "replacing", "replace it")),
+          _the_size_you_are,
+          ask=("buy", "fits", "fit", "wear", "size", "sizes", "wardrobe", "start", "do"),
+          bias=2,
+          # a return, a refund, a garment that shrank or a repair is another row's question, and
+          # the iron that is not needed is the ironing row's whatever the line says about clothes
+          avoid=("return", "returns", "refund", "bought online", "send it back", "take it back",
+                 "exchange", "washing machine", "shrank", "shrink", "shrunk", "iron", "ironing",
+                 "stain", "stains", "hole", "holes", "zip", "broken", "button", "sew", "alter",
+                 "tailor", "hem", "wedding", "interview", "funeral", "maternity", "uniform",
+                 # a garment that can be let out is the alterations row's question
+                 "let out", "let it out", "let them out", "taken in", "take it in", "alter",
+                 "altered", "alterations",
+                 # the size of one shirt is the shirt-size row's question, and a tape round
+                 # the neck is what it answers; the same goes for a length to turn up
+                 "shirt size", "size shirt", "which size shirt", "what size shirt",
+                 "know my size", "what size am i", "what size should i", "shirt collar",
+                 "collar size",
+                 # the tape round the body has its own card, and it is a better how-to than
+                 # "measure yourself once" is: "how do i measure myself for clothes" keeps it
+                 "measure myself", "measure yourself", "measure my body", "my measurements",
+                 "take my measurements", "how do i measure", "what measurements",
+                 "hem", "hems", "take up", "taking up", "turn up", "shorten")),
+    # --- the same clothes on a shorter frame --------------------------------------
+    # "im 5 foot 2 and everything is too long, what about trousers" was a punt, "i am 5 foot and
+    # sleeves are always too long" a nod and "what is petite sizing" a "tell me what you have got
+    # so far". The hemming how-to answers "how do i take up a hem" and keeps it; what these lines
+    # are asking is which clothes to buy and what a petite range actually changes.
+    entry("clothes-that-are-too-long",
+          (("trousers", "jeans", "sleeve", "sleeves", "dress", "dresses", "skirt", "skirts",
+            "coat", "coats", "clothes", "everything", "hem", "hems", "petite", "arms", "legs",
+            "jacket", "jackets", "shirt", "shirts", "jumpsuit"),
+           ("too long", "always too long", "petite", "sizing", "take up", "taking up", "shorten",
+            "shortened", "what length", "short legs", "short arms", "short frame", "5 foot",
+            "5ft", "5 ft", "4 foot", "4ft", "4 ft", "alter", "alterations")),
+          "Petite ranges are cut shorter in the body as well as the leg, so start there rather "
+          "than on the standard rail - most high-street shops carry one online, and the rise and "
+          "the sleeves come down with the hem. If something you like has no petite cut, buy it to "
+          "fit the widest part (hips or shoulders) and have the length taken up: a hem is about "
+          "£10-15 at a dry cleaner or a local tailor and takes a few days. Turn a trouser cuff up "
+          "once rather than twice, and check the shoulder seam sits on the bone - if it hangs off "
+          "the shoulder, no hem will rescue it.",
+          # no ask words: "i am 5 foot and sleeves are always too long" states the problem and
+          # asks nothing, and the two parts already say it is a length question
+          # the how-to for one garment is the hemming card's, a shop's stock is not a fact, and a
+          # wedding or a uniform has its own fitting row
+          avoid=("take up a hem", "take up the hem", "how do i hem", "sew", "stitch", "needle",
+                 "iron", "press", "shrank", "shrink", "wedding", "uniform", "school", "interview",
+                 "funeral", "where can i buy", "stock", "shop near", "weight", "diet",
+                 # the size of one shirt is the shirt-size row's question, not a length to
+                 # buy shorter: "which size shirt should i buy" was this row's petite card
+                 "shirt size", "size shirt", "which size shirt", "what size shirt",
+                 "know my size", "what size am i")),
+
+    # --- the garment that is nearly right ------------------------------------------
+    # "my only suit is too small" was a nod, "can a suit be let out" a punt and "my trousers are
+    # too tight" the jumper-soak trick, which is the answer for something that shrank in the wash
+    # and not for a person whose size changed. What is missing is the one card about altering a
+    # garment that exists: how far the seams allow, what a tailor charges, and the one part that
+    # cannot be changed.
+    entry("a-garment-that-can-be-altered",
+          (("suit", "suits", "jacket", "jackets", "blazer", "trousers", "dress", "shirt",
+            "coat", "skirt", "waistband", "waistline", "jeans", "clothes", "outfit", "shorts",
+            "top", "tops", "shirts", "blouse"),
+           ("too small", "got too small", "got small", "come up small", "came up small",
+            "too tight", "let out", "let it out", "let them out", "taken in",
+            "take it in", "taking in", "alter", "altered", "alterations", "alteration",
+            "tailor", "made bigger", "make them bigger", "loosen", "doesnt fit", "doesn't fit",
+            "does not fit", "fits badly", "tight",
+            "tight across", "tight around", "take a suit in", "take in a suit",
+            "to take in", "took it in")),
+          ("A tailor can usually take a garment out by about one size, and a trouser waist by "
+           "about 5cm, because what allows it is the seam allowance still inside: a waist or a "
+           "hem is \u00a320-40 and a jacket \u00a340-80, done in a few days. Judge it on the "
+           "shoulders - they can be taken in a little but never let out, so a jacket tight "
+           "across the back is the one to pass on. Take the trousers with the jacket so the "
+           "length is set with the shoes you will wear, and it is worth it on a suit whose cloth "
+           "is decent, not on one that has gone shiny at the seat."),
+          bias=3,
+          # something that shrank in the wash is the washing row's, a garment to buy is the
+          # wardrobe row's, and a return is the shop's
+          avoid=("shrank", "shrunk", "shrink", "in the wash", "washing machine", "dryer",
+                 "tumble", "conditioner", "return", "returns", "refund", "bought online",
+                 "send it back", "take it back", "wedding", "uniform", "interview", "funeral",
+                 "maternity", "stain", "stains", "hole", "holes", "zip", "broken", "button",
+                 "iron", "ironing", "sew a", "sewing", "knitting", "wool", "jumper", "cardigan",
+                 "what should i buy", "buy first", "new wardrobe", "where do i start",
+                 # a pair of jeans that is tight is the jeans-size card's line
+                 "jeans are too tight", "jeans too tight", "jeans are tight", "jeans are snug",
+                 # length is the petite and hemming row's question, not the tailor's letting out
+                 "too long", "too short", "petite", "5 foot", "5ft", "what length",
+                 "short legs", "short frame", "take up", "taking up", "hem")),
+    # --- the size of one shirt -----------------------------------------------------
+    # "how do i know my shirt size" was a search hedge, "what size shirt am i" the model-number
+    # card and "which size shirt should i buy" the petite row, none of which says how a shirt is
+    # sized. The neck and the chest are two numbers anybody can take at home, so they get a card.
+    entry("a-shirt-size",
+          (("shirt", "shirts", "blouse", "blouses", "collar", "dress shirt", "dress shirts",
+            "formal shirt", "formal shirts", "work shirt", "work shirts", "t shirt",
+            "t shirts", "tee shirt"),
+           ("size", "sizes", "sizing", "what size", "which size", "know my size", "my size",
+            "size am i", "measure", "measure myself", "measure my", "measurements",
+            "fit me", "fits me", "will it fit", "neck", "chest", "sleeve length",
+            "sleeves")),
+          "A shirt is sized by the neck and the chest: measure round the base of the neck where "
+          "the collar sits, with one finger's room, and round the chest at the widest part under "
+          "the arms, over a shirt you would wear underneath. A dress shirt is sold by the neck in "
+          "inches plus the sleeve length - a 15 in neck is about a 38 in chest and a medium in "
+          "most casual ranges, 15.5 about 40, 16 about 42 - and a casual shirt goes by the chest "
+          "alone: 36-38 in is a small, 39-41 medium, 42-44 large, 45-47 extra large. Use the "
+          "shop's own chart, because the same letter is up to two inches different between them, "
+          "and take the tape over what you would wear it with rather than against bare skin.",
+          bias=2,
+          ask=("size", "sizes", "what size", "which size", "how do i", "know", "am i",
+               "measure", "buy", "should i"),
+          # a shirt to be cleaned, mended, shortened or picked for an occasion is another row's
+          # question, and a size asked of a body that is a child's is a different chart
+          avoid=("iron", "ironing", "stain", "stains", "shrank", "shrink", "shrunk", "hole",
+                 "holes", "zip", "button", "buttons", "sew", "stitch", "tailor", "alter",
+                 "hem", "hems", "too long", "too short", "take up", "collar stiff", "yellow",
+                 "sweat", "wash", "washing", "bleach", "dry clean", "school", "uniform",
+                 "wedding", "interview", "funeral", "child", "children", "kids", "kid",
+                 "toddler", "baby", "babies", "year old", "years old", "gift", "present",
+                 "where can i buy", "shop near", "stock", "dress size", "bra size",
+                 # a shirt for a screen, a band or a team is a printed one, not a fitting
+                 "print", "printed", "design", "logo", "band", "team", "stainless")),
+])
+
+# A garment that no longer fits is the commonest clothes question after "how do i wash it",
+# and every row above answers a different one: shrinking is the wash, stretching is a knit, a
+# tight pair of jeans is denim giving. What a person means by "my suit doesnt fit any more" is
+# whether it can be saved, and that is one answer whatever the garment is.
+ENTRIES.append(entry(
+    "a-garment-that-no-longer-fits",
+    (("suit", "suits", "jacket", "jackets", "blazer", "trousers", "trouser", "chinos",
+      "waistcoat", "dress", "dresses", "skirt", "shirt", "shirts", "coat", "coats",
+      "shorts", "uniform", "waistband"),
+     # the ask is what to do about the fit: let it out, take it in, or have a tailor look at it.
+     # "too tight" and "too small" alone are not enough - a knit that came out small and a pair
+     # of jeans that pinches have their own rows, and both avoid this one.
+     ("let out", "letting out", "let the", "take in", "taking in", "taken in", "take it in",
+      "alter", "altered", "altering", "alteration", "alterations", "tailor", "tailors",
+      "too tight", "a bit tight", "so tight", "too small", "too snug", "snug",
+      "doesnt fit", "doesn't fit", "dont fit", "don't fit", "not fit", "no longer fits",
+      "doesnt fit any more", "does not fit", "stopped fitting", "wont fit", "tight across",
+      "bigger", "made bigger", "fit me again", "save it")),
+    ("A tailor can usually save it. What they can change: a jacket taken in at the sides, the "
+     "sleeves shortened, the hem let down an inch or two, and trousers let out about one size "
+     "(2-4cm) if there is seam allowance left inside the waist. What nobody can fix is a jacket "
+     "that is tight across the chest or whose shoulder seam sits past your shoulder bone - that "
+     "is a size up, and no alteration makes it right. A local alterationist charges £15 to £40 "
+     "for a jacket taken in and £10 to £25 for a hem, usually inside a week; ask them to pin it "
+     "on you so you can see the fit before they cut.",
+     # Both lines stand alone: the pool is picked from at random, so a second line that only
+     # makes sense as a follow-up ("a bigger size is often cheaper") is half the answers to
+     # "can you let out a jacket", and it says nothing.
+     "Check the inside of the seam first: most jackets and trousers have 2-4cm of fabric "
+     "folded in at the waist and side seams, which is one size, and letting it out costs £10 to "
+     "£40 at a local alterationist. If it is tight across the shoulders or the chest, no "
+     "alteration fixes it - buy the size up and have the waist taken in instead."),
+    # a garment that shrank in the wash, a knit to stretch back, a tight pair of jeans and a
+    # garment to buy are other rows, and each of them says so on the way in
+    avoid=("shrunk", "shrank", "shrink", "shrinking", "in the wash", "washing", "washed",
+           "dryer", "tumbled", "tumble", "came out small", "the wash",
+           "stretch", "stretched", "stretch it", "stretch them", "stretch out",
+           "jeans", "denim", "jumper", "jumpers", "cardigan", "knitted", "knit", "wool",
+           # a bare "what" or "which" here killed the row's own asks ("my suit is too small
+           # what do i do" scored 5 and then stood down on its own avoid word), so the buying
+           # words are the phrases a person buys with, not the question's own words
+           # a garment just bought is a returns question ("i bought a coat but it doesnt fit"
+           # got the fourteen-day returns card, which is the right answer), so the buying
+           # words fence this row off
+           "bought", "buy", "refund", "return", "returns", "exchange", "receipt",
+           "should i buy", "what suit", "which suit", "what jacket", "which coat",
+           "brand", "brands", "cheap", "sale", "shop", "sell", "selling",
+           "throw it", "bin it", "donate", "charity"),
     bias=1))

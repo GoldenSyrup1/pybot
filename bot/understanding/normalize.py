@@ -214,6 +214,39 @@ BASE = frozenset(_BASE)
 LEXICON = BASE | frozenset(f for word in _BASE for f in _inflections(word))
 COMMON_RANK = {word: i for i, word in enumerate(lexicon.CORE.split() + lexicon.COMMON.split())}
 
+# "me" where a possessive is meant, in the one shape the pass below cannot see.
+#
+# `possessive_me` already repairs most of British chat-speak's possessive "me" - "me sister is
+# coming at the weekend", "wher me phone", "me car wont start", "me head is banging" - and it
+# knows the words that make "me" the object instead ("she told me mum died" told me that Mum
+# died, "give me car keys back" is the keys). Two shapes fall outside it:
+#
+#   "it does me head in"   "head" is not a kin word, so the idiom that ends in "in" - do someone's
+#                          head in - was read as the pronoun and the line as an acknowledgement.
+#   "doin me ed in"        the "h" is clipped, so the word after "me" is not a word at all and
+#   "doin me ead in"       the repair stops at "me ead" -> "my ead".
+#
+# So this pass carries only those two, and asks the same question the other one asks: is the thing
+# the end of the phrase? "me head in" and "me ed ..." close the phrase, "me head office" and
+# "me ed office" do not, and nothing here touches a line `possessive_me` already reads.
+# What may follow a "me" this file thinks is a possessive: a verb, a preposition, a joiner, an
+# adverb, punctuation or the end of the line. A thing can go on naming a thing ("head office",
+# "car keys"), and there the "me" is somebody's object, so that word is not in the list.
+ME_FOR_MY_CLOSES = frozenset("""
+    is are was were am be been being isnt arent wasnt werent aint
+    has have had having got gets getting get
+    will wont would could should can cant cannot must might may shall
+    do does did doing done dont doesnt didnt
+    hurts hurt hurting aches ache aching bangs bang banging throb throbs throbbing kills kill
+    feels feel feeling looks look looking smells smell smelling sounds sound sounding seems seem
+    needs need wants want keeps keep kept goes go going went comes come coming came broke broken
+    breaks break stopped stops started starts works worked died dies dying
+    in on out off up down at to for with from by about over under around through into onto
+    and or but so because as than then
+    not no never still too also just again now today tomorrow yesterday tonight anymore
+    all both every any some
+""".split())
+
 # The words the topics name a thing by, kept by length so a slip is one scan of the words the
 # right length. `topics` fills this at import: it reads this module, so the list cannot come the
 # other way round, and the repair below needs it (see `_a_thing_a_letter_short`).
@@ -479,6 +512,33 @@ def _dropped_letter(word):
     if len(word) < 3 or word.endswith("w"):
         return ()
     return (word + "w",)
+
+
+def _an_ing_said_as_n(word):
+    """The -ing form typed with the i and the g both gone: "gettn" -> "getting".
+
+    A word ending in three letters that are all consonants and the last of them an n is an -ing
+    with nothing left of the ending but the n: "forgettn", "gettn", "sittn", "chattn". The shape
+    is what makes it safe - no English word ends that way, because a syllable needs a vowel - so
+    a word that has one in its last three letters ("basin", "satin", "salmon") is left alone
+    even when it is not in the lexicon, and one the lexicon holds is never reached at all.
+
+    The verb under it may double its last letter ("get" -> "getting", "sit" -> "sitting"), so
+    both spellings are tried and the caller keeps the one the lexicon knows.
+    """
+    if (len(word) < 5 or not word.endswith("n") or word in LEXICON
+            or word in lexicon.COMMON_NAMES):
+        return None
+    if any(char in VOWELS for char in word[-3:-1]):
+        return None
+    stem = word[:-1]
+    forms = [stem + "ing"]
+    if len(stem) > 1 and stem[-1] == stem[-2]:
+        forms.append(stem[:-1] + stem[-1] + "ing")
+    known = {form for form in forms if form in LEXICON}
+    if len(known) == 1:
+        return known.pop()
+    return None
 
 
 def _a_leading_h(word):
@@ -1244,6 +1304,86 @@ def _near_a_part(word):
 PART_REACH = 3
 
 
+# A game named by the shape of its pitch, or by the knockabout, rather than by its own name: "we
+# play five a side on sunday", "anyone up for a kickabout". The game's name is the word the topic
+# rule and the knowledge base match on, so a line that names the game this way named no game at all:
+# "what should i eat before playing five a side" was answered with a supper pick from the fridge,
+# and the same question with "football" in it with the carbs to eat an hour before. Only the reading
+# is given the name: `clean` and `plain` keep the words the person typed, which is what a reply
+# quotes back.
+A_SIDE = frozenset("five six seven eight nine".split())
+
+
+# A line that asks about the shape of the game itself, or about finding a team to play in, is not a
+# line about playing today. The knowledge base has nothing about the form of the game - reading
+# "how many players in five a side" as football reached the card about the professional game and
+# answered "two halves of 45 minutes, with 11 a side", a confident wrong answer where the bot had
+# said it did not know - and a card about picking a club to support is no answer to somebody looking
+# for a team. Both shapes keep the words they typed, and so does a statement about the game's shape
+# ("eleven a side is a full match"), which is why the full game is not one of the counts read here:
+# it is the same game the row about watching it is about, and the line already names it.
+ABOUT_THE_FORM = re.compile(r"""
+    \bhow\s+many\s+(?:players?|people|a\s+side)\b
+  | \bhow\s+(?:long|many\s+halves)\b[^.]{0,40}\b(?:match|game|half|halves)\b
+  | \b(?:the\s+)?rules?\b
+  | \boffside\b
+  | \bhow\s+big\b
+  | \bpitch\s+(?:size|dimensions)\b
+  | \bfull\s+(?:match|game)\b
+""", re.VERBOSE | re.IGNORECASE)
+FINDING_A_TEAM = re.compile(r"""
+    \b(?:join|joining|find|finding|looking\s+for|sign\s+up\s+(?:for|to)|get\s+into)\b
+  | \bteams?\b[^.]{0,24}\b(?:in|near|around|local)\b
+  | \b(?:clubs?|leagues?)\b
+""", re.VERBOSE | re.IGNORECASE)
+
+
+def _a_game_named_another_way(norm, words):
+    """(`norm`, `words`) with a game named by its shape read as the game's own name.
+
+    "five a side" is a small football match and nothing else is said that way, and one word stands
+    in its place so the game sits where the person put it - in their setting clause or in their ask
+    - instead of being bolted onto the end of the line. The knockabout is the same game named by the
+    thing you do with the ball. The game's name goes into `words` as well, because that is the list
+    the knowledge base is matched on; `clean` and `plain` keep the words the person typed, which is
+    what a reply quotes back.
+
+    A line about the make-up of the game, or about finding a team, names the game without asking
+    anything about playing it, so it keeps the words it typed (see `ABOUT_THE_FORM`). So does a
+    line whose subject is a part of the body that hurts: "i play five a side twice a week and my
+    groin is sore" has a groin answer of its own, and naming the game put a football-injury card's
+    clarifying question ahead of it - the person's part is the subject, and the game is only where
+    they use it.
+    """
+    flat = " ".join(norm)
+    if ABOUT_THE_FORM.search(flat) or FINDING_A_TEAM.search(flat):
+        return norm, words
+    if (any(word in lexicon.BODY_PARTS for word in words)
+            and any(word in lexicon.PAIN_WORDS for word in words)):
+        return norm, words
+    out = []
+    read = []
+    index = 0
+    while index < len(norm):
+        if (norm[index] in A_SIDE and index + 2 < len(norm)
+                and norm[index + 1] == "a" and norm[index + 2] == "side"):
+            out.append("football")
+            read.append("football")
+            index += 3
+            continue
+        if norm[index] == "kickabout" or (norm[index] == "kick"
+                                          and norm[index + 1:index + 2] == ["about"]):
+            out.append("football")
+            read.append("football")
+            index += 1 if norm[index] == "kickabout" else 2
+            continue
+        out.append(norm[index])
+        index += 1
+    if not read or "football" in words:
+        return out, words
+    return out, list(words) + ["football"]
+
+
 def _parts_that_hurt(words, fixes):
     """The line with every misspelt part of the body read as that part, repairs kept in `fixes`.
 
@@ -1971,6 +2111,9 @@ def fix_typo(word):
     dropped = _dropped_g(word)
     if dropped:
         candidates.append(dropped)
+    said_as_n = _an_ing_said_as_n(word)
+    if said_as_n:
+        candidates.append(said_as_n)
     candidates += [w for w in _dropped_letter(word) if _a_word_of_the_bots(w)]
     candidates += [w for w in _a_leading_h(word) if _a_word_of_the_bots(w)]
     candidates += [w for w in _extra_vowel(word) if _a_word_of_the_bots(w)]
@@ -1991,6 +2134,29 @@ def fix_typo(word):
     left_out = _an_emergency_word_left_out(word)
     if left_out:
         candidates.append(left_out)
+    # A letter the word does not say, and a letter typed twice.
+    #
+    # The t of "often", "listen", "fasten", "castle" and "whistle" is not said, so it is the
+    # letter people leave out of the word. It goes back where those words have it: straight
+    # before "en" or "le" and straight after a consonant. A general letter put anywhere turns
+    # ordinary words into other ones ("pond" is one letter from "pound", "bush" from "brush", and
+    # both are words a line is about), and with a vowel in front of the ending it would make
+    # "tile" into "title".
+    def _a_silent_t_put_back(typed):
+        for ending in ("en", "le"):
+            if typed.endswith(ending) and len(typed) > len(ending) + 1:
+                if typed[-len(ending) - 1] in VOWELS:
+                    continue
+                yield typed[:-len(ending)] + "t" + ending
+
+    candidates += [w for w in _a_silent_t_put_back(word) if w in BASE or w in LEXICON]
+    # The doubling rule above fences every doubled pair off, because "taping" is not "tapping" -
+    # but the fence belongs on a word that *is* a word as typed. "watter" is nothing, so "water"
+    # loses nothing, and the line that had it keeps its card. The fence is only ever loosened for
+    # a typed word the lexicon does not hold, so nothing that means something is bent.
+    typed_is_a_word = word in BASE
+    candidates += [w for w in _double_variants(word)
+                   if w in BASE and not (typed_is_a_word and _unsays_the_word(word, w))]
     words = sorted(set(candidates), key=lambda w: COMMON_RANK.get(w, 10 ** 6))
     if not words:
         return None
@@ -2922,6 +3088,14 @@ SAID_AS_A_FEELING = (
     (re.compile(r"(?<![a-z0-9])(?:my|me)\s+(?:whole\s+)?(?:world|life)\s+"
                 r"(?:fell|has\s+fallen|had\s+fallen|is\s+falling|came|came\s+crashing)\s+"
                 r"(?:apart|down|crashing\s+down)(?![a-z0-9])"), " i am sad "),
+    # The heart idioms that name dread rather than grief. "my heart is in my mouth" and "my heart
+    # is in my boots" are both the fear before something, and neither one is a heart that has been
+    # broken, so the readers that answer a heart answered them with the grief card or with the
+    # shrug that says the line held no feeling at all. The feeling word is the one the line means:
+    # nervous. "my heart is in my throat" is the same and is spelled the same way.
+    (re.compile(r"(?<![a-z0-9])(?:(?:my|me)\s+)?heart(?:'s|s)?\s+"
+                r"(?:(?:is|was|feels|felt)\s+)?in\s+(?:my|me)\s+"
+                r"(?:mouth|boots|throat|stomach|shoes)(?![a-z0-9])"), " i am nervous "),
     # "im crushed", "i feel crushed" - said of the person, not "i crushed my finger"
     (re.compile(r"(?<![a-z0-9])(?:im|i\s+am|i\s+feel|i\s+felt|i\s+was)\s+"
                 r"(?:so\s+|really\s+|totally\s+|completely\s+|utterly\s+|absolutely\s+)?"
@@ -2953,8 +3127,27 @@ def _the_ask_said_plainer(text):
                           f"{one.group('saying')} saying"), text)
 
 
+_A_CLOSING_WORD = "|".join(sorted((re.escape(word) for word in ME_FOR_MY_CLOSES),
+                                  key=len, reverse=True))
+_A_HEAD_IN_THE_IDIOM = re.compile(r"(?<![a-z0-9])me head(?=\s+in(?![a-z0-9]))")
+_A_CLIPPED_HEAD = re.compile(
+    r"(?<![a-z0-9])(?:me|my) (?:ed|ead)(?!s?(?:[a-z0-9]))"
+    r"(?=\s+(?:" + _A_CLOSING_WORD + r")(?![a-z0-9])|\s*$|\s*[,.;:!?])")
+
+
+def _me_for_my_pass(text):
+    """`me ed in` and `me head in` -> `my head in`, the two shapes `possessive_me` misses.
+
+    The rest of the possessive "me" is that pass's job, with its own fences (a kin word after a
+    verb, the owning verbs, the prepositions), so nothing here overrides it: "she told me mum
+    died" and "give me car keys back" keep their "me" because this pass never sees them.
+    """
+    text = _A_HEAD_IN_THE_IDIOM.sub(" my head", text)
+    return _A_CLIPPED_HEAD.sub(" my head", text)
+
 def _phrase_pass(text):
     """Replace whole phrases ("cn u", "b/c", "okey dokey") before words are split."""
+    text = _me_for_my_pass(text)
     for heart, feeling in HEART_SAID_AS_A_FEELING:
         if heart.search(text):
             text = heart.sub(feeling, text)
@@ -3584,6 +3777,41 @@ BEEN_WORDS = frozenset("""sick ill unwell poorly bad awful great good alright qu
 # "cats bin sick". A determiner never gets here, so "the bin" and "my bin" stay bins.
 BEEN_SUBJECT = frozenset("""i you we they he she it that thats its hes shes this these those
     there which what who everything nothing something""".split())
+# The word in front of the thing that has "bin": "my phones bin actin up all wk", "our boiler bin
+# leaking since tuesday". The thing is not one of the person-words above, so the person rule
+# never sees those lines, and the word after the "bin" has to be a verb with its -ing on (or the
+# state the thing has been in) - "my bin bags", "my bin is full", "my bin needs emptying" and
+# "my bin men come friday" keep their bin.
+THING_POSSESSIVES = frozenset("my our your his her their its".split())
+# The g people drop off a verb in a hurry: "actin", "tryin", "leakin". A word ending in "in"
+# is the verb unless it is one of the few nouns that end the same way, so those keep their word
+# ("my cabin bin" is a bin in a cabin, and "my cousin bin" is not a cousin who has been).
+IN_NOUNS = frozenset("""
+cabin robin basin margin satin ruin twin grin coin pumpkin napkin muffin raisin resin
+vitamin protein aspirin insulin cousin dolphin penguin violin mandolin origin virgin cabbage
+""".split())
+# A thing that is a bin is a bin whatever its -ing word looks like. "my kitchen bin smelling",
+# "my compost bin overflowing", "my food bin attracting flies" are a container with a problem,
+# and reading the container as a thing that has *been* handed the line to a damp-room answer
+# ("find the source before you treat the air"). The words in front of the "bin" name the
+# container, and the verbs after it are what a container does.
+BIN_CONTAINERS = frozenset("""
+kitchen compost food wheelie recycling waste rubbish trash dust garden nappy nappies sharps
+bathroom pedal swing carrier paper
+""".split())
+
+
+def _the_thing_has_been(word):
+    """Whether the word after a "bin" is what a thing that has been somewhere says next."""
+    plain = _plain_chat(word) if word else ""
+    if not plain:
+        return False
+    if plain in BEEN_WORDS or plain.endswith(("ing", "ed")):
+        return True
+    # The word `in` itself ends in "in", so "<possessive> <thing> bin in <place>" - "my green
+    # bin in the corner", "my washing bin in the corner" - was read as a thing that has *been*
+    # somewhere, and both lines lost their own answer. The bare word is not a dropped g.
+    return plain != "in" and plain.endswith("in") and plain not in IN_NOUNS
 
 
 def _is_person(word):
@@ -4073,6 +4301,20 @@ _AFTER_A_DOING = frozenset("""a an the my your our their his her its this that t
 
 # The words that come between "were" and the state: "were so tired", "were all gutted", "were
 # not happy", "were gonna be late". The word after one of these decides it.
+# The prepositions that open a place or a state after "we are": "were in york", "were near
+# bristol", "were at my mums", "were up in scotland", "were on the train". At the front of a
+# clause there is no subject in front of the "were", so the past tense of the plural cannot be
+# what was meant, and the only other reading - a question about a thing ("were dogs allowed",
+# "were parking available") - needs a noun after it, not a preposition. These lines kept their
+# "were" and reached the search hedge ("were in york" was answered "I don't know enough to
+# answer that honestly. A search should sort you out quickly"), while the same line with the
+# apostrophe was read: "we're in york" got the acknowledgement, "we're at my mums" was noted.
+_WERE_PLACE = frozenset("in at near up down out over round around on inside outside".split())
+# What says the past tense was meant after all: "were in york last week" is about a week that
+# has gone, and reading it as "we are in york last week" is a line nobody says. A time word
+# right after the preposition keeps the "were".
+_WERE_IN_THE_PAST = frozenset("""last yesterday then earlier previously ago once before
+    afterwards that those""".split())
 # Who a lead-in word can stand in front of in a question: "were both of them there", "were
 # all of us late". These keep the "were", because the question is about who was there.
 _AFTER_A_LEAD_IN_SUBJECT = frozenset("""i you we they he she it them us him her me of""".split())
@@ -4119,6 +4361,8 @@ def _were_for_another_word(before, after, after_after=None):
             return ["were"]
         return None
     if _a_doing(after) and (after_after is None or after_after in _AFTER_A_DOING):
+        return ["we", "are"]
+    if after in _WERE_PLACE and after_after not in _WERE_IN_THE_PAST:
         return ["we", "are"]
     return None
 
@@ -4963,6 +5207,10 @@ def _positional_word(token, before, after, after_after=None, before_before=None,
         if _is_person(before) and (after in PERSON_PREPS or _is_participle(after)
                                    or _is_said_of_a_person(after)):
             return ["been"]                       # "my mums bin in hospital", "my cats bin sick"
+        if before_before in THING_POSSESSIVES \
+                and (_plain_chat(before) if before else "") not in BIN_CONTAINERS \
+                and _the_thing_has_been(after):
+            return ["been"]                       # "my phones bin actin up all wk"
         if (before in BEEN_SUBJECT or before in BE_FORMS or before in (None, "|")) \
                 and (_is_said_of_a_person(after) or (after or "").isdigit()
                      or _counts_a_period(after) or _counts_a_period(after_after)
@@ -5097,13 +5345,19 @@ YOU_ARE_AFTER = frozenset("""a an the such so too very really quite bloody prope
 
 
 def _join_chat_digits(tokens):
-    """A chat word written with a digit stays one word: "any1", "l8r", "2nite".
+    """A chat word typed in pieces stays one word: "any1", "l8r", "2nite", and "i d k".
 
     The tokeniser keeps a measure together ("5kg", "1.5kg") but splits a letter run from a
     digit run, so the digit spelling of a chat word arrives in two or three pieces ("l" + "8r",
     "2" + "nite") and never reaches the chat table. Pieces are joined only into a word the
     lexicon knows, so an ordinary digit pair ("i have 4 cats", "a table for 2") is left alone,
     and a measure ("1.5kg", "20mg") is one token already and never a candidate.
+
+    Somebody typing with one hand writes the same chat word with a space between every letter:
+    "i d k", "o m g", "n e 1". Nothing read those runs, so `i d k` came out as "i'd k" and the
+    line reached no card at all. Three or four one-character pieces that spell a chat word are
+    joined the same way, and a run that spells nothing the lexicon knows ("c a t", "i have 4
+    cats") is left exactly as typed.
     """
     joined = []
     index = 0
@@ -5117,9 +5371,65 @@ def _join_chat_digits(tokens):
             joined.append(token + following)
             index += 2
             continue
+        spelt = _said_apart_as_one(tokens, index)
+        if spelt is not None:
+            joined.append(spelt[0])
+            index = spelt[1]
+            continue
         joined.append(token)
         index += 1
     return joined
+
+
+# A run of three or four one-character pieces that spells one chat word, in the line as typed.
+_SPACED_RUN = re.compile(r"(?<![\w'])([a-z0-9](?:[ \t]+[a-z0-9]){2,3})(?![\w'])", re.IGNORECASE)
+
+
+def _said_apart_as_one_word(clean):
+    """Join "i d k" into "idk", and only when the run spells a word the lexicon knows.
+
+    Longest first, so "n e 1" is read as "ne1" and not as a shorter piece of it. Two pieces are
+    deliberately left alone: "i m", "didn t" and "c section" are read by the tables that expect
+    them, and joining them here would take those lines away from those readers.
+    """
+    if not _SPACED_RUN.search(clean):
+        return clean
+
+    def join(match):
+        # The run may be longer than the chat word in it: "b t w i was late" is "btw" and the
+        # start of the next clause, so the longest piece that spells a word wins and the rest of
+        # the run is put back exactly as typed.
+        pieces = match.group(1).split()
+        for length in range(len(pieces), 2, -1):
+            word = "".join(pieces[:length]).lower()
+            if word in lexicon.CHAT or word in lexicon.MISSPELLINGS:
+                return " ".join([word] + pieces[length:])
+        return match.group(0)
+
+    return _SPACED_RUN.sub(join, clean)
+
+
+# "i d k" and "o m g": three or four single characters in a row that spell one chat word.
+# "i d k" and "o m g": three or four single characters in a row that spell one chat word.
+_SPACED_PIECE = re.compile(r"^[a-z0-9]$")
+
+
+def _said_apart_as_one(tokens, start):
+    """The chat word at this position and the index after it, or None.
+
+    Longest first, so "n e 1" is "ne1" and never a shorter piece of it, and never more than four
+    pieces, because five one-character words in a row is a spelling and not a chat word.
+    """
+    if not _SPACED_PIECE.match(tokens[start]):
+        return None
+    for length in (4, 3):
+        pieces = tokens[start:start + length]
+        if len(pieces) < length or not all(_SPACED_PIECE.match(piece) for piece in pieces):
+            continue
+        word = "".join(pieces)
+        if word in lexicon.CHAT or word in lexicon.MISSPELLINGS:
+            return word, start + length
+    return None
 
 
 # "The docs" is two different things: the surgery down the road ("should she go to the docs",
@@ -5365,7 +5675,7 @@ def _ask_start(clause):
         if following is None:
             continue
         if token in WH_WORDS:
-            if following in AUX_WORDS:
+            if following in AUX_WORDS or _a_word_between_the_ask_and_its_aux(clause, start):
                 if _reported(clause, start):
                     continue
                 return start
@@ -5387,6 +5697,48 @@ def _ask_start(clause):
                 continue
             return start
     return None
+
+
+# A word belongs to the question phrase in front of it rather than to a clause of its own:
+# "what else do i need", "which size should i get", "what kind of paint do i need", "what
+# present would she like". Cut at the auxiliary instead and the ask reads "do i need", which is
+# no ask at all, so the question word is where the ask begins.
+WH_QUANTIFIERS = frozenset("""else other others kind sort type size colour color number
+    make model brand version flavour flavor""".split())
+# What cannot stand between a question word and the auxiliary that asks it. A pronoun, a
+# determiner or another verb there means the question word is reported or relative, not asked.
+NOT_IN_A_QUESTION_PHRASE = frozenset("""
+    i me my mine we us our you your he him his she her it its they them their
+    the a an this that these those some each every which what who whom whose
+    to of for in on at by with from about as than if whether there here
+    do does did is are was were am be been being have has had will would shall should can
+    could may might must not no never""".split()) | WH_QUANTIFIERS
+# A question word asks through an auxiliary only when the auxiliary is followed by the person or
+# thing that does it: "what present would she like" asks, while "she keeps forgetting where things
+# are in the kitchen" and "my printer says paper jam when there is not one" report where something
+# is or how something is, because the auxiliary comes after its subject rather than in front.
+AFTER_AN_INVERTED_AUX = frozenset("""
+    i we you he she they there it this that these those
+    the a an my our your his her their some any""".split()) | SUBJECT_WORDS
+
+
+def _a_word_between_the_ask_and_its_aux(clause, start):
+    """True when the question word at clause[start] reaches an auxiliary over a few words.
+
+    "what present would she like", "what sort of shoes do i need", "what party games would he
+    like": the words between belong to the question, and the auxiliary that follows asks it. A
+    pronoun, a determiner or a second verb between them means the question word is reported or
+    relative, so that is left alone.
+    """
+    span = clause[start + 1:start + 6]
+    for offset, word in enumerate(span):
+        if word in AUX_WORDS:
+            crossed = [w for w in span[:offset] if w not in WH_QUANTIFIERS
+                       and w not in ("of", "for")]
+            subject = clause[start + 2 + offset] if start + 2 + offset < len(clause) else None
+            return (len(crossed) <= 2 and not (set(crossed) & NOT_IN_A_QUESTION_PHRASE)
+                    and subject in AFTER_AN_INVERTED_AUX)
+    return False
 
 
 def _inverted_ask(clause, start):
@@ -5614,6 +5966,26 @@ def strip_leaders(clause):
         start += 1
     return clause[start:]
 
+# The same rule for a line of text, for the readings that match a shape against the whole line and
+# so never see past the filler. A child's name and age is read as a pair in "my daughters name is
+# mia and shes 6", and behind a leader - "oh and my daughter is called mia", "and my sons called
+# tom, hes 9" - not one of those shapes matched, because every one of them starts at "my". A
+# leader can be stacked ("oh and", "so then"), so the rule is applied until it stops.
+_LEADER_WORD = re.compile(r"^\s*([A-Za-z']+)\s*[,.;:!\-\u2014]*\s*")
+
+
+def without_leaders(text):
+    """The line without the filler it opens with: "oh and my son is 9" -> "my son is 9"."""
+    said = str(text or "")
+    while True:
+        match = _LEADER_WORD.match(said)
+        if not match or match.group(1).lower() not in LEADERS:
+            return said
+        rest = said[match.end():]
+        if not rest.strip():
+            return said
+        said = rest
+
 
 # A time word ends a place phrase: "when i was at the gym last week" says the gym, not the week.
 _PLACE_STOP = frozenset("""last next this that yesterday today tomorrow tonight morning
@@ -5732,6 +6104,52 @@ def background_positions(norm):
                 index += 1
                 taken += 1
     return skip
+
+
+# A clause that opens "how long", "how much", "how often" is the measure word of an ask, and the
+# clause splitter keeps it on its own: "how long do they stay on" reads as two clauses, "how long"
+# and "do they stay on". The ask is both halves - the measure word is the one that says which kind
+# of answer is wanted - so `asking` puts them back together.
+
+
+def _the_measure_clause(clause):
+    """True for a clause that is only a measure word, with or without its noun.
+
+    "how long", "how much water", "how many hours sleep": the second word is the measure, and
+    whatever follows it inside the clause is the thing measured, so the whole clause belongs to
+    the ask that comes after it. A leading "and" or "so" is a leader, not part of the measure:
+    "and how long do they stay on" is the same ask as "how long do they stay on".
+    """
+    stripped = strip_leaders(clause)
+    return len(stripped) > 1 and stripped[0] == "how" and stripped[1] in HOW_DEGREE
+
+
+def _asking(clauses, focus):
+    """The clause that asks, with the measure word it was said with.
+
+    `focus` is the clause carrying the ask, and for "how long do they stay on" that is "do they
+    stay on": the measure word sits in the clause before it. A reader that reads the ask - the
+    shape of the answer, or the thing the question attaches to - needs the word that says which
+    measure is wanted, or a how-long reads as a yes/no. So the measure clause in front of the
+    focus is joined to it here, once, rather than by every reader of the ask.
+
+    Nothing else is added: a line with no measure word gets its focus back unchanged.
+    """
+    if not focus:
+        return []
+    at = None
+    for index, clause in enumerate(clauses):
+        if clause is focus:
+            at = index
+            break
+    if at is None:
+        for index, clause in enumerate(clauses):
+            if clause == focus:
+                at = index
+                break
+    if at and _the_measure_clause(clauses[at - 1]):
+        return list(clauses[at - 1]) + list(focus)
+    return list(focus)
 
 
 def _focus(clauses):
@@ -6268,7 +6686,7 @@ def _only_doubles_a_letter(typed, mended):
 
 def normalise(text):
     """{"text", "clean", "words", "plain", "norm", "norm_text", "fixes", "clauses", "focus",
-    "signals"} for one line.
+    "asking", "signals"} for one line.
 
     "plain" is the line as it was typed with each word repaired in place - the same order, the
     same punctuation, no clause splitting - so a reader that matches on words gets the spelling
@@ -6282,6 +6700,11 @@ def normalise(text):
     # token with an upper-case letter is never split ("Didi" is a person, not "did i").
     clean = _glued_said_apart(" ".join(_unaccent(text).split()))
     clean = _typed_without_spaces(clean)
+    # "i d k" and "o m g": somebody typing with one hand puts a space between every letter, and
+    # nothing read those runs, so `i d k` became "i'd k" from the two pieces "i d" and reached no
+    # card at all. It goes in here, before the short spellings are repaired, because "i d" is
+    # repaired into "i'd" further down and the pieces are gone by then.
+    clean = _said_apart_as_one_word(clean)
     clean = _the_mrs_is_the_wife(clean)
     clean = " ".join(clean.lower().split())
     # A "can not" typed as two words is the one word "cant": the cards are keyed on the short
@@ -6401,6 +6824,15 @@ def normalise(text):
                     # The g this pass put back is a repair, and the word the knowledge base is
                     # handed carries it: "how long can i go without eating, im starvin".
                     fixed[word] = spelled
+                elif word == "bin" and parts[0] == "been":
+                    # A "bin" the frame made into "been" is the word the knowledge base is handed,
+                    # for the same reason as a spelling put right: the rows key on words, and one
+                    # keyed on "bin" answers a line about a sick cat with a pet that has been in
+                    # the washing machine ("cats bin sick twice 2day" got "towel him dry right
+                    # through"). The noun keeps its word: "the bin needs emptying", "my dog fell
+                    # in the bin" and "bin day" never get here, because the frame in front of the
+                    # word is the whole of the test above.
+                    fixed[word] = parts[0]
             else:
                 # A chat-spelled contraction is a spelling slip, not an expansion: the plain line
                 # gets "couldnt" for "cudnt", which is the spelling the modules match on. Only
@@ -6422,6 +6854,7 @@ def normalise(text):
         norm = _without_the_intensifier(norm)
     # A misspelt part of the body is settled once, here, so the topic rule, the part the composer
     # keeps a pool of lines for, and every module that matches on words all read the same part.
+    norm, words = _a_game_named_another_way(norm, words)
     norm = _parts_that_hurt(norm, fixes)
     if any(word in lexicon.PAIN_WORDS for word in norm):
         # The plain line carries the repairs the reading made, or a reader matching on words
@@ -6437,6 +6870,7 @@ def normalise(text):
     clauses = _split_ask(_repair_openers(_clauses(norm), fixes))
     flat = [word for clause in clauses for word in clause]
     focus = _focus(clauses)
+    asking = _asking(clauses, focus)
     signals = {
         "question_mark": "?" in text,
         "shout": sum(1 for w in text.split() if len(w) > 2 and w.isupper()) > 0,
@@ -6476,6 +6910,8 @@ def normalise(text):
         "intensifier_left": intensifier_left,
         "clauses": clauses,
         "focus": focus,
+        # The ask as it was said, measure word and all: see `_asking`.
+        "asking": asking,
         "signals": signals,
         "dropped_subject": subject_put_back,
         "change_of_subject": change_of_subject,

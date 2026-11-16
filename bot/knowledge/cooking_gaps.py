@@ -37,9 +37,9 @@ bake. Once the line names the fault the row for that fault is more specific and 
 
 import re
 
-from .dishes import not_ruled_out
+from .dishes import a_plan_that_might_be_ruined, not_ruled_out
 from .lookup import entry
-from .cooking import JACKET_FILL
+from .cooking import JACKET_FILL, _crowd, _crowd_meal, _occasion
 
 ANSWERS = ("cooking",)
 
@@ -538,21 +538,6 @@ _FAULT = ("went wrong", "gone wrong", "went out wrong", "went badly", "gone badl
 # does/will/would is another question, and both rows stand down for it. This is a guard and not an
 # avoid word because an avoid phrase is read loosely, in any order: "does the lemon ruin it" and
 # "will that spoil the sauce" would still be answered, and "i ruined the curry" would not.
-_A_PLAN_THAT_MIGHT_BE_RUINED = re.compile(
-    r"\b(?:does|do|will|would|can|could|might|may|shall|should)\s+"
-    r"(?:that|this|it|they|these|those)\s+"
-    r"(?:ruin|ruins|spoil|spoils|wreck|wrecks)\b", re.I)
-
-
-def _a_dish_fault_already_happened(understood):
-    """True unless the line is asking what a choice would do to a dish, not reporting one."""
-    if not isinstance(understood, dict):
-        return True
-    text = str(understood.get("plain") or understood.get("clean") or understood.get("text")
-               or "")
-    return _A_PLAN_THAT_MIGHT_BE_RUINED.search(text) is None
-
-
 entry_dish_went_wrong = entry(
     "dish-went-wrong",
     # the fault phrase first, because it is what has to be said; the dish second, because a
@@ -590,7 +575,7 @@ entry_dish_went_wrong = entry(
            "eggs", "egg", "scrambled", "poached", "boiled",
            # and a pizza is baked, so it is the bake row's to answer
            "pizza", "pizzas"),
-    guard=_a_dish_fault_already_happened)
+    guard=a_plan_that_might_be_ruined)
 
 entry_bake_went_wrong = entry(
     "bake-went-wrong",
@@ -613,7 +598,7 @@ entry_bake_went_wrong = entry(
            "evening", "date", "day", "weekend", "holiday", "recipe", "how do i make",
            "make a cake", "bake a cake", "without flour", "no flour", "freeze", "frozen",
            "keep", "keeping", "stale", "mouldy", "mould", "mold"),
-    guard=_a_dish_fault_already_happened)
+    guard=a_plan_that_might_be_ruined)
 
 # A pancake, a waffle or a crepe fails in a pan rather than in the oven, so neither list above
 # answers it: "my pancakes went wrong" was an echo while "my pancakes are flat" already had its
@@ -1506,7 +1491,11 @@ ENTRIES.append(entry(
      "toss them in a tablespoon of oil and bake at 200C for 15 to 20 minutes, turning once. Salt "
      "the moment they come out and cool them on kitchen paper. Dry slices and a steady "
      "temperature are the whole trick."),
-    avoid=("buy", "buying", "shop", "brand", "packet", "walkers", "which", "best", "healthy",
+    # A roast potato is a crisp word too, and "how do i get a crisp roast potato" was this row
+    # telling somebody to slice potatoes 2mm thin. Anything that says roast is the oven tray.
+    avoid=("roast", "roasts", "roasted", "roasting", "parboil", "parboiled", "parboiling",
+           "sunday lunch", "yorkshire",
+           "buy", "buying", "shop", "brand", "packet", "walkers", "which", "best", "healthy",
            "healthier", "bad for you", "calories", "sugar", "salt in", "how much salt",
            "baby", "toddler", "kids", "child", "keto", "air fryer", "keep", "keeps", "keeping",
            "pastry", "crumble", "apple", "shop bought", "multipack", "price", "cost", "cheap",
@@ -1775,7 +1764,13 @@ ENTRIES.append(entry(
            "yorkshire", "bread", "sourdough", "starter", "pizza", "roast potatoes", "turkey",
            "chicken", "chickens", "bird", "birds", "cake", "cakes", "sponge", "tray", "trays",
            "tin of", "dishes", "things", "christmas", "calories", "how many calories", "protein", "price", "cheaper", "buy",
-           "supermarket", "pack", "keep", "keeps", "reheat", "leftover", "leftovers"),
+           "supermarket", "pack", "keep", "keeps", "reheat", "leftover", "leftovers",
+           # "double cream" is the dairy and not "double the recipe": the bare word "double" is
+           # read as "doubling", so "can i freeze double cream" was the add-20-minutes card. The
+           # phrases are adjacent words, so "can i double the cream in a recipe" still reaches
+           # this row, which is what it is for.
+           "double cream", "single cream", "soured cream", "creme fraiche", "whipping cream",
+           "extra thick cream", "double cream in", "a pot of cream", "cream cheese"),
     bias=1))
 # "What weight is a joint" was the weight-training card: "choose a weight you can lift 10 times
 # but not 15". A joint of meat asked about by weight is a shopping question, and the portion the
@@ -2250,8 +2245,15 @@ entry_bake_nothing_messy = entry(
       "messiest", "minimal mess", "cleaning up", "clean up", "clear up", "clearing up",
       "washing up", "wash up", "one bowl", "fuss", "faff"),
      ("bake", "baking", "baked", "kids", "kid", "children", "child", "toddler", "grandchildren",
-      "with the kids", "with kids", "with children", "cook", "cooking", "kitchen", "recipe",
-      "recipes", "ingredients")),
+      "with the kids", "with kids", "with children", "cook", "cooking", "recipe",
+      "recipes", "ingredients",
+      # "kitchen" used to be here and it was a place standing in for a job: "my kitchen is a
+      # mess" and "the kitchen is a mess" are statements about a room, and they were answered
+      # with the least-messy-bakes list because the room and the mess were the row's only two
+      # signals. A place is not a job, so the row now wants the baking or the cooking itself -
+      # "what can i bake with the kids", "any recipes that wont make a mess", "things to cook
+      # with no washing up" all still reach it, and the room's state reaches the tidying row.
+      )),
     "The least messy bakes are the ones with one bowl and no icing: a no-bake fridge cake "
     "(melted chocolate and butter, crushed biscuits, into a lined tin, an hour in the fridge), "
     "flapjack (one pan on the hob, one lined tin) and rocky road, which is the same thing with "
@@ -2328,15 +2330,24 @@ ENTRIES.append(entry(
     "raw-flour-taste",
     (("floury", "tastes of flour", "tastes floury", "raw flour", "raw flour taste",
       "chalky", "tastes like flour", "flour taste", "powdery taste"),
+     # "tastes", "taste", "why" and "how do i" used to be here and they were not a subject at all:
+     # every line with a floury word in it matched, so "my potatoes taste floury" got the raw-flour
+     # sauce card and so did "the flour tastes old". What the answer is about is the sauce, so the
+     # sauce words are the second group, and the flour itself is fenced off below.
      ("sauce", "gravy", "soup", "stew", "curry", "roux", "white sauce", "cheese sauce",
-      "tastes", "taste", "why", "how do i", "get rid of", "fix")),
+      "casserole", "pie filling", "get rid of", "floury taste", "why does",
+      "why is my sauce", "why has my sauce")),
     "A floury taste means the flour is still raw, and the fix is time on the heat, not more "
      "seasoning: simmer it 5 to 10 minutes longer, stirring, so the starch cooks through and "
      "loses the raw edge. A roux wants 2 or 3 minutes of bubbling before any liquid goes in, and "
      "if the sauce is already made, a splash of stock and a slow simmer takes it out. Milk, "
      "butter or cream rounds off what is left.",
      avoid=("bread", "bake", "cake", "batter", "pancake", "flourless", "which flour",
-            "what flour", "how much flour", "grams", "cup", "self raising", "plain flour")))
+            "what flour", "how much flour", "grams", "cup", "self raising", "plain flour",
+            # a floury potato is a kind of potato and a flour that tastes old has gone off: both
+            # used to land here because "tastes" matched, and neither is a raw sauce
+            "potato", "potatoes", "spud", "spuds", "old", "gone off", "off", "smell", "smells",
+            "smelling", "musty", "rancid", "stale", "keep", "keeps", "last", "lasts")))
 
 ENTRIES.append(entry(
     "metallic-taste-in-food",
@@ -2354,3 +2365,391 @@ ENTRIES.append(entry(
             "my kettle", "the kettle", "kettle tastes", "kettle smells", "from the kettle"),
      # the mouth-and-gums card shares "metallic" and "taste", and won the food lines
      bias=2))
+
+# A burger that will not hold together is the binding and the handling, and it is a kitchen fault
+# with a kitchen answer - on main it was answered by the composer's "Nice one. How did the rest
+# of it go?", which congratulates somebody whose dinner has just fallen into the pan.
+BURGER_APART = ("fell apart", "falling apart", "falls apart", "fall apart", "broke up",
+                "breaking up", "breaks up", "crumbled", "crumbling", "crumbles", "wont hold",
+                "won't hold", "not holding", "holds together", "hold together",
+                "went to pieces", "slid apart", "disintegrated")
+BURGER_APART_REPLY = (
+    "It falls apart for three reasons: the mince is too lean, it was handled too much, or "
+    "it was turned before it had a crust. Use mince with some fat in it (20 per cent is right), "
+    "break it up with a fork rather than squeezing it, and add an egg and a couple of spoons of "
+    "breadcrumbs per 500g if the meat is lean - then shape it loosely, press a shallow dip in the "
+    "middle and chill it 20 minutes so it sets. Salt it just before it goes in the pan, cook it "
+    "in a hot pan and leave it alone for 3 minutes before the first turn, and it will hold."
+    .replace("a egg", "an egg"))
+
+
+ENTRIES.append(entry(
+    "burger-fell-apart",
+    # the plural is left to the burger row in cooking.py, which already answers "my burgers fall
+    # apart in the pan" well: what this row is for is the singular and the other minced-meat
+    # shapes, where the composer was congratulating somebody whose dinner had just collapsed
+    (("burger", "patty", "patties", "beefburger",
+      "meatball", "meatballs", "meatloaf", "kofta", "koftas", "frikadellen"),
+     BURGER_APART),
+    BURGER_APART_REPLY,
+    # the plural is the burger row's, and only the plural: "burgers" here does not fence the
+    # singular out of the row, which is the line this row was built for
+    avoid=("how do i make", "recipe", "best burger", "veggie", "vegan", "bean burger",
+           "tofu", "bun", "buns", "sauce", "cheese slice", "restaurant", "takeaway"),
+    bias=1))
+
+# --- a meal for the situation the line describes -------------------------------------------
+# A line that says the situation and then asks what to cook was answered about the situation:
+# "my son has a football match saturday and its freezing, what should i feed him before" got the
+# baby-room-temperature card, "im back at work monday after a year off with the baby, what should
+# i take for lunch" got the exercise ramp-up, and "my back is bad and i cant stand long, what can
+# i cook quickly" got the back-pain card. The ask at the end is the meal, so one table holds the
+# meals: the situation picks which one, and each is a dish with the reason it suits.
+#
+# The situation words are what let this stand beside the ordinary dinner rows: a line with no
+# situation in it ("what should i cook tonight") matches nothing here and keeps its own answer.
+MEAL_SITUATIONS = (
+    (("football match", "before a match", "before the match", "playing sport", "five a side",
+      "swimming gala", "cross country", "sports day", "before training", "game tomorrow",
+      "before football", "before rugby", "before a run", "before swimming",
+      "rugby match", "netball match", "hockey match", "match tomorrow", "before the game",
+      "before his match", "before her match", "match on saturday", "match on sunday",
+      "football tomorrow", "swimming gala", "sports day"),
+     "Feed them plain carbohydrate about three hours before, not straight before: a bowl of pasta "
+     "with a little butter or cheese, a jacket potato, or toast and banana, plus water. Keep the "
+     "fat and the fibre light so it is out of the stomach by kick-off, and have a banana or a "
+     "flask of squash for after. A cold day wants a warm drink in a flask more than a bigger "
+     "meal."),
+    (("coeliac", "celiac", "gluten free", "gluten-free", "no gluten", "wheat allergy"),
+     "Cook one dish that is gluten-free by nature rather than making a second version: chicken "
+     "thighs roasted with potatoes and lemon, a chilli with rice, or a fish pie with a mashed "
+     "top. Check the stock cube, the soy sauce and the sausages, because that is where the wheat "
+     "hides, use a clean board, and put the bread in its own basket so nothing is cross-"
+     "contaminated."),
+    (("no oven", "oven is broken", "oven broke", "without an oven", "hob only", "just a hob",
+      "oven is out", "no cooker", "microwave only", "moving house"),
+     "Everything on the hob: pasta with a sauce made in the same pan, rice with a stir fry, "
+     "tinned tomatoes with beans and eggs poached in them, or soup with bread. One pan and one "
+     "hob ring is plenty if you add the pasta to the sauce with a ladle of its water, and a "
+     "kettle fills in for hot water."),
+    (("tight budget", "on a budget", "skint", "no money", "cheap meals", "cheap dinners",
+      "money is tight", "cutting back", "cost of living"),
+     "Build the week on eggs, lentils, beans, oats, frozen vegetables and chicken thighs: a "
+     "lentil bolognese, a bean chilli, egg fried rice, a frittata and a soup covers five dinners "
+     "for about the price of one takeaway. Frozen veg and tinned tomatoes cost less and waste "
+     "less than fresh, and a whole chicken gives a roast plus a second meal from the carcass."),
+    (("pregnant", "cant stand the smell", "can't stand the smell", "smell of cooking",
+      "smells make me", "cooking makes me"),
+     "Eat cold or barely cooked while the smell turns your stomach: sandwiches, cereal, yoghurt, "
+     "fruit, cheese and crackers, or a plate of the dinner you cooked yesterday eaten cold. Cook "
+     "once in the morning when the kitchen is fresher, open a window and use the extractor, and "
+     "let somebody else do the frying - it is the smell of hot fat that carries."),
+    (("chest infection", "no appetite", "lost my appetite", "recovering from flu", "got the flu",
+      "been ill", "feeling ill", "off my food", "cant eat", "can't eat"),
+     "Small and plain, eaten often: soup, toast, rice pudding, yoghurt, a banana, scrambled egg "
+     "on a good day, and a drink beside you all day. Do not worry about a proper dinner while "
+     "you are ill - calories and fluid are the job, and the appetite comes back with them."),
+    (("my back", "back is bad", "bad back", "cant stand long", "can't stand for long",
+      "standing hurts", "on my feet all day", "knee is bad", "cant stand up"),
+     "One tray in the oven and one pot on the hob, done in about ten minutes of standing: "
+     "chicken thighs or sausages with chopped veg and oil at 200C for 30 minutes, or a chilli "
+     "you leave to simmer. Sit at the table to prep with everything within reach, use a stool at "
+     "the hob, and cook double so tomorrow needs no standing at all."),
+    (("camping", "in a tent", "in the tent", "no fridge", "campervan", "camper van",
+      "festival", "no electricity"),
+     "One pot, no fridge: pasta with tinned tomatoes, tinned beans and a chopped chorizo or a "
+     "tin of tuna, or a curry from a jar with rice. Take food that keeps without cooling - tins, "
+     "dried pasta, noodles, porridge oats, bread, hard cheese, apples - and a small gas ring "
+     "plus matches in a plastic bag, because a wet night in a tent is when the cooking has to be "
+     "simple."),
+    (("packed lunch", "packed lunches", "take to work", "take for lunch", "lunch for work",
+      "lunchbox", "lunch box", "back at work", "back to work", "school lunch", "dinner lady"),
+     "Cook one extra portion of dinner and box it: rice, pasta or a grain with a protein and "
+     "something sharp keeps a day in a cool bag and needs no microwave. If there is nothing "
+     "left over, a flask of soup with bread, or a tub of couscous made with boiling water from a "
+     "kettle and stirred with feta, tomato and herbs, takes five minutes the night before."),
+    (("night shift", "night shifts", "eats at 3am", "at 3am", "works nights", "working nights",
+      "night worker"),
+     "Treat the shift as two meals: a proper one before you go in - rice, pasta or potato with "
+     "protein and vegetables - then something light about two thirds of the way through, like a "
+     "sandwich, yoghurt, fruit or cereal, rather than a full dinner at 3am. Heavy fat at that "
+     "hour sits on the stomach and makes the last hours worse, and a flask of something warm "
+     "helps more than coffee at the end of the shift."),
+    (("pudding", "dessert", "to bring a cake", "bring a cake", "bring a dessert", "bbq",
+      "barbecue", "pot luck", "bring something"),
+     "Bring something that travels and needs no fridge: a lemon drizzle traybake, brownies, a "
+     "fruit crumble in its dish, or an Eton mess carried as meringue, cream and fruit in three "
+     "tubs to layer at the table. Cut it in the tin so it arrives whole, and take the serving "
+     "spoon with you."),
+    (("tiny kitchen", "no worktop", "small kitchen", "no space", "little space",
+      "one hob ring", "no surface"),
+     "One tray or one pan a night, prepped on a board balanced on the hob or the table: a "
+     "traybake of chicken, potatoes and veg, a one-pot pasta where everything goes in together, "
+     "or a stir fry chopped straight into the pan. Clear as you go so the board has a home, and "
+     "cook double on the nights you have room, because the second meal needs no worktop at all."),
+)
+# What the line has to ask for: a meal, not a fact about the situation.
+MEAL_ASK = ("what can i cook", "what can i make", "what should i cook", "what should i make",
+            "what can we eat", "what shall i cook", "what shall i make", "what should i feed",
+            "what can i feed", "what can i bring", "what should i bring", "what do i feed",
+            "what do i cook", "what do i make", "what is quick", "whats quick", "what's quick",
+            "what can i give", "what should i give", "what to cook", "what to make",
+            "meal ideas", "dinner ideas", "what can i do for dinner", "what can i do for tea",
+            "what should i take for lunch", "what do i take for lunch", "what to take for lunch",
+            "what should i buy", "what do i buy", "what cake can i make", "what can i bake",
+            "how do i prep", "prep a meal", "what should i eat", "what can i eat",
+            "what should he eat", "what should she eat", "what should they eat")
+# Diabetes is two questions and they were one row: "what can i bake for a diabetic" wants the
+# low-sugar cake, and "my husband is diabetic what can i make for dinner" wanted a dinner and got
+# the cake, because both are "what can i make" in this table. So the bake is its own row, keyed on
+# the sweet the line names, and every other ask for a diabetic meal falls through to the plate
+# rule in cooking.py - half the plate vegetables, a quarter protein, a quarter starch - which is
+# the answer to the dinner. Nothing is banned for a diabetic, so this row is about the bake only.
+DIABETES_WORDS = ("diabetic", "diabetics", "diabetes", "type 1", "type 2", "blood sugar",
+                  "watching my sugar", "sugar free", "low sugar", "no sugar", "sugar diabetes")
+SWEET_ASK = ("cake", "cakes", "bake", "baking", "biscuit", "biscuits", "pudding", "puddings",
+             "dessert", "desserts", "something sweet", "sweet treat", "sweet things", "sweets",
+             "sweetener", "sweeteners", "sugar substitute")
+DIABETIC_BAKE = (
+    "Bake something that is low in sugar by nature rather than swapping in sweeteners: an "
+    "almond and olive oil cake, a carrot cake made with less sugar and more spice, or berries "
+    "with cream and a little dark chocolate. Keep the portion small and have it after a meal "
+    "rather than on its own, and put the fruit and the cream on the plate so the cake slice can "
+    "be thinner.")
+# A dinner that happens to mention sugar is a dinner, and a recipe ask is the cake row's.
+# The meal is the other question and it is asked by naming a meal. "Recipe" was in this list and
+# is not a meal: "diabetic birthday cake recipe" was handed to the tin-size row, which answers how
+# big a tin a sponge needs, and a diabetic cake recipe is this row's own question. "How do i make"
+# left with it, for the same reason - "how do i make a cake for a diabetic" is a bake.
+_A_MEAL_IS_NAMED = ("dinner", "dinners", "supper", "lunch", "main meal", "main course")
+# "Can she eat cake" and "is cake ok for a diabetic" name a cake but ask whether it is allowed,
+# and the answer to that is that nothing is banned and the portion is what counts - the plate
+# rule, not something to bake. The eating verb is what tells the two apart: "what cake can i make"
+# is a bake, "can i eat cake" is not.
+_ALLOWED_ASKS = ("is it ok", "is it okay", "is it alright", "allowed", "ok for", "okay for",
+                 "bad for", "good for", "fine for", "suitable for")
+_EATING_VERBS = (" eat ", " have ", " drink ")
+
+
+def _asks_what_is_allowed(said):
+    """True when the line asks whether a food is allowed rather than asking for a recipe."""
+    if any(phrase in said for phrase in _ALLOWED_ASKS):
+        return True
+    if not any(verb in said for verb in _EATING_VERBS):
+        return False
+    return any(word in said for word in (" can ", " could ", " should ", " is ", " are "))
+
+
+def _a_bake_is_the_ask(understood):
+    """The row answers a sweet that is asked for, and stands aside for a meal or a permission.
+
+    A guard rather than a reply that returns None: a row that matches and then declines takes the
+    turn down with it, where a guard lets the row behind it answer - "can a diabetic eat cake" is
+    the plate rule's, and it was the plate rule that answered it before.
+    """
+    said = " " + str((understood or {}).get("clean") or "").lower() + " "
+    if any(" %s " % word in said for word in _A_MEAL_IS_NAMED):
+        return False
+    return not _asks_what_is_allowed(said)
+
+
+ENTRIES.append(entry(
+    "a-bake-for-a-diabetic", (DIABETES_WORDS, SWEET_ASK), DIABETIC_BAKE, bias=2,
+    guard=_a_bake_is_the_ask))
+
+MEAL_SITUATION_WORDS = tuple(word for words, _reply in MEAL_SITUATIONS for word in words)
+MEAL_ASK_WORDS = tuple(" ".join(phrase.split()) for phrase in MEAL_ASK)
+
+
+def _meal_for_the_situation(memory, understood):
+    """The dinner the situation wants, or nothing when the line names no situation."""
+    said = str((understood or {}).get("clean") or "").lower()
+    if not any(phrase in said for phrase in MEAL_ASK_WORDS):
+        return ""
+    for words, reply in MEAL_SITUATIONS:
+        if any(word in said for word in words):
+            return reply
+    return ""
+
+
+ENTRIES.append(entry(
+    "meal-for-the-situation",
+    (MEAL_SITUATION_WORDS, MEAL_ASK),
+    _meal_for_the_situation,
+    # the fridge, the freezer, the oven and the illness with its own card are other answers, and
+    # a line asking whether it is safe to eat something is not asking for a menu
+    avoid=("gone off", "is it safe", "still ok", "eat the", "freezer broke", "nothing to eat",
+           "should i eat", "how long does", "thaw", "defrost", "allergic", "allergy",
+           "intolerant", "poisoning", "recipe for", "how do i make a"),
+    bias=3))
+
+# "Can i leave the sugar out of a cake" was a shrug ("That's beyond what I know well"), and the
+# half of the same question - "can i halve the sugar" - went to the halve-a-recipe row, which
+# scales a recipe rather than saying what the sugar was doing in it. Sugar is the one ingredient
+# of a bake that people cut on purpose, and the amount it can lose differs by what is being
+# baked, so it is its own row rather than an edit to the scaling one.
+#
+# The ask is what tells this apart from the other sugar lines: "how much sugar is in a can of
+# coke", "is sugar bad for you" and "how much sugar in a cake recipe" all name sugar and none of
+# them is asking to take it out. The cut words are the ask, and the foods are the key.
+_BAKE_NAMED = ("cake", "cakes", "biscuit", "biscuits", "cookie", "cookies", "bun", "buns",
+               "muffin", "muffins", "loaf", "loaves", "bread", "sponge", "brownie", "brownies",
+               "flapjack", "flapjacks", "traybake", "tray bake", "pie", "crumble", "pudding",
+               "frosting", "icing", "buttercream", "recipe", "recipes", "bake", "baking",
+               "baked", "batter", "dough", "meringue", "scone", "scones", "shortbread",
+               "cheesecake", "swiss roll", "madeira", "victoria sandwich", "tin", "tins",
+               "oven", "frosting", "ganache", "dessert")
+
+
+def _a_bake_is_named(understood):
+    """True when the line names something being baked, so the sugar is in a recipe.
+
+    "Can i leave the sugar out of a cake" is this row's line; "im trying to cut down on sugar",
+    "should i give up sugar" and "how much sugar is in a can of coke" are the diet's and the
+    drink's, and none of them names a bake at all.
+    """
+    said = understood.get("clean") if isinstance(understood, dict) else understood
+    words = " " + str(said or "").lower() + " "
+    return any((" " + name + " ") in words for name in _BAKE_NAMED)
+
+
+ENTRIES.append(entry(
+    "less-sugar-in-a-bake",
+    (("sugar", "caster sugar", "granulated", "icing sugar", "brown sugar", "sweetener",
+      "sweet"),
+     ("less", "leave", "leaving", "leave out", "leaving out", "left out", "left",
+      "take", "taking", "take out", "taking out", "cut", "cutting", "cut down",
+      "cut the", "cut it", "reduce", "reducing", "halve", "halving", "half the", "omit",
+      "skip", "skipping", "no sugar", "without sugar", "sugar free", "sugar-free",
+      "too sweet", "less sweet", "not so sweet", "healthier", "healthy", "diet", "diabetic",
+      "diabetes", "calories", "how little", "how much less")),
+    "You can cut the sugar in most cakes and traybakes by a third to a half and still get a good "
+     "bake, but not all of it: sugar keeps the crumb soft, browns the crust and holds the "
+     "structure, so a cake with none bakes pale, dry and crumbly. Leave at least a quarter of "
+     "what the recipe asks, add a splash of milk if the batter looks stiff, and eat it within a "
+     "couple of days. Bread needs its teaspoon to get the yeast going, and jam and meringue are "
+     "set by their sugar, so those cannot be cut.",
+    # A line about cutting sugar *out of the diet* is not about a bake, and this row is: "im
+    # trying to cut down on sugar" was answered with the cake card. The bake has to be named, and
+    # a word for the eating is enough to rule it out.
+    guard=lambda said: _a_bake_is_named(said),
+    avoid=("how much sugar", "how many calories", "calories in", "coke", "cola", "fizzy",
+           "cereal", "yoghurt", "yogurt", "juice", "squash", "energy drink", "bad for",
+           "addictive", "teeth", "blood sugar", "insulin", "type 2", "type 1",
+           # a recipe that is scaled is the halve-a-recipe row's line, and it answers the
+           # amounts rather than what the sugar does
+           "double", "doubling", "half the recipe", "for two tins", "two tins",
+           # keeping and going off are other rows
+           "keep", "keeps", "last", "lasts", "gone off", "fridge", "freeze"),
+    # the scaling row keys "halve" and "cake" as well, and answers the amounts; a line that
+    # names the sugar is asking what the sugar does, so the sugar row outranks it
+    bias=5))
+
+# A head count at your table is a cooking question, whether or not the line names a meal. The
+# crowd row in cooking.py reads a table off a food noun or a cooking verb, so the commonest way
+# of saying it - "we're having 12 people on saturday" - reached no row at all and was answered
+# "Noted: you're having 12 people on saturday", the filing cabinet STYLE.md rules out. The number
+# of people coming is the subject of the line, so the one-dish answer is the reply; nothing else
+# in the bot reads a count of people as a thing to cook for. Rows that name a meal, a quantity
+# ("how much food for 30") or a food fault keep their lines.
+# What has to come after the number for it to be a table rather than a head count: people
+# coming, a day, a meal, a party. "we've got 20 people in the office" and "12 people applied for
+# the job" are the same number and not a dinner.
+_TABLE_AHEAD = (
+    r"(?=[^.?!]{0,30}?\b(?:coming|come|round|over|due|arriving|invited|tonight|tomorrow|"
+    r"this\s+weekend|next\s+week|"
+    r"for\s+(?:dinner|lunch|tea|supper|brunch|christmas|a\s+meal|the\s+meal|a\s+party|"
+    r"a\s+buffet|a\s+barbecue|a\s+bbq|a\s+birthday|sat|sun|fri|mon|tue|wed|thu)|"
+    r"at\s+(?:my|our|a|the)\s+(?:party|do|barbecue|bbq|dinner|table|wedding|reception)|"
+    r"on\s+(?:sat|sun|fri|mon|tue|wed|thu)\w*))")
+
+_A_TABLE_OF_PEOPLE = re.compile(
+    # having / feeding / invited / catering for a number: the number is the table.
+    r"\b(?:having|have\s+got|feeding|catering\s+for|invited|inviting|cooking\s+for|"
+    r"making\s+food\s+for|supper\s+for|dinner\s+for|lunch\s+for|tea\s+for|"
+    r"table\s+for|seats?\s+for)\s+(?:\d{1,3}|a\s+dozen|twenty|thirty|forty|fifty)\b"
+    + _TABLE_AHEAD +
+    # "12 people round on saturday": the count said as people, here for something.
+    r"|\b(?:\d{1,3}|a\s+dozen|twenty|thirty|forty|fifty)\s+(?:people|guests|adults|folk|"
+    r"of\s+us|grown\s*ups)\b" + _TABLE_AHEAD +
+    # "having people over on saturday": the table said as people first, with no number, and the
+    # day or the meal after it. Without that second half "what do i say to the people coming"
+    # is a meeting, and the table row has no business in it.
+    r"|\b(?:people|guests|adults)\s+(?:coming|round|over|due|arriving)\b" + _TABLE_AHEAD,
+    re.I)
+
+# A table announced is not a quantity question, a food fault or a diet one: those rows are
+# narrower and keep their lines.
+_NOT_A_TABLE = (
+    "how much", "how many", "per head", "per person", "per guest", "amount", "quantity",
+    "kilos", " kg", "grams", "portions", "portion", "how big a", "how large a",
+    "poison", "poisoning", "hygiene", "allergy", "allergic", "reaction", "ill", "sick",
+    "waste", "bin", "bins", "food bank", "dog food", "cat food", "pet food", "baby food",
+    "fast food", "menu", "seating", "seat", "plates", "cutlery", "chairs", "parking",
+    # standing-up food is not an oven dish: "were having a bbq for 12 people on saturday" has
+    # the party-food answer already, and a tray of chicken thighs is the wrong shape for it
+    "bbq", "barbecue", "barbeque", "buffet", "finger food", "party food", "canape",
+    "nibbles", "crisps", "sausage rolls", "sandwiches", "picnic",
+    "how many people does", "feeds", "feeding a",
+    # a plan for the week, and not knowing how to cook at all, are their own questions and they
+    # answer a table of six better than one tray of chicken thighs does: "having 6 people over on
+    # saturday and i need to plan a dinner", "im having six people over on saturday and i cant
+    # cook".
+    "plan", "planning", "meal plan", "the week", "cant cook", "can't cook", "cannot cook",
+    "never cooked", "dont know how to cook", "don't know how to cook", "beginner",
+)
+
+
+def _a_table_announced(understood):
+    """Whether the line states a table of people, with no meal and no cooking verb in it."""
+    read = understood if isinstance(understood, dict) else {}
+    text = " " + str(read.get("clean") or read.get("text") or "").lower() + " "
+    if not _A_TABLE_OF_PEOPLE.search(text):
+        return False
+    return not any(phrase in text for phrase in _NOT_A_TABLE)
+
+
+_A_DIET = (("vegetarian", "meat"), ("vegan", "meat"), ("no meat", "meat"),
+           ("nut allergy", "nuts"), ("gluten free", "gluten"), ("dairy free", "dairy"),
+           ("lactose", "dairy"))
+
+
+def the_table_of_people(memory, understood):
+    """The one-dish answer for a stated table, sized by the number in the line.
+
+    The reading is the one cooking.py's own crowd row does, over the line plus the last few
+    turns: an occasion named one turn back ("a bit of a do for my mums birthday", then "im
+    cooking for 12 on saturday") belongs to the table being cooked for, and a table of twelve
+    told the plain version while cooking's row tells the fuller one is the same line answered two
+    ways. Where both rows fit, both now say the same thing, so the person sees no difference.
+    """
+    read = understood if isinstance(understood, dict) else {}
+    line = str(read.get("clean") or read.get("text") or "")
+    text = line
+    turns = memory.get("turns") if isinstance(memory, dict) else None
+    if isinstance(turns, list):
+        text += " " + " ".join(str(turn.get("user") or "") for turn in turns[-4:]
+                               if isinstance(turn, dict))
+    text = text.lower()
+    banned = set()
+    for word, food in _A_DIET:
+        if word in text:
+            banned.add(food)
+    return _crowd_meal(banned, _occasion(text), _crowd(text))
+
+
+entry_a_table_of_people = entry(
+    "a-table-of-people",
+    (("people", "guests", "adults", "folk", "of us", "feeding", "cooking for", "catering"),
+     ("coming", "round", "over", "for", "having", "feeding", "catering", "invited", "due",
+      "arriving", "on saturday", "on sunday", "on friday", "on monday", "tonight", "tomorrow")),
+    the_table_of_people,
+    # the quantity, the meal, the fault and the diet rows are narrower and keep their lines
+    avoid=("how much", "how many", "per head", "per person", "per guest", "portion",
+           "poison", "hygiene", "allergy", "allergic", "food bank", "menu", "seating",
+           "chairs", "plates", "cutlery", "feed the dog", "feeding a baby"),
+    guard=_a_table_announced,
+    # A table of people is the cooking question even where a lunch or a stay row also fits: the
+    # person has said how many they are feeding, and the answer to that is what to cook.
+    bias=1)
+ENTRIES.append(entry_a_table_of_people)

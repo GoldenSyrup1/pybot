@@ -11,6 +11,7 @@ details: British Lion eggs are fine runny, hard cheese is fine, and the caffeine
 a day. Where a line has no food in it at all ("what can I eat", "how much coffee") the row is
 keyed on the general words, so "what can't i eat when pregnant" still gets the list.
 """
+import datetime
 import re
 
 from .lookup import entry
@@ -18,14 +19,25 @@ from .lookup import entry
 ANSWERS = ("health", "food-and-drink")
 
 
-def _not_a_shift_roster(understood):
-    """False when a shift pattern is the whole line, and it names no period of its own.
+def _a_late_that_is_not_a_period(understood):
+    """False when "late" in this line is lateness, and the cycle rows should stand aside.
 
     "im on lates this week" is a week of two-till-ten, not a period that is late: "lates" was
     read as "late" and reached the cycle card. A line that names a period as well keeps the
     entry: "im on lates and my period is late" is still a late period.
+
+    The second shape is the same fault without a roster in it: "they fired me for being late
+    every day" and "im late for work again" were answered with the advice for a period that has
+    not come, because "late" is on the key and nothing said which late it was. The reading says
+    it now - `understood["sense"]["late"]` is `time` when the line names something a person is
+    late for (a boss, a bus, an interview, a deadline) and `cycle` when it names the cycle - and
+    only `time` changes anything here: a line that says neither keeps the card it had.
     """
-    if not isinstance(understood, dict) or not understood.get("shift"):
+    if not isinstance(understood, dict):
+        return True
+    if (understood.get("sense") or {}).get("late") == "time":
+        return False
+    if not understood.get("shift"):
         return True
     text = understood.get("clean") or ""
     return bool(re.search(r"\b(?:periods?|cycles?|pregnan\w*|tests?)\b", text, re.I))
@@ -313,6 +325,252 @@ _FEEDING_WORDS = ("breastfeed", "breastfeeding", "breast feeding", "breast fed",
                   "pumping", "feeding")
 
 
+# ------------------------------------------------------------------ when is the baby due
+#
+# The date a pregnancy is owed is arithmetic, and people ask for it in their own words: "when is
+# my due date", "when is the baby due", "how many weeks am i". It was answered with a search
+# hedge ("that is beyond what I know well"), with the late-period card, or - worse, on "im 12
+# weeks pregnant when is my due date" - with the answer about eating dates. One row answers the
+# whole family, and it does the sum when the line gives it the one figure the sum needs: the
+# first day of the last period, or how many weeks the person is now.
+#
+# The words that ask when a baby is due. A "when ... due" on its own is not enough: "when am i
+# due back at work" and "im due a tax refund" say the word and ask nothing of a pregnancy, so
+# the guard below wants a pregnancy word in the line as well.
+_DUE_SHAPE = re.compile(
+    r"\b(?:due date|due dates|baby due|baby is due|due in|when am i due|when are you due|"
+    r"weeks pregnant|weeks along|weeks am i|weeks gone|"
+    r"how far along|how far gone|what week am i|which week am i|"
+    r"how many (?:weeks?|wks?|months) (?:pregnant|preg|am i|along|into|gone|left|to go)|"
+    r"how pregnant am i|pregnancy weeks|"
+    r"how many weeks (?:is|does|are) (?:a |the |an )?pregnan\w*|"
+    r"how many months (?:pregnant|along)|"
+    r"how long (?:is|does|are|do|can) (?:a |the |an )?pregnan\w*|"
+    r"how long (?:are you|is a woman|is she|is he) pregnant|"
+    r"last period|first day of (?:my|her|your|the) last period|"
+    r"lmp\b|"
+    r"(?:when|what date|which date)\b[^.?!]{0,30}\bdue\b|"
+    r"when will (?:the baby|my baby|she|he|it) (?:arrive|come|be born|get here)|"
+    r"when (?:is|are) (?:the baby|my baby|she|he|it) born|"
+    r"when (?:is|are) (?:the baby|my baby|she|he|it) (?:due|coming))", re.I)
+
+# The line has to be about a pregnancy as well. Without it "how many weeks in a year" and "how
+# long is my period" read as due-date questions on their shape alone.
+_PREG_WORD = re.compile(
+    r"\b(?:pregnan\w*|preg|expecting|baby|babies|due date|lmp|last period|"
+    r"weeks (?:pregnant|preg|along|gone|am i)|birth|born|midwife)\b", re.I)
+# "How far along am i" and "im 20 weeks, how far along is that" name no pregnancy word at all: the
+# phrase is the pregnancy. They are read as pregnancy asks unless the line is plainly about
+# something else being built or written, which is what the subject words below are for.
+_PREG_SOFT = re.compile(
+    r"\b(?:how far along|how far gone|weeks am i|wks am i|what week am i|which week am i|"
+    r"when am i due|when are you due|"
+    r"when (?:is|are) (?:she|he) due|"
+    r"due (?:in|on) (?:january|february|march|april|may|june|july|august|september|"
+    r"october|november|december))\b", re.I)
+_OTHER_SUBJECT = re.compile(
+    r"\b(?:essay|project|thesis|dissertation|book|build|renovation|course|game|sprint|"
+    r"assignment|paper|novel|training|app|website)\b", re.I)
+
+# "Due" has a second life that is not a baby: work, a refund, a payment. A line naming one of
+# those is not a due-date question however much it looks like one.
+_DUE_ELSEWHERE = re.compile(
+    r"\bdue\s+(?:back|at work|for work|in work|"
+    r"to (?:start|finish|go|leave|renew|pay|return|hand|come back)|"
+    r"(?:a|an|any|some|my|the)?\s*(?:tax\s+)?(?:refund|rebate|payment|bill|rise|bonus|"
+    r"money|fee|invoice))\b", re.I)
+
+# A milestone in the pregnancy, not the date: "when will i feel the baby move", "when will i start
+# showing", "when do the kicks start". The row read "when will i" as an ask for the date and
+# answered a question nobody asked, so these stand it down and the milestone keeps its own answer.
+_A_MILESTONE = re.compile(
+    r"\bwhen (?:will|do|should|can)\b[^?]{0,40}?"
+    r"\b(?:feel (?:the )?(?:baby|it|them|kicks?|movement|movements)|kicks? (?:start|begin)|"
+    r"start (?:to )?(?:show|showing)|be showing|bump (?:show|appear|grow)|"
+    r"feel (?:him|her) move|movement)\b", re.I)
+
+# Only a period with no pregnancy beside it: "when is my period due", "when is my next period".
+# Those belong to the late-period row, which is about waiting for one, not about a baby's date.
+_PERIOD_ONLY = re.compile(r"\bperiods?\b", re.I)
+_PERIOD_WITH_A_PREGNANCY = re.compile(
+    r"\b(?:pregnan\w*|expecting|baby|babies|last period|lmp|weeks (?:pregnant|along|gone|am i)|"
+    r"due date|when am i due|when are you due)\b", re.I)
+
+_MONTHS = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3, "april": 4,
+    "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7, "august": 8,
+    "aug": 8, "september": 9, "sep": 9, "sept": 9, "october": 10, "oct": 10,
+    "november": 11, "nov": 11, "december": 12, "dec": 12}
+_DAY_THEN_MONTH = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]{3,9})\b", re.I)
+_MONTH_THEN_DAY = re.compile(
+    r"\b([a-z]{3,9})\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b", re.I)
+# A figure in weeks, but only when it is how the person dates the pregnancy: "im 30 weeks", "30
+# weeks pregnant", "at 20 weeks". "in three weeks" and "three weeks ago" name no date yet.
+# "How many weeks is a pregnancy" and "how long does a pregnancy last" ask about pregnancy, not
+# about this person, so they get the 40 weeks. "How many weeks pregnant am i" gets the count.
+_A_PREGNANCY = re.compile(r"\b(?:a|the|an) pregnanc(?:y|ies)|\bpregnancies\b|"
+                          r"\bpregnancy last(?:s|ing)?\b|\bpregnancy norm(?:al|ally)\b", re.I)
+_MY_OWN = re.compile(r"\b(?:am i|i am|i'?m|im|my|me|we|us|our)\b", re.I)
+# The asks that want the count rather than the date: "how many weeks pregnant am i".
+_ASKS_WEEKS = re.compile(
+    r"\b(?:how many (?:weeks?|wks?|months)|how far along|how far gone|weeks am i|wks am i|"
+    r"weeks pregnant|weeks along|weeks gone)\b", re.I)
+_WEEKS_NOW = re.compile(
+    r"\b(?:im|i'?m|i am|am|is|are|at|now|about|nearly|almost|just|only)\s+"
+    r"(\d{1,2})\s*(?:weeks?|wks?)\b"
+    r"|\b(\d{1,2})\s*(?:weeks?|wks?)\s+(?:pregnant|along|gone|in)\b", re.I)
+
+
+# The line has to ask. A statement that dates a pregnancy - "im 6 weeks pregnant and have a
+# temperature", "im 8 weeks pregnant what should i eat", "the baby is due in march" - is a
+# complaint or a piece of news with a date on it, and its own row answers it; counting the due
+# date back at it answered a question nobody asked and lost the temperature and the meal.
+_SHORT_ASK = re.compile(r"\bdue date\b|\bhow far along\b", re.I)
+_ASKED = re.compile(
+    r"\bwhens?\b|\bwhen's\b|\bhow (?:many|far|long|soon|pregnant)\b|\bwhich date\b|"
+    r"\bwhat date\b|\bwhat week\b|\bwhich week\b|\bpregnancy weeks\b|"
+    r"\bcalculat\w* (?:my|the) due date\b|\bdue date calculator\b|"
+    r"\bwhat(?:'s|s)? (?:is |was )?(?:my|the|your) (?:due date|date thing)\b", re.I)
+
+
+# The other half of the same ask is the answer to it: the bot asks for the first day of the last
+# period, so "3 may was the first day of my last period" and "my last period was 3 may" are
+# figures to count from, not news. A day and the words for it are the whole signal.
+_GIVES_THE_DAY = re.compile(r"\b(?:last period|period started|lmp|first day)\b", re.I)
+_A_MONTH = re.compile(r"\b(?:january|february|march|april|may|june|july|august|september|"
+                      r"october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|"
+                      r"nov|dec)\b", re.I)
+
+
+def _gives_a_month(line):
+    """A month in the line is a day being given, which is the answer to the bot's own question.
+
+    The bot asks for the first day of the last period, and the reply to that names a day and
+    asks nothing: "my last period was 3 may", "my last period started on 3 may", "lmp was 3 may".
+    None of those carries an ask word, so the row scored 0 and the cycle card, the puberty card
+    and the greeting took them. A month is the figure this row counts from, so it is a signal in
+    its own right - the same weight as a key word, so the subject still has to be in the line -
+    and `_asks_when_due` is what keeps a mention in passing ("baby is due in march") off it.
+    """
+    return bool(_A_MONTH.search(line or ""))
+
+
+def _asks_when_due(understood):
+    """True for a line that asks when a baby is due, and for nothing that only looks like one."""
+    line = " ".join(str((understood or {}).get("clean") or "").split())
+    if not line or not _DUE_SHAPE.search(line):
+        return False
+    if not _ASKED.search(line) and not (_GIVES_THE_DAY.search(line) and _A_MONTH.search(line)):
+        # "due date?" and "my due date" are the whole line: that is the question, however it is
+        # punctuated, and a two-word line cannot be about anything else.
+        if not (_SHORT_ASK.search(line) and len(line.split()) <= 4):
+            return False
+    if _DUE_ELSEWHERE.search(line) or _A_MILESTONE.search(line):
+        return False
+    if _PERIOD_ONLY.search(line) and not _PERIOD_WITH_A_PREGNANCY.search(line):
+        return False
+    if _PREG_WORD.search(line):
+        return True
+    return bool(_PREG_SOFT.search(line)) and not _OTHER_SUBJECT.search(line)
+
+
+def _the_day(date, today):
+    """A date as a person says it: "7 February", with the year only when it is not this one."""
+    said = f"{date.day} {date.strftime('%B')}"
+    return said if date.year == today.year else f"{said} {date.year}"
+
+
+def _the_date_named(line, today):
+    """The day the line names, or None. A last period is always in the past, so a date still to
+    come in this year is last year's: "my last period was 3 may" said in November is 3 May."""
+    for match in _DAY_THEN_MONTH.finditer(line):
+        day, month = int(match.group(1)), _MONTHS.get(match.group(2).lower())
+        if month is not None:
+            date = _the_date_in_this_year(today, month, day)
+            if date:
+                return date
+    for match in _MONTH_THEN_DAY.finditer(line):
+        month, day = _MONTHS.get(match.group(1).lower()), int(match.group(2))
+        if month is not None:
+            date = _the_date_in_this_year(today, month, day)
+            if date:
+                return date
+    return None
+
+
+def _the_date_in_this_year(today, month, day):
+    for year in (today.year, today.year - 1):
+        try:
+            date = datetime.date(year, month, day)
+        except ValueError:  # a 31 in a month of 30, or a figure that is no day at all
+            return None
+        if date <= today + datetime.timedelta(days=3):
+            return date
+    return None
+
+
+def _the_weeks_named(line):
+    """How many weeks along the line says the person is, or None."""
+    for match in _WEEKS_NOW.finditer(line):
+        figure = match.group(1) or match.group(2)
+        if figure:
+            weeks = int(figure)
+            if 1 <= weeks <= 45:
+                return weeks
+    return None
+
+
+# The rule and where the date is written down: the answer when the line gives no figure to count
+# from. (The row was a card before it could do the sum, and this is that card.)
+CARD = ("Forty weeks from the first day of your last period, so count 280 days from it "
+        "(nine months and a week): a midwife writes that date in your notes at your "
+        "booking-in appointment, and the dating scan can move it by a few days. If you have "
+        "neither to hand, the date on your scan report or in your maternity notes is the one "
+        "they will go by. Weeks gone are counted from that same first day of your last "
+        "period, not from the day you conceived.")
+
+
+def _preg_due_date(memory, understood):
+    """When the baby is due: the date from the figures the line gives, else the rule and an ask.
+
+    A due date is 40 weeks - 280 days - from the first day of the last period, so a line that
+    gives that day gets the date worked out, and a line that gives how many weeks the person is
+    now gets the weeks that are left counted on from today. A line that gives neither gets the
+    rule itself and one question, because the bot cannot see a date the person has not said.
+    """
+    line = " ".join(str((understood or {}).get("clean") or "").split())
+    today = datetime.date.today()
+    weeks = _the_weeks_named(line)
+    if weeks is not None:
+        left = 40 - weeks
+        if left < 0:
+            return (f"At {weeks} weeks you are past the 40-week due date, so the date on your "
+                    "notes and your midwife are the ones to go by now. Most places offer an "
+                    "induction by 41 or 42 weeks, and she will talk you through what happens "
+                    "next - worth asking her at your next appointment rather than waiting.")
+        date = today + datetime.timedelta(days=left * 7)
+        return (f"Week {weeks} of 40 leaves {left} weeks to go, which puts the due date at about "
+                f"{_the_day(date, today)}. That is the 40-week count, but the dating scan at 11 "
+                "to 14 weeks is the date the midwife goes by, so go by what is on the notes if "
+                "the scan moved it.")
+    named = _the_date_named(line, today)
+    if named is not None:
+        date = named + datetime.timedelta(days=280)
+        said = (f"Counted from the first day of the last period, {_the_day(named, today)}, the "
+                f"due date is about {_the_day(date, today)} - 40 weeks, or 280 days, later. ")
+        days = (today - named).days
+        if 0 <= days <= 300:
+            return (said + f"That makes you {days // 7} weeks now. The dating scan at 11 to 14 "
+                    "weeks is the date the midwife goes by, so if it moved the date, the scan is "
+                    "the one that counts.")
+        return (said + "If that is not the day you meant, tell me the first day of the last "
+                "period as a date and I will work it out again.")
+    # No figure in the line, so the answer is the card: how the count goes, and where the date is
+    # written down.
+    return CARD
+
+
 def _preg_hair_dye(memory, understood):
     """Dyeing in pregnancy, or while breastfeeding - two different questions.
 
@@ -528,6 +786,7 @@ def _said_pregnant(understood):
     return bool(_PREG_SAID.search(said))
 
 
+
 ENTRIES = [
     entry("preg-soft-cheese",
           (("brie", "camembert", "soft cheese", "soft cheeses", "blue cheese", "stilton",
@@ -604,7 +863,7 @@ ENTRIES = [
           # answered with the first sentence of this row, which was about oily fish: the verdict
           # they asked for was three sentences further down. The rule comes first now, and
           # shellfish is named in it.
-          "Yes, with one rule: raw is the part to skip. Cooked prawns, mussels that have opened "
+          "Yes, with one rule. Raw is the part to skip: cooked prawns, mussels that have opened "
           "in the pan, tinned tuna and smoked salmon are all fine in the UK, and so is sushi made "
           "with cooked or frozen fish. What to leave alone is raw fish and raw shellfish - no "
           "oysters, no raw prawns - because of listeria and norovirus. Cooked fish is good for "
@@ -818,6 +1077,10 @@ ENTRIES = [
               "ammonia", "mould spray", "ant powder", "slug pellets", "rat poison", "rodenticide",
               "flea treatment", "flea bomb", "creosote", "wood preserver", "decking oil",
               "paint stripper", "nitromors", "caustic", "swimming pool chemicals",
+              # a jab is not a food: "is the covid jab ok while pregnant" was told that the thing
+              # it named is not on the list of foods to avoid, which is the wrong question
+              "jab", "jabs", "jabbed", "booster jab", "booster", "vaccination", "immunisation",
+              "immunization", "covid jab", "flu jab", "covid vaccine", "flu vaccine",
               # the general list is its own row: "what can i eat when pregnant" and "what foods
               # should i avoid" are questions about the whole list, not about one food
               "what can i eat", "what cant i eat", "what can't i eat", "what can i not eat",
@@ -845,7 +1108,18 @@ ENTRIES = [
                  "the baby", "baby have", "baby need", "how much milk", "ounces", "oz",
                  "expressing", "colic", "reflux", "allergy", "allergic", "lactose",
                  "cows milk protein", "cheese", "brie", "camembert", "feta", "stilton",
-                 "yoghurt", "yogurt", "ice cream", "goat", "soya", "oat milk", "almond milk")),
+                 "yoghurt", "yogurt", "ice cream", "goat", "soya", "oat milk", "almond milk",
+                 # a milk that is going in the freezer is the freezer table's question, and its
+                 # answer is the one with the inch of room and the shake: "can i freeze milk" was
+                 # reaching this row on "can i" and "milk" with no pregnancy in the line at all
+                 "freeze", "freezes", "freezing", "frozen", "freezer", "thaw", "thawed",
+                 "defrost", "defrosted", "use by", "out of date", "gone off", "goes off",
+                 "how long does milk", "how long can i keep", "storage"),
+          # The key's second group is nearly all ways of asking ("can i", "should i", "is it",
+          # "ok", "fine"), so with no guard this row answered "what milk should i use" and
+          # "which milk should i buy" with the calcium an unborn baby needs. The same reading
+          # the other pregnancy rows use: the line has to say the pregnancy.
+          guard=_said_pregnant),
 
     # The doubt, before there is a fact: "am i pregnant", "could i be pregnant".
     entry("preg-am-i",
@@ -900,7 +1174,7 @@ ENTRIES = [
           LATE_REPLY,
           ask=("my period", "period", "late", "missed", "why", "when", "should", "is it",
                "how long", "what"),
-          guard=_not_a_shift_roster,
+          guard=_a_late_that_is_not_a_period,
           # "missed" and "late" each sit in both halves of this entry's key, so one word can
           # carry the pair: "i missed my driving test" was answered with the late-period card.
           # The other lives the word names are fenced rather than the word itself, because "my
@@ -914,6 +1188,10 @@ ENTRIES = [
                  "deadline", "payment", "train", "bus", "flight",
                  # a pregnancy with a due date is a pregnancy, not a late period
                  "due date", "weeks pregnant", "weeks am i", "trimester", "maternity",
+                 # "due" is a date for all sorts of other things: "when am i due back at work"
+                 # was the late-period card, and the card is about waiting for a period.
+                 "due back", "due to be", "back at work", "back to work", "refund",
+                 "tax return", "parcel", "library", "renewal", "invoice",
                  # the cycle in general, which has its own answer below
                  "normal", "how long", "how often", "how many days", "days between",
                  "lasts", "started", "when do periods", "first period", "heavy", "light",
@@ -932,7 +1210,7 @@ ENTRIES = [
           (("period", "periods", "cycle", "cycles"),
            CYCLE_SHAPE + ("how often", "typical", "average", "length", "between")),
           CYCLE_REPLY, bias=1,
-          guard=_not_a_shift_roster,
+          guard=_a_late_that_is_not_a_period,
           avoid=NOT_A_TEST + NOT_FOOD +
                 ("heavy", "light", "late", "missed", "pregnant", "pregnancy", "test",
                  "tests", "period pain", "cramps",
@@ -1004,20 +1282,48 @@ ENTRIES = [
             "when's my due", "baby due", "when is the baby due", "how far along",
             "weeks pregnant am i", "weeks am i", "how many weeks pregnant",
             "how pregnant am i", "how many weeks am i", "pregnancy weeks",
-            "when will the baby", "when is the baby born", "how long left of my pregnancy"),
+            "when will the baby", "when will my baby", "when is the baby born",
+            "how long left of my pregnancy", "how many weeks left of my pregnancy",
+            "weeks pregnant", "how many wks am i", "how many weeks along",
+            "how many weeks into", "how many weeks gone", "what week am i",
+            "which week am i",
+            "how many weeks is a pregnancy", "how long is a pregnancy",
+            "when are you due", "when is she due", "when is he due", "baby is due",
+            "last period", "lmp", "first day of my last period", "period started",
+            "my period started", "how many months"),
            ("when", "what", "how many", "how far", "date", "weeks", "days", "am i",
             "due", "work out", "worked out", "calculate", "count", "left", "born",
             "is it", "will it", "how long")),
-          "Forty weeks from the first day of your last period, so count 280 days from it "
-          "(nine months and a week): a midwife writes that date in your notes at your "
-          "booking-in appointment, and the dating scan can move it by a few days. If you have "
-          "neither to hand, the date on your scan report or in your maternity notes is the one "
-          "they will go by. Weeks gone are counted from that same first day of your last "
-          "period, not from the day you conceived.",
-          bias=1,
-          avoid=NOT_FOOD + ("rent", "bill", "bills", "payment", "pay", "invoice", "loan",
-                            "library", "essay", "assignment", "coursework", "homework",
-                            "deadline", "tax", "mot", "insurance", "subscription")),
+          # Bias 4, not 3: the line that gives a day reaches the cycle card as well, and the row
+          # that counts from that day is the more specific answer - "my last period was 3 may" was
+          # answered with the usual cycle. Measured over 24 period lines, this and the shape below
+          # change that one line and nothing else: "my period is late", "when is my next period
+          # due", "how long is my period" and "can i fly at 30 weeks pregnant" keep their rows.
+          _preg_due_date, bias=4,
+          ask=("when", "whens", "how many", "how far", "how long", "which date", "what date",
+               "due date", "weeks", "week", "months", "calculate", "worked out", "left",
+               "am i", "is", "are", "will",
+               # The bot asks for the first day of the last period, so the answer to that
+               # question names the day and asks nothing: "3 may was the first day of my last
+               # period" reached the cycle card, and "my last period started on 3 may" the
+               # puberty one, because the ask words are the gate and a line that only gives
+               # the day has none of them. The guard still holds it to a day and to a
+               # pregnancy, so "my last period was late" is not a date to count from.
+               "last period", "first day", "period started", "lmp"),
+          shape=(_gives_a_month,),
+          guard=_asks_when_due,
+          avoid=NOT_FOOD + NOT_A_TEST + (
+              "am i pregnant", "could i be pregnant", "test was", "test is", "two lines",
+              "one line", "negative", "positive", "missed period", "late period",
+              "period late", "contraction", "contractions", "induction", "c section",
+              "c-section", "epidural", "maternity pay", "maternity leave", "paternity",
+              "birth certificate", "names", "name", "nursery", "cot",
+              "rent", "bill", "bills", "payment", "pay", "invoice", "loan",
+              "library", "essay", "assignment", "coursework", "homework",
+              "deadline", "tax", "mot", "insurance", "subscription")),
+          # A line that gives the day or the week gets the date worked out; a line that gives
+          # neither gets the card, which says how the count goes and where the date is written
+          # down. The card is the fallback text in `_preg_due_date`.
 
     # The birth itself: both questions the last month brings, and both were the shrug.
     entry("preg-labour-length",
@@ -1196,8 +1502,14 @@ _BIRTH_WORD_KEY = tuple(word for words, _ in _BIRTH_WORDS for word in words)
 _BIRTH_WORD_NAMES = tuple(sorted(((word, reply) for words, reply in _BIRTH_WORDS
                                   for word in words), key=lambda pair: len(pair[0]),
                                  reverse=True))
+# A thing people are sent for is asked as "what happens during a c section" as often as
+# "what is a c section", and on main every one of those shapes was the search hedge: the walk
+# through the day is the same definition the person is after, so the shapes that ask for it are
+# part of the definition group.
 _BIRTH_ASK = ("what is", "whats", "what's", "what are", "mean", "means", "meaning", "explain",
-              "definition", "define", "stand for", "difference", "what does")
+              "definition", "define", "stand for", "difference", "what does",
+              "what happens", "what happens during", "what happens at", "what happens in",
+              "what goes on", "what goes on during", "whats it like", "what is it like")
 
 
 # Everyday words that are also birth words, and are the commoner sense on their own: a section of
@@ -1288,7 +1600,7 @@ ENTRIES.append(entry(
     avoid=("bleeding", "bled", "waters broke", "my waters", "pain", "pains", "hurt", "hurts",
            "cramp", "cramps", "contractions are", "how much", "cost", "costs", "price", "pay",
            "should i", "shall i", "or not", "worth it", "safe", "dangerous", "risk",
-           "how do i", "how to", "how long", "when do i", "when should i", "what happens",
+           "how do i", "how to", "how long", "when do i", "when should i",
            "appointment", "results", "not offered", "decline", "choose", "decide",
            "my friend", "my sister", "my wife", "my partner", "for my"),
     bias=1))
@@ -1300,3 +1612,58 @@ ENTRIES.append(entry(
                    "supposed to", "close together")),
     _a_labour_contraction,
     ask=_BIRTH_ASK + ("how far apart", "how often", "hurt", "painful"), bias=3))
+
+# The bleeding after a baby is not a period and it is not a birth to register. On main, "is it
+# normal to bleed after birth" was the heavy-periods card - clots bigger than a 50p coin read as
+# a reason to see a GP about periods - "how long do you bleed after giving birth" was the card
+# about registering the birth, and "postnatal bleeding" and "lochia" were nothing at all, even
+# though the glossary row below has the answer: that row needs a definition ask, so the term on
+# its own never reached it.
+#
+# The rule is the pair, not the sentences: a bleeding word and a birth word in the same line is
+# the lochia question, whatever order they come in. The term is on both sides of the key so that
+# "lochia" and "postnatal bleeding" reach it alone, and the pads, the section and the six weeks
+# are the words people type when they are worried rather than asking.
+_POSTNATAL_BLEED = (
+    "bleed", "bleeds", "bled", "bleeding", "blood", "bloods", "clot", "clots",
+    "pad", "pads", "lochia", "postnatal", "post natal", "postpartum")
+_POSTNATAL_BIRTH = (
+    "birth", "births", "after birth", "baby", "babies", "the baby", "my baby",
+    "section", "c section", "c-section", "caesarean", "cesarean", "caesarian",
+    "postnatal", "post natal", "postpartum", "lochia", "maternity", "midwife",
+    "give birth", "gave birth", "giving birth", "delivered", "weeks after", "days after",
+    # "bleeding after my son was born" says the birth without the word birth
+    "born", "was born",
+    # "im still bleeding 4 months after having my son" is the same six weeks, said the long way
+    "having my son", "having my daughter", "having a baby", "had my son", "had my daughter",
+    "had a baby", "months after", "month after")
+
+ENTRIES.append(entry(
+    "postnatal-bleeding",
+    (_POSTNATAL_BLEED, _POSTNATAL_BIRTH),
+    "Lochia is the bleeding after birth: heavy red blood for three to five days, then browner and "
+    "lighter for up to six weeks, coming back a little when you do more - so a bleed still going "
+    "past six weeks is a GP visit, not lochia. Use pads, not tampons. Ring your maternity unit the "
+    "same day if you soak a pad in an hour, pass clots bigger than a 50p coin, or the blood smells "
+    "bad or you are feverish - and 999 or 911 if you are faint, dizzy or flooding.",
+    # a period, a miscarriage, a pregnancy and a nappy are other answers: the baby's blood in a
+    # nappy is the nappy's, and anything with a period in it is the cycle's
+    avoid=("period", "periods", "menstrual", "between periods", "miscarriage", "missed",
+           "ectopic", "implantation", "pregnant", "pregnancy test", "after sex", "sex",
+           "nappy", "nappies", "poo", "stool", "stools", "cord", "circumcision", "nose",
+           "nosebleed", "gums", "tooth", "teeth", "urine", "wee", "cut", "wound", "gash",
+           "stitches in my hand", "dog", "cat",
+           # the cut from a section is a wound and not lochia, and the person says "scar": a
+           # blood test, a heel prick and a jab are somebody taking blood, not blood arriving
+           "scar", "scars", "scar tissue", "incision", "stitches", "dressing",
+           "blood test", "blood tests", "blood test tomorrow", "heel prick", "screening",
+           "jab", "jabs", "vaccine", "vaccination", "vaccinated", "injection", "immunisation",
+           "group b strep", "newborn screening",
+           # "birth control" is not a birth: a bleed on the pill is the pill's answer, and a
+           # bleed inside the head is not this at all
+           "birth control", "contraception", "pill", "pills", "implant", "coil", "iud",
+           "morning after", "brain", "head injury", "hit my head"),
+    # 4, because a dessert row keys "and" and "afters", "after" folds onto "afters", and that
+    # row is at bias 3: "bleeding after birth and i feel dizzy" was a pudding idea
+    bias=4))
+

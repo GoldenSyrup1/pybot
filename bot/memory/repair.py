@@ -238,6 +238,70 @@ def _content_words(text):
                                      "their", "its", "some", "any", "this", "that")}
 
 
+# The reading of one line, so the correction reads it once however many candidates it tries: the
+# understanding is the expensive half of this path, and a two-hop correction asks it per candidate.
+_READINGS = {}
+
+
+def _the_reading(line):
+    """The understanding of the line the correction is about, read once and kept."""
+    said = str(line or "")
+    if said in _READINGS:
+        return _READINGS[said]
+    from ..understanding import understand  # noqa: PLC0415 - answers imports this package
+    try:
+        read = understand(said, {"turns": []})
+    except Exception:
+        read = {}
+    if not isinstance(read, dict):
+        read = {}
+    if len(_READINGS) > 12:
+        _READINGS.clear()
+    _READINGS[said] = read
+    return read
+
+
+def _the_thing_the_reading_named(line):
+    """The thing the reading finds in the line, or "" when it finds no single one.
+
+    "the washing machine is broken" then "no the dishwasher" is a swap of the machine. The last
+    content word of that line is "broken" - the state the thing is in, not the thing - so the
+    corrected ask came out as "the washing machine is dishwasher" and the row on how to run a
+    wash answered it. The reading names one thing there ("washing machine"), and the swap made on
+    that gives "the dishwasher is broken", which is the dishwasher's own row. Only a thing, never
+    a person: a correction of a person is `_the_person_the_line_named`'s to move.
+    """
+    read = _the_reading(line)
+    found = []
+    for one in read.get("entities") or ():
+        if not isinstance(one, dict):
+            continue
+        if str(one.get("type") or "") not in ("thing", "animal", "food", "place"):
+            continue
+        text = " ".join(str(one.get("text") or "").lower().split())
+        if not text:
+            continue
+        at = one.get("at")
+        at = at if isinstance(at, int) else None
+        found.append((at, text))
+    if not found:
+        return ""
+    # The reader splits a two-word thing ("washing", "machine"), so words that sit next to each
+    # other are one thing. Two things with a gap between them are two things, and a correction of
+    # one of them is not this: "the washing machine is better than the dishwasher" names both.
+    found.sort(key=lambda pair: (pair[0] is None, pair[0]))
+    one = found[0][1]
+    for index, (at, text) in enumerate(found[1:], start=1):
+        before = found[index - 1]
+        if at is not None and before[0] is not None \
+                and at == before[0] + len(before[1].split()):
+            one = one + " " + text
+        else:
+            return ""
+    said = " ".join(str(line or "").lower().split())
+    return one if one in said else ""
+
+
 def _the_thing_the_last_line_named(line):
     """The thing the ask before the repair was about: its last content word, or None.
 
@@ -453,9 +517,51 @@ def _about_the_same_thing(first, second):
     return bool(left & right)
 
 
+def _the_shape_the_swap_had(memory, line, old, thing):
+    """The corrected line written the way the store has always written it: the word at the end of
+    the line swapped for the new thing.
+
+    The reply to a correction is about the thing the line named ("the washing machine is broken" /
+    "no the dishwasher" is answered about dishwashers). The record the follow-ups are read against
+    is a different matter: everything downstream - the rewritten line a bare "what about a duck"
+    is read as, the words a part or a measure ask is filled from - was written against the store's
+    own shape, which swaps the last word of the line. Handing that a reshaped sentence changed
+    turns that answered before: "how long does a chicken take to roast" / "i meant a turkey" /
+    "what about a duck" reached the duck on the old shape and got a search hedge on the new one.
+    So the reply keeps the better reading and the bookkeeping keeps the old shape, and no chat
+    downstream of a correction moves.
+    """
+    last = str(last_user(memory) or "")
+    tail = _the_thing_the_last_line_named(last) if last else ""
+    if tail and _a_state_not_a_thing(last, tail):
+        # "the washing machine is broken": the word at the end of the line is the state the thing
+        # is in, and the correction swaps the thing, not the state. Swapping it as the store's
+        # shape does makes a topic of "the washing machine is dishwasher", and every follow-up
+        # after the correction is then read against a sentence that is not a sentence.
+        return line
+    if tail and tail != old and _a_different_thing(tail, thing):
+        older = _swapped(last, tail, thing)
+        if older:
+            return older
+    return line
+
+
+def _a_state_not_a_thing(line, tail):
+    """True when the word the line ends on is what the thing is doing or is, not a thing itself.
+
+    "the boiler is noisy" ends on what it is like, and "i need a new boiler" ends on the thing. The
+    copula in front of it is what tells the two apart, and it is the whole of the test on purpose:
+    a state word chosen from a list would miss the next one somebody says.
+    """
+    pattern = (r"\b(?:is|are|was|were|isn'?t|aren'?t|wasn'?t|weren'?t|feels?|seems?|looks?|gets?"
+               r"|got|goes|went|has|have|had|keeps?|stays?|stops?)\s+" + re.escape(str(tail)) + r"\b")
+    return bool(re.search(pattern, str(line or ""), re.I))
+
+
 def _keep_the_swap(memory, line, old, thing):
     """The topic and the plan are the corrected line, so the turns after it are about the thing
     they meant rather than the one they took back."""
+    line = _the_shape_the_swap_had(memory, line, old, thing)
     record = current(memory)
     if isinstance(record, dict):
         record["text"] = line
@@ -483,6 +589,64 @@ def _keep_the_swap(memory, line, old, thing):
             moved = _swapped(value, old, thing)
             if moved:
                 entry["value"] = moved
+
+
+def _the_paragraph_already_given(answer, memory, old, thing):
+    """True when this answer is the one the chat has just read, with the thing's word changed.
+
+    `the washing machine is broken` / `no the dishwasher` gets the dishwasher card, and the store's
+    two cards for a machine that stops dead are the same paragraph with the machine's own word in
+    it. Read out, it is the same answer twice in two turns, which is what the rest of this module
+    spends its time preventing; what the person asked for was the swap, not the paragraph again.
+    """
+    said = set(re.findall(r"[a-z0-9']+", " ".join(str(answer or "").lower().split())))
+    if len(said) < 25:
+        return False
+    turns = memory.get("turns")
+    if not isinstance(turns, list):
+        return False
+    for turn in reversed(turns[-4:]):
+        earlier = str((turn or {}).get("bot") or "")
+        if len(earlier.split()) < 20:
+            continue
+        other = set(re.findall(r"[a-z0-9']+", " ".join(earlier.lower().split())))
+        if not other:
+            continue
+        shared = len(said & other) / float(len(said | other))
+        if shared < 0.8:
+            continue
+        # Only when the paragraph names its own thing on both sides: the machine cards say "most
+        # washing machines that will not start" and "most dishwashers...", so the two are one
+        # paragraph about two things, and the swap is the whole of what is new. Two cards that
+        # name no thing (a dripping tap, a child who will not sleep) are the same advice however
+        # they are read, and there the correction is worth saying with the advice behind it.
+        if not (keywords(thing) and keywords(old)):
+            continue
+        if not _names(said, keywords(thing)) or not _names(other, keywords(old)):
+            continue
+        if _names(said, keywords(old)):
+            # The paragraph still names the thing they took back ("a dripping tap" after "no the
+            # bathroom one"), so the swap did not change what the answer is about: the advice
+            # belongs on the turn.
+            continue
+        return True
+    return False
+
+
+def _names(words, wanted):
+    """True when a set of words of an answer holds one of the words, plural or possessive.
+
+    "the dishwasher" is in a card that says "most dishwashers that will not start", and the swap
+    is only worth standing down when the answer itself is about the thing they meant.
+    """
+    for one in wanted:
+        one = str(one or "").lower()
+        if not one:
+            continue
+        for word in words:
+            if word == one or word == one + "s" or word.rstrip("s") == one:
+                return True
+    return False
 
 
 def _without_the_repeat_lead(answer):
@@ -752,6 +916,18 @@ SAME_AGAIN = (
     "{said}, then. Same advice as the {old}: {answer}",
 )
 
+# ...and when the answer the correction gives is the paragraph the chat has just read with only the
+# thing's word changed, the card is not read out a second time. What the correction changes is which
+# thing the advice is about, and the person already has the advice: saying it again puts two copies
+# of one paragraph in the chat, and every follow-up after it is read against a doubled answer ("and
+# what about the filter" then answers with the first step of the card the person has just been given
+# rather than with the filter). So the turn says the swap and that the advice is the same one.
+SAME_ADVICE = (
+    "{said}, then \u2014 the same advice as for the {old}.",
+    "Got it \u2014 {thing}. The same advice as for the {old} applies.",
+    "{said}, then. Same advice as the {old}.",
+)
+
 # A person named as a slip is the person they meant: "my grans 84" then "sorry i meant my nan" is
 # one age said of two words, and the age belongs to the nan. Left under the slip, the chat keeps a
 # fact it cannot use and answers "you haven't told me how old your nan is" - the age was there,
@@ -823,6 +999,64 @@ def _the_fact_moved_line(fact, old, thing, text, memory):
     return said if said.endswith((".", "!", "?")) else said + "."
 
 
+def _the_swap_in_the_line(text, memory):
+    """What the line swaps: (the last line, the words that could be the old thing, the new thing).
+
+    None when the line is no correction of a thing, or when there is no earlier line to correct.
+    The old thing is tried in order: the person the last line named, then the thing its reading
+    names - the thing and not the state it is in ("the washing machine is broken" names the
+    machine, not the broken) - then the word at the end of the line, which is what a row keyed on
+    the whole sentence was reached by.
+    """
+    if not isinstance(memory, dict):
+        return None
+    thing = _the_thing(text)
+    if not thing or AN_ASK_OPENS.match(thing) or thing.rstrip().endswith("?"):
+        return None
+    last = str(last_user(memory) or "")
+    if not last:
+        return None
+    refined = _the_pointer_refines(thing, last)
+    if refined:
+        # "no the lower one" after "my back hurts" is not a thing of its own: it points at a part
+        # of the thing already named, so the ask they would have made is "my lower back hurts".
+        old, thing = refined
+        return last, [old], thing, refined
+    # A correction of a person moves the person, not the last noun of the line: "my son has a
+    # cough" with "my daughter" is about a daughter's cough.
+    old = _the_person_the_line_named(last, thing)
+    olds = [old] if old else []
+    for one in (_the_thing_the_reading_named(last), _the_thing_the_last_line_named(last)):
+        if one and one not in olds:
+            olds.append(one)
+    if not olds:
+        return None
+    return last, olds, thing, None
+
+
+def keep_the_correction(text, memory):
+    """Keep the swap the line made, for a correction another reader answered.
+
+    "how long does a chicken take to roast" then "i meant a turkey" reads right either way - the
+    turkey row answers the correction itself - but the chat has still been corrected, and the line
+    after it has to be read against the turkey: asked "what about a duck" the chat was still on
+    the chicken, so the duck row was never reached and the person got a search hedge. Called by
+    the store whatever gave the reply, so the bookkeeping does not depend on which reader won the
+    turn.
+    """
+    found = _the_swap_in_the_line(text, memory)
+    if not found:
+        return
+    last, olds, thing, _refined = found
+    for one in olds:
+        if not _a_different_thing(one, thing):
+            continue
+        swapped = _swapped(last, one, thing)
+        if swapped:
+            _keep_the_swap(memory, swapped, one, thing)
+            return
+
+
 def the_thing_they_meant(text, memory):
     """The answer about the thing they said they meant, or None.
 
@@ -851,31 +1085,25 @@ def the_thing_they_meant(text, memory):
             # says it is the same advice - and there is no thing here to put that frame round.
             return None
         return answer if answer.endswith((".", "!", "?")) else answer + "."
-    last = str(last_user(memory) or "")
-    if not last:
-        return None
-    old = _the_thing_the_last_line_named(last)
-    refined = _the_pointer_refines(thing, last)
-    if refined:
-        # "no the lower one" after "my back hurts" is not a thing of its own: it points at a part
-        # of the thing already named, so the ask they would have made is "my lower back hurts".
-        old, thing = refined
-    else:
-        # A correction of a person moves the person, not the last noun of the line: "my son has a
-        # cough" with "my daughter" is about a daughter's cough.
-        old = _the_person_the_line_named(last, thing) or old
-    if not old or not _a_different_thing(old, thing):
-        return None
+    last, olds, thing, refined = _the_swap_in_the_line(text, memory)
+    held = olds[0]
     # The fact the last line stated belongs to the person they meant. This is a correction of who
     # and not of what, so it is right whether or not there is an answer for the corrected ask:
     # the reply says the fact moved only when there is no answer of its own to give.
-    fact = _the_fact_moved_to_the_person_they_meant(memory, old, thing, text)
-    line = _swapped(last, old, thing)
-    if not line:
-        return _the_fact_moved_line(fact, old, thing, text, memory)
-    answer = _the_answer(line, memory)
+    fact = _the_fact_moved_to_the_person_they_meant(memory, held, thing, text)
+    answer, line, old = "", "", ""
+    for one in olds:
+        if not _a_different_thing(one, thing):
+            continue
+        swapped = _swapped(last, one, thing)
+        if not swapped:
+            continue
+        found = _the_answer(swapped, memory)
+        if found:
+            answer, line, old = found, swapped, one
+            break
     if not answer:
-        return _the_fact_moved_line(fact, old, thing, text, memory)
+            return _the_fact_moved_line(fact, held, thing, text, memory)
     answer = _without_the_repeat_lead(answer)
     plain = _the_plain_answer(text, memory)
     if plain and not (_about_the_same_thing(plain, thing)
@@ -892,6 +1120,11 @@ def the_thing_they_meant(text, memory):
         # there is nothing to repair: "sorry i meant a turkey" names the turkey and the turkey row
         # answers it. Framing that answer with a nod only puts a second acknowledgement in front
         # of it, and the arbiter drops the pair as an echo anyway.
+        #
+        # The swap is kept even so. The turn reads right, and the line after it does not: asked
+        # "what about a duck" the chat was still on the chicken, so the duck row was never reached
+        # and the person got a search hedge. The correction happened whatever the reply to it is.
+        _keep_the_swap(memory, line, old, thing)
         return None
     if plain and len(plain) > A_REAL_ANSWER and not HEDGE.search(plain) \
             and not _still_the_old_thing(plain, old, thing):
@@ -909,7 +1142,10 @@ def the_thing_they_meant(text, memory):
         # The store's own reading of the line already answers the thing they meant: "sorry i meant
         # a turkey" names the turkey, so the turkey row reaches it without any help. Nothing is
         # wrong with that answer, and a nod in front of it is not worth the turn the bookkeeping
-        # behind it costs.
+        # behind it costs. The bookkeeping itself is still owed: the chat has been corrected, and
+        # the next line ("what about a duck") has to be read against the thing they meant rather
+        # than the one they took back.
+        _keep_the_swap(memory, line, old, thing)
         return None
     _keep_the_swap(memory, line, old, thing)
     if refined and not _said_before(answer, memory):
@@ -919,6 +1155,15 @@ def the_thing_they_meant(text, memory):
         # in two sentences: "Got it - Waterproof coat. For rain, a waterproof shell...".
         return answer if answer.endswith((".", "!", "?")) else answer + "."
     shown = thing[:1].upper() + thing[1:]
+    if _the_paragraph_already_given(answer, memory, old, thing):
+        # The pools put the thing after a determiner of their own, so a determiner the person said
+        # comes off the copy that follows one, and stays on the copy that opens the sentence.
+        held = _bare(thing)
+        if shown.split()[0].lower() in ("the", "a", "an", "my", "our", "your", "his", "her"):
+            held = shown[:1].lower() + shown[1:]
+        said = pick(SAME_ADVICE, memory, str(text)).format(
+            said=shown, thing=held, old=_bare(old))
+        return said if said.endswith((".", "!", "?")) else said + "."
     if _said_before(answer, memory):
         # The pools put the thing after a determiner of their own, so a determiner the person
         # said is taken off first: "the front room", not "the the front room".

@@ -17,7 +17,7 @@ import time
 __version__ = "0.1.0"
 
 # The commit that `bot/` was copied from.
-SOURCE_COMMIT = "3185a7a9bc50491205b19f64839f8c70962c4369"
+SOURCE_COMMIT = "24cbc0439e07fd015c0747ab3be6e782a42b5c5b"
 
 # The first lines of the interactive chat: the name in FIGlet's "slant" lettering, then one line
 # saying what PyBot is.

@@ -17,7 +17,7 @@ import re
 from decimal import Decimal, ROUND_HALF_UP
 from fractions import Fraction
 
-from ..memory.saving import a_rate_put_right
+from ..memory.saving import a_rate_put_right, the_money_already_held, the_pot_said_alone
 from ..memory.topics import in_a_safety_thread
 from . import units
 from .lookup import entry
@@ -1879,8 +1879,13 @@ A_HORIZON = re.compile(r"\b(?:in|within|by|after)\s+(?:\d+|an?|[a-z-]+)\s+"
 TIME_ELSEWHERE = re.compile(
     r"\b(?:cook|roast|boil|bake|fry|grill|simmer|rest|leave|marinate|drive|walk|fly|cycle|"
     r"ride|run|swim|wait|queue|charge|download|install)\b")
+# A figure with a period on it. The saving verb often sits between the two words - "i put 20 by
+# every week", "i put 50 aside each month", "putting 100 away a week" - and the phrase
+# "20 by every week" matched nothing, so the whole chat below (how long until i can buy it) had
+# no rate to work with and punted.
 RATE = re.compile(r"(?P<amount>\d[\d,]*(?:\.\d+)?)\s*"
                   r"(?:pounds?|quid|euros?|dollars?|grand|k\b)?\s*"
+                  r"(?:(?:by|aside|away|back|to (?:one|the) side)\s+)?"
                   r"(?:a|an|per|each|every|/)\s*(?P<period>day|week|fortnight|month|year)\b")
 MONEY = re.compile(r"\b(?:save|saves|saving|saved|spend|spends|spending|cost|costs|afford|"
                    r"budget|need|needs|want|wants|goal|target|total|price|deposit|pay|paying|"
@@ -1896,7 +1901,7 @@ TOWARDS = re.compile(r"\b(?:save|saves|saving|saved|put away|putting away|put by
 # line, and neither of them is money being put by.
 CLAUSE_SPLIT = re.compile(r"[,;.]|\band\b|\bbut\b|\bthen\b|\bso\b")
 SAVING_CLAUSE = re.compile(
-    r"\b(?:save|saves|saving|saved|savings|put away|putting away|put by|putting by|put aside|"
+    r"\b(?:save|saves|saving|saved|savings|put|puts|putting|put away|putting away|put by|"
     r"putting aside|set aside|setting aside|stash|stashing|squirrel|towards|toward|into|"
     r"pay off|paying off|paid off|pay towards|paying towards|paid towards|pay down|paying down|"
     r"pay back|paying back|paid back|overpay|overpaying|give|gives|giving|gave|send|sends|"
@@ -1963,7 +1968,7 @@ def _rate_in_chat(memory):
     lines = _user_lines(memory)
     for index in range(len(lines) - 1, -1, -1):
         line = lines[index]
-        put_right = a_rate_put_right(line)
+        put_right = a_rate_put_right(line, lines[index - 1] if index else "")
         if put_right and _a_rate_was_said(lines[:index]):
             return float(put_right), "month"
         for match in RATE.finditer(line):
@@ -2072,6 +2077,12 @@ def _goal_in_chat(memory, rate=None):
             continue
         if not GOAL.search(line) and SPENDING_CLAUSE.search(line):
             continue  # a bill or a wage, not what is being saved towards
+        if the_pot_said_alone(line):
+            # Money already in the pot is not the total being saved towards. A chat that said
+            # "we need 8000 for a new kitchen" and then "weve got 3000 in savings" was told
+            # "£3,000 at £250 a month is 12 months": the pot was read as the goal, and the
+            # length it gave was for the money they already hold.
+            continue
         if OWED.search(line) and not A_DEBT_CLEARED.search(line):
             # Money they are carrying, kept aside until nothing better is named: a chat about a
             # car that also mentions a loan saves towards the car.
@@ -2099,7 +2110,17 @@ def _rate_and_total(memory):
     rate, period = _rate_in_chat(memory)
     if rate is None:
         return None, None, None
-    return rate, period, _goal_in_chat(memory, rate)
+    total = _goal_in_chat(memory, rate)
+    held = the_money_already_held(memory)
+    if total and 0 < held < total:
+        # The pot is not the goal: "im saving for a 15000 deposit" / "i have 4200 saved" /
+        # "i put by 400 a month" / "when will i have enough" was answered "at 400 a month, 15,000
+        # takes about 38 months", while the answer two turns earlier had worked out "£10,800
+        # still to find ... 22 months". The chat had the figure and the arithmetic both, and the
+        # last turn gave back the whole goal. What is still to find is the goal less the pot, the
+        # same sum `bot/memory/saving.py` works out.
+        total = total - held
+    return rate, period, total
 
 
 def _in_months(count, period):
@@ -2225,8 +2246,11 @@ def _time_at_a_new_total(clean, memory):
 def _time_without_a_goal(clean, memory):
     """A rate without a figure to reach yet: "how long would that take?"
 
-    There is nothing to divide, so the answer says what the rate comes to in a year and asks for
-    the one number that is missing. Better than a shrug, and it is the question they will ask next.
+    There is nothing to divide, so the answer says what the rate comes to in a year, what one
+    hundred of the price costs in weeks at that rate, and asks for the one number that is missing.
+    Better than a shrug, and it is the question they will ask next: "i put 20 by every week
+    towards a bike" then "so how many weeks until i can buy it" was a search hedge, when 20 a
+    week is five weeks for every 100 of the bike.
     """
     if not TIME_ASKED.search(clean) or TIME_ELSEWHERE.search(clean) or _parse(clean):
         return None
@@ -2236,8 +2260,132 @@ def _time_without_a_goal(clean, memory):
     if _goal_in_chat(memory, rate):
         return None  # there is a figure to reach, so _time_to_reach answers this
     yearly = rate * 12 / PERIODS[period]
-    return (f"At {_number(rate)} a {period} that's about {_number(round(yearly))} a year. "
-            "Tell me the figure you are saving towards and I will work out how long it takes.")
+    said = f"At {_number(rate)} a {period} that's about {_number(round(yearly))} a year"
+    each_hundred = _each_hundred(rate, period)
+    if each_hundred:
+        said += f", so every 100 of the price takes {each_hundred}"
+    return (said + ". Tell me the figure you are saving towards and I will work out how long "
+            "it takes.")
+
+
+# The next unit down and how many of it make one of the larger: a hundred of the price at 300 a
+# month is a third of a month, which nobody says, and "eight days" is the same figure said plainly.
+_SMALLER_PERIOD = {"year": ("month", 12), "month": ("week", 4.345), "fortnight": ("week", 2),
+                   "week": ("day", 7), "day": ("hour", 24)}
+
+
+def _each_hundred(rate, period):
+    """How long 100 of the price takes at a rate: "five weeks", "eight days", "2.5 months".
+
+    The figure that makes an empty sum useful without inventing a price: it is the rate read the
+    other way round, and a price can then be done in the head in steps of one hundred. The unit
+    follows the count down, so a rate of 300 a month answers in days rather than in "a third of a
+    month", and the count is rounded to the half that a person would say.
+    """
+    if not rate or rate <= 0:
+        return None
+    count = 100.0 / rate
+    while count < 1 and period in _SMALLER_PERIOD:
+        period, many = _SMALLER_PERIOD[period]
+        count *= many
+    if count < 1:
+        return None  # 100 of the price in under an hour is not a rate anyone is saving at
+    while count >= 13 and period in ("day", "week", "fortnight"):
+        period, many = _SMALLER_PERIOD[period]
+        count /= many
+    if period == "hour" and count >= 12:
+        return None  # the yearly figure above says this better than hours do
+    if count < 3:
+        value = round(count * 2) / 2
+        said = _number(int(value) if value == int(value) else value)
+    else:
+        value = round(count)
+        said = _number(int(value))
+        if abs(count - value) >= 0.5:
+            said = f"about {said}"
+    name = period if abs(value - 1) < 0.05 else period + "s"
+    return f"{said} {name}"
+
+
+# The figure has to be money being put by, not any number with a goal word beside it. "i want to
+# run 100 miles" / "how long will it take" was answered "Getting to 100 depends on what you can put
+# by", because GOAL counts "want" and the plan is a figure like any other.
+MONEY_GOAL = re.compile(
+    r"\b(?:save|saves|saving|saved|put by|put aside|set aside|put away|deposit|afford|owe|owes|"
+    r"owed|debt|debts|repay|repaying|pay off|paying off|towards|toward)\b")
+
+
+def _a_saving_goal_in_chat(memory):
+    """The biggest figure on a line that says money is being put by."""
+    best = None
+    for line in _user_lines(memory):
+        if not MONEY_GOAL.search(line) or SPENDING_CLAUSE.search(line):
+            continue
+        for value in _sums(SAID_A_RATE.sub(" ", line)):
+            if value >= 50 and (best is None or value > best):
+                best = value
+    return best
+
+
+def _the_plan_figure(memory):
+    """The figure the **newest** plan names, if that plan is about money.
+
+    "im trying to save 2000 for a used car" then "actually its 3000" leaves the plan reading
+    "Save 3000 for a used car" (bot/memory/topics.py writes the correction), while the old sum is
+    still on the first line of the chat. Reading the lines alone answered a later ask with 2,000.
+
+    Only the newest plan, because a later plan is a new subject: "i want to run 100 miles" after the
+    car leaves the store holding both, and the goal in hand is the run. A plan with no money word in
+    it is not money at all, so this is also the fence that keeps 100 miles from being read as £100.
+    """
+    user = memory.get("user") or {}
+    if not isinstance(user, dict):
+        return None
+    plans = [plan for plan in list(user.get("plans") or []) if plan]
+    newest = plans[-1] if plans else user.get("plan")
+    if not newest or not MONEY_GOAL.search(str(newest).lower()):
+        return None
+    sums = [value for value in _sums(str(newest)) if value >= 50]
+    return max(sums) if sums else None
+
+
+# The fallback when the sums at the rates people save at have already been said: the missing half
+# of the sum is the rate, so that is what is asked for. Kept as words of its own so a test can hold
+# on to it.
+ASKED_FOR_RATE = "how much could you set aside each month?"
+
+
+def _a_goal_without_a_rate(clean, memory):
+    """A figure to reach but no rate to reach it at: "im trying to save 2000 for a used car" then
+    "how long will it take".
+
+    _time_without_a_goal is the same sum the other way round: with a rate and no figure, the answer
+    says what the rate comes to in a year and asks for the figure. With a figure and no rate there
+    is nothing to divide either, and the missing half is the one a friend asks for. Nothing said it,
+    so the question was answered from the card for the thing being saved for - "ask how long they've
+    owned it and why they're selling" - which is a question to put to a stranger about the car,
+    not an answer about time.
+    """
+    if not TIME_ASKED.search(clean) or TIME_ELSEWHERE.search(clean) or _parse(clean):
+        return None
+    rate, _period = _rate_in_chat(memory)
+    if rate:
+        return None  # both halves are in the chat, so _time_to_reach divides them
+    total = _the_plan_figure(memory)
+    if total is None:
+        user = memory.get("user") or {}
+        if isinstance(user, dict) and (user.get("plan") or user.get("plans")):
+            return None  # the plan in hand is not money, so this is a new subject
+        total = _a_saving_goal_in_chat(memory)
+    if not total:
+        return None
+    # The sums at the rates people save at are the answer money.py already gives a line that names
+    # its own goal ("i need a deposit of 15000" / "how long will that take"), and it gives the same
+    # one for a goal the chat named a turn earlier when the entry that carries it is reached. This
+    # is the door for the bare follow-up, so the wording is theirs, not a second table.
+    from .money import _time_to_save
+    return (_time_to_save(memory, {"clean": clean, "text": clean})
+            or f"Getting to {_number(total)} depends on what you can put by - {ASKED_FOR_RATE}")
 
 
 # the exact words _time_without_a_goal uses, so the figure it asked for can be answered next turn
@@ -3634,12 +3782,12 @@ def _days_until_a_named_day(clean):
 # it a count rather than "how many days in a year", which is a fact about the calendar.
 _REST_OF_A_PERIOD_WORDS = frozenset("""
 how many much long day days week weeks are is left to go remaining remain in of until till the
-this end month year now already exactly please today january february march april may june july
+this end month year tax now already exactly please today january february march april may june july
 august september october november december jan feb mar apr jun jul aug sep sept oct nov dec
 """.split())
 
 _REST_OF_A_PERIOD = re.compile(
-    r"\b(?:month|year|january|february|march|april|may|june|july|august|september|october|"
+    r"\b(?:month|year|tax year|january|february|march|april|may|june|july|august|september|october|"
     r"november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b", re.I)
 
 
@@ -3668,7 +3816,17 @@ def _days_left_in_the_month_or_the_year(clean):
         if name.lower() in words or name[:3].lower() in words:
             month = number
     waiting = False
-    if "year" in words:
+    extra = ""
+    if "tax" in words:
+        # The tax year runs from 6 April to 5 April, so it is a period of its own that the
+        # calendar already knows: "how many days left in the tax year" is a count, not the
+        # P60 card it used to get.
+        end = datetime.date(today.year, 4, 5)
+        if end < today:
+            end = datetime.date(today.year + 1, 4, 5)
+        said = "the tax year"
+        extra = f" It ends on {_said_with_a_weekday(end)}."
+    elif "year" in words:
         end = datetime.date(today.year, 12, 31)
         said = f"{today.year}"
     elif month is not None and month != today.month:
@@ -3689,7 +3847,7 @@ def _days_left_in_the_month_or_the_year(clean):
         return (f"{_count_in(unit, days)} until the end of {said}. "
                 f"That is {_count_in(unit, days + 1)} counting today.")
     return (f"{_count_in(unit, days)} left in {said} after today, "
-            f"{_count_in(unit, days + 1)} counting today.")
+            f"{_count_in(unit, days + 1)} counting today." + extra)
 
 
 # "how many days since 3 march", "how long ago was the 3rd": the count runs backwards, to the
@@ -3757,6 +3915,144 @@ def _how_long_ago(clean):
     if days >= 1000 and unit.startswith("day"):
         count = f"{days:,} days"
     return f"{count} since {said} - that was a {_WEEKDAYS[when.weekday()]}."
+
+
+# --- working days, and weekends, between today and a day ---------------------
+# "how many working days until christmas" is the count a person does when they are planing a
+# job, a move or a handover: the days that are not weekends and not bank holidays. "How many
+# weekends until christmas" is the same idea the other way round, and both need a date, which
+# the line either gives or the bot already knows.
+_WORKING_ASK = re.compile(
+    r"(?P<count>how many\s+(?:(?:working|work|business)\s+days?|weekends?))\s+"
+    r"(?:are there\s+|are left\s+|is it\s+|do i have\s+|left\s+|to go\s+)?"
+    r"(?:until|till|to|before)\s+(?P<rest>.+)", re.I)
+_WORKING_LEFT = re.compile(
+    r"(?P<count>how many\s+(?:(?:working|work|business)\s+days?|weekends?))\s+"
+    r"(?:are\s+|is\s+|have i got\s+)?(?:left|to go)\s+(?:in\s+|of\s+)?"
+    r"(?:the\s+|this\s+)?(?P<period>year|month)", re.I)
+
+
+def _a_known_day_the_line_names_next(text):
+    """The next time the day the line names comes round, as a date and how to say it."""
+    import datetime
+    today = datetime.date.today()
+    if re.search(_CHRISTMAS_DAY + r"\b", text):
+        eve = bool(re.search(r"\beve\b", text))
+        when = datetime.date(today.year, 12, 24 if eve else 25)
+        if when < today:
+            when = datetime.date(today.year + 1, 12, 24 if eve else 25)
+        return when, ("Christmas Eve" if eve else "Christmas")
+    if re.search(r"\bnew year(?:'s|s')? (?:day|eve)\b|\bnew year\b", text):
+        when = datetime.date(today.year, 1, 1)
+        if when < today:
+            when = datetime.date(today.year + 1, 1, 1)
+        return when, "New Year's Day"
+    if re.search(r"\beaster\b", text):
+        when = _easter_sunday(today.year)
+        if when < today:
+            when = _easter_sunday(today.year + 1)
+        return when, "Easter Sunday"
+    return _date_the_line_gave(text)
+
+
+# "how many working hours in a week" is the job's week, not the calendar's: 37.5 or 40 hours.
+# The plain unit rows answer "how many hours in a week" with 168 and "how many days in a week"
+# with 7, and they are right to; the word "working" is what makes it a question about work.
+# `_plain` drops that word as filler, so this reads the line before the filler goes.
+_WORKING_SHAPE = re.compile(
+    r"(?:how many|what is|whats|what's|what are) (?:the )?(?P<which>working|work) "
+    r"(?P<unit>hours?|days?)(?: in| per| to| into| a| of)?(?: a| the| one)? (?P<week>week|day|month)"
+    r"(?: is (?:full|normal) time)?(?: of work)?", re.I)
+
+
+def _a_working_week(clean):
+    said = " ".join(str(clean or "").lower().strip().strip("?.!").split())
+    found = _WORKING_SHAPE.fullmatch(said)
+    if not found:
+        return None
+    unit, span = found.group("unit"), found.group("week")
+    if unit.startswith("hour") and span == "week":
+        return ("A full-time week is usually 37.5 to 40 hours - 7.5 or 8 hours a day over five "
+                "days. The law caps the average at 48 hours a week over 17 weeks unless the "
+                "person signs to opt out, and part-time hours are usually written as a share of "
+                "that full-time week.")
+    if unit.startswith("hour") and span == "day":
+        return ("A full-time day is usually 7.5 or 8 hours, and a break of 20 minutes after six "
+                "hours is the legal minimum in the UK. Contracted hours are the ones that count "
+                "for pay, so check the contract rather than the rota.")
+    if unit.startswith("day") and span == "week":
+        return ("Five, for a full-time job - Monday to Friday - which is why a week off is five "
+                "days of leave, not seven. Shift work and four-day weeks are the usual "
+                "exceptions, and the contract says which one you are on.")
+    return None
+
+
+def _working_days_or_weekends_until(clean):
+    """The weekdays, or the whole weekends, between tomorrow and the day the line names.
+
+    A bank holiday is not a working day, so the England and Wales calendar comes out of it (the
+    line can say Scotland or Northern Ireland, and then that list is used). Weekends are counted
+    whole: a Saturday whose Sunday is the day itself is not a weekend off before it.
+    """
+    import datetime
+    text = _plain(clean)
+    today = datetime.date.today()
+    if re.fullmatch(r"how many (?:working|work|business) days? (?:in|per) a year", text):
+        return ("About 253 working days in a year: 261 weekdays, less the 8 bank holidays in "
+                "England and Wales. Leap years add one.")
+    # "how many working hours in a week" is 37.5 or 40, not the 168 hours a week has: the
+    # plain hours row answers the calendar question and this one the job.
+    if re.fullmatch(r"how many (?:working|work) hours? (?:in|per|to) (?:a|the) week", text):
+        return ("A full-time week is usually 37.5 to 40 hours - 7.5 or 8 hours a day, five days. "
+                "The law caps the average at 48 hours a week over 17 weeks unless the person "
+                "signs to opt out, and part-time hours are usually written as a share of the "
+                "full-time week.")
+    if re.fullmatch(r"how many weekends (?:in|per) a year", text):
+        return ("104 weekend days in a year - 52 Saturdays and 52 Sundays - plus a day or two "
+                "in most years, because 365 is not a whole number of weeks.")
+    found = _WORKING_ASK.fullmatch(text) or _WORKING_LEFT.fullmatch(text)
+    if not found:
+        return None
+    weekends = "weekend" in found.group("count").lower()
+    rest = (found.groupdict().get("rest") or "").strip()
+    period = found.groupdict().get("period") or ""
+    if rest:
+        end, said = _a_known_day_the_line_names_next(rest)
+        if end is None:
+            # "until the end of the year" is a stretch of calendar, not a day; anything else
+            # ("until my holiday", "until payday") is a date only the person has, so it passes.
+            if not re.search(r"\b(?:the\s+|this\s+)?(year|month)\b", rest, re.I):
+                return None
+            period = "month" if re.search(r"\bmonth\b", rest, re.I) else "year"
+    if not rest or end is None and period:
+        if period == "month":
+            end = datetime.date(today.year + (today.month // 12), today.month % 12 + 1, 1)
+            end -= datetime.timedelta(days=1)
+            said = f"the end of {_MONTH_NAMES[end.month - 1]}"
+        else:
+            end = datetime.date(today.year, 12, 31)
+            said = f"the end of {today.year}"
+    days = (end - today).days
+    if days <= 0:
+        return None
+    span = [today + datetime.timedelta(days=step) for step in range(1, days + 1)]
+    if weekends:
+        count = sum(1 for day in span
+                    if day.weekday() == 5 and day + datetime.timedelta(days=1) < end)
+        if not count:
+            return (f"There is no whole weekend between today and {said} - the next Saturday "
+                    f"falls on {_said_with_a_weekday(end)} or later.")
+        first = next(day for day in span if day.weekday() == 5)
+        return (f"{count} weekend{'' if count == 1 else 's'} until {said}, the first starting "
+                f"on {_said_with_a_weekday(first)}.")
+    where, _ = _bank_where(rest or text)
+    holidays = set()
+    for year in {day.year for day in span} | {end.year}:
+        holidays |= {day for _name, day in _bank_holidays(year, where)}
+    count = sum(1 for day in span if day.weekday() < 5 and day not in holidays)
+    return f"{count} working days until {said}, out of {days} days in all."
+
+
 
 
 def _a_known_day_that_has_gone(text, year=None):
@@ -4762,12 +5058,14 @@ def solve(text, understood, memory):
                    _at_a_pace(clean, memory),
                    _save_by_a_date(clean, memory), _save_time(clean), _saving(clean),
                    _time_to_reach(clean, memory),
+                   _a_goal_without_a_rate(clean, memory),
                    _time_at_a_new_rate(clean, memory),
                    _time_at_a_new_total(clean, memory),
                    _time_without_a_goal(clean, memory),
                    _figure_just_given(clean, memory),
                    _deadline_for_a_goal(clean, memory), _save_by_a_date(clean, memory),
-                   _each_month_for_a_goal(clean, memory), _convert(clean, memory), _unit_fact(clean),
+                   _each_month_for_a_goal(clean, memory), _a_working_week(clean),
+                   _convert(clean, memory), _unit_fact(clean),
                    _average(clean), _area(clean), _perimeter_of_a_room(clean),
                    _days_in_month(clean),
                    _today(clean), _days_until(clean), _date_counted_from_today(clean),
@@ -4777,6 +5075,7 @@ def solve(text, understood, memory):
                    _days_until_a_named_day(clean),
                    _days_until_a_month_or_season(clean),
                    _days_left_in_the_month_or_the_year(clean),
+                   _working_days_or_weekends_until(clean),
                    _how_long_ago(clean)):
         if answer:
             return answer
@@ -4839,6 +5138,34 @@ def _short(value):
 _MEAN_VERB = ("mean", "means", "meaning")
 
 
+# The statistic the line names is what is being asked about; "that", "it" and "this" are the
+# thing meant, so the "mean" after them is the line's verb. "whats that mean" and "what does it
+# mean" were answered with the mean explainer - a definition of the mean average for a person
+# asking what the bot's last answer meant - because every word of them is filler, "mean"
+# included. The same line with "does" in it was read correctly, so the spelling was what decided
+# it. A line that names a statistic of its own ("what does the median mean") still answers.
+_STATISTIC_WORDS = ("average", "averages", "mean", "means", "median", "mode", "statistics")
+_OTHER_STATISTICS = ("average", "averages", "median", "mode")
+_POINTS_AT_A_THING = ("that", "this", "it", "these", "those", "you", "me", "we", "they",
+                      "he", "she", "them", "what", "whats", "how", "which")
+
+
+def _names_a_statistic(asked):
+    """Whether the line names the statistic it asks about, rather than pointing at a thing."""
+    words = [word.strip("?.!,") for word in asked.split()]
+    for index, word in enumerate(words):
+        if word not in _STATISTIC_WORDS:
+            continue
+        if word in _MEAN_VERB:
+            before = words[index - 1] if index else ""
+            if before in _POINTS_AT_A_THING:
+                continue
+            if any(other in _OTHER_STATISTICS for other in words):
+                continue
+        return True
+    return False
+
+
 def _about_words(asked):
     words = asked.split()
     i = len(words) - 1
@@ -4859,7 +5186,7 @@ def _averages(memory, understood):
         # A definition, not a sum: answer only when the line is all ask and no subject
         # ("what is the average rent in london" is a different question, so pass).
         words = [word for word in re.findall(r"[a-z']+", asked)]
-        if all(word in _AVERAGE_FILLER for word in words):
+        if all(word in _AVERAGE_FILLER for word in words) and _names_a_statistic(asked):
             if ("median" in asked and "mean" in about) or "difference" in asked:
                 return _AVERAGE_EXPLAIN  # the comparison is the question, so name them all
             if "median" in asked:
@@ -4947,7 +5274,16 @@ ROUNDING_NAMED = re.compile(
     r"|\bround(?:ed|ing)?\s+(?:up|down)\s+(?:the\s+|a\s+|your\s+)?"
     r"(?:price|prices|cost|bill|total|number|figure|amount|sum|pence|penny|pennies|pounds|pound"
     r"|decimal|decimals|digit|digits)\b"
-    r"|\brounding\b|\bdecimal places?\b|\bsignificant figures?\b|\bnearest\b"
+    # A bare "nearest" is not a number: "whats the nearest cashpoint", "where is the nearest
+    # chemist", "how do i find my nearest recycling centre" are all place questions, and the card
+    # answered them with the digit rule ("Look at the digit just after the place you are keeping")
+    # because the word alone was the sign. Rounding is what "nearest" means when a place value
+    # follows it - nearest whole, nearest ten, nearest penny - or when it is the end of a line
+    # that has already said round ("how do i round to the nearest").
+    r"|\brounding\b|\bdecimal places?\b|\bsignificant figures?\b"
+    r"|\bnearest\s+(?:whole|ten|tens|hundred|hundreds|thousand|thousands|million|penny|pence"
+    r"|pound|pounds|decimal|digit|digits|number|numbers|integer|unit|one|\d)\b"
+    r"|\bround(?:s|ed|ing)?\s+(?:it\s+)?(?:to|at)\s+(?:the\s+)?nearest\b"
     # "what does round mean in maths": the word is the subject of the question, and maths is what
     # the line says it is about.
     r"|\bmaths?\b|\bmathematics\b")
@@ -5226,7 +5562,15 @@ ENTRIES = [
                  "leftovers", "tin", "tins", "tin of", "can", "cans", "can of", "jar", "jars",
                  "packet", "packets", "packet of", "carton", "carton of", "tub", "pots", "pot",
                  "punnet", "bag", "bags", "bunch", "tray", "half a tin", "half a can",
-                 "half a jar", "half a packet")),
+                 "half a jar", "half a packet",
+                 # "im going to halve my dose and see how i go" is a plan about a prescription:
+                 # "Divide it by 2: half of 46 is 23" is arithmetic help for a sum nobody asked,
+                 # and the medicine is not a number. A medicine word in the line means the sums
+                 # row stands down, whatever the words around it.
+                 "dose", "doses", "dosage", "tablet", "tablets", "pill", "pills", "capsule",
+                 "capsules", "medication", "medicine", "medicines", "insulin", "steroid",
+                 "steroids", "inhaler", "inhalers", "antibiotic", "antibiotics", "statins",
+                 "painkillers", "antidepressants", "prescription")),
     entry("ratio-how",
           (("ratio", "ratios", "proportion", "proportions", "share in a ratio"),
            ("how", "work", "out", "share", "divide", "simplify", "what", "explain", "split",

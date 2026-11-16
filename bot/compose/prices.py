@@ -37,6 +37,12 @@ PRICE_ASK = re.compile(
     r"|\bhow\s+much\b[^?.!,]{0,16}\b(?:roughly|in\s+total|altogether|all\s+in)\b"
     r"|\b(?:roughly|about)\s+how\s+much\b")
 
+# The same ask with the front of it dropped, which is how it is typed on a phone: "ow much is a
+# pint of milk", "much does a pint cost". Only at the head of the line, because "that much is a
+# stretch" is a judgement and "so much is a stretch" is not a question about a shop.
+PRICE_ASK_HEADLESS = re.compile(
+    r"^(?:and\s+|but\s+)?(?:ow\s+much|much)\s+(?:is|are|was|were|do|does|would)\b")
+
 # A job is not a listing: "how much would a service cost", "the garage wants 400 for a service".
 # No seller's page has that figure, because it depends on who does the work and what they find
 # when they open it up, so a comparison site is the wrong place to send somebody.
@@ -45,6 +51,18 @@ PRICE_OF_A_JOB = (
     "they open it up. Two quotes will give you a real range, and I can help you weigh them up.",
     "No figure from me on a job like that, sorry: it is a quote rather than a price list. Ring "
     "two firms and compare what each one covers, not just the total.",
+)
+# A judgement on a job with a figure already in the chat: what settles it is a second quote, and
+# the answer says that first rather than opening on what the bot cannot see. The pool above opens
+# "I can't price a job from here", which is honest but is the hedge in front of the answer, and a
+# person who has just been told 900 quid wants to know how to test that figure.
+A_JOB_JUDGED = (
+    "A quote is only normal against another one: ring a second firm for the same job and compare "
+    "what each one covers, not just the total, because who does it and what they find when they "
+    "open it up is why two figures for the same job come out apart.",
+    "What tells you whether that figure is normal is a second quote for the same job, in writing, "
+    "compared on what each one includes rather than the total alone. The range moves with who does "
+    "it and what they find, so the second quote is the only real test of the first.",
 )
 JOB_WORDS = frozenset("""
 plumber plumbing builder builders decorator decorating electrician electrics joiner carpenter
@@ -72,6 +90,18 @@ PRICE_OF_A_THING = (
 PRICE_JUDGEMENT = re.compile(
     r"\bis\s+(?:that|this|it)\s+(?:about\s+)?(?:fair|normal|reasonable|right|about\s+right|"
     r"steep|a\s+lot|too\s+(?:much|dear|expensive))\b")
+
+# The same judgement with the thing being judged said after the word: "is that a normal price",
+# "is that a fair rate", "is that a reasonable quote". Those are not requests for a figure - the
+# figure is on the page in front of them - so the answer that settles them is that the same thing
+# priced in two or three places is what tells you, and for a job, two firms and what each covers.
+# Without this the fairness shapes in PRICE_ASK read as a plain price ask and the person got "I
+# can't look up live prices, sorry. The seller's site or a price comparison site will have
+# today's figure" - which is no answer to "the plumber wants 900 quid, is that a normal price".
+A_FAIRNESS_JUDGEMENT = re.compile(
+    r"\b(?:fair|normal|reasonable|typical|sensible|going|right|steep|good|ok|decent)\s+"
+    r"(?:price|prices|rate|rates|quote|quotation|cost|money|fee|charge)\b"
+    r"|\b(?:that|this|it)\s+(?:about\s+)?right\b[^?.!]{0,14}\b(?:price|pay|paid|charge)\b")
 # The faces that are money on their own, so no cue is needed: nobody says "is it expensive" about
 # anything but a price. "is it expensive" after "im thinking of a hotel in lisbon" was answered
 # with the search hedge, and so was "is that expensive to fix" after "the boiler is leaking" -
@@ -244,17 +274,25 @@ def the_price_reply(clean, phrases, before, options):
     if A_BUDGET_ASK.search(clean) or (A_BARE_BUDGET_JUDGEMENT.search(clean)
                                      and A_MONEY_NEARBY.search(before or "")):
         return A_BUDGET_IS_THEIR_OWN_SUM
-    judged = bool(MONEY_JUDGEMENT.search(clean) or PRICE_JUDGEMENT.search(clean))
+    judged = bool(MONEY_JUDGEMENT.search(clean) or PRICE_JUDGEMENT.search(clean)
+                  or A_FAIRNESS_JUDGEMENT.search(clean))
     worth = bool(WORTH_AN_AMOUNT.search(clean)) or bool(
         WORTH_IT.search(clean)
         and (A_MONEY_NEARBY.search(clean) or A_MONEY_NEARBY.search(before or "")))
     asked = (_has(clean, phrases) or PRICE_ASK.search(clean) or worth
+             or PRICE_ASK_HEADLESS.match(clean)
              or (judged and (A_MONEY_CUE.search(clean) or A_MONEY_CUE.search(before)
                              or MONEY_JUDGEMENT.search(clean))))
     if not asked:
         return None
-    if _has(clean, JOB_WORDS):
-        return PRICE_OF_A_JOB
+    # The trade is as often the turn before as this one: "the plumber wants 900 quid" then "is
+    # that a normal price" named no trade at all, so the job pool was never reached and the
+    # person was sent to a seller's page for a quote from a plumber.
+    if _has(clean, JOB_WORDS) or (judged and _has(before or "", JOB_WORDS)):
+        # "is that a normal price" after "the plumber wants 900 quid" is a judgement on a figure
+        # the person already has, so the answer starts with what tests it, not with what the bot
+        # cannot see. A plain "how much does a tiler charge" keeps the pool above.
+        return A_JOB_JUDGED if judged else PRICE_OF_A_JOB
     if judged or worth:
         # A judgement on a price rather than a request for a figure: what settles it is the same
         # thing priced in three places, and the line usually names no thing at all.

@@ -9,7 +9,18 @@ careful driver can do themselves, and when to stop and call a garage.
 """
 import re
 
+from ..understanding.car_glass import a_window_on_a_car_is_not_a_damage
+from ..understanding.cars import no_broken_car, no_broken_car_or_none
 from .lookup import asks_how_often, entry as _raw_entry, the_line
+
+# What a garage charges, in one place because two rows answer with it: the line that says what
+# is being mended, and the bare "what will it cost roughly" a turn or two into a fault.
+REPAIR_COST = ("Garage labour is usually £50 to £90 an hour, and a job is priced by the hours "
+               "the book allows rather than by what the car is worth: a clutch is £300 to £800 "
+               "fitted, a cambelt £250 to £500, a wheel bearing £150 to £300. Ask for the price "
+               "in writing with parts and labour split, and get a second quote for anything over "
+               "£300.")
+
 
 PARKING_TICKET = ("Do not ignore it. If it is a council Penalty Charge Notice, challenge it "
                   "informally within 14 days with photos and the reason, and if that fails make a "
@@ -265,6 +276,38 @@ LEASE_OR_BUY = ("lease or buy", "buy or lease", "lease vs buy", "buy vs lease", 
                 "lease or purchase", "purchase or lease", "hire purchase or", "or hire purchase",
                 "rent or buy", "or pcp", "pcp or", "or a pcp")
 
+DASH_CAM_WHAT = (
+    "A dash cam is a small camera on the windscreen that records the road ahead in a loop and "
+    "saves the clip on impact, so you have proof after a bump that is not your word against "
+    "theirs. Fit one high behind the mirror, feed it from a 12V socket, and use a high-endurance "
+    "micro SD card labelled U3 - a cheap card dies after months of constant writing. Many "
+    "insurers knock a little off the premium if you tell them you have one.")
+DASH_CAM_BUY = (
+    "A dash cam records the road ahead in a loop, wiping the oldest clip, so you only keep a "
+    "crash by pressing the button or by it saving on impact. For the card: a high-endurance "
+    "micro SD of 64GB or 128GB, labelled U3, because a cheap card dies after a few months of "
+    "constant writing - that endurance word matters more than the size.")
+DASH_CAM_FIT = (
+    "Mount it high on the windscreen behind and below the mirror so it sees both kerbs and "
+    "does not block your view, run the cable along the headlining and down the door pillar to a "
+    "12V socket or a hardwire kit, and keep the lens clean. Check it records after every "
+    "service, and tell your insurer - many give a discount for one.")
+
+
+def _dash_cam(memory, understood):
+    """The card is the buying question; the rest is where it goes and how it is wired."""
+    text = " ".join(str(part or "") for part in (understood.get("text"),
+                                                 understood.get("clean"))).lower()
+    if any(word in text for word in ("card", "memory", "sd", "size", "buy", "best", "recommend",
+                                     "which", "worth")):
+        return DASH_CAM_BUY
+    if any(word in text for word in ("what is", "whats a", "what are", "explain", "used for",
+                                     "do they do", "how does it work")):
+        return DASH_CAM_WHAT
+    return DASH_CAM_FIT
+
+
+
 
 # The animals a car meets on a country road, said whichever way round the line puts them: the
 # person hits it ("i hit a fox with my car", "i ran over a pheasant"), it is hit ("a badger was
@@ -328,6 +371,28 @@ def _not_a_bike_chat(understood):
     said = str(understood.get("clean") or understood.get("text") or "").lower()
     return any(word in said for word in ("car", "cars", "van", "mot", "motor", "engine",
                                         "vehicle", "lorry", "truck"))
+
+
+# Selling a car is a course of action, not always a decision about the car: "should i sell my car
+# to a dealer", "how do i sell my car privately" and "can i sell my car without an MOT" want the
+# photos, the price and the V5C/2. The decision - mend it, keep it or let it go - is
+# `repair-or-scrap`'s, and it is asked with a rival alongside the selling: "should i fix my car or
+# sell it", "should i sell my car or keep it", "should i sell my car as is or fix it first". So this
+# row stands aside when the line puts a rival course beside the selling, and stays for the how-to.
+_SELLING_RIVAL = re.compile(r"\b(keep|keeping|fix|fixing|repair|repairing|mend|mending|scrap|"
+                            r"scrapping|buy|buying|replace|replacing|new car|another car|get rid)\b")
+_SELLING_BILL = (" of work ", " needs work ", "failed its mot", "failed the mot", "mot failure",
+                 "worth selling", "worth keeping")
+
+
+def _the_selling_is_the_decision(understood):
+    """False when the line is choosing between selling the car and keeping or mending it."""
+    text = " " + (understood.get("clean") or understood.get("plain") or "") + " "
+    if any(w in text for w in _SELLING_BILL):
+        return False
+    if not (" or " in text or "should i" in text):
+        return True
+    return _SELLING_RIVAL.search(text) is None
 
 
 def _entry(name, keys, reply, avoid=(), **kw):
@@ -448,6 +513,26 @@ CLEANING = ("gum", "chewing gum", "sofa", "settee", "couch", "carpet", "rug", "m
             "shirt", "jumper", "duvet", "washing machine", "dishwasher", "kettle", "bath",
             "blockage", "drain", "mould", "mildew", "stain", "stains", "gravy", "ink",
             "paintbrush", "skirting", "grout", "bin", "wheelie")
+
+
+# "home" is one of the row's destinations and a care home, a nursing home or a retirement home
+# carries the word without being anywhere a car is being taken. "my mum has moved into a care
+# home and i feel awful about it" was answered with the rule for driving a car with a fault: the
+# row read "moved" as its verb and "home" as its destination. A guard reads the two words next
+# to each other, which an avoid word cannot do, so "can i drive it home" keeps its answer.
+_SOMEBODY_ELSES_HOME = re.compile(
+    r"\b(?:care|nursing|residential|retirement|children'?s|funeral|hostel)\s+home\b"
+    r"|\bmov(?:e|ed|es|ing)\s+(?:house|flat|home)\b"
+    r"|\bmov(?:e|ed|es|ing)\s+(?:into|to)\s+(?:a|an|the|my|our|her|his|their)?\s*"
+    r"(?:care|nursing|residential|retirement)?\s*home\b", re.IGNORECASE)
+
+
+def _a_machine_and_not_a_person(understood):
+    """True unless the line's "home" is where somebody lives or is being looked after."""
+    if not isinstance(understood, dict):
+        return True
+    said = understood.get("text") or " ".join(understood.get("words") or ())
+    return not _SOMEBODY_ELSES_HOME.search(str(said))
 
 
 def _learning(memory):
@@ -890,6 +975,26 @@ TO_A_TEST = ("drive to", "drive it to", "driving to", "take it to", "get it to",
              "to my mot", "to its mot")
 LEGAL_ASK = ("legal", "allowed", "permitted", "am i able", "can i", "may i", "could i", "ok to")
 
+# A "booster" is a jab far more often than it is a car seat, and this row was answering
+# "when should i get my covid booster" and "when do i get my booster" - the second has no
+# vaccine word for the avoid list to stand aside on. The bare word stays in the key because it is
+# how a parent names the seat ("when does my child need a booster"), so the row reads the line for
+# the seat or the child, and takes the follow-up ("would a booster help" in a chat about car
+# seats) from the line it follows. Where neither says either, the word is the jab's.
+_A_SEAT_OR_A_CHILD = re.compile(
+    r"\b(seat|seats|isofix|car|cars|child|children|kid|kids|toddler|baby|son|daughter|"
+    r"height|135|law|legal|rear facing|backless|high backed|high-backed|front seat|cushion|"
+    r"maxi)\w*")
+
+
+def _a_seat_is_what_it_is_about(understood):
+    """The seat or the child has to be in the line, or in the line it follows."""
+    line = " ".join(str(word) for word in ((understood or {}).get("words") or ()))
+    if _A_SEAT_OR_A_CHILD.search(line):
+        return True
+    lean = (understood or {}).get("leans_on") or {}
+    return bool(_A_SEAT_OR_A_CHILD.search(" ".join(str(word) for word in lean.get("words") or ())))
+
 
 def _no_mot(memory, understood):
     """A lapsed MOT, answered from the half of it the person asked about."""
@@ -945,6 +1050,34 @@ def _mot_fail_reply(memory, understood):
     if "how_long" in asks or "how_much" in asks:
         return MOT_FAIL_CLOCK + MOT_FAIL_REPLY
     return MOT_FAIL_REPLY
+
+
+def _money_against_value(memory, understood):
+    """The repair-or-let-it-go decision, said in the person's own number when they gave one.
+
+    The card used to say "money against value" without ever using the quote the person
+    brought: "my car needs 900 pounds of work should i sell it" got the general rule and no
+    mention of £900. With one figure in the line, the same rule can be said in it - the
+    repair is the bigger number once the car would sell for less than about twice it. Two
+    figures can be the car and the repair ("cost me 2000 and the garage wants 900"), and
+    guessing which is which would say the wrong thing, so with two the general rule stands.
+    """
+    figures = []
+    for number in understood.get("numbers") or ():
+        value = number.get("value")
+        if isinstance(value, (int, float)) and value >= 150:
+            figures.append(int(value))
+    if len(figures) == 1:
+        figure = figures[0]
+        return ("£%s of work is the number to judge it by: if the car would sell for less than "
+                "about £%s, the repair is the bigger number, so let it go. Scrap value is only "
+                "£150 to £400, and a 'dangerous' MOT item like brakes, steering or rust near a "
+                "mounting is not worth fixing on a cheap car; tyres, a clutch or a cambelt on an "
+                "otherwise sound car usually are." % (format(figure, ","), format(figure * 2, ",")))
+    return ("Money against value: if the quote is more than the car is worth, or more than half of it "
+            "in one go on an old car, let it go. A 'dangerous' MOT item like brakes, steering or rust "
+            "near a mounting is not worth fixing on a cheap car; tyres, a clutch or a cambelt on an "
+            "otherwise sound car usually are. Scrap value is only £150 to £400.")
 
 
 ENTRIES = [
@@ -1018,7 +1151,13 @@ ENTRIES = [
                              ("test", "testing", "check", "click", "clicks", "clicking",
                               "whirr", "whirring", "spins", "spinning", "turns over",
                               "not turning", "replace", "replacement", "change",
-                              "is it", "faulty", "gone", "dead", "failed", "problem",
+                              # "is it" alone was a question word doing a fault word's job, so
+                              # every "is it <something> starter" line was a candidate: "is it
+                              # rude to skip the starter" was answered "check the battery before
+                              # blaming the starter". The ask that names the part is kept.
+                              "is it the starter", "is it my starter", "is it a starter",
+                              "is it the starter motor", "is it my starter motor",
+                              "faulty", "gone", "dead", "failed", "problem",
                               "problems", "wrong", "noise", "noisy")),
           "Check the battery before blaming the starter: switch the headlights on and crank, and if "
           "they stay bright while nothing turns over, the starter is the suspect. One loud click that "
@@ -1067,7 +1206,16 @@ ENTRIES = [
     # "why are my tyres flat" and "my tyres are flat" say the flatness the other way round, and
     # the phrase list only had "flat tyre", so the wheel-change card took the question and gave
     # the jack and the brace to somebody asking why. The noun comes first here as well as second.
-    _entry("tyre-puncture", (("puncture", "flat tyre", "flat tire", "nail in", "going down",
+    # A nail through a tyre is the same question whether the line says "nail in" or asks how to
+    # get it out: "how do i get a nail out of a tyre" was a shrug, because the phrase list only
+    # had the nail going in.
+    _entry("tyre-puncture", (("puncture", "flat tyre", "flat tire", "nail in", "nail out",
+                             "nail out of", "nail from", "screw from", "nail stuck",
+                             "from my tyre", "from the tyre", "from a tyre", "from my tire",
+                             "from the tire", "from a tire", "in the tyre", "in the tire",
+                             "nail in my tyre", "screw in my tyre",
+                             "screw in my tire", "screw in the tyre", "screw in the tire",
+                             "going down",
                              "going flat", "losing air", "losing pressure", "keeps going down",
                              "tyres flat", "tyre flat", "tires flat", "tire flat",
                              "flat tyres", "flat tires", "tyres are flat", "tyre is flat"),
@@ -1304,8 +1452,10 @@ ENTRIES = [
                       "mirrors", "number plate", "seatbelt", "seatbelts", "emissions")),
           "A fault like that is usually a 'major', not a 'dangerous' one: you can drive it to the "
           "garage or to a pre-booked test and nowhere else, and taking it back the next working "
-          "day makes the partial retest free. Read the sheet before you move it, though - only "
-          "'dangerous' means the car must not be driven at all.",
+          "day makes the partial retest free. Read the sheet before you move it; only "
+          "'dangerous' means the car must not be driven at all. Put a bulb, a wiper, a number "
+          "plate or a tyre right yourself in a few minutes; brakes, steering, suspension and "
+          "anything rusted through are the garage's.",
           bias=2, avoid=_NOT_BUYING + ADVISORY_PASS),
     # Nobody told the person who thinks the tester got it wrong where to go: "can i appeal an mot
     # failure" was a search hedge. The appeal is DVSA's, not the garage's, it costs nothing, and
@@ -1402,6 +1552,7 @@ ENTRIES = [
           "lamp, a wiper, an exhaust blow, a noisy bearing - can be driven to the garage or to a "
           "pre-booked test, slowly, with half an eye on the temperature gauge.",
           bias=1,
+          guard=_a_machine_and_not_a_person,
           # A driving test, a lesson and a pint are not a car that needs moving, and a warning
           # light asked about by its own name is the light row's question: "is it safe to drive
           # with a warning light on" wants what the light means, not the moving rule.
@@ -1424,7 +1575,17 @@ ENTRIES = [
                                          # questions: "i need a new passport photo, can i take it
                                          # myself" was answered with the moving rule
                                          "passport", "photo", "photos", "licence photo",
-                                         "visa", "boarding pass")),
+                                         "visa", "boarding pass",
+                                         # A homecoming is not a car to be moved: "moving back
+                                         # home next week" got the moving rule, because "moving"
+                                         # carries "move" and "home" is in the second group.
+                                         "moving back", "move back", "moved back", "moves back",
+                                         "moving home", "back home", "homecoming",
+                                         "back in with", "moving in with", "move in with",
+                                         "moving house", "moving flat",
+                                         # not a bare "moving away": that is how a fault is
+                                         # described ("juddering when moving away in first")
+                                         "moving away from home")),
     _entry("mot-advisory", (("mot", "mot pass"), ("passed", "pass", "advisory", "advisories",
                                                  "but", "needs", "recommended")),
           "An advisory is not a fail, so you can keep driving while you sort it, but it is the "
@@ -1470,7 +1631,8 @@ ENTRIES = [
                  "i paid", "i bought", "paid for", "sold to me", "dealer sold",
                  "insurance", "tax it", "how much is", "price of", "cost of"),
           ask=("how", "where", "what", "should", "can i", "do i", "someone", "buyer", "paid",
-               "pay", "paying", "payment", "transfer", "advert", "sell", "selling")),
+               "pay", "paying", "payment", "transfer", "advert", "sell", "selling"),
+          guard=_the_selling_is_the_decision),
     _entry("repair-or-scrap", (("car", "cars", "mot", "garage", "mileage", "vehicle", "mechanic"),
                               ("scrap", "scrapping", "scrap it", "scrapped", "worth fixing",
                                "write it off", "written off", "fix it",
@@ -1498,11 +1660,18 @@ ENTRIES = [
                                "worth repairing", "worth keeping",
                                # "should i buy a new car or fix mine" missed every one of these
                                "fix mine", "fix my own", "mend mine", "or fix", "buy a new car or",
-                               "new car or", "or keep")),
-          "Money against value: if the quote is more than the car is worth, or more than half of it "
-          "in one go on an old car, let it go. A 'dangerous' MOT item like brakes, steering or rust "
-          "near a mounting is not worth fixing on a cheap car; tyres, a clutch or a cambelt on an "
-          "otherwise sound car usually are. Scrap value is only £150 to £400.",
+                               "new car or", "or keep",
+                               # The same decision with the selling in it, which is how most
+                               # people put it: "should i fix my car or sell it", "should i sell my
+                               # car or keep it", "my car needs 900 of work should i sell it".
+                               "sell it", "sell her", "or sell", "sell or", "keep it",
+                               "keep or sell", "sell or keep", "sell it as is", "sell as is",
+                               "fix it first", "sell it first", "should i sell", "should i scrap",
+                               "scrap it", "scrap my car", "scrapping my car", "scrapyard",
+                               "needs work", "needs 800", "needs 900", "needs 1000",
+                               "needs a lot of work", "of work", "spend money on",
+                               "put money into", "spend on it")),
+          _money_against_value,
           bias=1,
           # "worth it" and "get rid" are in every job on a car, so the ask gate is what keeps the
           # decision off the how-tos: "how do i replace my car wipers" and "should i fix it myself"
@@ -1513,7 +1682,11 @@ ENTRIES = [
                "keep spending", "keep throwing", "keep it going", "fixing or", "repair or",
                "or repair", "or replace", "fix or", "buy or", "write it off", "buy a new",
                "or fix", "fix mine", "fixing mine", "repair mine", "car or fix",
-               "time to replace"),
+               "time to replace",
+               # the same decision asked with the selling, the wearing out or the bill in it
+               "sell it", "or sell", "sell or", "keep it", "or keep", "keep or sell",
+               "sell or keep", "should i sell", "should i scrap", "scrap it", "scrapyard",
+               "needs work", "needs 800", "needs 900", "of work", "spend money on"),
           avoid=("phone", "laptop", "boiler", "fridge", "washing machine", "sofa", "dishwasher",
                  "telly", "tv", "computer", "bike", "bicycle", "pushbike",
                  # a check on a car before you buy it is the inspection card's question, and
@@ -1533,7 +1706,49 @@ ENTRIES = [
                  "windscreen", "windshield", "chip", "scratch", "scratches", "scratched",
                  "paint", "radio", "stereo", "speaker", "speakers", "alloy", "alloys",
                  "cambelt", "cam belt", "timing belt", "timing chain", "wiper", "wipers",
-                 "how do i", "how to", "how can i", "myself", "yourself", "diy")),
+                 "how do i", "how to", "how can i", "myself", "yourself", "diy",
+               # which way to sell it is not whether to sell it: "should i trade in my car or sell
+               # it privately" is about the route, and `sell-my-car` has the photos and the transfer
+               "trade in", "trade-in", "part exchange", "privately", "private sale",
+               "we buy any car", "webuyanycar", "autotrader", "dealer", "dealership")),
+    # How to actually get rid of the car, which the decision row above never answered: "how do i
+    # scrap my car" was the crime report on main and the de-icer card on this branch, and neither
+    # is a how-to. The money words stay with the decision, so "should i scrap my car" and "is it
+    # worth scrapping" keep the money-against-value answer, and "how much will i get" keeps it
+    # too. The paperwork is the part people ask about, so the DVLA and the certificate are named.
+    _entry("scrap-my-car", (("scrap", "scrapping", "scrapped", "scrapyard", "scrap yard",
+                             "breaker", "breakers", "certificate of destruction",
+                             "authorised treatment", "atf", "weigh it in", "weighing it in",
+                             # "get rid of" is the plain verb and the second group has to name
+                             # the car, so it is safe bare: "how do i get rid of my old car" was
+                             # answered by the stain-removal card, because none of the three
+                             # wordings here carried the word "old".
+                             "get rid of", "getting rid of", "rid of my", "rid of the",
+                             "get rid of my car", "get rid of the car",
+                             # The how-shapes are phrases because the decision row has the
+                             # phrase "scrap my car" in its own key: on words alone the two rows
+                             # tie, and "where can i scrap my car" went back to the money rule.
+                             "how do i scrap", "how to scrap", "how can i scrap",
+                             "where can i scrap", "where do i scrap", "scrapping a car",
+                             "scrap a car", "scrap my car", "scrap my old car",
+                             "to the scrapyard",
+                             "dispose of", "disposing of", "do with an old car",
+                             "do with my old car", "get rid of an old car"),
+                            ("car", "cars", "vehicle", "van", "motorbike", "motorcycle",
+                             "paperwork", "dvla", "v5c", "log book", "logbook", "plates",
+                             "number plate", "private plate", "keys", "wheels", "tyres")),
+          ("Take it to an Authorised Treatment Facility - a scrapyard that takes whole cars and "
+           "gives you a Certificate of Destruction - because that certificate is the proof the "
+           "car is gone. Hand over the V5C and the keys, keep the certificate, and tell DVLA "
+           "yourself the same day so the tax, the insurance and any fines stop with you. Empty "
+           "everything out first, and take a private plate off before it goes on the truck. "
+           "Expect £150 to £400 for a small car, paid by weight."),
+          ask=("how", "where", "what do i", "paperwork", "dvla", "can i", "do i", "want to",
+               "need to", "plan to", "going to", "take", "taking", "get rid"),
+          avoid=("should i", "worth", "worth it", "how much will", "how much do i get",
+                 "how much is", "better", "or sell", "or keep", "or fix", "or repair",
+                 "or buy", "fix or", "sell or", "keep or", "my car is worth"),
+          bias=2),
     # What a garage charges, asked as "how much does car repair cost", "how much should i pay to
     # fix my car", "average garage labour cost per hour". The parts and fees with their own page
     # (MOT, service, clutch, cambelt, tyres, insurance, tax, fuel) are held out, so this only takes
@@ -1546,10 +1761,7 @@ ENTRIES = [
                            ("cost", "costs", "much", "price", "prices", "priced", "charge",
                             "charged", "charging", "quote", "quoted", "estimate", "labour",
                             "hour", "rate", "pay", "spend", "roughly", "typical", "average")),
-          "Garage labour is usually £50 to £90 an hour, and a job is priced by the hours the book "
-          "allows rather than by what the car is worth: a clutch is £300 to £800 fitted, a cambelt "
-          "£250 to £500, a wheel bearing £150 to £300. Ask for the price in writing with parts and "
-          "labour split, and get a second quote for anything over £300.",
+          REPAIR_COST,
           bias=1,
           # The gate is a mending word, not a cost word: "how much should i spend on a car" and
           # "how much is a new car" are the buying question, and this entry took them while the
@@ -1634,6 +1846,23 @@ ENTRIES = [
                  # labour and a clutch. Only the phrases that make it a wage go here - a bare
                  # "pays" also matches the "pay" of "how much should i pay to fix my car".
                  "new job", "job pays", "job that pays", "jobs that pay")),
+    # The bare price question a turn or two into a fault. "what will it cost roughly" names no
+    # part and no repair, so `repair-cost` has nothing to match, and the learning-to-drive row
+    # took it: the price of a repair answered with 45 hours of lessons. The chat says the car is
+    # broken (bot/understanding/cars.py), so the price asked for is the garage's. The words that
+    # make it another question - selling, buying, insurance, tax, a service - keep their rows.
+    _entry("repair-cost-follow-up",
+           ("cost", "costs", "costing", "much", "price", "priced", "roughly", "quote",
+            "quoted", "estimate", "charge", "charged", "pay"),
+           REPAIR_COST,
+           bias=1,
+           guard=no_broken_car_or_none,
+           avoid=("sell", "selling", "sold", "sale", "worth", "buy", "buying", "bought",
+                  "trade in", "part exchange", "insurance", "insured", "tax", "road tax",
+                  "mot", "service", "servicing", "fuel", "petrol", "diesel", "lease",
+                  "hire purchase", "pcp", "scrap", "scrappage", "write off", "written off",
+                  "roof", "boiler", "washing machine", "laptop", "phone", "mortgage",
+                  "energy", "tariff")),
     # "what does a full service cost" names no car and no garage, so the ask gate below stood
     # this entry down and a refund letter took the line. A bare "full service" is a car service in
     # English (a boiler and a washing machine say which they are and have their own cards).
@@ -1758,7 +1987,18 @@ ENTRIES = [
                                "boiler", "central heating", "smoke alarm", "washing machine",
                                "dishwasher", "phone", "laptop", "mower", "lawnmower",
                                "bike", "bicycle", "motorbike", "motorcycle", "puncture repair",
-                               "tread depth", "how much tread"),
+                               "tread depth", "how much tread",
+                               # A lamp that has failed is not a light about the brakes. The
+                               # brake-light entry keyed "brake light" and took every line that
+                               # named one, so "my car failed its mot on a brake light" was the
+                               # handbrake-or-fluid card, and so were "one brake light is out"
+                               # and "how much is a brake light bulb". What the row answers is
+                               # the lamp lit on the dash; a lamp that is out, blown or a fail
+                               # on the test is a bulb to change or a fail sheet to read.
+                               "bulb", "bulbs", "blown", "is out", "are out", "went out",
+                               "not working", "dont work", "doesnt work",
+                               "do not work", "does not work", "arent working",
+                               "isnt working", "failed", "fail", "mot", "mot test"),
           bias=3),
     _entry("overheating", (("overheat", "overheating", "temperature gauge", "steam", "hot"),
                           ("engine", "car", "coolant", "radiator", "gauge", "bonnet")),
@@ -1880,6 +2120,12 @@ ENTRIES = [
           "loose wants doing before it drops off. Down on power too, or the engine light on, means "
           "the manifold or a sensor wants a look.",
           ask=("car", "cars", "van", "engine", "exhaust", "back box", "silencer", "motorway"),
+          # "is a loud exhaust dangerous" is the safety question this row answers in its second
+          # sentence, and the reason comes first because that is what "why" and "what is that
+          # noise" ask for. It is one row and one answer either way: `lead` moves the sentence
+          # that says the verdict in front of the diagnosis when the line asks whether it is
+          # safe, and leaves the row alone on every other line.
+          lead=("yesno", "It is not an emergency"),
           # The law and the row that wants it louder are their own question: "is it illegal to
           # have a loud exhaust" and "how do i make my exhaust louder" were both answered with
           # this diagnosis, which tells a person their exhaust is broken when they asked about
@@ -2052,6 +2298,8 @@ ENTRIES = [
            "18. Lessons run 25 to 40 pounds an hour, and a block with one instructor beats single "
            "lessons with three. Do the theory test early, because the pass lasts two years, and ask "
            "the price of a test-day car hire before you book the test.",
+           # A car that has gone wrong is not a lesson: see bot/understanding/cars.py.
+           guard=no_broken_car,
            # "i failed my driving test today" is a person having a bad day, not a how-to
            #
            # The bare "how" in the words above makes this the answer to almost any "how do i ..."
@@ -2144,7 +2392,10 @@ ENTRIES = [
              "heavy rain", "downpour", "flood", "flooded", "flooding", "puddle", "puddles",
              "wet leaves", "standing water", "aquaplane", "aquaplaning",
              "storm", "storms", "thunderstorm", "thunderstorms", "gale", "gales", "gusts"),
-            ("drive", "driving", "how do i", "how can i", "tips", "advice", "nervous", "safe",
+            # not "safe" on its own: "spray safe toddler" reached this row on the two words
+            # "spray" and "safe", and the spray there is in a room and not on a road. A
+            # rain-driving line says drive, road, nervous, tips or how do i anyway.
+            ("drive", "driving", "how do i", "how can i", "tips", "advice", "nervous",
              "car", "road", "roads", "stop", "skid", "skidding", "brake", "braking", "slow",
              "speed", "mist", "spray", "first time")),
            "Slow down before the water, not in it: at 50mph a tyre has to shift a bucketful of "
@@ -2336,7 +2587,28 @@ ENTRIES = [
                   "feeding", "fever", "temperature", "hot flushes", "nausea", "thirsty",
                   "numb", "numbness", "tingling", "tingle", "pins and needles", "hand",
                   "hands", "fingers", "arm", "arms", "leg", "legs", "foot", "feet", "knee",
-                  "shoulder", "back", "stiff", "stiffness", "swollen", "swelling", "bruise")),
+                  "shoulder", "back", "stiff", "stiffness", "swollen", "swelling", "bruise",
+                  # A line that names a beam is asking about that beam, not about the whole
+                  # drive: "when should i use full beam" got the dazzle answer, which opens on
+                  # dipping, and never said when to put the full beam on. The row for the lights
+                  # themselves leads with the rule for using it.
+                  "full beam", "main beam", "high beam",
+                  # a lamp that needs a clean is the cloudy-lens card's question: `headlights`
+                  # is in this row's key, so "how do i clean my headlights" and "how do i polish
+                  # my headlights" were answered "Dip your headlights as soon as another car is
+                  # in sight". This row is about how to drive after dark, not about the plastic.
+                  "clean my headlights", "cleaning my headlights", "clean the headlights",
+                  "clean headlights", "polish my headlights", "polishing my headlights",
+                  "restore my headlights", "headlight restoration", "headlights are foggy",
+                  "headlights look foggy", "headlight is foggy", "cloudy headlights",
+                  "cloudy headlight", "milky headlights", "milky headlight", "yellow headlights",
+                  "yellow headlight", "yellowed", "dull headlights", "lens is", "lenses",
+                  # a cost shared at night is not night driving: "how do i split the cost of a
+                  # taxi at night" was answered with the headlights card, because "at night" and
+                  # "how do i" were the whole of the match
+                  "split", "splitting", "share", "sharing", "divide", "halves", "fare",
+                  "taxi", "cab", "uber", "petrol", "fuel", "who pays", "who owes",
+                  "each pay", "chip in")),
     _entry("catalytic-converter",
            (("catalytic converter", "catalytic", "cat converter", "catalyst"),
             ("what is", "whats", "what does", "what do", "do", "does", "how does", "why",
@@ -2376,7 +2648,11 @@ ENTRIES = [
                                "tights", "trousers", "jersey", "bib", "chamois",
                                "saddle", "knee", "knees", "elbow", "elbows", "shoulder",
                                "shoulders", "chest", "helmet", "gloves", "glove",
-                               "knee pads", "elbow pads", "shoulder pads")),
+                               "knee pads", "elbow pads", "shoulder pads",
+                               # a bulb that has failed is a lamp, not a set of pads: the
+                               # pads price took "how much is a brake light bulb" once
+                               # the dash-light row stopped answering lamp lines
+                               "bulb", "bulbs", "lamp", "lamps")),
     # "how often do my brake pads need changing" was answered with what a set costs: the interval
     # is the question, and a price is a different one. The frequency words carry the row.
     _entry("brake-life", (("brake pad", "brake pads", "pads", "brake disc", "brake discs", "brakes"),
@@ -2393,7 +2669,11 @@ ENTRIES = [
                                "tights", "trousers", "jersey", "bib", "chamois",
                                "saddle", "knee", "knees", "elbow", "elbows", "shoulder",
                                "shoulders", "chest", "helmet", "gloves", "glove",
-                               "knee pads", "elbow pads", "shoulder pads")),
+                               "knee pads", "elbow pads", "shoulder pads",
+                               # a bulb that has failed is a lamp, not a set of pads: the
+                               # pads price took "how much is a brake light bulb" once
+                               # the dash-light row stopped answering lamp lines
+                               "bulb", "bulbs", "lamp", "lamps")),
     _entry("clutch-slip", (("clutch", "pull away", "pulling away", "pulling off"), ("slip", "slipping",
                                         "bite", "high", "revs", "burn", "smell", "replace", "judder",
                                         "juddering", "shudder", "shuddering")),
@@ -2518,25 +2798,76 @@ ENTRIES = [
           "people get hurt.",
           ask=("handbrake", "hand brake", "parking brake", "brake", "brakes", "car")),
     # --- lights, glass, screen ----------------------------------------------
-    _entry("headlight-out", (("headlight", "headlights", "bulb", "lights"), ("not working", "blown",
-                                                                             "out", "dim", "foggy",
-                                                                             "replace", "change",
-                                                                             "yellow")),
-          "Change bulbs in pairs, because the other one is usually the same age and about to go. Half "
+    # The same bulb job is every lamp on the car, and the brake and tail lamps were the ones the
+    # dash-light row had been taking: "one brake light is out", "my brake lights dont work" and
+    # "how much is a brake light bulb" are a bulb, not a warning about the braking system.
+    _entry("headlight-out", (("headlight", "headlights", "bulb", "lights",
+                              "brake light", "brake lights", "tail light", "tail lights",
+                              "rear light", "rear lights", "number plate light",
+                              "reverse light", "reverse lights", "indicator", "indicators"),
+                             ("not working", "blown", "out", "dim", "foggy",
+                              "replace", "change", "yellow",
+                              # a lamp is a cheap part, so what it costs is the same card
+                              "how much", "cost", "price", "expensive",
+                              # "my brake lights dont work" was left with nothing once the
+                              # dash row stood down: a lamp that will not light is this job
+                              "dont work", "doesnt work", "do not work", "does not work",
+                              "arent working", "isnt working", "wont work", "went out",
+                              "broken", "faulty", "blown out")),
+          "A failed lamp is a bulb, and the job is the same all round the car. Change bulbs in pairs, because the other one is usually the same age and about to go. Half "
           "an hour with the handbook and a £10 to £20 bulb is normal DIY, though some cars need the "
-          "battery or the wheel arch liner out. Cloudy plastic headlamps can be polished back with a "
-          "kit for about £15 instead of replacing them.",
+          "battery or the wheel arch liner out. A lamp that looks milky or yellow rather than dark "
+          "is the plastic lens fogging, not the bulb, and the cloudy-headlight card covers that.",
           # a pilot light and a boiler flame are gas, not a car bulb: "the pilot light keeps
           # going out" was getting the headlight answer
           avoid=_NOT_BUYING + ("pilot", "pilot light", "boiler", "gas", "cooker", "hob", "oven",
                                "fire", "fireplace", "thermocouple", "flame", "caravan",
+                               # a lens gone milky, yellow or foggy is the polish card below:
+                               # this row keyed "headlights" + "foggy" and answered "change bulbs
+                               # in pairs" about a lamp that was not dark at all
+                               "foggy", "cloudy", "clouded", "milky", "yellowed", "hazy",
+                               "dull", "dulled", "restore", "restoring", "polish", "polishing",
+                               "toothpaste", "sand", "sanding", "kit", "clean", "cleaning",
+                               "wipe", "condensation inside", "misty", "steamy",
                                # a light in a room is a home job, not a car one: this row keyed
                                # `bulb` + `change` and answered "how do i change a light bulb in
                                # the ceiling" with bulbs in pairs and cloudy headlamps
                                "ceiling", "lampshade", "pendant", "downlight", "spotlight",
                                "light fitting", "bayonet", "screw fitting", "gu10", "edison",
                                "led bulb", "hall", "landing",
-                               "bedroom", "bathroom", "kitchen", "living room", "lamp")),
+                               "bedroom", "bathroom", "kitchen", "living room", "lamp",
+                               # the switch is its own fault: "how much to replace a brake
+                               # light switch" is not the price of a bulb
+                               "switch", "switches", "fuse", "fuses", "relay", "wiring",
+                               "earth", "connection")),
+    # A lens that has gone milky, yellow or foggy asks for a clean, not a bulb or a night-driving
+    # tip, and both of those rows used to take it: "how do i clean my headlights" was answered
+    # "Dip your headlights as soon as another car is in sight" and "the headlights are foggy" with
+    # "Change bulbs in pairs". The plastic is polycarbonate with a UV coat that fails first, so the
+    # fix is a polish and a new coat, and a mistiness on the inside is the other cause.
+    _entry("headlight-cloudy",
+           (("headlight", "headlights", "headlamp", "headlamps", "head light", "head lights",
+             "lens", "lenses"),
+            ("foggy", "cloudy", "clouded", "milky", "yellow", "yellowed", "dull", "dulled",
+             "hazy", "misty", "restore", "restoring", "restoration", "polish", "polishing",
+             "buff", "buffing", "sand", "sanding", "toothpaste", "kit", "clean", "cleaning",
+             "wipe", "scratch", "scratched", "scuffed", "see at night", "dimmer", "dimmer than",
+             "cant see", "can't see", "mot", "condensation", "condensation inside", "water inside",
+             "wet inside", "how")),
+           "Wipe the outside with soapy water and dry it first, because the cheap fix for a milky "
+           "lens is a polish: a £10 to £20 headlight kit with 800, 1500 and 3000 wet-and-dry "
+           "paper, then the polish pad, then the sealing wipe, and half an hour a side. Toothpaste "
+           "on a rag gets much of it off if the kits are not handy. Water or mist on the inside is "
+           "a cracked lens or a perished seal, so dry it out and reseal or it will come back, and a "
+           "lamp too dull to show a clean beam can fail the MOT.",
+           # a bulb that has blown, a chip in the windscreen and a lamp in the house are the
+           # rows above and below; this one is the plastic itself
+           avoid=_NOT_BUYING + ("blown", "not working", "has gone", "stopped working", "bulb",
+                                "fuse", "dip my headlights", "main beam", "full beam", "high beam",
+                                "dazzle", "dazzled", "ceiling", "lampshade", "pendant", "kitchen",
+                                "bedroom", "bathroom", "living room", "oven", "fridge",
+                                "phone", "camera", "glasses", "spectacles"),
+           bias=1),
     # bias, because a second row that keys "chip" tipped the tie with the golf swing: "how do i
     # fix a stone chip on my windscreen" is a windscreen + chip line, and the golf row keys "fix"
     # and "chip". One point is enough to keep it.
@@ -2546,6 +2877,22 @@ ENTRIES = [
           "insurance policies do it free because it saves them a new screen. Cover it with clear "
           "tape so dirt stays out and get it done before it spreads. A crack in the driver's line of "
           "sight fails the MOT.",
+          bias=1),
+    # A side or rear window is not the windscreen: it is toughened glass, so a chip in it is a new
+    # pane rather than the resin repair the screen takes. "my car window is cracked" reached the
+    # claim card by way of the damage row, and the paint row's "stone chip" would have told them to
+    # touch it in with a paint pen, so this row reads the window itself.
+    _entry("car-side-window", (("car window", "car windows", "window on the car",
+                                "windows on the car", "side window", "rear window",
+                                "back window"),
+                               ("chip", "crack", "cracked", "stone", "hole", "repair", "replace",
+                                "replaced", "pane", "glass")),
+          "A side or rear window is toughened glass, so a chip or a crack in it is a new pane "
+          "rather than a repair: a glass company or a mobile fitter supplies and fits it, £60 to "
+          "£150 for most cars and more for a window with a heated rear element. Give them the "
+          "registration or the VIN, because the glass is cut to the car. Check the door seals, the "
+          "central locking and the window motor work before they leave, and cover the gap with "
+          "plastic and tape rather than driving with broken glass in the door.",
           bias=1),
     _entry("wipers", (("wipers", "wiper", "windscreen wiper"), ("smear", "smearing", "squeak",
                                                                 "squeaky", "judder", "juddering",
@@ -2762,9 +3109,14 @@ ENTRIES = [
           "push it clear of the pump, then ring the station or your breakdown cover for a drain and "
           "flush. That is around 150 to 250 pounds against a few thousand for new injectors.",
           # choosing between the two fuels is a comparison, not a tank of the wrong one
+          # "how much should i put in for petrol" is a whip round for a tank, not a tank of the
+          # wrong fuel: "put in" and "petrol" were the whole of the match, and the money is the
+          # word that says which line it is.
           avoid=_NOT_BUYING + ("cheaper", "cheaper to run", "better", "worse", "which is",
                                "or a diesel", "or a petrol", "running costs", "fuel economy",
-                               "mpg", "compare", "comparison")),
+                               "mpg", "compare", "comparison",
+                               "put in", "chip in", "split", "share", "each pay", "contribute",
+                               "how much should", "who owes", "between us")),
     _entry("stalling", (("stalling", "stalls", "stalled", "cut out", "cuts out", "dies"),
                        ("car", "engine", "stop", "stopping", "idle", "junction", "traffic")),
           _stalling,
@@ -2974,7 +3326,11 @@ ENTRIES = [
                            "face forward", "forward facing", "forward-facing", "rear facing",
                            "rear-facing", "front seat"),
                           ("law", "rules", "need", "must", "height", "age", "child", "children",
-                           "baby", "toddler", "when")),
+                           "baby", "toddler", "when",
+                           # the yes-or-no ask: "is a backless booster ok" and "is a backless
+                           # booster safe" name the seat by its shape and ask if it will do,
+                           # which is this row's question and was a hedge
+                           "ok", "safe")),
           "By law a child under 12 and under 135cm tall needs the right car seat or booster, and it "
           "has to be the one made for their weight or height, fitted properly. A rear-facing seat "
           "goes in the back if there is an active airbag in front. Above 135cm or 12 years old they "
@@ -2984,7 +3340,17 @@ ENTRIES = [
           bias=1, avoid=("cheap", "best", "recommend", "buy", "which",
                         "dog", "dogs", "puppy", "puppies", "cat", "cats", "kitten", "kittens",
                         "pet", "pets", "vet", "jab", "jabs", "vaccination", "vaccinations",
-                        "vaccine", "boosters for dogs", "horse", "rabbit")),
+                        "vaccine", "boosters for dogs", "horse", "rabbit",
+                         # "is it safe to wear a coat in the car seat" is the coat answer, and
+                         # "safe" in the ask group above brought it here
+                         "coat", "coats", "pramsuit", "pram", "blanket", "fleece",
+                         "snowsuit", "all in one", "wearing", "wrap",
+                         # a booster that is a jab is not a booster that is a seat:
+                         # "when should i get my covid booster" was this row's line
+                         "jabbed", "vaccines", "immunisation", "immunization", "covid", "flu",
+                         "tetanus", "booster jab", "booster shot"),
+          # ...and a bare "booster" with neither a seat nor a child in it is the jab
+          guard=_a_seat_is_what_it_is_about),
     _entry("road-charge", (("congestion charge", "ulez", "ultra low emission zone",
                            "low emission zone", "clean air zone", "emission zone",
                            "dart charge", "dartford crossing", "toll", "tolls", "toll road",
@@ -3272,6 +3638,11 @@ ENTRIES = [
                  "living room", "wall", "walls", "front door", "back door", "garage door",
                  "house window", "house", "flat", "shed", "conservatory", "keyboard",
                  "keyed in", "typed", "password", "login", "account", "phone", "laptop",
+                 # the key in a door lock is not a keyed car: "my key sticks in the car door"
+                 # reached this row on "keyed" and "the car" and was told to ring 101 and tell
+                 # the insurer about damage nobody had done
+                 "lock", "locks", "lock barrel", "keyhole", "key sticks", "key sticking",
+                 "key in the lock", "key will not turn", "key wont turn", "sticking", "sticks",
                  "insurance", "insurer", "insurers", "claim", "claims", "claiming", "policy",
                  "excess", "loss adjuster", "no claims", "payout", "pay out", "cover it",
                  "will they pay", "will insurance",
@@ -3279,14 +3650,29 @@ ENTRIES = [
                  # report and a claim: "my car key fob isnt working" was answered with "Nobody
                  # was hurt ... ring 101 for a crime or incident number"
                  "key fob", "keyfob", "fob", "fob battery", "key battery", "key not working",
+                 # The decision to mend it, keep it or let it go is `repair-or-scrap`'s, and the
+                 # damage row reads "my car" and "should i" and nothing else: "should i scrap my
+                 # car" was answered with the police and the crime number, which is for damage
+                 # somebody else has already done.
+                 "scrap", "scrapping", "scrapped", "scrapyard", "sell", "selling", "sold",
+                 "trade in", "part exchange", "worth fixing", "worth repairing", "repair or",
+                 "fix or", "or sell", "keep it", "of work", "needs work", "spend money on",
                  # A set of keys is not damage to the car, and "keys" is a loose form of this
                  # row's own "keyed": "my dad keeps forgetting where his keys are" was told to
                  # ring 101 and photograph the damage. What keeps a keyed car in is the verb,
                  # so where the keys *are* and the forgetting of them stand down here.
                  "keys are", "keys is", "keys were", "keys was", "where his keys",
                  "where her keys", "where my keys", "where the keys", "forgot where",
-                 "forgetting where", "keeps forgetting", "keeps losing"),
-          report=True, bias=1),
+                 "forgetting where", "keeps forgetting", "keeps losing",
+                 # A key named as an object is not a keyed car, and the reading does not tell the
+                 # two apart: "keyed" is a form of "key", so "i lost my car keys" and "how do i
+                 # start my car without the key" were both told to ring 101 for a crime number
+                 # and photograph the damage. Neither is damage to the car. The phrases keep the
+                 # verb, which is the row's own: "my car got keyed", "keyed last night".
+                 "the key", "the keys", "my key", "my keys", "a key", "spare key", "spare keys",
+                 "lost my", "lost the key", "without the key", "without a key",
+                 "without my keys"),
+          guard=a_window_on_a_car_is_not_a_damage, report=True, bias=1),
     _entry("crash", (("crash", "crashed", "accident", "collision", "prang", "bumped into",
                      "hit a car", "rear ended", "rear-ended", "went into the back of me",
                      "someone hit me", "hit me at", "shunt", "shunted", "hit my car",
@@ -3314,7 +3700,34 @@ ENTRIES = [
                      "went into the back of us", "into the back of us", "into the back of me",
                      "rear ended us", "rear-ended us", "shunted us", "shunted me", "shunted",
                      "hit us from behind", "drove into us", "ran into the back of",
-                     "came off the road", "the car behind", "car behind me"),
+                     "came off the road", "the car behind", "car behind me",
+                     # A person on foot or on a bike is the other half of the same evening as a
+                     # parked car, and the worst reply in the deck came from this gap: "i just
+                     # hit a cyclist and theyre on the ground" was answered "Got it. Is there
+                     # anything you'd like a hand with?", "i knocked a man off his bike"
+                     # "Sounds alright. Anything good in it?" and "i clipped a pedestrian on the
+                     # crossing" "Nice one. How did the rest of it go?" - the same words the row
+                     # already answers for a bollard, used about somebody who is hurt. Every
+                     # phrase names the person as the object of the verb, so the struck-by-a-
+                     # vehicle card still takes "my son was knocked off his bike by a car",
+                     # where the person is the one it happened to (#13221's deck rows).
+                     "hit a cyclist", "hit cyclists", "hit a pedestrian", "hit a person",
+                     "hit someone", "hit somebody", "hit a man", "hit a woman", "hit a kid",
+                     "hit a child", "hit a boy", "hit a girl", "hit a dog", "hit a cat",
+                     "hit someone on a bike", "hit a man on a bike", "hit a woman on a bike",
+                     "hit a person on a bike", "hit a cyclist on",
+                     "knocked a cyclist", "knocked a pedestrian", "knocked a person",
+                     "knocked someone off", "knocked somebody off", "knocked a man off",
+                     "knocked a woman off", "knocked the cyclist off", "knocked him off",
+                     "knocked her off", "knocked them off", "knocked a kid off",
+                     "knocked a child off", "knocked a dog",
+                     "clipped a cyclist", "clipped a pedestrian", "clipped someone",
+                     "clipped a person", "clipped a man", "clipped a kid", "clipped a woman",
+                     "ran into a cyclist", "ran into a pedestrian", "ran into someone",
+                     "ran into a person", "collided with a cyclist", "collided with a pedestrian",
+                     "collided with someone", "caught a cyclist", "caught a pedestrian",
+                     "caught someone on", "went into a cyclist", "went into a pedestrian",
+                     "hit them with my car", "hit him with my car", "hit her with my car"),
                     ("what do", "what now", "should i", "insurance", "police", "details", "claim",
                      "other driver", "car park", "scratched", "roundabout", "junction",
                      "parked", "road", "another car",
@@ -3327,7 +3740,13 @@ ENTRIES = [
                      # than a person: "the bloke behind drove into the back of my car" was "How
                      # was it, overall?" because none of this was in the key.
                      "behind", "behind me", "the car behind", "lights", "traffic", "queue",
-                     "lane", "motorway", "slip road", "this morning")),
+                     "lane", "motorway", "slip road", "this morning",
+                     # the person the crash was with, which is also what tells this row the
+                     # collision was not with a car at all
+                     "cyclist", "cyclists", "pedestrian", "pedestrians", "bike", "bicycle",
+                     "on a bike", "on the ground", "crossing", "zebra", "pelican", "someone",
+                     "somebody", "person", "child", "kid", "dog", "cat", "hurt", "injured",
+                     "ambulance", "alright", "ok", "breathing", "what now", "what do i do")),
           # A program that crashes is not a car crash: "my laptop keeps crashing, should i get a
           # new one" shares "crash" and "should i" with this entry and got the roadside checklist
           # instead of the laptop repair decision.
@@ -3344,6 +3763,9 @@ ENTRIES = [
           # loyalty card out of it.
           report=True,
           bias=1,
+          # a cyclist is who a crash is with, so the bike words cannot stand this row down:
+          # NOT_BIKE would have thrown away every line in the group above
+          bikes=True,
           avoid=("market", "markets", "stock market", "share prices", "shares", "stocks",
                  "portfolio", "my investments", "house prices", "property prices",
                  # A program that crashes is not a car crash either: "my laptop keeps crashing,
@@ -3455,7 +3877,15 @@ ENTRIES = [
                  "phone", "iphone", "android", "handset", "smartphone", "laptop", "macbook",
                  "computer", "pc", "mac", "monitor", "display", "tablet", "ipad",
                  "tv", "telly", "television", "screen is frozen", "screen has frozen",
-                 "frozen screen", "not responding", "unresponsive", "app", "browser")),
+                 "frozen screen", "not responding", "unresponsive", "app", "browser",
+                 # A car being scrapped is not a screen being scraped: "how do i scrap my car"
+                 # was "spray a de-icer and scrape with a plastic scraper", because "scrape"
+                 # and "scrapping" reduce to the same stem. The get-rid-of shapes are here as
+                 # phrases, since a bare stem would take the ice with it.
+                 "scrap my car", "scrap a car", "scrap the car", "scrap my old car",
+                 "scrap value", "scrapyard", "scrap yard", "breaker", "breakers",
+                 "certificate of destruction", "get rid of the car", "get rid of my car",
+                 "part exchange it", "we buy any car", "webuyanycar")),
     _entry("car-door-frozen", (("car door", "car doors", "car lock", "car window", "car windows",
                                 "side windows", "door", "doors", "lock", "locks", "door lock",
                                 "door seal", "seals", "handbrake", "wipers", "windscreen", "car"),
@@ -3562,8 +3992,11 @@ ENTRIES = [
                  "mat", "mats", "carpet", "boot", "floor", "floormats", "floor mats",
                  # a leather seat is a different job with a different answer, kept below
                  "leather"),
+          # "wash" is in the key's second group and must be in the ask too, or the same question
+          # asked as a wash misses: "how do i wash a car seat" and "how do i wash a car seat
+          # cover" were shrugs while "how do i clean a car seat" was answered
           ask=("clean", "cleaning", "stain", "stains", "smell", "smells", "vomit", "spill",
-               "spilled", "spilt", "shampoo", "valet", "dirty", "stinks")),
+               "spilled", "spilt", "shampoo", "valet", "dirty", "stinks", "wash", "washing")),
     # A leather car seat is not a fabric one: washing-up liquid is the one thing leather must
     # not have, so the two seats are two answers rather than one answer that hedges. The key
     # needs the car in it - "my leather seats" with no car is a sofa or a jacket, and
@@ -3641,7 +4074,30 @@ ENTRIES = [
            "on a big screen, and book the test once practice scores sit in the high forties.",
            avoid=("failed", "fail", "failing", "gutted", "nervous", "scared", "anxious",
                   "worried", "panic", "test drive", "eye test", "blood test", "mot test")),
+    # "dash" is the punctuation row's word as well, so "which memory card for a dash cam" was
+    # answered with the hyphen-and-dash rule. A dash cam is a thing you buy and fit, and its
+    # two questions are what it is and which card it takes.
+    _entry("dash-cam",
+           (("dash cam", "dashcam", "dash cams", "dash cameras", "dash camera",
+             "dash cam card", "front and rear camera", "car camera"),
+            ("what", "whats", "which", "best", "recommend", "should", "buy", "card", "memory",
+             "sd", "size", "fit", "fitted", "install", "wire", "power", "worth", "need",
+             "how much", "do i need")),
+           _dash_cam,
+           ask=("what is a dash cam", "whats a dash cam", "which memory card", "which sd card",
+                "what sd card", "which card", "what card", "what size", "how big", "how much",
+                "best", "recommend", "should i buy", "worth it", "how do i fit", "how do i wire",
+                "fit a dash cam", "install", "do i need", "what do i need"),
+           bias=2),
 ]
+
+from .costs import time_entries
+# How long the job takes is the other half of the MOT, tyre and service questions, and the
+# rows live here so they answer a line read as a car one.
+# The MOT and the driving test are `takes.py`'s rows on main (its `mot-takes` says 45
+# minutes to an hour and its `driving-test-takes` about 40 minutes), so this table holds
+# only the jobs it does not answer: two rows for one job would drift apart.
+ENTRIES += time_entries("tyres", "car-service")
 
 # --- the keys that are inside the car --------------------------------------------------------
 # "how do i get keys out of a locked car" was answered with the Android screen-timeout setting,
@@ -3790,6 +4246,64 @@ ENTRIES.append(_entry(
                          "round a corner", "around a corner", "corner"),
     bias=1))
 
+# ---- where to leave the car -------------------------------------------------
+#
+# "where should i park the car", "wheres the best place to park round here" and "weres a good
+# place to park near the station" were all a shrug: the row above is the manoeuvre, the ticket
+# row is the appeal, and nothing answered the place. The answer names the places in the order
+# that saves money.
+ENTRIES.append(_entry(
+    "where-to-park",
+    (("park", "parking", "parked", "park the car", "car park", "multi storey", "multistorey",
+      "park and ride", "park & ride", "free parking", "parking space",
+      # "leave the car" is the same question and had no word in common with it: "where do i leave
+      # my car near the ground" and "somewhere to leave the car" were a shrug, while the parking
+      # word in the same sentence reached this row
+      "leave the car", "leave my car", "leaving the car", "leave the car near",
+      "park the car", "put the car"),
+     # The ask is a place to leave the car, not permission to leave it: "can i park on the high
+     # street on sundays" is the council's rule and has an honest answer of its own.
+     ("where", "wheres", "weres", "whers", "best place", "good place", "place to park",
+      "anywhere", "somewhere", "is there", "near", "nearby", "round here", "around here",
+      "near me", "near the station", "town", "town centre", "city centre", "cheap",
+      "cheapest", "free", "closest", "leave")),
+    "The side streets five to ten minutes further out are where the free and cheap spaces are: "
+    "read the sign at the entrance, because a residents' bay or a one-hour limit is what the "
+    "tickets come from. For a station or a town centre, the station car park or a park and ride "
+    "is usually cheaper than the multi-storey, and the parking apps (RingGo, PayByPhone, JustPark) "
+    "show the live price and let you top up from your phone. Photograph the bay number and the "
+    "sign before you walk off.",
+    # the manoeuvre, the ticket and the neighbour are other rows and other questions
+    avoid=_NOT_BUYING + ("parallel", "reverse", "reversing", "tight space", "tight spot",
+                         "how do i park", "how to park", "parking ticket", "parking fine",
+                         # leaving the car *in gear* is the manoeuvre's own advice, not a place
+                         "in gear", "handbrake", "when parked", "parked on a hill",
+                         "penalty charge", "appeal", "clamped", "towed", "blue badge",
+                         "disabled bay", "residents permit", "parking permit", "neighbour",
+                         "neighbor", "driveway", "blocking", "blocked in", "caravan",
+                         "motorhome", "camper", "trailer", "lorry", "truck", "hgv",
+                         # finding the car again is a different question from choosing a space
+                         "remember", "remembering", "forgot", "forget", "where i parked",
+                         "where did i park", "did i park", "parked it",
+                         "lost my car", "cant find my car", "can't find my car",
+                         # whether parking is allowed, free or paid on a street or at a place
+                         # is the council's rule or the hotel's, and the honest answer names who
+                         # decides rather than where to try
+                         "available", "availability", "hotel", "guest", "book with",
+                         "sunday", "sundays", "saturday", "saturdays", "bank holiday",
+                         "high street", "on street", "on-street", "yellow line", "yellow lines",
+                         "allowed", "can i park on", "how long can i", "maximum stay",
+                         "is it free", "after 6", "after 6pm", "evening",
+                         # a yes/no about the price or the rule is not a where either: "is parking
+                         # free at the hospital" and "how much is parking at the airport" are the
+                         # hospital's or the airport's own answer, and this row can only name a
+                         # kind of place
+                         "is parking free", "parking free", "free parking at", "free at",
+                         "how much is parking", "how much for parking", "parking cost",
+                         "cost of parking", "price of parking", "parking prices",
+                         "is parking", "is there parking"),
+    bias=1))
+
 # "should i get a hybrid", "is a hybrid worth it" and "petrol or hybrid" had three different
 # wrong answers: the flexible-working request ("ask with a plan, not a preference"), "that's
 # beyond what I know well", and a one-word pick. The trade is the engine's: the motor earns its
@@ -3883,6 +4397,9 @@ ENTRIES.append(_entry(
     avoid=("seat", "seats", "interior", "dent", "dents", "dented", "scratch", "scratches",
            "scratched", "how much", "cost", "price", "quote", "insurance", "claim",
            "alloy scuff", "alloy scuffs",
+           # the glass is not the paint: a chip or a crack in a window is the glass row's job,
+           # and "my car window has a chip in it" was told to touch it in with a paint pen.
+           "window", "windows", "glass", "windscreen", "windshield", "windscreen chip",
            # whether to keep the car at all is the money rule's question: "should i scrap my old
            # car" was answered with a touch-in pen because "scrap" reads as the paint's "scrape"
            "scrap", "scraps", "scrapped", "scrapping", "write it off", "write off",
@@ -3947,7 +4464,16 @@ ENTRIES.append(_raw_entry(
            "mpg", "economy", "fuel economy", "how many litres", "tank", "tank size", "range",
            "lawnmower", "lawn mower", "strimmer", "generator", "heater", "paraffin",
            "to fill up", "fill up", "road tax", "insurance", "an mot", "mot", "service",
-           "how much does it cost to run", "per mile", "per month"),
+           "how much does it cost to run", "per mile", "per month",
+           # a tank split between people is a shared-cost question, not the price of a litre:
+           # "how do i split petrol money between friends" reached this row on "petrol" alone
+           "split", "splitting", "share", "sharing", "halves", "go halves", "divide",
+           "between us", "between the two of us", "who pays", "who owes", "each pay",
+           "chip in", "chipped in", "petrol money", "fuel money", "money for petrol",
+           "money for fuel", "towards petrol", "towards fuel",
+           # "how much should i put in for petrol" is a share of a tank, not the price of a
+           # litre: the share row's ask words are "how much should" and "put in"
+           "put in for", "put in", "put towards", "going towards", "between us"),
     bias=2))
 
 # A jet that is blocked or weak is the other half of the same fluid, and main's top-up row reads
@@ -3969,6 +4495,90 @@ ENTRIES.append(_entry(
     "the nozzles.",
     avoid=("light", "warning", "symbol", "dashboard", "top up", "car wash", "wash the car",
            "price", "cost", "buy", "replace the windscreen", "windscreen wipers", "frozen")))
+
+# Three jobs on a car whose words belong to a person, a phone and a bedroom as well, so each was
+# answered by the other domain on main: "how do i transfer a car into my name" was the trick for
+# remembering names ("Use the name out loud in the first minute"), "keep a car battery healthy"
+# was the iPhone's Battery Health screen, and "my car alarm keeps going off" was the snooze habit
+# ("Put the alarm across the room"). The car word is in the line each time, so the row is the car
+# job and the other three stand down (see the avoid lists in study.py, technology.py and
+# habits.py). This gate is what tells the two apart: a vehicle, a model or a part only a car has.
+A_CAR_IS_NAMED = ("car", "cars", "van", "vans", "vehicle", "motor", "motorbike", "motorcycle",
+                  "suv", "estate", "hatchback", "saloon", "pickup", "4x4", "camper", "caravan",
+                  "engine", "boot", "bonnet", "dashboard", "wipers") + tuple(MODELS)
+
+
+def _a_car_is_named(understood):
+    read = understood if isinstance(understood, dict) else {}
+    words = set(_words_of_a_car_line(read))
+    return any(word in words or (" " in word and word in " ".join(words)) for word in A_CAR_IS_NAMED)
+
+
+def _words_of_a_car_line(read):
+    clean = str(read.get("clean") or read.get("text") or "").lower()
+    clean = re.sub(r"[^a-z0-9% ]", " ", clean)
+    return [word for word in clean.split() if word]
+
+
+ENTRIES.append(_raw_entry(
+    "car-transfer-name",
+    (("transfer", "transferring", "put it in my name", "put the car in my name",
+      "change of owner", "change the owner", "change of keeper", "change the keeper",
+      "registered keeper", "log book", "v5c", "v5", "new keeper", "green slip", "in my name",
+      "into my name", "to my name", "ownership", "dvla"),
+     ("car", "van", "vehicle", "motorbike", "motorcycle", "bike", "motor", "it")),
+    "Fill in the buyer's details on the V5C, tear off the green slip (V5C/2) and give that to "
+    "them, then send the rest of the log book to DVLA at SA99 1BA - or do both online with the "
+    "reference number on the front. Keep the yellow slip: it is your proof you told them. The new "
+    "keeper needs the green slip to tax the car, and their own insurance from the moment they "
+    "drive it away, so do the paper at the handover rather than later: until DVLA has the change "
+    "on record, a parking ticket or a camera fine is still yours.",
+    # Moving insurance, a warranty or finance to another car is its own job and not this paper:
+    # "how do i transfer my car insurance to a new car" and "transfer my no claims bonus" both
+    # name a car and a transfer, and the V5C answer is wrong for both.
+    avoid=("insurance", "insure", "no claims", "no-claims", "ncb", "policy", "premium",
+           "warranty", "extended warranty", "finance", "lease", "leasing", "hire purchase",
+           "breakdown cover", "gap insurance"),
+    guard=_a_car_is_named))
+
+ENTRIES.append(_raw_entry(
+    "car-battery-health",
+    (("battery health", "battery healthy", "keep the battery healthy",
+      "keep my battery healthy", "look after the battery", "look after my battery",
+      "battery last longer", "battery lasts longer", "make the battery last",
+      "make my battery last", "maintain the battery", "battery care", "healthy", "look after",
+      "last longer", "longer life", "keep it going"),
+     ("battery", "batteries"),
+     ("car", "van", "vehicle", "engine", "12v", "under the bonnet", "it")),
+    "A car battery dies from short trips rather than age: a five-minute run never puts back what "
+    "the starter took, so give it a twenty-minute drive every couple of weeks, or a smart charger "
+    "once a month through the winter. If there is white fur on the terminals, pour warm water over "
+    "them, brush it off and smear a little grease on, and check both clamps are tight - a loose one "
+    "cranks like a flat battery. Most last three to five years, and a garage can test one in five "
+    "minutes; a slow crank and lights that dim at idle are the signs it is going.",
+    avoid=("phone", "iphone", "android", "laptop", "tablet", "macbook", "settings", "smoke alarm",
+           "fire alarm", "doorbell", "aa battery", "aaa battery", "remote", "controller",
+           "hearing aid", "watch", "ebike", "e bike", "scooter"),
+    # battery-flat answers a battery that is already going flat; this row is the one asked how
+    # to keep it going, and the two cards tie on "car" and "battery", so this one is nudged.
+    bias=1, guard=_a_car_is_named))
+
+ENTRIES.append(_raw_entry(
+    "car-alarm-going-off",
+    (("alarm", "alarm going off", "keeps going off", "keeps sounding", "going off on its own",
+      "wont stop", "won't stop", "sounding", "siren", "immobiliser", "beeping"),
+     ("car", "van", "vehicle", "boot", "bonnet", "doors", "fob", "key", "it")),
+    "Three things cause most of these, in this order: a car battery that is going flat (low "
+    "voltage reads to the alarm as someone tampering with it), a boot or bonnet switch that is not "
+    "quite shut, and an interior sensor picking up a moth, a pet or a lorry going past. Charge or "
+    "test the battery first, push every door and the boot shut firmly, and lock it with the key in "
+    "the door rather than the fob - if it stays quiet that way, the fob or its battery is the "
+    "fault. A garage can read the alarm's fault code, which names the sensor that triggered it.",
+    avoid=("clock", "wake up", "waking", "snooze", "morning", "get up", "sleep", "smoke alarm",
+           "fire alarm", "burglar alarm", "house alarm", "doorbell", "phone", "iphone", "android",
+           "reminder", "work"),
+    guard=_a_car_is_named))
+
 # --- the load that goes on the bars ----------------------------------------------------------
 # Nothing owned tying something to a car. Seven typed lines on main `7dc51404` were a search
 # hedge or a wrong card: "how do i strap a mattress to the roof", "how do i tie a christmas tree
@@ -4186,15 +4796,19 @@ ENTRIES.append(_entry(
 ENTRIES.append(_entry(
     "driving-in-the-dark",
     (("in the dark", "at night", "night driving", "after dark", "headlights", "headlight",
-      "full beam", "dipped beam", "main beam"),
+      "full beam", "dipped beam", "main beam", "high beam"),
      ("drive", "driving", "car", "road", "glare", "oncoming", "see", "visibility", "dazzled",
       "dazzle", "use", "when")),
-    _how_to("Use dipped headlights whenever there is anything ahead of you, and full beam only on an "
-     "unlit road with nothing in front; drop back to dipped the moment a car appears. Drive so "
+    _how_to("At night on an unlit road with nothing in front, use full beam; dip the moment a "
+     "car appears, because a main beam left on dazzles the driver coming towards you. Drive so "
      "you could stop within the distance your lights actually show, which is usually slower than "
-     "in daylight. Clean the windscreen inside and out - smears on the glass turn every oncoming "
-     "headlight into a glare."),
-    avoid=("night light", "leave a light", "light on", "child", "children", "kid", "kids",
+     "in daylight."),
+    # A body part is the subject of the line, not the car: the night row already keeps out
+    # "my back" and "my knee", and this row answers the same "at night" lines when they name a
+    # beam, so it needs the same guard. "driving at night is hard because of my back" was given
+    # the headlights card and never said anything about the back.
+    avoid=("back", "knee", "shoulder", "neck", "hip", "leg", "ankle", "wrist",
+           "night light", "leave a light", "light on", "child", "children", "kid", "kids",
            "toddler", "scared of the dark", "bedtime", "bed", "bulb", "not working", "broken",
            "dim", "fog", "foggy", "mist", "xenon", "led bulb", "convert",
            # "in the dark" is a frightened child's phrase as much as a driver's, and this row
@@ -4229,3 +4843,58 @@ ENTRIES.append(_entry(
      "front out into the road and look again, because the front of the car sweeps wide."),
     avoid=("parallel park", "park in a tight", "tight space", "bay", "reverse park",
            "reverse into a space")))
+
+
+# A click that keeps time with the steering is one thing - a CV joint - and the noise row under it
+# is about tapping, rattles and whines, so "my car is making a clicking noise when i turn" was
+# answered with the wrong causes and "clicking when i turn the wheel" with the listening line. The
+# row is the click against the turning, because a click on the brakes already has its own answer
+# and a knee or a jaw that clicks is not a car at all.
+def _the_click_on_a_turn(memory, understood):
+    """A click on the steering is a fault, unless what was asked is what the part is. "What is a cv
+    joint" is the same words as the fault, so the answer has to read the shape of the ask, and that
+    is what `understood` is for."""
+    clean = (understood.get("clean") or understood.get("text") or understood.get("plain") or "")
+    clean = clean if isinstance(clean, str) else " ".join(str(part) for part in clean)
+    clean = clean.lower()
+    if any(shape in clean for shape in _A_DEFINITION_ASK):
+        return _CV_JOINT_DEFINITION
+    return _THE_CLICK_ON_A_TURN_REPLY
+
+
+# the phrase is what makes it a definition: "what is a cv joint" and "what does a driveshaft do"
+# ask what the part is, while "what is that clicking when i turn" asks the fault again.
+_A_DEFINITION_ASK = ("what is a cv", "what is a drive", "what is cv joint", "whats a cv",
+                     "whats a driveshaft", "what does a cv", "what does a drive",
+                     "what is the cv joint", "what does a cv joint do", "what is that cv")
+_THE_CLICK_ON_A_TURN_REPLY = (
+           "A click or clunk that keeps time with the steering is usually a CV joint on the "
+           "driveshaft: the rubber boot splits, the grease comes out and the joint wears. Look "
+           "behind the front wheels for a torn boot and grease sprayed round the inside of the "
+           "arch. A garage replaces the joint or the shaft, an hour or two of work, and it is "
+           "worth doing before it fails - a joint that lets go leaves the car with no drive. A "
+           "single clunk on full lock can also be a top mount or a drop link, which is cheaper.")
+_CV_JOINT_DEFINITION = (
+           "A CV joint - constant velocity joint - is the flexible coupling at each end of a "
+           "driveshaft, so the shaft can turn the wheel while the suspension moves and the wheel "
+           "steers. It is packed with grease and wrapped in a rubber boot; when the boot splits "
+           "the grease goes, grit gets in and it starts clicking on turns. Outer joints sit "
+           "behind each front wheel, the inner ones at the gearbox.")
+ENTRIES.append(
+    _entry("clicking-on-a-turn",
+           (("click", "clicks", "clicking", "clunk", "clunks", "knocking", "knock", "tapping",
+             "tap", "popping", "cv joint", "driveshaft", "drive shaft"),
+            ("turn", "turns", "turning", "steering", "steering wheel", "full lock", "on lock",
+             "corner", "corners", "cornering", "round a bend", "when i steer", "wheel when i",
+             # the part itself, asked what it is: the same words as the fault
+             "what is a cv", "whats a cv", "what does a cv", "what is a drive", "drive shaft")),
+           _the_click_on_a_turn,
+           ask=("car", "cars", "van", "vehicle", "wheel", "wheels", "steering", "brake",
+                "driveshaft", "axle"),
+           avoid=("brake", "brakes", "braking", "pedal", "knee", "knees", "jaw", "shoulder",
+                  "hip", "ankle", "neck", "back", "finger", "fingers", "wrist", "elbow",
+                  "joint pain", "clicky", "mouse", "laptop", "phone", "remote", "heater",
+                  "clicking noise bad", "click noise bad"),
+           # bias 3: a "clunk ... steering wheel" line was reaching a plumbing card that keys the
+           # bare "clunk", and "which tyre pressures" was taking a click on the steering wheel.
+           bias=3))

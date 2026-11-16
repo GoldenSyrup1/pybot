@@ -9,8 +9,9 @@ cooking.py, which has already defined them by the time this module is imported.
 import re
 
 from ..compose.repair import amends_to, line_of
-from .dishes import KEEP_QUALITY_WORDS
-from .freshness import a_cooling_question_not_a_keeping_one, soak_but_not_left_out
+from .dishes import KEEP_QUALITY_WORDS, PAIRING_FOODS
+from .freshness import (a_cooling_question_not_a_keeping_one, soak_but_not_left_out,
+                        _not_how_to_keep_it_fresh, _not_just_a_hard_loaf)
 from .lookup import (DAY_WORDS, JOB_GUARD, PACK_DATE, TOOTH_OUT, entry,
                      not_the_flat_you_live_in)
 from .shopping import not_a_present
@@ -31,6 +32,7 @@ from .cooking import (
     _GRAIN_FOOD, _GRAIN_WORD, _MASH_NOT_THIS, _MEAL_ASK_AVOID,
     _NOT_MINE, _NO_MEAT, _NUTRIENT_ASK_WORDS, _NUTRIENT_WORDS, _OUT_ASK,
     _STAPLE_NAMES, _SWAP_ASK, _WET_FOOD, asks_a_gluten_fact, _bake, _learn_to_cook,
+    _not_a_portion_ask,
     _BAKE_FAULT_FAMILIES, _BAKE_FOLLOW_SHAPES, _BAKE_KEEP_SHAPES, _BAKE_KEEPING,
     _BAKED_GOODS, _CAKE_NAMES, _NO_CAKE_RISE, _NO_LOAF_RISE, _NO_SPREAD_RISE,
     _bake_follow, _bake_keep, _gummy,
@@ -42,7 +44,7 @@ from .cooking import (
     _container_keep, _cook_word, _cookies, _dip_fault,
     _dough, _dry, _egg_fault, _eggs, _falls_apart,
     _flat, _free_of_gluten_fact, _freeze_food, _gluten_free, _grainy,
-    _MINCE_GRAIN_DISH, _MINCE_GRAIN_WORD, _mince_grainy,
+    _MINCE_GRAIN_DISH, _MINCE_GRAIN_WORD, _mince_grainy, _crowd,
     _greasy, _herbs_keep, _honey_age, _kids_veg,
     _bans_of, _legs, _lentils, _lumpy, _lunch_ideas, avoids_for_the_one_talked_about,
     _meal_ideas, _meal_plan, _meat_defrost, _mince,
@@ -242,9 +244,14 @@ _EXTRA_GUARDS = {
              "itch", "itching", "how many", "calories", "cheap", "shellfish", "allergy",
              "allergic", "pregnant", "mercury"),
     # a rabbit is a pet far more often than it is a dinner, so the pet words stand this row down
+    # and "how long do rabbits live" is not a braise: this row keys the animal with "how long", so
+    # a lifespan question was answered with a cooking time - on today's main it still is - and the
+    # animal table has the years. Words about living stand the row down.
     'rabbit': ("pet", "pets", "my", "hutch", "hutches", "cage", "litter", "droppings", "sick",
                "ill", "vet", "sneezing", "sneeze", "eating", "feed", "feeding", "fur",
-               "neutered", "adopt", "bonded", "how many", "calories", "cheap", "wild"),
+               "neutered", "adopt", "bonded", "how many", "calories", "cheap", "wild",
+               "live", "lives", "lived", "lifespan", "life span", "life expectancy",
+               "how old"),
     'lamb neck': ("how many", "calories", "cheap", "pain", "stiff", "ache", "aches"),
     # A whole fish is scored and roasted with the head and tail on, which is a different method and
 }
@@ -256,6 +263,22 @@ _EXTRA_GUARDS = {
 if "whole" not in _cooking_tables.NOT_WANTED.get("fish", ()):
     _cooking_tables.NOT_WANTED["fish"] = ("whole",) + tuple(
         _cooking_tables.NOT_WANTED.get("fish", ()))
+# A rabbit is somebody's animal before it is a joint, and the care question is asked with the
+# plainest words there are ("look after", "keep", "should i get one", "for a child"). None of them
+# is a word about cooking, so the method row stands down for them: "how do i look after a rabbit"
+# was answered "Rabbit wants either a long braise or a fast roast", and "should i get a rabbit"
+# the same, because the guard held only the words for an animal kept already ("my", "hutch",
+# "vet") and not the words for taking one on. Added here rather than in the row above so the
+# row stays the row it is.
+_EXTRA_GUARDS['rabbit'] = tuple(_EXTRA_GUARDS['rabbit']) + (
+    "look after", "looking after", "care for", "caring for", "should i get", "should we get",
+    "shall i get", "thinking of getting", "of getting a", "get a rabbit", "get one",
+    "getting one", "own a rabbit", "owning", "new rabbit", "as a pet", "for my son",
+    "for my daughter", "for my child", "for a child", "for kids", "for our", "keep a rabbit",
+    "keeping a rabbit", "rabbit for", "asking for", "asked for", "wants a", "want a",
+    "birthday", "get one as", "have a rabbit", "having a rabbit", "bring home", "need for",
+    "needs for", "need to get", "to get a rabbit")
+
 _cooking_tables.NOT_WANTED.update(_EXTRA_GUARDS)
 _cooking_tables.BASICS = tuple(_cooking_tables.BASICS) + _EXTRA_BASICS
 # The staple row below is keyed on the names in the table, so the new cuts have to be in that
@@ -267,6 +290,32 @@ _STAPLE_NAMES = _STAPLE_NAMES + tuple(
 # plates, and the lines after it were read as party food too ("what should we do there" got the
 # cook-for-a-crowd advice). Naming the person is what a trip looks like, so the row stands down
 # and the day out is left to the rows that plan one.
+# "is my rice still ok" on its own is the bag in the cupboard, and that card answers it. The
+# keeping question is about the cooked bowl only when the line says the rice was cooked, so the
+# still-ok row names the subject ("rice", "still ok") as the cupboard row does and this guard is
+# what tells the two apart. A guard rather than an avoid word, because the cue and the rice have
+# to be two separate mentions: an avoid word would stand the row down for its own subject.
+_RICE_WAS_COOKED = re.compile(
+    r"\b(?:cooked|leftover|left over|takeaway|take away|last night|yesterday|in the fridge|"
+    r"in the freezer|refrigerated)\b")
+
+
+# The one card both cooked-rice keeping rows give. It has to stand alone on the takeaway and the
+# day-after lines, so it carries the bin rule that the cooler "rice-storage" card leaves out; two
+# copies of a 340-character reply in one file is a second place to forget when the rule changes.
+_COOKED_RICE_KEEPS = (
+    "Cooked rice keeps a day in the fridge and no longer: cool it within an hour of cooking, box "
+    "it, and put it in cold. Reheat it once, all the way through until it is steaming hot, and "
+    "never a second time - the spores that grow in rice left warm are not killed by reheating. "
+    "Rice that sat out overnight goes in the bin, and so does anything that smells or feels "
+    "slimy.")
+
+
+def _the_rice_was_cooked(understood):
+    said = str((understood or {}).get("clean") or (understood or {}).get("text") or "").lower()
+    return bool(_RICE_WAS_COOKED.search(said))
+
+
 _TAKEN_PERSON = (r"(?:mum|mom|mam|mummy|dad|daddy|father|mother|son|daughter|child|children|"
                  r"kid|kids|baby|wife|husband|partner|boyfriend|girlfriend|friend|mate|"
                  r"brother|sister|cousin|nan|gran|granny|grandma|grandad|grandpa|niece|nephew|"
@@ -299,6 +348,70 @@ _DAY_BEFORE = ("yesterday", "yesterdays", "last night", "this morning", "the day
 _ON_A_FLIGHT = ("plane", "planes", "flight", "flights", "flying", "airport", "airports",
                 "security", "hand luggage", "carry on", "carry-on", "cabin bag", "cabin")
 
+# A lunchbox is one person's lunch, and a lunch for other people is a table to cook for. The
+# sandwich row answered "im having my parents over for lunch on sunday" and "whats a good
+# lunch for 6 people" with a wrap and a drink, and the guests went unfed. Anyone else on the
+# line - a guest, the family, a number at the table - stands the row down so the cooking-for-a-
+# crowd row answers instead.
+#
+# It is a guard rather than an `avoid` word because `avoid` is read one word at a time, and a
+# lunchbox for a family is still a lunchbox: with the person words in `avoid`, "packed lunch
+# ideas for the family", "lunchbox ideas for the whole family" and "what can i put in everyones
+# lunchbox" all lost the row and got a search hedge where main had answered them.
+_OTHER_PEOPLE_AT_LUNCH = re.compile(
+    r"\b(?:everyone|everybody|friends?|parents?|relatives?|"
+    r"in\s?laws?|guests?|visitors?|"
+    # "what do people usually have for lunch" asks about people in general, so bare
+    # "people" is not here: only the shapes that put people at this table.
+    r"(?:people|folk) (?:coming|over|round|for|at)|having people|"
+    r"for (?:\d+|three|four|five|six|seven|eight|nine|ten|twelve|twenty) "
+    r"(?:people|adults|guests|kids|children))\b")
+# "of us" is read as a count rather than as a phrase: "whats a good lunch for 2 of us" is two
+# people and a sandwich apiece, which is the row's own answer, while three or more is somebody
+# cooking for a table. A bare phrase cannot tell those apart, and it stood the row down for a
+# couple as readily as for a family.
+# "the family" is not in that list on purpose. It is the household as often as it is guests, and
+# with the lunch row stood down for it, "lunch ideas for the family" and "sunday lunch ideas for
+# the family" reached the ten-minute kids' tea - a card that invents small children. The family
+# lunches that are a table are named as one ("lunch for the family", "having the family over"),
+# and those phrases are read by the crowd row itself.
+_PACKED_LUNCH_NOUNS = ("packed lunch", "packed lunches", "lunchbox", "lunchboxes",
+                       "lunch box", "lunch boxes", "school lunch", "school lunches",
+                       "work lunch", "lunch for work", "lunch to take", "take to work",
+                       "take for lunch", "pack up", "packed up", "packup")
+
+
+def _one_persons_lunch(understood):
+    """Whether the line is one person's lunch rather than a meal for other people.
+
+    A line that names a packed lunch or a lunchbox keeps the row whoever it is for: the
+    person words are about who eats it, not about whether it leaves the house, and
+    "packed lunch ideas for the family" is a lunchbox question before it is a table.
+    """
+    # The reading is not always the line as it was typed. "whats a good lunch for 4 of us"
+    # reaches the entry read back as "what is a good lunch for four of me", because the
+    # understanding pass puts the first person in: with only `clean` to go on, the guard saw
+    # one person on a table of four and the sandwich answered the crowd. `text` keeps what the
+    # person typed, so both are read and the first that names other people stands the row down.
+    if not understood:
+        return False
+    lines = [str(understood.get(field) or "").lower() for field in ("text", "clean")]
+    if not any(lines):
+        lines = [" ".join(str(word) for word in understood.get("words") or ()).lower()]
+    for said in lines:
+        if any(noun in said for noun in _PACKED_LUNCH_NOUNS):
+            return True
+        if _OTHER_PEOPLE_AT_LUNCH.search(said):
+            return False
+        # A counted table is a table however it is phrased: "ideas for a sunday lunch for 10"
+        # names nobody and reads as one person's lunch without the number, and the number is
+        # what the crowd row counts. Six is where that row starts calling it a crowd.
+        table = _crowd(said)
+        if table >= 6 or (table >= 3 and "of us" in said):
+            return False
+    return True
+
+
 # The food words of the freeze row are read off FREEZE_FACTS instead of being written out a second
 # time: 44 names had a fact in that table but no word in this key, so "can i freeze garlic", "can
 # i freeze yoghurt" and "can i freeze an egg" reached no entry at all and got a shrug while the
@@ -313,6 +426,31 @@ _FREEZE_FOOD_WORDS = tuple(sorted(
     ({str(_name).lower() for _names, _fact in FREEZE_FACTS for _name in _names}
      | set(_FREEZE_WORDS_NOT_IN_FACTS))
     - set(_FREEZE_KEEPS_ITS_KEEPING)))
+# The same question with the dish left out: "can i freeze the rest", "can i freeze it", "will this
+# freeze". The rest of the store answered these with a search hedge while the general rule - cool
+# it within two hours, box it while it is still warm, about three months, never refreeze once
+# thawed - sat in this row's own fallback, because the key wanted a food name and these lines name
+# nothing. Anything a person points at in a kitchen is a food they mean, so the pointing words are
+# words of this row too, and the row answers them with the general rule unless the chat already
+# says what the dish is.
+_FREEZE_POINTING_WORDS = ("it", "this", "that", "these", "those", "them", "the rest", "the other half",
+                          "the remainder", "whats left", "what is left", "the spare", "some",
+                          "any left", "any spare", "a portion", "the leftovers")
+
+# The asking words a freeze question is put together with. A sentence about the speaker never
+# says them: "i can read it fine but freeze when someone talks to me" is a person freezing up,
+# and the bare freeze word plus a pointing word answered it with food.
+_FREEZE_ASKS = ("can i freeze", "can you freeze", "can we freeze", "could i freeze",
+                "should i freeze", "do i freeze", "how do i freeze", "how to freeze",
+                "how long can i freeze", "how long do i freeze", "is it ok to freeze",
+                "is it okay to freeze", "is it alright to freeze", "is it safe to freeze",
+                "is it fine to freeze", "will it freeze", "will this freeze", "will they freeze",
+                "will that freeze", "would it freeze", "do i need to freeze",
+                "does it freeze", "does this freeze", "can this be frozen", "can it be frozen",
+                "can that be frozen", "can these be frozen", "can they be frozen",
+                "is it freezable", "is this freezable", "ok to freeze", "freezes well",
+                "freeze well", "goes in the freezer", "put it in the freezer",
+                "put this in the freezer", "keep it in the freezer", "can i keep it frozen")
 
 # The age a parent names a child by: "my 2 year old refuses vegetables" is "my son refuses
 # vegetables" with the age where the word would be. The wording is what people type, in the
@@ -584,6 +722,28 @@ _SMOKE_REPLIES = {
 }
 
 
+# "Smoked haddock" is a fish on the slab, not a question about a smoker, and the participle alone
+# was enough to reach the row: "how do i cook smoked haddock" and "what can i make with smoked
+# haddock" were both answered with the method for hot-smoking a salmon. A smoked food wants a
+# recipe, so the row stands down unless the line has a smoking word that is not that participle -
+# the verb, the noun, or the gear.
+_SMOKING_WORDS = {"smoke", "smokes", "smoked", "smoking", "smoker", "smokers", "bbq",
+                  "barbecue", "barbeque", "woodchips", "pellet", "pellets"}
+_SMOKING_PHRASES = ("hot smoke", "cold smoke", "wood chips", "low and slow", "pellet grill",
+                    "smoke it", "smoke them", "smoke a ", "smoke an ")
+
+
+def _asks_about_a_smoker(reading):
+    """A guard: a food that is already smoked is a recipe, not a question about a smoker."""
+    said = str((reading or {}).get("text") or "").lower()
+    words = set(re.findall(r"[a-z']+", said))
+    if "smoked" not in words:
+        return True
+    if words & {word for word in _SMOKING_WORDS if word != "smoked"}:
+        return True
+    return any(phrase in said for phrase in _SMOKING_PHRASES)
+
+
 def _smoke_food(memory, reading):
     words = {str(word).lower() for word in (reading.get("words") or ())}
     for name in _SMOKE_THINGS:
@@ -682,6 +842,18 @@ def _the_kind_of_cheese_named(said):
     if any(" %s" % name in said for name in CHEESE_NAMES):
         return "hard"
     return ""
+
+
+def _not_a_serving_frame(reading):
+    """True unless the line asks what to put beside something.
+
+    "what pairs best with blue cheese" is a dinner: the cheese row keeps the word "blue" for the
+    veins going wrong, and it took the ask. A serving frame is a question about a plate, not about
+    the wedge in the fridge, so the row stands down and the pairing rule answers.
+    """
+    from . import dishes
+    text = str((reading or {}).get("clean") or (reading or {}).get("text") or "").lower()
+    return not dishes.asks_for_a_side_of_a_food(text)
 
 
 def _cheese_keep(memory, reading):
@@ -849,6 +1021,43 @@ def _a_thread_of_a_pan(memory):
         words.extend(plan.split())
     low = " " + " ".join(str(word).lower() for word in words) + " "
     return any(f" {dish} " in low for dish in _TEA_MILK_PAN)
+
+
+# The milk in a cup of coffee: the kind asked about, the amount, and why a milk splits in it. Three
+# questions that arrive on the same two words, so the half that was asked leads.
+MILK_FOR_COFFEE_KIND = (
+    "In coffee, oat is the plant milk that behaves best - the barista cartons are made not to "
+    "split, and they foam. Soy is next and tastes slightly beany in a long black; almond is thin "
+    "and can separate in hot coffee; coconut changes the taste of the cup. Whole milk foams the "
+    "thickest and semi-skimmed is the usual for a flat white, and a splash of milk in black coffee "
+    "takes the edge off without much milk at all.")
+MILK_FOR_COFFEE_AMOUNT = (
+    "A splash: about 20 to 40ml in a mug of filter coffee, a tablespoon or two, and 100 to 150ml "
+    "in a latte or a cappuccino, where the milk is most of the cup. Pour it in after the coffee so "
+    "you can see how dark it has gone, and heat the milk for a milky drink - cold milk takes the "
+    "heat out of a small cup.")
+MILK_FOR_COFFEE_SPLIT = (
+    "Milk splits in coffee because the coffee is hot and acidic: the acid takes the milk towards "
+    "the point where its proteins clump, and the heat sets the clumps, which is why the specks "
+    "appear in a long black and not in a latte. Let the coffee cool for a minute before the milk "
+    "goes in, use the fresher bottle, and use a barista plant milk if it keeps happening - those "
+    "have oil and a stabiliser added so they hold together.")
+
+
+def _the_milk_for_a_coffee(memory, understood):
+    """The kind of milk for a coffee, how much of it, or why it splits - whichever was asked."""
+    text = " " + ((understood or {}).get("clean") or "").lower() + " "
+    # " split " as well as " splits " and " splitting ": "does milk split in coffee" is asked
+    # with the bare verb, and it was falling through to the ranking of plant milks - an answer
+    # about which carton to take, given about the cow's milk already in the cup.
+    if any(said in text for said in ("curdl", " split ", " split,", " splits ", " splitting ",
+                                     " separated ", " separates ", " gone lumpy ",
+                                     " lumps in ")):
+        return MILK_FOR_COFFEE_SPLIT
+    if any(said in text for said in ("how much", "how many ml", "how many mls", "how milky",
+                                     "much milk", "much of it")):
+        return MILK_FOR_COFFEE_AMOUNT
+    return MILK_FOR_COFFEE_KIND
 
 
 def _tea_milk_reply(memory, understood):
@@ -1322,6 +1531,23 @@ _A_KEPT_THING = re.compile(
     r"out of date)\b")
 
 
+# The avoid list above carries "what can i make" and "what can i do", and they do not catch a
+# line that asks them: the frame words ("what", "can") are emptied out before a row is weighed, so
+# "i have leftover quinoa what can i make" still reached the keeping row and was told the days it
+# keeps when the use-up answer is the one they asked for. The ask is a shape, so it is read from
+# the line: a question about what to make, cook or do with the food is not a keeping question.
+_MAKE_IT_ASK = re.compile(
+    r"\b(?:what (?:can|should|shall) i (?:make|cook|do|have)|what to (?:make|cook|do)|"
+    r"what else can i (?:make|cook)|ideas (?:for|with)|something (?:for|with)|"
+    r"use (?:it )?up|using (?:it )?up|use up the|recipe|recipes)\b")
+
+
+def _not_a_make_it_ask(understood):
+    """True unless the line asks what to make or do with the food rather than how it keeps."""
+    text = str((understood or {}).get("clean") or "").lower()
+    return not _MAKE_IT_ASK.search(text)
+
+
 def _not_a_cooking_time(understood):
     """True unless the line asks how long a dish takes, saying nothing about how it is kept.
 
@@ -1331,6 +1557,8 @@ def _not_a_cooking_time(understood):
     A line that says how the food is kept - "keep", "last", "in the fridge", "still good", "go
     off" - keeps the keeping answer whatever else it says.
     """
+    if not _not_a_make_it_ask(understood):
+        return False
     words = [str(word).lower() for word in (understood.get("words") or ())]
     if not words:
         return True
@@ -1348,6 +1576,48 @@ KEEPING_WORDS = ("how long", "keep", "keeps", "keeping", "kept", "last", "lasts"
                  # "safe to eat" and "day old".
                  "safe to eat", "day old", "days old",
                  "how many days", "left over", "leftover")
+
+# "How do i store milk" and "how long does milk keep" are one question and one row, and the
+# store shapes were missing from the key words of the rows written before this: "how do i store
+# milk" was a shrug while "how long does milk keep" answered, and the same for broccoli. The
+# words here are the ones people type, which the keeping table did not all have: "store",
+# "storing" and "how do i store" reached nothing at all.
+STORE_ASKS = ("store", "stores", "storing", "stored", "storage",
+              "how do i store", "how should i store", "how do you store", "how to store",
+              "best way to store", "where do i keep", "where should i keep",
+              "keep it fresh", "keep them fresh", "keep fresh", "stays fresh",
+              "stay fresh", "keeps fresh")
+
+# A store question about milk asks how to keep it and a gone-off milk question asks whether to
+# bin it, and one card answers both: it leads with whichever the line asked. The baby milk words
+# are here so a bottle of breast milk or made-up formula never gets the carton's five days.
+_BREAST_MILK = ("breast milk", "breast", "expressed", "baby milk", "bottle of milk",
+                "baby bottle", "babies bottle")
+
+
+def _milk_keep(memory, understood):
+    """A store question leads with the keeping; a gone-off milk question leads with the bin."""
+    said = " %s " % " ".join(str((understood or {}).get(key) or "")
+                             for key in ("clean", "norm_text", "norm")).lower()
+    if "formula" in said or "made up" in said or "made-up" in said:
+        # powder in water is not a carton: the clock starts when the powder goes in, and what is
+        # left in the bottle after a feed is not kept at all
+        return ("Made-up formula is good for 2 hours at room temperature and 24 hours in the "
+                "fridge, and the clock starts when the powder goes in - throw away whatever is "
+                "left in the bottle after a feed.")
+    if any(word in said for word in _BREAST_MILK):
+        # a bottle of expressed milk has its own hours, and "once opened" means nothing for it:
+        # the carton's five days is the wrong number for it in both directions
+        return ("Expressed breast milk keeps about 4 hours at room temperature, up to 4 days at "
+                "the back of the fridge, and 6 months in the freezer; once thawed it is good for "
+                "24 hours in the fridge and must not be refrozen.")
+    keeping = ("Once opened, keep milk in the fridge and use it within about 5 days; the date on "
+               "the carton is about quality, not safety, so milk that has been kept cold is fine a "
+               "day or two past it.")
+    spoilt = "If milk smells or tastes sour, bin it, whatever the date says."
+    if "fresh" in said or any(shape in said for shape in STORE_ASKS):
+        return keeping + " " + spoilt
+    return spoilt + " " + keeping
 
 
 # "keeps" and "how long" are two different readings of one cake. A cake that keeps sinking is a
@@ -1457,6 +1727,8 @@ def _a_snack(memory, understood):
     return ("Go for protein plus fibre at about four in the afternoon, 150 to 250 calories: "
             + listed + ". It holds you a couple of hours where a biscuit holds you twenty "
             "minutes, so you are not starving at dinner.")
+
+
 # The bake row's own guard: a bake is flat, a home is flat, and only the words next to each
 # other say which. `not_the_flat_you_live_in` is the one definition, so this is a plain alias and
 # not a second regex that could drift from it.
@@ -1556,11 +1828,21 @@ def _tomato_sauce(memory, understood):
 # mash", and the next line "how long does it keep" cut that sentence down to "It keeps a month
 # for mash." on a dish it was not about. Each dish now says its own time, and a dish with no row
 # of its own gets the rule that covers almost all of them.
+def freeze_cooked_answer(memory, understood):
+    """The public name for the cooked dish's freezing answer, for the rows beside this one."""
+    return _freeze_cooked(memory, understood)
+
+
 FREEZE_DISH_TIMES = (
     (("mash", "mashed potato", "mashed potatoes", "potato", "potatoes"), "about one month"),
     (("lasagne", "lasagna", "pasta bake", "casserole", "shepherds pie", "cottage pie",
       "pie", "risotto", "paella", "gratin", "stew", "curry", "soup", "chilli",
-      "bolognese", "leftovers", "food"), "about three months"),
+      "bolognese", "leftovers", "food",
+      # the same dishes the row now picks up, said back by name: "yes - it keeps about three
+      # months in the freezer" reads better than the fallback that lists mash in it.
+      "quiche", "frittata", "omelette", "moussaka", "tagine", "meatballs", "burrito",
+      "quesadilla", "stuffing", "sausage rolls", "samosa", "spring rolls", "dumplings",
+      "fishcakes", "fish cakes", "nut roast"), "about three months"),
 )
 
 # The part of the answer that is the same whatever the dish: what to do with it when it comes out.
@@ -1577,7 +1859,9 @@ def _freeze_cooked(memory, understood):
     """
     said = " %s " % " ".join(str(word).lower() for word in (understood.get("words") or ()))
     for names, keeps in FREEZE_DISH_TIMES:
-        if any(" %s " % name in said for name in names):
+        # the plural is the same dish: "can i freeze burritos" was the fallback that lists mash
+        # because the table says burrito, and a list of plurals beside every name goes stale.
+        if any(" %s " % name in said or " %ss " % name in said for name in names):
             # The keeping time comes first, and the cooling step after it: a "how long for" said
             # next is about how long it keeps, and the hour it takes to cool is the only other
             # length in the answer, so written the other way round that hour is what came back.
@@ -1616,7 +1900,6 @@ _BATTER_IN_A_TIN = ("tin", "tins", "tray", "trays", "muffin", "muffins", "oven",
                     "yorkshire", "yorkshires", "pudding", "puddings")
 # A waffle iron is a pan that closes: hot, oiled and not pulled open too soon.
 _BATTER_IN_AN_IRON = ("iron", "waffle iron", "waffle maker", "waffles", "waffle")
-
 
 _LOAF = ("bread", "loaf", "loaves", "sourdough", "bloomer", "brioche", "teacake", "teacakes")
 
@@ -1735,6 +2018,25 @@ def _bread_sliced(memory, understood):
         return SLICE_WARM
     return SLICE_METHOD
 
+# "the kids wont eat kidney beans" is the beans question, not the tea question. The tea row
+# keys on the eating words (a person asking "what should i feed my kids" asks the same thing as
+# "kids tea ideas"), so a line naming a food tied with that food's own row and the tea row's
+# bias won the tie: the bean card ("Mash them in rather than serve them whole") came back as a
+# plate of fish fingers. A named food is the more specific question, so this row stands down.
+# Only the ingredient names count, never the whole food vocabulary: "food", "dinner", "eat"
+# and "veg" are what the tea question itself is made of.
+def _no_named_food(understood):
+    from .meals import INGREDIENTS  # imported here: this file loads with meals
+    words = set(understood.get("words") or ())
+    named = set()
+    for key, forms in INGREDIENTS.items():
+        # "veg" is a category, not an ingredient: "my kids wont eat their veg" is the refusing-veg
+        # card's line, and standing the tea row down for it cost that line its warmer answer
+        # (a reviewer caught it on a 20-line probe - 4 gains, that one loss).
+        if key == "veg":
+            continue
+        named.update(forms)
+    return not (words & named)
 
 # Three faults a bowl of porridge has, and no pan's answer fits any of them: tinned tomatoes,
 # potatoes and vinegar all have a place, and it is not in a bowl of oats.
@@ -1769,6 +2071,73 @@ def _porridge_fault(memory, understood):
             "porridge takes very little, and the milk brings out the sweetness of the oats.")
 
 
+# The surfaces a hot pan may go on, named the way a person names them, and the ones it may not.
+# `hot-pan-surface` answers the where-question ("where can i put a hot pan") and the yes/no about
+# one named surface alike, and the verdict used to be the reply's second sentence: "can i put a
+# hot pan on a granite worktop" was told where a pan can go, and only afterwards that granite is
+# the one it must not touch. A person who names a surface is asking about that surface, so the
+# answer opens on it; a line that names none keeps the balanced answer, which is the whole of
+# what "where can i put a hot pan" asks.
+_HOT_PAN_TAKES = (
+    # The hob needs its own word. A bare "glass top" is how people say the table they eat off, and
+    # that is the one surface in this list that shatters, so a line that only says "glass top"
+    # gets the balanced answer below - whose no still names glass tables - rather than a
+    # confident yes about the wrong surface.
+    ("a glass ceramic or induction hob",
+     r"glass (?:ceramic )?hob|ceramic hob|induction (?:hob|top)|glass[- ]top hob"),
+    ("a stainless steel worktop",
+     r"stainless(?: steel)? (?:worktop|work top|top|surface|bench)"),
+    ("the hob", r"\bhob\b"),
+)
+_HOT_PAN_REFUSES = (
+    ("granite", r"granite", "the heat shock cracks stone"),
+    ("quartz", r"quartz", "the heat shock cracks stone"),
+    ("marble", r"marble", "the heat shock cracks stone"),
+    ("a laminate worktop", r"laminate", "the heat shock scorches and lifts it"),
+    ("a wooden worktop or board",
+     r"wood(?:en)? (?:worktop|work top|(?:\w+ )?board)", "the heat scorches the wood"),
+    ("a wooden table", r"wood(?:en)? table", "the heat scorches the wood"),
+    ("a glass table", r"glass[- ]?top table|glass table", "the heat shock can crack it"),
+)
+_HOT_PAN_CAN = ("Straight off the ring a hot pan can go back down on a glass ceramic or induction "
+                "hob, and on a stainless steel worktop, because those are built for it.")
+_HOT_PAN_NOT = ("Keep it off granite, quartz, marble and laminate worktops, wooden boards and "
+                "glass tables: the heat shock cracks stone and scorches laminate.")
+_HOT_PAN_TIP = "A trivet or a folded dry cloth under it, and nothing wet on a hot hob."
+
+
+def _a_hot_pan_surface(text):
+    """The verdict for the surface this line names, and the surface as it is called.
+
+    Returns ("yes", name, "") for a surface built to take a hot pan, ("no", name, the reason) for
+    one the heat damages, and (None, None, "") when the line names no surface at all. The reason
+    is the surface's own - wood scorches and stone cracks - because one sentence for all of them
+    told a person with a wooden worktop that the heat shock would crack their stone.
+    """
+    said = " %s " % (text or "").lower()
+    # The no is read first, because two of the surfaces are said with the word the hob is:
+    # "a glass table" must not be read as the glass of a glass hob.
+    for name, pattern, reason in _HOT_PAN_REFUSES:
+        if re.search(r"(?:%s)" % pattern, said):
+            return "no", name, reason
+    for name, pattern in _HOT_PAN_TAKES:
+        if re.search(r"(?:%s)" % pattern, said):
+            return "yes", name, ""
+    return None, None, ""
+
+
+def _the_hot_pan_place(memory, understood):
+    """The surface answer, opening on the verdict when the line names the surface."""
+    verdict, surface, reason = _a_hot_pan_surface(_line(understood))
+    if verdict == "no":
+        return ("No - not on " + surface + ": " + reason + ". " + _HOT_PAN_CAN + " "
+                + _HOT_PAN_TIP)
+    if verdict == "yes":
+        return ("Yes - " + surface + " takes it straight off the ring. " + _HOT_PAN_NOT + " "
+                + _HOT_PAN_TIP)
+    return _HOT_PAN_CAN + " " + _HOT_PAN_NOT + " " + _HOT_PAN_TIP
+
+
 def something_to_bake_in_the_oven(understood):
     """True when the line names a dish, whose own heat the dish table answers.
 
@@ -1784,6 +2153,82 @@ def something_to_bake_in_the_oven(understood):
     return bool(dishes.dish_in(text))
 
 
+# A tray of roast potatoes, and the one fault that wants a different answer from the method.
+# Every shape of the question used to get the method read out again, except the burnt tray, which
+# reached the roast-vegetable salvage card ("cut the black edges off and give it ten more
+# minutes"): what a burnt tray needs is the reason it happened.
+_ROAST_BURNT = ("burn", "burnt", "burning", "black", "blackened", "caught", "too hot",
+                "too dark", "stuck")
+
+
+_ROAST_STUCK = ("stuck", "stick", "sticks", "sticking", "welded", "glued")
+
+
+# A tray that came out hard is the third fault the same row answers, and it was the one main
+# answered with two cards that each missed: "how do i make roast potatoes without them going hard"
+# got the dish plan's reheating note ("they reheat well at 200C for 8 minutes"), and "my roast
+# potatoes are hard in the middle" got the boiled-vegetable card. A potato that is hard has not
+# had long enough, and the tray is why.
+_ROAST_HARD = ("hard", "harder", "still hard", "too hard", "undercooked", "under cooked",
+               "under-done", "not cooked", "not soft", "raw in the middle", "hard in the middle",
+               "hard centre", "hard centers", "not done")
+
+
+# A joint named beside the tray is not a different subject. Bare nouns in `avoid` win over every
+# key word, so "roast potatoes in beef dripping", "roast potatoes with the lamb" and "with the
+# gammon" stopped reaching this row at all and fell to the joint's row or to a chat ack - and
+# beef, goose, lamb and the rest are the words of the fat and the plate, not of another subject.
+# What is the joint's own question is its timing, so the row stands down only when a joint is
+# named *and* a time is being asked for it, and never when the line names the fat, which is a
+# tray word: "in goose fat" and "in beef dripping" are this method.
+_JOINT_WORDS = ("chicken", "turkey", "beef", "lamb", "pork", "ham", "gammon", "goose", "duck",
+                "joint", "bird", "brisket")
+
+_A_JOINT_TIMING = re.compile(
+    r"\bhow long\b|\bhow many minutes\b|\bhow many hours\b|\btakes?\b|\btiming\b"
+    r"|\btime\b|\bminutes per\b|\bper (?:kg|500g|pound|lb)\b|\bis it done\b"
+    r"|\bwhen is it done\b")
+
+_A_FAT_WORD = re.compile(r"\bfat\b|\bdripping\b|\bdrippings\b|\blard\b|\btallow\b")
+
+
+def _not_the_joint_timing(understood):
+    """True unless the line asks a joint's cooking time: then the joint's own row answers."""
+    said = " " + " ".join(str((understood or {}).get(key) or "")
+                          for key in ("clean", "norm_text", "norm")).lower() + " "
+    if not any(re.search(r"\b" + word + r"\b", said) for word in _JOINT_WORDS):
+        return True
+    if _A_FAT_WORD.search(said):
+        return True
+    return not _A_JOINT_TIMING.search(said)
+
+
+
+def _roast_potatoes(memory, reading):
+    """A roast potato question: the reason the edges caught or stuck, or the method."""
+    clean = str(reading.get("clean") or "").lower()
+    if any(word in clean for word in _ROAST_STUCK):
+        return ("Sticking is the tray and the wet, not the heat: put the oiled tray in to get hot "
+                "before the potatoes go on, dry them on a tea towel once they are drained, and "
+                "keep them in one layer with space between them so the steam can get out. "
+                "Turn them at 25 minutes with a fish slice rather than a spoon, and whatever is "
+                "already browned comes away on its own.")
+    if any(word in clean for word in _ROAST_HARD):
+        return ("Hard in the middle is a size and time problem, not a heat problem: cut them no "
+                "bigger than a golf ball, parboil them a full 8 minutes so the middle starts to "
+                "cook before the outside crisps, and give the tray 10 to 15 minutes more at 200C "
+                "(180C fan) in one layer. Test the biggest one with the point of a knife: it "
+                "should slide in with no resistance at all.")
+    if any(word in clean for word in _ROAST_BURNT):
+        return ("Too hot, or the potatoes went in wet: turn the oven down to 190C (170C fan), "
+                "spread them in one layer with space between them and turn them at 25 minutes. "
+                "Dry them on a tea towel after the parboil and shake them rough, because a wet "
+                "potato steams and then blackens at the edges before the middle is done.")
+    return ("Parboil peeled potatoes for 8 minutes, drain them, shake the pan to rough up the "
+            "edges, then roast at 200C (180C fan) in a thin layer of hot oil for 40 to 45 "
+            "minutes. The rough edges are what go crunchy. If they came out of a freezer bag, "
+            "none of that applies: 200C (180C fan) for 20 to 25 minutes straight from frozen, "
+            "in one layer.")
 ENTRIES = [
     # A batter is not a cake and its tin is not a cake tin. "my pancakes stick to the pan" and "my
     # yorkshire puddings stuck to the tin" were told to stir them and keep the water at a rolling
@@ -2348,6 +2793,26 @@ ENTRIES = [
           # that card carries a bias of 2, so the pasta has to outrank it: this row is only in
           # the running at all when the line names pasta.
           bias=3),
+    # "how do i drain pasta" had no row at all: the rinse row wants a rinse verb, the cook row
+    # wants water or the clock, and the no-kit table only fires when the line names a colander,
+    # so the plainest step of the job was a search hedge while "how do i drain pasta without a
+    # colander" was answered. The drain verbs are the key and the rinse words stand it down, so
+    # the two rows keep their own lines.
+    entry("pasta-drain", (("drain", "draining", "drained", "strain", "straining", "strained",
+                           "colander", "sieve"),
+                          ("pasta", "spaghetti", "penne", "macaroni", "noodles", "linguine",
+                           "fusilli", "tagliatelle", "orzo", "shells")),
+          "Scoop out a mugful of the cooking water first, then tip the pasta into a colander in "
+          "the sink: that cloudy water is what loosens a sauce that has gone too thick. Shake it "
+          "once, do not rinse it, and get it back into the warm pan with the sauce straight "
+          "away, because drained pasta starts sticking to itself within a minute. Never leave it "
+          "sitting in the colander - it carries on cooking in its own heat and goes soft.",
+          avoid=("rinse", "rinsing", "rinsed", "wash", "washing", "washed",
+                 "left out", "leftover", "left over", "reheat", "fridge", "freezer", "freeze",
+                 "how long", "minutes", "salt", "boil", "boiling", "portion", "how much",
+                 "sauce recipe", "bake", "oven", "cheese"),
+          ask=("drain", "draining", "drained", "strain", "straining", "strained", "colander",
+               "sieve")),
     # The fourth of the same family, because "is it ok to soak cashews overnight" was a
     # night-sweat answer: nuts and dried fruit get a soak for texture, not for safety.
     entry("soak-nuts", (("soak", "soaking", "soaked"),
@@ -2473,6 +2938,59 @@ ENTRIES = [
           # a grill and a stick word is this row's line whatever the food is, so the bias is
           # three, the same as the oil row's
           bias=3),
+    # A keeping question about cooked rice is said as a day: "is cooked rice ok tomorrow",
+    # "we had a takeaway last night, is the rice still ok", "leftover rice ok the day after".
+    # On main the first was answered with the water ratio for cooking it, the second with the
+    # bag in the cupboard, and the third with a card that lists four foods and puts rice third.
+    # The day word is the shape, and each phrase here is a keeping shape rather than a day word
+    # alone, so "im cooking rice tomorrow, how" keeps its method and "what can i make with
+    # leftover rice" keeps its fried-rice answer.
+    entry("rice-cooked-tomorrow",
+          # "the next day" and "reheat" are left out on purpose: those lines already reach the
+          # cooked-rice card on main, and a second card saying the same thing in other words is
+          # not an improvement. These are the shapes that did not reach it.
+          ("rice", ("ok tomorrow", "tomorrow ok", "safe tomorrow", "the day after", "day after",
+                    "still ok the day after", "still good the day after")),
+          _COOKED_RICE_KEEPS,
+          # nothing here guards on "cook": avoid matches word forms, so it would catch the
+          # "cooked rice" in the very line this row is for
+          avoid=("water", "minutes", "how long to cook", "pot",
+                 "pan", "ratio", "rinse", "raw", "dry", "uncooked", "bag", "packet", "pack",
+                 "jar", "airtight", "cupboard", "larder", "past its date", "past the date",
+                 "after the date", "out of date", "expired", "opened", "open for", "weevils",
+                 "year", "years", "months", "idea", "ideas", "make with", "do with", "use up",
+                 "what can i", "anything i can", "recipe", "recipes", "fry", "fried", "freeze",
+                 "freezing", "freezer", "burnt", "burned", "burnt bits", "slimy", "smell",
+                 "smells", "pudding", "milk", "sugar", "phone", "cat", "dogs", "dog", "cats",
+                 "bird", "birds", "pets", "the washing", "laundry", "curry", "sushi",
+                 "risotto", "paella", "bake", "baked", "salad"),
+          # it has to beat the method rows a rice line fits equally well: the water ratio and
+          # the ten to twelve minutes are both "rice" and both confident wrong answers here.
+          # Two, because the bag-in-the-cupboard row added since keys "rice" with "still ok" too,
+          # and at one the takeaway line came out as the dry-rice card again.
+          bias=2),
+    # "is my rice still ok" on its own is the cupboard question, and the dry-rice card answers it
+    # ("Dry rice keeps for years in an airtight jar") -
+    # tests.test_a_slimy_rice_is_not_a_diet_question holds that line. The bag-in-the-cupboard row
+    # keys "rice" with "still ok" as well, and on a newer main it won
+    # "we had a takeaway last night, is the rice still ok" even at bias 2: the row that names the
+    # subject of the line ("rice") is ranked ahead of a row that reaches it on a cue word alone.
+    # So this row names the subject as the cupboard row does, and a guard keeps it off the bare
+    # line: "is my rice still ok" has no cooked cue in it, and that one is the cupboard question
+    # (tests.test_a_slimy_rice_is_not_a_diet_question holds it).
+    entry("rice-cooked-still-ok",
+          ("rice", ("still ok", "still good", "still be ok", "still safe", "safe to eat",
+                    "ok to eat")),
+          _COOKED_RICE_KEEPS,
+          avoid=("water", "minutes", "how long to cook", "pot", "pan", "ratio", "rinse", "raw",
+                 "dry", "uncooked", "bag", "packet", "pack", "jar", "airtight", "cupboard",
+                 "larder", "weevils", "year", "years", "months", "idea", "ideas", "make with",
+                 "do with", "use up", "recipe", "recipes", "fry", "fried", "freeze", "freezer",
+                 "burnt", "burned", "slimy", "smell", "smells", "pudding", "milk", "sugar",
+                 "curry", "sushi", "risotto", "paella", "bake", "salad"),
+          # two, to sit ahead of the cupboard row that keys the same words at bias 1
+          bias=2,
+          guard=_the_rice_was_cooked),
     entry("rice-storage", ("rice", ("leftover", "left over", "reheat", "next day", "yesterday",
                                     "gone off", "safe to eat", "ok to eat", "again", "keep",
                                     # "can i leave rice in the fridge for 2 days" was answered
@@ -2888,7 +3406,13 @@ entry("porridge-fault",
     entry("omelette", (("omelette", "omelet"),
                        ("filling", "fillings", "easy", "make", "fold", "cook",
                         "long", "take", "takes", "time", "minutes", "put", "inside",
-                        "flip", "flipping")),
+                        "flip", "flipping",
+                        # "how many eggs go in an omelette" is this row's question, and the
+                        # count is in its first sentence. The cholesterol card used to take it
+                        # because "how many" is in its key for the daily allowance; now that the
+                        # allowance stands down on the verb, this row has to take the line, or the
+                        # bot answers a count it knows with a shrug.
+                        "how many")),
           "Two to three minutes in the pan: beat two eggs with a pinch of salt, pour them into a "
           "hot buttered pan and pull the set edges inwards with a spatula. Add cheese, mushrooms "
           "or ham on one half, fold it over and slide it out while the middle is still soft."),
@@ -3396,11 +3920,21 @@ entry("porridge-fault",
                            "joint of lamb", "leg of lamb", "roast lamb", "shoulder of lamb",
                            "joint of pork", "leg of pork", "roast pork", "pork joint"),
                           ("temperature", "how long", "time", "oven", "cook", "roast",
-                           "hot", "fan", "minutes", "done")),
+                           "hot", "fan", "minutes", "done",
+                           # the same ask with the everyday verb: "im doing a beef joint"
+                           # and "im making a leg of lamb" were both a shrug, while
+                           # "im cooking a beef joint" answered. Doing and making are
+                           # what people say for the cooking they have planned.
+                           "doing", "making")),
           _roast_joint,
           # the fast timetable is not a slow roast, and a joint is not what to serve with it
           avoid=("slow", "slowly", "low and slow", "overnight", "pulled", "serve", "serving",
                  "serves", "side", "sides", "goes with", "what with", "accompany",
+                 # a joint is not a curry: with "making" read as cooking, "im making a leg of
+                 # lamb curry" would be handed the roasting timetable
+                 "curry", "curries",
+                 # and a joint for a buffet is the party-food question, which answers it
+                 "buffet", "buffets", "party",
                  # how long to rest the joint is rest-meat's question
                  "rest", "resting", "rested")),
     # "how long should i rest it" was answered with the gym rest between sets and "why do you rest
@@ -3600,11 +4134,18 @@ entry("porridge-fault",
                  "potato", "potatoes", "dumplings", "samosa", "spring rolls", "yorkshire",
                  "cake", "pancake", "pancakes", "croissant", "dough")),
     entry("roast-potatoes", (("potato", "potatoes"),
-                             ("roast", "crispy", "crunchy", "soggy", "oven")),
-          "Parboil peeled potatoes for 8 minutes, drain them, shake the pan to rough up the edges, "
-          "then roast at 200C (180C fan) in a thin layer of hot oil for 40 to 45 minutes. The rough "
-          "edges are what go crunchy. If they came out of a freezer bag, none of that applies: "
-          "200C (180C fan) for 20 to 25 minutes straight from frozen, in one layer.",
+                             # "crisp" and "crispy" were the make-crisps row's, so "how do i get a
+                             # crisp roast potato" was told to slice them 2mm thin and fry them,
+                             # and "roast potatoes fluffy inside" was a how-to-keep-cool card
+                             ("roast", "crispy", "crisp", "crunchy", "crunchiest", "soggy",
+                              "oven", "fluffy", "burn", "burnt", "burning", "black",
+                              "blackened", "caught", "too hot", "stuck", "edges")),
+          _roast_potatoes,
+          # A roast or an oven has to be in the line: "the potatoes boiled dry and burnt" is a pot
+          # on the hob, and this row's burn answer is about a tray.
+          ask=("roast", "roasts", "roasting", "roasted", "roastie", "roasties", "oven",
+               "in the tin", "in the tray"),
+          bias=3, guard=_not_the_joint_timing,
           # "oven" in the key is what catches "how long do potatoes take in the oven", and it is
           # also in "how do i cook sweet potato in the oven": a sweet potato is a different
           # vegetable with a different answer, so it passes instead of getting this one.
@@ -3614,10 +4155,32 @@ entry("porridge-fault",
                  # one potato in its skin is not a tray: "how do i make a jacket potato crispy"
                  # and "how do i get crispy skin on a baked potato" want an hour at 200C, not 40
                  # minutes of parboiled chunks.
+                 # a joint named in the line used to be listed here, as bare nouns, and it
+                 # took "roast potatoes in beef dripping" and "roast potatoes with the lamb" out
+                 # of this row: `_not_the_joint_timing` above is the guard now, and it stands
+                 # down only when the joint's own cooking time is what is being asked.
+                 # an air fryer is its own method and its own answer: "how do i make roast
+                 # potatoes in the air fryer" is the basket, not a 200C oven tray.
+                 "air fryer", "air fryers", "airfryer", "air-fryer", "air fried", "airfry",
                  "jacket", "jacket potato", "jacket potatoes", "baked potato", "baked potatoes",
                  "baking potato", "potato skin", "potato skins", "skin on",
                  "keep", "keeps", "keeping", "last", "lasts", "stale", "freeze", "fridge",
-                 "freezer", "reheat", "leftover", "leftovers")),
+                 "freezer", "reheat", "leftover", "leftovers",
+                 # "roast" in the key is what makes "how long do roast potatoes take" this
+                 # method, and it also made every nutrition line about roast potatoes this
+                 # method: "are roast potatoes fattening", "...bad for you", "...healthy" and
+                 # "how many calories in roast potatoes" were the potato nutrition card and
+                 # became "parboil them for 8 minutes". Whether a tray is fattening is not a
+                 # roasting question, so those words stand this row down.
+                 "fattening", "fatten", "calories", "calorie", "how many calories", "healthy",
+                 "healthier", "unhealthy", "bad for you", "good for you", "slimming", "diet",
+                 "weight loss", "waistline", "carbs", "keto", "nutrition", "nutritious",
+                 # "what goes with roast potatoes" is the accompaniments question - main's
+                 # what-goes-with card answers it with gravy - and this row answered it with
+                 # the method, because "roast" and "potatoes" are the words of both.
+                 "goes with", "go with", "went with", "serve with", "served with",
+                 "to serve with", "accompaniment", "accompaniments", "side with",
+                 "sides to go with")),
     entry("mash", (("mash", "mashed potato", "mashed potatoes"), ("lumpy", "smooth", "fluffy",
                                                                  "cream", "creamy", "make",
                                                                  "how do i mash", "how do you mash",
@@ -3749,10 +4312,17 @@ entry("porridge-fault",
           # "my breath smells of garlic" is the breath row's question: the hands trick does
           # nothing for breath, which comes out of the lungs
           avoid=("breath", "bad breath", "garlic breath", "mouth", "breathe", "breathing")),
-    entry("garlic-burn", ("garlic", ("burn", "burnt", "bitter")),
+    entry("garlic-burn", (("garlic", "garlic clove", "garlic cloves"),
+                          ("burn", "burns", "burnt", "burned", "burning", "bitter", "black",
+                           "black bits", "went black", "gone black", "scorch", "scorched",
+                           "too hot", "high heat", "caught")),
           "Garlic burns in seconds because it's full of sugar: crush or slice it and add it later "
           "than the onion, on a lower heat. If it's already bitter, start again; burnt garlic "
-          "taints the whole dish."),
+          "taints the whole dish.",
+          # ...and a line about the smell of it is the breath row's, which the burn words above
+          # would otherwise take: "does burnt garlic give you bad breath" is a breath question.
+          avoid=("breath", "bad breath", "garlic breath", "mouth", "breathe", "breathing",
+                 "still smell", "smells of")),
     # Garlic going green or blue is the one colour change in a kitchen that is not spoilage, and
     # it was reaching the storage answer, the planting answer and the laundry one instead - the
     # blue card even rang a 999 for "my garlic went blue when i pickled it" (fixed in safety.py).
@@ -3974,7 +4544,15 @@ entry("porridge-fault",
           "Put a hard avocado in a paper bag with a banana and leave it on the counter for a day or "
           "two; the banana's gas speeds it up. Once it gives slightly at the stem end it's ready, "
           "and lemon juice stops a cut one going brown."),
-    entry("banana-ripe", ("banana", ("ripe", "ripen", "brown", "black", "quick")),
+    # "Green" is the word for a banana that is not ripe, and it was not a key: "my bananas are
+    # still green", "the bananas are too green" and "my bananas are still hard" were a nod, while
+    # "how do i ripen bananas" was this row. A banana is not in keeping.py's ripen table (its
+    # keeping is a row of its own, banana-keep), so the words live here.
+    entry("banana-ripe", (("banana", "bananas"),
+                          ("ripe", "ripen", "ripening", "brown", "black", "quick",
+                           "green", "still green", "too green", "very green", "so green",
+                           "hard", "still hard", "too hard", "soften", "softer", "not ripe",
+                           "unripe", "not ripening", "wont ripen", "wont go yellow")),
           "Bananas ripen fastest in a paper bag on the counter, especially with an apple; the "
           "fridge slows them right down but turns the skin black. Black-spotted skin is a sweet "
           "banana, and overripe ones are perfect for banana bread."),
@@ -4212,6 +4790,43 @@ entry("porridge-fault",
                  "freeze", "freezer", "fridge", "keeping", "keeps", "overnight", "leftover",
                  "chicken", "meat", "fish", "batter"),
           ask=(("my", "should", "can", "do", "how", "what", "is", "why", "add", "need"),)),
+    # A bare ask for the oven's heat has no dish to go on, and the dial row answered it with
+    # "drop the dial about 20C for a fan oven" - advice about an oven that runs hot, where the
+    # person wanted the number to set. A line that names a dish keeps that dish's own heat.
+    # The ask is the wording, not one keyword: the dial row (`oven-hot` below) matches "oven"
+    # plus "temperature" too, and a row that only holds the same two words never outscores it -
+    # the phrase is what says the question is about the heat to set. Every phrase is one way of
+    # asking the same thing, so a new way of asking belongs in this list beside the others.
+    entry("oven-heat", (("what temperature should the oven be", "what temperature should my oven be",
+                         "what temperate should the oven be", "what temp should the oven be",
+                         "what temperature do i set the oven", "what temperature should i set the oven",
+                         "what temp do i set the oven", "what temperature should the oven",
+                         "how hot should the oven be", "what heat should the oven be",
+                         "what temperature for the oven", "what temperature is the oven",
+                         "what temperature should an oven be", "what temperature to cook at",
+                         "what temperature should i cook at", "what gas mark should the oven be",
+                         "what gas mark should my oven be", "what gas mark for the oven",
+                         "what temperature should i put the oven on", "what temp should i put the oven on",
+                         "what temperature do you set an oven to", "what temp do you set an oven to",
+                         "what temperature is my oven meant to be", "what temperature is an oven meant to be",
+                         "what setting should the oven be on", "what setting should the oven be",
+                         "what setting should my oven be on", "what setting do i put the oven on"),
+                        ("oven", "temperature", "temp", "hot", "heat", "cook", "bake", "set", "gas")),
+          "For most things, 180C (160C fan, gas mark 4) for cakes, biscuits, a tray of "
+          "vegetables and a slow roast, and 200C (180C fan, gas mark 6) for chips, roast "
+          "potatoes and anything you want brown and crisp. Go to 220C (200C fan, gas mark 7) "
+          "for a fast pizza or a crisp edge, and down to 150C (130C fan, gas mark 2) for "
+          "meringues and slow bakes.",
+          # a dish named in the line keeps its own heat, and an oven running hot is the dial
+          avoid=("chips", "chip", "cake", "cakes", "sponge", "chicken", "turkey", "beef", "pork",
+                 "lamb", "joint", "bread", "pizza", "pastry", "yorkshire", "muffin", "scone",
+                 "biscuit", "cookie", "meringue", "casserole", "fish", "salmon", "lasagne",
+                 "lasagna", "pie", "potatoes", "air fryer", "airfryer", "microwave",
+                 "slow cooker", "runs hot", "running hot", "too hot", "overheat", "overheats",
+                 "calibrate", "thermometer", "dial", "not working", "wont heat", "won't heat",
+                 "not heating", "not heat up", "broken", "smoking", "smoke", "fever", "body",
+                 "fridge", "freezer", "water", "baby", "milk"),
+          bias=1),
     entry("oven-hot", (("oven", "fan", "fan oven", "temperature", "temp", "gas", "gas mark",
                         "dial", "thermometer", "degrees"),
                        ("hot", "hotter", "overheats", "runs hot", "too hot", "running hot",
@@ -4611,6 +5226,11 @@ entry("porridge-fault",
           # keeping: "it" and "how long" were the whole of the match.
           avoid=OPEN_ASK + TOOTH_OUT + ("lid", "lids", "stuck", "budge", "tight", "loosen",
                             "undo", "jar",
+                            # leave from an earlier year is not a jar: "i saved some holiday
+                            # from last year can i use it" matched "it" + "last" and got the
+                            # days a jar keeps
+                            "holiday", "holidays", "annual leave", "days leave", "saved up",
+                            "carry over", "carried over", "entitlement",
                             "put me down", "puts me down", "putting me down",
                             # "how do i keep it up" keeps something going, not food: the two
                             # words it shares with this row are the whole of the line
@@ -4993,8 +5613,20 @@ entry("porridge-fault",
                  "keeping", "mouldy", "mould", "freeze", "frozen", "how long") + NO_SUGAR),
     entry("bake-always", (("baking", "bake", "bakes", "baked", "everything i bake", "all my bakes",
                            "my cakes", "my loaves", "my bakes", "when i bake", "whatever i bake"),
-                          ("always", "never", "every time", "comes out", "come out", "keeps coming",
-                           "keep coming", "always comes", "always come", "turns out", "turn out")),
+                          # The second signal is that the fault *always* happens. "comes out" and
+                          # "turns out" are how any single bake is described, so carrying them here
+                          # let this row take a named bake's fault from the row that knows it: "my
+                          # loaves are coming out flat" and "my cakes come out flat" were told to
+                          # check the baking powder is in date, while the very same lines said with
+                          # "the bread"/"the rolls" reached the bread row. A pattern across bakes
+                          # is what this row answers, and a pattern is said with one of these.
+                          ("always", "never", "every time", "every single time", "each time",
+                           "no matter what", "whatever i do", "always comes", "always come",
+                           "always does", "never comes", "never come",
+                           # the always-ness is also said about the whole batch rather than with a
+                           # frequency word: "everything i bake comes out dry", "whatever i bake
+                           # comes out flat", "all my bakes come out dry"
+                           "everything i bake", "whatever i bake", "all my bakes", "when i bake")),
           _bake_always,
           avoid=("how long", "keep", "keeps", "freeze", "fridge", "recipe", "how do i make",
                  "buy", "shop", "calories", "healthy", "what temperature", "how hot"),
@@ -5064,7 +5696,48 @@ entry("porridge-fault",
           "In cakes and biscuits, one egg becomes 60g of yoghurt, half a mashed banana, or a "
           "tablespoon of ground flax or chia stirred into 3 tablespoons of water and left 10 "
           "minutes. Those bind but do not lift, so add half a teaspoon of baking powder. For "
-          "glazing or binding mince, a little milk or oil does the job."),
+          "glazing or binding mince, a little milk or oil does the job.",
+          # A quiche, a tart and a custard are set by the eggs themselves, not held together by
+          # them, so 60g of yoghurt is the wrong fact for those: "can i make a quiche without
+          # eggs" was answered with the cake rule. The set dishes have their own row below.
+          avoid=("quiche", "quiches", "tart", "tarts", "flan", "flans", "frittata",
+                 "frittatas", "custard", "creme anglaise", "pastry cream", "custard tart")),
+    # The set dishes, where the egg is the structure rather than the glue. Kept apart from the
+    # swap rows above because the honest answer is a different dish, not a substitute.
+    entry("no-eggs-in-a-set-custard",
+          (("quiche", "quiches", "tart", "tarts", "flan", "flans", "frittata", "frittatas",
+            "custard tart", "egg custard"),
+           ("without eggs", "without egg", "no eggs", "no egg", "egg free", "egg-free",
+            "eggless", "out of eggs", "ran out of eggs", "run out of eggs", "no eggs left",
+            "cant eat eggs", "can't eat eggs", "allergic to eggs", "egg allergy",
+            "instead of eggs", "replace the eggs", "replace eggs", "swap the eggs")),
+          "A quiche is set by its eggs, so leaving them out gives you warm vegetables in a "
+          "pastry case rather than a quiche. The nearest thing is 300g of silken tofu blended "
+          "smooth with a tablespoon of cornflour, or 100g of chickpea flour whisked with 250ml "
+          "of water and a spoon of oil for a firmer, nuttier set: bake either at 180C for 30 to "
+          "35 minutes, until the middle still wobbles. If the reason is an allergy, read the "
+          "pastry label too, because some shortcrust has egg in it.",
+          bias=2),
+    # Nobody is taught this and everybody guesses: "how do i drain a can of tuna" was answered
+    # with the drain-cleaning card (a kettle of boiling water down the plughole). A tin is a
+    # lid, a press and a bowl if the liquid is worth keeping.
+    entry("drain-a-tin",
+          (("tin", "tins", "can", "cans", "tinned", "canned", "can of", "tin of"),
+           ("drain", "draining", "drained", "strain", "straining", "get the water out",
+            "get the oil out", "water out", "oil out", "brine", "juice", "liquid")),
+          "Open the tin most of the way, hold the lid down with your thumb and tip it over the "
+          "sink with a gap of about a centimetre, so the liquid runs out and the food stays in. "
+          "Pressing the lid flat and squeezing is tidier still, and the lid laid over a bowl "
+          "makes a strainer if you want to keep the oil or brine for a dressing. Tuna in water "
+          "wants a good press before the mayo; chickpeas and sweetcorn want a rinse as well.",
+          avoid=("drain outside", "drain cover", "manhole", "gully", "gutter", "downpipe",
+                 "plughole", "sink", "shower", "bath", "blocked", "smell", "smells", "boiling "
+                 "water", "bicarbonate", "vinegar", "battery", "phone", "laptop", "pond",
+                 # a tin of pulses already has the answer that matters - "drain them, rinse the
+                 # salty water off" - and it says more about them than a strainer can, so this
+                 # row leaves chickpeas, beans and lentils to `pulses-tinned`
+                 "chickpeas", "chick peas", "beans", "bean", "lentils", "lentil", "pulses"),
+          bias=1),
     _swap("swap-butter", (("butter",), _SWAP_ASK),
           "In cakes and biscuits, margarine at the same weight, or a neutral oil at about "
           "three-quarters of the weight. For frying and greasing, any oil will do. Do not swap the "
@@ -5639,7 +6312,13 @@ entry("porridge-fault",
                        # no bare "fridge": "half a cabbage in the fridge, what can I do with it"
                        # is a recipe line, and the recipe entry answers it
                        ("keep", "keeps", "last", "lasts", "still ok", "still good", "gone off",
-                        "safe", "how long"),
+                        "safe", "how long",
+                        # "how do i store broccoli" and "how do i store veg" were shrugs next to
+                        # "how long does broccoli keep", which had the drawer card all along. The
+                        # bare words only, never the phrases with them: a phrase scores as well as
+                        # a word, and the extra point made this general card outrank a named
+                        # vegetable's own row ("how do i store spinach" lost the spinach card).
+                        "store", "stores", "storing", "stored", "storage"),
                        ),
           "Most veg keeps about a week in the fridge drawer, and a bit longer than you'd think if "
           "it stays dry: keep it in a bag or box, and don't wash it until you use it. Cabbage, "
@@ -5801,6 +6480,7 @@ entry("porridge-fault",
     # The key's two halves have to be near each other in the line, so the place the bottle is kept
     # is a key word too: "the milk in my fridge smells off" put a fridge between milk and smells
     # and scored nothing at all, while "the milk smells off in the fridge" scored five.
+
     entry("milk", ("milk", ("sour", "off", "smell", "smells off", "smelt off", "smells sour",
                             "smells funny", "smells wrong", "in my fridge", "in the fridge",
                             "in our fridge", "keep", "how long", "date", "opened",
@@ -5810,9 +6490,16 @@ entry("porridge-fault",
                           # tomorrow" was the dairy-free swap card, because the only rows that
                           # scored were the diet plan and a keeping stand-down, and this card had
                           # no day word to score on.
-                          + DAY_WORDS),
-          "If milk smells or tastes sour, bin it, whatever the date says; the date is about quality, "
-          "not safety. Once opened, keep it in the fridge and use it within about 5 days.",
+                          + DAY_WORDS
+                          # the store question is the same one: "how do i store milk" was a
+                          # shrug while "how long does milk keep" had the card all along
+                          + STORE_ASKS
+                          # a bottle of expressed milk is a milk row too, and without its own
+                          # name here "how do i store breast milk" and "how do i freeze breast
+                          # milk" were answered with the puberty card, whose only word in common
+                          # was "changes"/"milk" - the breast milk branch below has the hours
+                          + ("breast milk", "breastmilk", "expressed milk", "formula milk")),
+          _milk_keep,
           # a milk tooth is a child's tooth: "my son's milk tooth fell out" was answered with the
           # carton, because milk is the only word the two have in common
           avoid=("tooth", "teeth", "milk tooth", "milk teeth", "baby tooth", "baby teeth",
@@ -5827,7 +6514,10 @@ entry("porridge-fault",
                  "smells of yoghurt",
                  # "is milk ok in pregnancy" is not a question about a sour carton: the
                  # pregnancy row answers it, and this one only shares the word "ok" with it.
-                 "pregnant", "pregnancy", "expecting", "miscarriage", "trimester")),
+                 "pregnant", "pregnancy", "expecting", "miscarriage", "trimester",
+                 # a supply question is not a storage question: "how do i stop my breast milk
+                 # drying up" wants feeding advice, and the hours are a wrong answer to it
+                 "drying up", "supply", "enough milk", "low supply", "milk supply")),
     # A pan that smokes is a hot fat and a worried cook, and the bot said "your wok is smoking -
     # I'll remember that". Fat smokes at a temperature, so the answer is the heat, the fat's own
     # limit and what to do with the pan you already have: wipe it out, do not just carry on.
@@ -5907,6 +6597,9 @@ entry("porridge-fault",
                  # a pan that has bowed is a pan that no longer sits flat, not a pan of fat at
                  # its smoke point: "can i still use a warped pan" was answered with the spent-oil
                  # card because "still use" is this row's own reuse ask
+                 # a bottle of oil going into the freezer is a storage question, not a pan:
+                 # "can i put oil in the freezer" was told the fat was past its smoke point
+                 "freezer", "freeze", "freezing", "frozen", "fridge", "refrigerator",
                  "warped", "warp", "warping", "warped pan", "wont sit flat", "doesnt sit flat",
                  "doesn't sit flat", "bowed", "spins", "rocks",
                  # where a hot pan goes down is the surface's question, not the fat's; the
@@ -5982,6 +6675,16 @@ entry("porridge-fault",
                  "mug", "mugs", "plate", "plates", "cup", "cups", "saucer", "saucers", "bowl",
                  "bowls", "glass", "glasses", "tumbler", "tumblers", "teapot", "jug", "dish",
                  "dishes", "crockery", "cutlery", "worktop", "tile", "tiles",
+                 # A greasy thing is not a pan. "grease" and "greasy" are in the key, and the
+                 # key's other half is every "get rid of" and "down the drain" phrase, so
+                 # "how do i get rid of greasy shine on my face" was answered "the fat is past
+                 # its smoke point, turn the heat down" - a pan of fat for a face. A part of a
+                 # person, or a shine on one, is the body's or the cleaning row's, and the same
+                 # fence is on mark-on-skin and garment-shine.
+                 "face", "faces", "forehead", "nose", "chin", "cheeks", "cheek", "skin",
+                 "t-zone", "t zone", "scalp", "hair", "hands", "hand", "thighs", "elbow",
+                 "elbows", "shoulders", "neck", "shine", "shines", "shiny", "sheen", "gleam",
+                 "glow", "oily", "spot", "spots", "pores",
                  # "sink" used to stand the row down and it was the one word that stopped it
                  # answering its own disposal line: "can i pour oil down the sink" is the
                  # question the fat-down-the-drain answer is written for, and it was a search
@@ -6051,14 +6754,18 @@ entry("porridge-fault",
                                       # cheese in cling film" by the tortilla wrap.
                                       "put", "where do i put", "cling film", "clingfilm",
                                       "storing", "stored", "keep it")),
-          _cheese_keep),
+          _cheese_keep, guard=_not_a_serving_frame),
     # --- what to make with what is in the kitchen --------------------------
     # "what's"/"whats" because the matcher reads the raw words of a line, apostrophe and all
     # "what do kids eat" and "what should i feed my kids" are the same question as "kids tea
     # ideas", and the eating words were not in the second part, so they went looking for another
     # table: "what do kids like to eat" reached the city row, and with the goat's "kids" removed
     # ("what should i feed my kids for lunch") they would have fallen to a hedge.
-    entry("kids-tea", (("kids", "children", "child"),
+    # A son or a daughter is a kid, and the words people actually use were not in the key:
+    # "my son is 4 years old, what should i feed him" reached no table at all and the line came
+    # back as a shrug. Brothers, sisters and the child's own name are still the person row's.
+    entry("kids-tea", (("kids", "children", "child", "son", "sons", "daughter", "daughters",
+                        "boy", "boys", "girl", "girls"),
                        ("tea", "dinner", "supper", "meal", "food", "eat", "eats", "eating",
                         "feed", "feeds", "feeding", "fed")),
           "Keep it plain and fast: fish fingers or chicken strips with peas and oven chips, pasta "
@@ -6066,6 +6773,8 @@ entry("porridge-fault",
           "on the plate and don't make a second dinner if they refuse it.",
           # a tea at home, not catering for a party or a picnic: those are party-food's lines
           bias=1,
+          # a food named in the line is that food's question, not this one
+          guard=_no_named_food,
           # a breakfast is the breakfast table's question, and "what do kids eat for breakfast"
           # was answered with fish fingers once the eating words were in the key.
           avoid=("picnic", "party", "birthday", "guests", "take", "bring", "school", "packed",
@@ -6354,6 +7063,36 @@ entry("porridge-fault",
                  ) + _TEA_MILK_DISH,
           bias=1),
 
+    # The milk in a coffee is the same question as the milk in a tea, and it had no row: the brew
+    # row above stands down for coffee, the barista row below stands down for "best" and "which",
+    # and the pantry read "oat milk" as oats and milk, so "is oat milk good in coffee" and "what
+    # milk is best for coffee" were both handed a method for porridge and a bag of beans to buy.
+    # Asked about the milk in a cup of coffee, not about coffee: the second key group is the drink,
+    # and the ask holds the words that make it a question about what goes in the cup.
+    entry("milk-for-coffee",
+          (("milk",), ("coffee", "coffees", "latte", "lattes", "cappuccino", "flat white",
+                       "espresso", "americano", "mocha", "macchiato")),
+          _the_milk_for_a_coffee,
+          # a preference ("milk, one sugar") is not a question, and the amount in the cup, the
+          # caffeine, a machine, a bag of beans and whether coffee is good for you all have rows
+          ask=("which", "what", "best", "good", "better", "ok", "should i", "can i", "could i",
+               "do i", "does", "is", "are", "worth", "instead of", "rather than", "goes in",
+               "go in", "use", "put in", "oat milk", "soy milk", "soya milk", "almond milk",
+               "plant milk", "skimmed", "semi skimmed", "whole milk", "barista", "taste",
+               "tastes", "split", "curdle", "froth", "foam"),
+          # "how much coffee should i drink" is a caffeine limit and "does coffee break a fast" is
+          # the fast: neither is a question about the milk, and the milk word is only carried in.
+          avoid=("too much", "fast", "fasting", "calorie", "calories",
+                 "caffeine", "pregnant", "pregnancy", "breastfeeding", "sleep", "anxiety",
+                 "blood pressure", "stain", "stains", "machine", "beans", "bag", "buy", "buying",
+                 "price", "cost", "costs", "shop", "cafe", "healthy", "good for you",
+                 "bad for you", "before bed", "decorate", "art", "paint", "tables", "table",
+                 "book", "books", "shop", "grinder", "descale", "clean"),
+          # The caffeine rows still take "how much milk in a cup of coffee" and "my milk split in
+          # my coffee", which are their lines to lose: the row above answers the kind of milk, the
+          # amount and the split, and a fence on the caffeine rows is the next change, not this one.
+          bias=1),
+
     # "how much water should i put in the kettle for two cups of tea" reached nothing: the brew
     # entry is about temperature and time, not about how full the kettle goes.
     # The cook_kit row "tea-water" does the sum for the mugs you name; this one is the flat
@@ -6497,12 +7236,26 @@ entry("porridge-fault",
                  "still ok", "use by", "shelf life", "mouldy")),
     entry("bread-stale", (("bread", "loaf", "baguette", "rolls"),
                           ("stale", "dry", "hard", "yesterday", "keep fresh", "stop it going",
-                           "going stale", "revive", "soft again")),
+                           "going stale", "revive", "soft again"),
+                          # the ask, so that a loaf that is dry inside a question a person asked
+                          # about it - "is it ok to eat bread thats gone a bit hard", "can i eat
+                          # this stale loaf" - is this row's line and not the mould notice's.
+                          # The row needs a word that says the loaf has dried out, so the ask is
+                          # on `ask=` below and the plain "is my bread still ok" stays a fresh
+                          # question for the row that answers it.
+                          ("is it ok", "is it still", "ok to eat", "okay to eat", "can i eat",
+                           "can i still", "still ok", "still okay", "still good", "safe to eat",
+                           "eat it", "use it", "bin it", "throw it", "ruined", "gone a bit",
+                           "what can i do with", "what do i do with", "hard", "dry")),
           ("Stale bread is dry, not spoilt: sprinkle it with water and warm it in a 180C oven for "
            "6 to 8 minutes and it comes back close to fresh, and a dry loaf is the right bread for "
            "toast, croutons, breadcrumbs or a panzanella. To stop it happening, keep the loaf "
            "whole and cut slices as you need them, in a paper bag or a bread bin rather than the "
-           "fridge, and freeze half of it sliced on day one."), bias=1),
+           "fridge, and freeze half of it sliced on day one."),
+          ask=("stale", "dry", "hard", "hardened", "tough", "yesterday", "soft again", "revive",
+               "gone a bit hard", "gone hard", "gone dry", "dried", "going stale"),
+          guard=_not_how_to_keep_it_fresh,
+          bias=2),
     # The prevention answer is main's, and it has to stay: "how do i stop my bread going mouldy"
     # is a keeping question and this entry answers it. The bin-it question is a different line -
     # "can i cut the mould off" - and it gets its own entry below, so neither has to hedge.
@@ -6558,6 +7311,8 @@ entry("porridge-fault",
           # a pack date is the keeping question, not the mould one: "is it ok to eat
           # bread past the date" was answered "don't cut the mould off a loaf" on main
           + PACK_DATE,
+          # and a loaf that is only dry has not been spoilt: the stale row says the oven trick
+          guard=_not_just_a_hard_loaf,
           bias=1),
     # Freezer shelf life, as its own answer. "How long can beef stay in the freezer" was answered
     # with the fridge numbers, and "how long can fish stay in the freezer" with the searing time,
@@ -6589,7 +7344,18 @@ entry("porridge-fault",
                             ("mash", "mashed potato", "potato", "stew", "curry", "soup",
                              "leftovers", "chilli", "bolognese", "food", "lasagne", "lasagna",
                              "pasta bake", "casserole", "shepherds pie", "cottage pie", "pie",
-                             "risotto", "paella", "gratin")),
+                             "risotto", "paella", "gratin",
+                             # The dishes people ask about that had no row of their own at all
+                             # and were refused with a hedge: "can i freeze a quiche", "can i
+                             # freeze meatballs", "can i freeze a frittata", "can i freeze
+                             # moussaka", "can i freeze burritos", "can i freeze stuffing". They
+                             # are cooked dishes like every other row here, so they take the same
+                             # rule and the same keeping time.
+                             "quiche", "quiches", "frittata", "frittatas", "omelette",
+                             "omelettes", "moussaka", "tagine", "meatballs", "meatball",
+                             "burritos", "burrito", "quesadilla", "quesadillas", "stuffing",
+                             "sausage rolls", "samosas", "samosa", "spring rolls", "dumplings",
+                             "fishcakes", "fish cakes", "nut roast")),
           _freeze_cooked,
           # food that is out of the freezer, or out of the fridge, is the two-hour rule's
           # question (`freshness.py`), not "can i freeze it": this row was answering "how long
@@ -7012,7 +7778,11 @@ entry("porridge-fault",
                              ("make", "recipe", "oil", "vinegar", "ratio", "good", "keep")),
           "Whisk 3 parts olive oil to 1 part vinegar with a teaspoon of mustard, a pinch of salt "
           "and pepper: the mustard holds it together. Make it in a jam jar and shake it, and it "
-          "keeps a week in the fridge."),
+          "keeps a week in the fridge.",
+          # "how do i make a fancy dress costume" was answered with salad dressing, because
+          # "dressing" is this row's word and "make" was in the line. A costume is never a sauce.
+          avoid=("costume", "costumes", "fancy dress", "dress up", "dressing up", "world book day",
+                 "halloween", "outfit", "party outfit")),
     entry("avocado-brown", (("avocado", "avocados"),
                             ("brown", "going brown", "browning", "black", "keep", "stop")),
           "Lemon or lime juice on the cut face slows it down, and cling film pressed right onto "
@@ -7065,13 +7835,22 @@ entry("porridge-fault",
     # and sharing the word meant every "how long can X stay in the freezer" got the fridge days.
     entry("fridge-life", (("fridge",),
                           ("how long", "keep", "keeps", "last", "safe", "still ok", "gone off",
+                           # A verdict asked of a thing that has been kept asks the same
+                           # question, and its words are not the keeping words: "is it ok to eat
+                           # fish thats been in the fridge since sunday" reached nothing, because
+                           # the line asks "ok to eat" and this row's ask was "still ok". The
+                           # subject half still has to say the place, so a line that asks a
+                           # verdict with no place in it ("is it ok to eat reheated rice") is
+                           # not this row's.
                            "days", "use by", "out of date",
                            # "is it ok in the fridge til tomorrow" carries no measure at all, so
                            # it reached no entry and the follow-up path cut the last answer down
                            # to the sentence of it that says "fridge". The keeping words are the
                            # key here; the fridge is the subject.
                            "overnight", "til tomorrow", "till tomorrow", "until tomorrow",
-                           "next day", "in the morning")),
+                           "next day", "in the morning",
+                           "ok to eat", "safe to eat", "alright to eat", "ok to drink",
+                           "safe to drink", "can i eat", "can we eat", "edible")),
           ("Cooked food keeps 3 to 4 days in the fridge, raw meat and fish 1 to 2 days, and milk, "
            "cheese and yogurt until the date on the pack, or a couple of days past it if they look "
            "and smell right. Cooked rice is the exception at 1 day, and anything left out for more "
@@ -7571,6 +8350,10 @@ entry("porridge-fault",
           (("lumpy", "lumps"), _FOOD),
           _lumpy,
           avoid=("gravy", "mattress", "pillow", "breast", "skin", "throat", "gland", "bump",
+                 # a coat that went on unevenly is the nails row's: "my nails came out lumpy" and
+                 # "my nail polish came out lumpy" were taught to push a sauce through a sieve.
+                 "nails", "nail", "nail polish", "nail varnish", "manicure", "varnish",
+                 "fingernail", "fingernails", "cuticle", "cuticles",
                  # A lump in a baby's meal is the weaning question, not a sauce to whisk: "she
                  # doesnt like lumps in her food" reached this row. A person's own food is the
                  # tell, so a baby, a child or "her food" stands this row down.
@@ -7908,6 +8691,11 @@ entry("porridge-fault",
             "have with", "eat with", "have it with", "side for", "sides for", "side dish",
             "side dishes", "serve with", "serving with", "to serve with", "alongside",
             "what side", "which side", "pairs with",
+            # the adverb slot, filled: "what pairs best with blue cheese", "what goes best
+            # with lamb", "what to eat with couscous". The pairing frame reads any adverb
+            # between the verb and "with", so the key only needs the commonest.
+            "pairs best with", "pairs well with", "pairs nicely with", "goes best with",
+            "to go with", "to have with", "to eat with", "serve alongside", "go alongside",
             # what to put on the meat, rather than beside it: "seasoning for lamb" was "Thanks
             # for telling me" and "what spice for beef" a shrug, because every key word here
             # named the rest of the plate. The same entry answers both, from SEASONINGS.
@@ -7938,7 +8726,7 @@ entry("porridge-fault",
             # "what spice goes with pumpkin" were all a punt, and SEASONINGS has an answer for
             # every one of them.
             "tofu", "mince", "ribs", "tomato", "tomatoes", "cherry tomatoes", "pumpkin",
-            "butternut") + PLAN_NAMES),
+            "butternut") + PAIRING_FOODS + PLAN_NAMES),
           _sides,
           # the key alone is not enough: "the handle came off the side of the pan" is a fault,
           # and "what goes with a blue sofa" names no food at all, since _sides only answers a
@@ -8287,7 +9075,12 @@ entry("porridge-fault",
                  "say", "talk", "talk about", "conversation", "small talk",
                  # "im just having my lunch" is small talk, not a plan for lunch
                  "just having", "having my lunch", "just had lunch", "had my lunch",
-                 "on my lunch", "eating my lunch") + _ON_A_FLIGHT),
+                 "on my lunch", "eating my lunch",
+                 # a lunch for guests is the crowd row's question: see _one_persons_lunch
+                 "coming over", "come over", "coming round", "come round",
+                 "over for", "round for") + _ON_A_FLIGHT,
+          # one person's lunch only: a packed lunch for the family is still a packed lunch
+          guard=_one_persons_lunch),
     entry("lunch-no-sandwich",
           (("lunch", "lunches", "lunchbox", "lunchboxes", "lunch box", "lunch boxes",
             "packed lunch", "packed lunches", "school lunch", "school lunches", "work lunch",
@@ -8550,12 +9343,23 @@ entry("porridge-fault",
     # above answers the "something to take to a party" ask. One id each, so neither copy hides
     # behind the other.
     entry("party-food-plan",
-          (("party", "buffet", "picnic", "guests", "people coming", "friends coming"),
-           ("food", "snacks", "nibbles", "finger food", "ideas", "cheap", "feed", "make")),
+          (("party", "buffet", "picnic", "guests", "people coming", "friends coming",
+            # A baby shower is a party, and the word "baby" in it was stealing the line: "im
+            # having a baby shower what food should i make" got the health visitor and "baby
+            # shower food ideas" got the list of muslins. The shower is the occasion, and the
+            # food for it is the same plan as any other standing-up do.
+            "baby shower", "baby showers", "bridal shower", "baby sprinkle"),
+           ("food", "snacks", "nibbles", "finger food", "ideas", "cheap", "feed", "make",
+            # "cook" and "serve" are the same ask as "make", and without them in the key
+            # "what should i cook for a baby shower" scored nothing at all
+            "cook", "cooks", "cooking", "serve", "serving")),
           "Cheap party food people actually eat: a big pot of chilli or a pasta bake, garlic bread, "
           "and a bowl of crisps and dips. For standing-up food, sausage rolls, cheese straws and "
           "fruit on sticks go further than anything fiddly.",
-          ask=("party", "buffet", "picnic", "guests", "food", "snacks", "nibbles"),
+          # "make", "cook" and "serve" are how the host asks, and "what should i make for a
+          # baby shower" has no food word in it at all.
+          ask=("party", "buffet", "picnic", "guests", "food", "snacks", "nibbles",
+               "make", "makes", "making", "cook", "cooking", "serve", "serving", "feed"),
           # "snacks" is on the snack row's key as well, and a word two rows use is worth a point
           # less to both: with the snack row added, "good snacks for a party" lost this card to
           # the plainer party row and read "Cheap food that people finish and that travels"
@@ -8603,6 +9407,10 @@ entry("porridge-fault",
           "mature cheddar, a blue, and something goat's or sheep's for variety. Add crackers, "
           "grapes, chutney and nuts, and take them out of the fridge an hour before."),
     entry("cook-a-staple", (_STAPLE_NAMES, STAPLE_ASK), _staple, bias=1,
+          # how much of it to buy is the portion table's question and how long to cook it is
+          # this row's, so the bare "how much" and "how many" live in a guard instead of in the
+          # avoid list: see `_not_a_portion_ask`.
+          guard=_not_a_portion_ask,
           # "how long does uncooked rice last" is the keeping answer, not the method: "last" and
           # "uncooked" were the gap that let this entry answer a keeping question with a recipe.
           # a licence or a permit is the angling answer, not a recipe: "do i need a licence to
@@ -8624,14 +9432,32 @@ entry("porridge-fault",
                  "goldfish", "tropical fish", "koi", "betta", "guppy", "pet fish",
                  "feed the fish", "feed a fish", "feed my fish", "feed fish",
                  "feed the goldfish", "feeding the fish", "feeding fish", "fish flakes",
+                 # the same animal kept as a pet is the pet's own question: "what do i need for
+                 # a rabbit" reached this row on the staple name plus the "do i" of the ask and
+                 # came back with a braise. A hutch, a cage, bedding or a buying shape says the
+                 # animal is not for the pan, and "how do i cook rabbit" keeps the braise.
+                 "hutch", "hutches", "cage", "cages", "guinea pig", "guinea pigs", "cavies",
+                 "hamster", "hamsters", "budgie", "budgies", "pet", "pets", "bedding",
+                 "look after", "care for", "what do i need", "need for", "need to buy",
+                 "need to get", "need before",
+                 # how they get on with each other is the pet question as well: "how do i bond
+                 # two rabbits" came back with the braise, and a rabbit of yours is not a joint.
+                 # ("my rabbit" and "our rabbit" are not here: "our rabbit died, do i need a
+                 # funeral director" is a pet-loss line, and standing this row down for it let a
+                 # weaker condolence take the turn from the grief answer that fits the question.)
+                 "bond", "bonding", "bonded", "introduce them", "two rabbits",
+                 "pet rabbit", "house rabbit", "as a pet",
+                 # how long the animal can be left is the pet's own question, and "how long" is
+                 # one of this row's asks: "how long can a rabbit be left alone" was the braise.
+                 "alone", "left alone", "on its own", "on her own", "on his own", "lonely",
                  "last", "lasts", "lasting", "uncooked", "airtight", "stale", "staleness",
                  "leftover", "leftovers", "left over", "go with", "goes with", "gone off",
-                 "side", "sides", "per person", "portion", "portions", "serving", "servings",
+                 "per person", "portion", "portions", "serving", "servings",
                  "freeze", "freezer", "refreeze", "reheat", "keep", "keeping", "store", "ratio",
                  # where it is kept is a keeping question: "how long can i leave cooked rice in the
                  # fridge" wants the cooked-rice rule, not the method that cooked it.
                  "fridge", "refrigerator", "out of the fridge", "left out", "leave it out",
-                 "leaving it out", "how much", "how many",
+                 "leaving it out",
                  # "<bone> stock" is the stock pot, not the staple: the staple name sits in this
                  # key, so "how do i make vegetable stock" answered with the rule for boiling
                  # vegetables rather than the stock row it belongs to.
@@ -8689,10 +9515,20 @@ entry("porridge-fault",
           # take", and spuds and tatties are how half the country asks it.
           (("potato", "potatoes", "new potatoes", "spud", "spuds", "tattie", "tatties"),
            ("boil", "boiling", "how long", "minutes", "tender", "soft", "done",
-            "cook", "cooking", "make")),
+            "cook", "cooking", "make",
+            # "how do i stop potatoes going mushy" and "my potatoes always fall apart" are the
+            # same timer question asked as a fault, and neither had a row: mushy, fall apart and
+            # break up are the words people use for it
+            "mushy", "mush", "soggy", "watery", "fall apart", "falls apart", "falling apart",
+            "fell apart", "break up", "breaks up", "breaking up", "broke up", "crumbly",
+            "disintegrate", "disintegrates")),
           "Boil them in salted water: 10 to 12 minutes for small new potatoes, 15 to 20 for chunks, "
           "20 to 25 for whole medium ones. A knife should slide in with no resistance at all, and "
-          "drain them the moment it does, or they go watery.",
+          "drain them the moment it does, or they go watery. If they keep going mushy, it is "
+          "usually the potato rather than the pan: floury ones (Maris Piper, King Edward, Desiree) "
+          "break up in water and are for mashing and roasting, so boil the waxy ones (Charlotte, "
+          "Nicola, any new potato) and keep the water at a gentle simmer rather than a rolling "
+          "boil, and do not stir them.",
           # "how long" is in this key, and it is in everybody else's potato question too: the
           # keeping one ("how long do potatoes keep"), the roasting one ("how long do roast
           # potatoes take", which used to be told to boil them) and the jacket one.
@@ -8745,6 +9581,13 @@ entry("porridge-fault",
           "that is not.",
           avoid=("glass hob", "worktop", "counter", "countertop", "granite", "quartz", "marble",
                  "laminate", "wooden board", "chopping board", "trivet", "glass table",
+                 # The glass surface said the other way round: "can i put a hot pan on a glass
+                 # top table" and "on the glass top" were this row's cold-plunge answer, because
+                 # a table called a glass top matches none of the surface words above. The
+                 # surface row reads that phrase itself, and a bare glass top there falls to the
+                 # balanced answer rather than to a yes, because a glass top is as often a table
+                 # as a hob.
+                 "glass top", "glass-top",
                  # "taps" stood this row down for its own key phrase: a stand-down word is read
                  # as a stem, so "under the tap" was a line the row could never answer, and
                  # "can i put my hot wok under the tap" went to the pan-heat card instead. The
@@ -8823,11 +9666,10 @@ entry("porridge-fault",
             # the thing that was set down, said as a tray or a dish rather than a pan
             "hot tray", "hot roasting tin", "hot baking tray", "hot dish", "hot pot",
             "hot casserole", "hot kettle")),
-          "Straight off the ring a hot pan can go back down on a glass ceramic or induction hob, "
-          "and on a stainless steel worktop, because those are built for it. Keep it off granite, "
-          "quartz, marble and laminate worktops, wooden boards and glass tables: the heat shock "
-          "cracks stone and scorches laminate. A trivet or a folded dry cloth under it, and "
-          "nothing wet on a hot hob.",
+          # The verdict for the surface the line names, then the same two sentences: "can i put a
+          # hot pan on a granite worktop" opens on the no, and "can i put a hot pan on a glass
+          # hob" on the yes. See `_a_hot_pan_surface`.
+          _the_hot_pan_place,
           # a pan to be washed, a pan of burnt food and a hob to be cleaned are their own rows,
           # and cold water on a hot pan is a warping question rather than a surface one
           avoid=("clean", "cleaning", "wash", "washing", "scrub", "soak", "burnt", "stain",
@@ -8956,6 +9798,33 @@ entry("porridge-fault",
           "covered frying pan on a low heat for 5 minutes - both give you a crisp base again. A "
           "microwave heats the water in the sauce and turns the base to leather, so only use it for "
           "10 seconds if you want it warm rather than good."),
+    # The same question with the dish left out: "can i freeze the rest", "can i freeze it",
+    # "will this freeze". The rest of the store answered these with a search hedge while the
+    # general rule - cool it within two hours, box it while it is still warm, about three months,
+    # never refreeze once thawed - sat in `freeze-food`'s own fallback, because that row's key
+    # wanted a food name and these lines name nothing.
+    #
+    # It is a row of its own rather than the pointing words added to `freeze-food`: the wider key
+    # stopped that row reaching a freeze question through the chat ("and if i freeze it" after a
+    # chicken was answered with the general rule and now reaches nothing at all), because a row
+    # whose key can match the line itself is no longer read as borrowing its subject.
+    #
+    # The subject is the asking words, not the bare "freeze": "i can read it fine but freeze when
+    # someone talks to me" is a person freezing up, and a key of ("freeze" x pointing words)
+    # answered it with food. The asking words are never put together in a sentence about the
+    # speaker.
+    entry("freeze-anything", (_FREEZE_ASKS, _FREEZE_POINTING_WORDS),
+          _freeze_food,
+          ask=KEEP_ASK,
+          # the phrases stay whole: `avoid` matches loosely, and split into single words
+          # "from frozen" hands this row "frozen", which is its own subject word
+          avoid=("soup", "soups", "broth", "mashed potato", "mash", "refreeze", "refroze",
+                 "re-freeze", "thawed", "defrost", "defrosting", "defrosted", "stew", "stews",
+                 "casserole", "casseroles", "curry", "curries", "chilli", "chili", "bolognese",
+                 "lasagne", "lasagna", "brain freeze", "brainfreeze", "instead", "instead of",
+                 "substitute", "swap", "from frozen", "ice cream",
+                 "leftover", "leftovers", "left over") + _FREEZE_AVOID,
+          bias=0),
     entry("refreeze-food",
           (("refreeze", "refroze", "re-freeze", "freeze again", "frozen again"),
            ("mince", "meat", "chicken", "fish", "rice", "safe", "ok", "okay", "fine", "harm",
@@ -10015,7 +10884,9 @@ entry("porridge-fault",
                  # hours, not 25 minutes per 500g at 200C, and the slow-roast entry has it
                  "slow", "slowly", "slow roast", "slow roasted", "slow-roasted", "low and slow",
                  # how long the joint rests is rest-meat's question, not the roasting time
-                 "rest", "resting", "rested"),
+                 "rest", "resting", "rested",
+                 # a curry is not a roast, and the roast-joint row next door avoids it too
+                 "curry", "curries"),
           ask=("how long", "how many minutes", "time", "minutes", "temperature", "degrees",
                "gas mark", "how hot", "per kilo", "per kg", "per pound", "what temperature",
                # the plain ask the kitchen sends without a number in it: "how do i roast a leg
@@ -10484,6 +11355,7 @@ entry("porridge-fault",
                "should i", "do i"),
           # "how long do i smoke a brisket for" also carries a time word, and the roast table
           # answers the time; this row has the heat as well as the time
+          guard=_asks_about_a_smoker,
           bias=3),
 ]
 
@@ -11143,3 +12015,57 @@ ENTRIES.append(entry(
            "pond", "garden", "weed", "duckweed", "roast", "crispy", "confit", "feed",
            "feeding", "pet", "the ducks"),
 ))
+
+
+# The other half of the smoked family, once the smoking row stops answering it: a fish that comes
+# smoked is already cooked, so "how do i cook smoked haddock" and "how do i cook kippers" were
+# left with a shrug. The answer is the heat and the four minutes, and the fish said in the line is
+# the fish named back, because a kipper and a smoked mackerel are not the same shape on the plate.
+_SMOKED_FISH = ("smoked haddock", "smoked mackerel", "smoked trout", "smoked fish", "kippers",
+                "kipper", "smoked herring")
+_SMOKED_FISH_REPLY = (
+    "Smoked {fish} is already cooked, so it only wants heating through: 3 to 4 minutes under a hot "
+    "grill, or 4 to 5 minutes in milk that is barely simmering, which keeps it moist. Flake it "
+    "while it is warm into a fish pie, scrambled eggs or a salad with a squeeze of lemon.")
+
+
+# Smoked salmon is the same family and the opposite answer: it is cured, not cooked, so it is eaten
+# cold or warmed at the last minute, and "how do i cook smoked salmon" was answered with the heat
+# and time for baking a raw fillet.
+SMOKED_SALMON_ALREADY = (
+    "Smoked salmon is cured rather than cooked, so it needs no cooking at all: eat it cold on "
+    "bread with a squeeze of lemon and black pepper, or warm it through at the very end - folded "
+    "into hot pasta, a risotto or scrambled eggs off the heat - because heat turns it firm and "
+    "salty. Do not fry or bake it.")
+
+
+def _smoked_fish_reply(memory, reading):
+    """The smoked fish the line names, in the answer that fish wants."""
+    said = str((reading or {}).get("text") or "").lower()
+    if "smoked salmon" in said or "lox" in said:
+        return SMOKED_SALMON_ALREADY
+    return _SMOKED_FISH_REPLY.format(fish=_smoked_fish(reading))
+
+
+def _smoked_fish(reading):
+    said = str((reading or {}).get("text") or "").lower()
+    for name in _SMOKED_FISH:
+        if name in said:
+            if name in ("kipper", "kippers", "smoked herring"):
+                return "kipper"
+            return name[len("smoked "):] if name.startswith("smoked ") else name
+    return "haddock"
+
+ENTRIES.append(entry(
+    "smoked-fish",
+    (("smoked haddock", "smoked mackerel", "smoked trout", "smoked fish", "kipper", "kippers",
+      "smoked herring", "smoked salmon", "lox"),
+     ("cook", "cooking", "heat", "hot", "grill", "grilled", "poach", "poached", "serve", "eat",
+      "how", "best way", "what do i do", "what can i do", "warm", "warm up")),
+    _smoked_fish_reply,
+    # smoked salmon is eaten cold out of the packet, so it is not this row's fish; the smoking row
+    # and the health rows have their own asks
+    avoid=("gravad", "gravlax", "healthy", "healthier", "omega",
+           "pregnant", "pregnancy", "freeze", "frozen", "keep", "how long", "hot smoke",
+           "cold smoke", "smoker", "wood chips", "low and slow", "barbecue", "bbq"),
+    bias=2))

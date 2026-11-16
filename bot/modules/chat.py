@@ -13,13 +13,17 @@ from ..compose import (LINGERED_LINE, badnews, circumstance, doubted, fallback, 
 from ..compose import leaving as leaving_reading
 from ..compose import limit as limit_line
 from ..compose.badnews import reads_as_bad_news, reads_like_a_symptom
-from ..compose.goodnews import (asks_for_news, reads_as_a_pass, reads_as_a_win_nobody_noticed,
+from ..compose.goodnews import (a_detail_of_the_news, asks_for_news,
+                                MORE_OF_THE_NEWS, MORE_OF_THE_NEWS_ARRIVAL,
+                                MORE_OF_THE_NEWS_SCORE, reads_as_a_pass,
+                                reads_as_a_win_nobody_noticed,
                                 reads_as_a_prize_in_a_message, reads_as_good_news,
                                 reply_for_a_win_from_a_past_year)
 from ..memory import hope, matters, obstacle, plan as plan_steps
 from ..memory.when import asks_what_today_is
 from ..memory import size as another_size
 from ..memory.cause import NO_REASON as _NO_REASON
+from ..knowledge.lookup import the_body_is_short_of_sleep
 from ..understanding import breeds, topics
 from ..understanding.kinds import (ADDRESSED, EMOTION_WORDS, THANKS_NOISE,
                                    ANSWERING_A_QUOTED_ASK, cue_about_person,
@@ -31,10 +35,12 @@ from ..compose import harm as harm_reading
 from ..compose import saidby as saidby_reading
 from ..compose import reaction as answer_reaction
 from ..compose import repair
+from ..compose import said_about_me
 from ..compose.repair import (DEEDS_WITH_A_CARD, amends_to, deed_of, owns_the_deed,
                               with_the_feeling_named)
 from ..compose import reading as reading_reply
 from ..compose import urgent as urgent_reading
+from ..compose import stepwords
 from ..compose import verdict as verdict_reply
 from ..compose import doubt as doubt_reply
 from ..compose import occasionplan
@@ -55,7 +61,7 @@ from ..memory import carried_on as step_after
 from ..memory import passing_the_time
 from ..memory import the_years
 from ..memory import warmth as talked_to
-from ..memory import limits
+from ..memory import limits, portions
 from ..memory import facts, hours as hours_after, limit, meant, pile, repeat, tried, more, returned
 from ..memory import topics as topic_memory
 from ..memory.ack import A_MOVE, a_person_getting_better, nobody_around
@@ -926,6 +932,13 @@ def _judgement(clean, tokens):
     """
     if "?" in clean or len(tokens) > 14 or (tokens and tokens[0] in ASKS_A_QUESTION):
         return None
+    # A label somebody else put on the person is not the person judging themselves: "my teacher
+    # says im lazy" and "my brother says im a waste of space" were answered "I doubt that's the
+    # whole picture - you're being harder on yourself than you'd be on a friend", which argues with
+    # the wrong person about a judgement they did not make. Being spoken to that way has its own
+    # reader (bot/compose/said_about_me.py), so these pools stay out of it.
+    if said_about_me.reads_as_somebody_elses_words(clean.replace("'", "")):
+        return None
     # A comparison the person built themselves ("i feel like im doing everything wrong") is read
     # by `_feel_like`, which names what they compared themselves to; this pool's lines fit any
     # worth line and would answer before that reading was ever asked.
@@ -1185,12 +1198,32 @@ PLACE_TAIL = tuple(re.compile(tail) for tail in (
     # when"), and the name ran on through the follow-up word: the reply said "Leeds When — that's
     # a big move". No town is called "Leeds When", so these words end the name whatever follows.
     r"\s+(?:when|where|why|how|what|which|who|whose|whom)\b.*$",
+    # A date said after the name is not part of it, whether it is written in figures or in words:
+    # "im moving to leeds in six weeks" said the place back as "Leeds in Six Weeks", and the same
+    # line with a place the reader has not met is "Moving to Six Weeks. Exciting - what's the plan?"
+    r"\s+(?:in|on|at|by|from)\s+(?:about\s+|around\s+|roughly\s+|just\s+over\s+|nearly\s+)?"
+    r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a|an|a\s+few|"
+    r"a\s+couple\s+of|several)\s+(?:hours?|days?|weeks?|fortnights?|months?|years?)\b.*$",
 ))
 PLACE_MOST = 4        # "new york", "stoke on trent", "the isle of wight"; not a clause
 PLACE_LAST = re.compile(r"^.*\bin\s+([a-z][a-z' -]*)$")
 # A phrase that only looks like a place: "i live in hope", "i live in fear of mondays".
 PLACE_IDIOM = frozenset(("hope", "fear", "sin", "pain", "denial", "the past", "the moment",
                          "the dark", "a bubble", "cloud cuckoo land", "the middle of nowhere"))
+# A span of time is a date, not a place: "i am moving out in six weeks" was answered "Moving to Six
+# Weeks. Exciting - what's the plan?", and "im moving out in a fortnight" became "Moving to A
+# fortnight". The span is only ever read after "in" or "to", so the guard is on the whole phrase:
+# the count and its unit, or the unit on its own ("a fortnight", "the weekend"), with the hedge
+# people put in front of it ("in about six weeks"). A month is a date as well - "im moving out in
+# march" is March - and it is already in the store's own list of words that are not places.
+PLACE_SPAN = re.compile(
+    r"^(?:about\s+|around\s+|roughly\s+|just\s+over\s+|nearly\s+|almost\s+)?"
+    r"(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a|an|a\s+few|"
+    r"a\s+couple\s+of|several|the)\s+)?"
+    r"(?:hours?|days?|weeks?|fortnights?|months?|weekends?|years?|bit|while|minute|minutes)"
+    r"(?:'?s\s+time|\s+time)?(?:\s+or\s+so|\s+from\s+now)?$"
+    r"|^(?:january|february|march|april|may|june|july|august|september|october|november|"
+    r"december|christmas|easter|the\s+weekend)$")
 PLACE_NONE = frozenset({"", "holiday", "a holiday", "the holiday"})
 # A word that points at the thing rather than naming it. The place reader takes the words after
 # "live in", and the thing they live in is often one of these plus what it is: "i live in a 2 bed
@@ -1326,7 +1359,15 @@ BAD_NEWS = (
     re.compile(r"\b(turned me down|turned us down|got rejected|got turned down|rejected)\b"),
     re.compile(r"\bi (failed|didn't pass|didnt pass)\b"),
     re.compile(r"\bwe lost (?:the|our) (?:contract|client|deal|bid|job|order|tender)\b"),
-    re.compile(r"\b(she|he|they) said no\b"),
+    # "they said no" is a refusal and a blow. "they said no infection" is what the bloods found,
+    # and read as a refusal it was answered "That's gutting, especially after you put the work in.
+    # Ask for feedback if you can" for a result that was good news. A no with a word of the thing
+    # it rules out after it is a result, and bot/compose/fallback.py draws that same line for its
+    # refusal reader (`REFUSED_NO_OBJECT`), so the test is asked here rather than kept in a second
+    # list.
+    re.compile(r"\b(she|he|they) said no\b(?!\s+(?!(?:way|chance|deal|thanks|thank|worries|"
+               r"problem|dice|objection|to|about|on|again|twice|either|yet|at|for|so|and|but|"
+               r"then|though|after|before|last|this|it|because|when|until|unless)\b)[a-z])"),
     re.compile(r"\bgot (cancelled|canceled|postponed)\b"),
 )
 # Something they did and came back from: "we went to the pub last night", "i went to the
@@ -1949,6 +1990,15 @@ NEWS_REPLIES = {
         "Love that — well done. How are you celebrating?",
         "Good stuff. That must be a weight off.",
     ),
+    # The best part of the news, said a turn after it: "i passed my driving test" / "first time",
+    # "we won on saturday" / "2-0". The cheer has just been given, so the detail is the news again
+    # and not a question: what came back was a card about the subject ("Most people need around 45
+    # hours of lessons plus 20 hours of private practice before they pass", "That's 2") or the
+    # floor. The pool is read by `goodnews.a_detail_of_the_news`, which only takes a short line
+    # with nothing asked in it, after a cheer this module gave.
+    "more_of_the_news": MORE_OF_THE_NEWS,
+    "more_of_the_news_score": MORE_OF_THE_NEWS_SCORE,
+    "more_of_the_news_arrival": MORE_OF_THE_NEWS_ARRIVAL,
     "bad_news": (
         "That's gutting, especially after you put the work in. Ask for feedback if you can — "
         "it usually says exactly what to change.",
@@ -2349,7 +2399,10 @@ FEELINGS = (
                  # their first-person replies, but a line about somebody else ("my husband is
                  # browned off", "she is peeved") only reaches a feeling here, and without the
                  # words it was an echo: "Noted: your husband is browned off."
-                 "browned off", "peeved")),
+                 "browned off", "peeved",
+                 # "stroppy" was in no list, so "im stroppy" got "Got it. Is there anything
+                 # you'd like a hand with?" while "im mardy" and "im grumpy" were answered.
+                 "stroppy", "stroppy with", "in a huff")),
     # A weight coming off is good news of a kind, and it is not an occasion. While "relieved" sat
     # in the happy group, "im relieved hes gone" and "my scan came back clear and im so relieved"
     # both got "Love that. Anything nice planned to go with it?" - a question about a party nobody
@@ -2663,14 +2716,25 @@ def _a_limit(text, memory):
     after a curry is answered by the entry that says what to use instead, and "no heating" is a
     report about the boiler, not a limit on anything. Only a line nothing answers is read as a
     limit, so no entry ever loses its turn to this.
+
+    A line that is only the limit is the exception (`bot/memory/limit.py`, `only_a_limit`). The
+    entry the knowledge base has for the word after "no" is, by definition, the thing the person
+    has just taken away: "no walking up hills" after a weight-loss plan reached the entry about
+    riding a bike up a hill, which answers a cyclist, and it read as a fresh answer beside the plan
+    already on the screen with the walking taken out of it.
     """
     read = memory.get("understood") if isinstance(memory, dict) else None
     if not isinstance(read, dict) or not read.get("constraint"):
         return None
     try:
-        if lookup.find(read) is not None:
+        if lookup.find(read) is not None and not limit.only_a_limit(text):
             return None
-        return limit_line.reply_for(read, memory)
+        reply = limit_line.reply_for(read, memory)
+        if reply and isinstance(memory, dict):
+            # The parts the limit left are what a "whats the first thing to change" a turn later is
+            # about, and the answer itself is no longer the turn on the screen.
+            memory["limit"] = {"said": reply, "steps": limit_line.steps_left(read, memory)}
+        return reply
     except Exception:  # noqa: BLE001 - a limit that cannot be worked out claims no turn
         return None
 """A verdict the person has already reached on their own life.
@@ -3257,6 +3321,42 @@ ROUGH_DAY = re.compile(r"\b(bad|rough|long|terrible|awful|rubbish|crap|hard|toug
                        r"(?:all (?:day|night|evening|morning)|till|til|until|late)\b"
                        r"|\bone of those (?:days|mornings|nights)\b")
 WHAT_A_DAY = re.compile(r"\bwhat a (day|week|morning)\b")
+# A stretch of time that will not move: "this week is dragging", "the week has been long", "school
+# holidays are too long", "the days are long at the moment", "been a slow month". ROUGH_DAY reads
+# the day and the week with a bad word in front of them ("a long week", "what a week"); these are
+# the same complaint with the stretch itself as the subject, and every one of them fell to the
+# stock line ("I'm listening - say more if it helps", "Got it. Is there anything you'd like a
+# hand with?"). The rough-day pool answers with a shower and an early night, which is advice for a
+# bad day and not for a week with nothing in it, so the stretch gets its own pool. Both a stretch
+# and a word for how it goes are needed, which is what keeps it off "the days are getting longer"
+# and off a line that names a person.
+A_STRETCH = (r"(?:week|weeks|month|months|term|half[- ]term|holidays?|summer|winter|autumn|"
+             r"spring|days?|nights?|weekends?|mornings?|evenings?|year)")
+A_STRETCH_THAT_DRAGS = re.compile(
+    r"\b(?:this|that|the|these|those|another|my|our|school|whole)\s+" + A_STRETCH + r"\b"
+    r"[^.!?,;]{0,24}?"
+    r"\b(?:is|are|was|were|has\s+been|have\s+been|['\u2019]?s\s+been|feels|feel)\b"
+    r"[^.!?,;]{0,16}?"
+    r"\b(?:dragging|drags|crawling|crawls|slow|long|endless|never[- ]ending|"
+    r"taking\s+(?:forever|ages)|going\s+on\s+forever|"
+    # The same complaint in the wear idioms: "this week has been a nightmare", "the month has
+    # been a slog". They are a stretch of time and not a job or a night, which is what the wear
+    # reader and the child's-nightmares entry read them as.
+    r"a\s+(?:nightmare|mare|slog|grind|hell)|nightmare)\b", re.I)
+def _a_stretch_that_drags(clean):
+    """True for a stretch of time said to be long or slow, with nothing else in the line."""
+    text = " ".join(str(clean or "").lower().split())
+    if not text or "?" in text:
+        return False
+    if not A_STRETCH_THAT_DRAGS.search(text):
+        return False
+    # A stretch of somebody else's day is their line; a stretch of time with a body in it is an
+    # ache. Both have their own readers, so the pool stands down on them.
+    if VENTED.search(text):
+        return False
+    return True
+
+
 # The same complaint said the other ways people say it: "it's doing my head in", "he drives me up
 # the wall", "she gets on my nerves". The thing complained about is named in the line, and these
 # are all the same kind of line, so they get the same warm reply.
@@ -3304,8 +3404,14 @@ WORRY_WHEN = re.compile(
 # and only a daily-life action: a line about what cannot be done right now in the world ("i
 # can't find my keys", "i can't log in") is a problem to solve and is left to the modules that
 # solve it.
+#
+# "I can barely keep my eyes open" and "i can hardly get out of bed" are the same inability as
+# "i can't": barely and hardly are how a thing that is nearly out of reach is said, and read as
+# no inability at all they reached whatever row shared a word with them - the tired line above
+# was answered with the conjunctivitis card, then with the 20-20-20 screen rule.
 CANT = re.compile(
     r"\b(?:i|i'm|im|i've|ive|we|we're)\b[^.!?]{0,50}?\b(?:can'?t|cant|cannot|can not|"
+    r"can\s+(?:barely|hardly)|could\s+(?:barely|hardly)|"
     r"couldn'?t|couldnt|struggl(?:e|es|ed|ing) to|haven'?t been able to|havent been able to|"
     r"not able to|find(?:ing)? it hard to|find(?:ing)? it difficult to|"
     # "im not eating much" and "im not sleeping much" are a run of bad days said plainly:
@@ -3324,7 +3430,8 @@ CANT = re.compile(
 # "my son cant sleep" and "cant you sleep" are about someone else, whatever the rest says.
 NOT_THE_SUBJECT = (r"(?!\s+(?:i|i'm|im|you|u|we|we're|they|he|she|it|anyone|anybody|someone|"
                    r"somebody|everyone|everybody|there|nobody|people)\b)")
-INABILITY = (r"(?:can'?t|cant|cannot|can not|couldn'?t|couldnt|could not|"
+INABILITY = (r"(?:can'?t|cant|cannot|can not|can\s+(?:barely|hardly)|"
+             r"could\s+(?:barely|hardly)|couldn'?t|couldnt|could not|"
              r"struggl(?:e|es|ed|ing) to|not able to|"
              r"haven'?t been able to|havent been able to|have not been able to|"
              r"not been able to|find(?:ing)? it (?:hard|difficult) to|"
@@ -3374,7 +3481,15 @@ STUCK = (
                   r"today|most days|at all|any ?more|these days|early|before)\b)",
                   r"\b(?:out of bed|get going|getting going|start the day|face the day|"
                   r"mornings|in the morning)\b")),
-    ("sleep", (r"\b(?:get to sleep|fall asleep|sleep|sleeping|slept|awake|nights?)\b",)),
+    ("sleep", (r"\b(?:get to sleep|fall asleep|sleep|sleeping|slept|awake|nights?)\b",
+               # A tired body said the way people say it, with no sleep named at all: "i can
+               # barely keep my eyes open", "i keep nodding off at my desk", "my eyes keep
+               # closing on the bus". None of them names sleep, and each was answered from
+               # whatever row shared a word with it - the eye card, the posture card, the
+               # 20-20-20 screen rule.
+               r"\beyes?\s+(?:open|shut|closing|dropping)\b|" 
+               r"\bnodd(?:ing|ed|s)?\s+off\b|\bstay(?:ing)?\s+awake\b|"
+               r"\bkeep(?:ing|s)?\s+(?:falling|dropping)\s+asleep\b")),
     # Eating in general, never a named food or a diet: "can't eat gluten" is a restriction.
     ("eating", (r"\b(?:eat|eats|eating|eaten)\b(?=$|[,.!?;]|\s+(?:anything|much|at all|properly|"
                 r"a (?:full |proper |hot )?meal|full meals|three meals|a thing|normally|"
@@ -3415,6 +3530,39 @@ STUCK_IDIOM = re.compile(r"\b" + NEG + r"\s+(?:wait|think(?!\s+straight)|believe
 STUCK_OBJECT = re.compile(r"\bwork(?:s|ed|ing)?\s+(?:the|this|that|my|a|an|it|out)\b")
 # Blaming yourself is not a shortage of effort: "i can't do anything right" is about them.
 STUCK_SELF = re.compile(r"\b(?:do|doing|did|get|getting|got)\b[^.?!]{0,20}\bright\b")
+# "do anything" is the person's energy only when nothing follows it: "i can't do anything with
+# nuts in it" is a food line, "can't do anything on this laptop" is the laptop, "can't do
+# anything about the noise" names what the noise is. Without the preposition the reading stood
+# on the bare verb, and a line about nuts was answered with a card about not being bothered.
+STUCK_DOES_SOMETHING = re.compile(
+    r"\b(?:do|does|did|doing)\s+anything\s+(?:with|on|about|to|for|in|at)\s+\S")
+# What follows "in" or "at" can be a time or a degree rather than an object: "i can't do anything
+# at all", "can't do anything at the moment", "can't do anything in the mornings" are the person's
+# energy, and the mood card is the answer to them. "can't do anything in the kitchen" names the
+# kitchen, and "can't do anything at all with nuts" names the nuts in the words after it, so the
+# phrase is a degree only when the line puts no thing after it.
+STUCK_A_DEGREE_OR_A_TIME = re.compile(
+    r"\b(?:in|at)\s+(?:all|the\s+moment|this\s+moment|the\s+minute|times|any\s+way|"
+    r"the\s+(?:mornings?|afternoons?|evenings?|nights?|daytime|week|weekend)|this\s+weather)\b")
+STUCK_AN_OBJECT = re.compile(r"\b(?:with|on|about|to|for)\b")
+
+
+def _doing_something_to_a_thing(clean):
+    """Whether "do anything" names a thing it cannot be done to, not a degree or a time of day.
+
+    "i can't do anything with nuts in it" is the nuts, and "i can't do anything at all" is how
+    the person feels: the preposition alone cannot tell them apart, and a bare `at`/`in` took
+    three low-mood lines away from the mood card. So the phrase after `at`/`in` is read, and it
+    counts as a degree only when the line names no thing after it either.
+    """
+    found = STUCK_DOES_SOMETHING.search(clean)
+    if not found:
+        return False
+    degree = STUCK_A_DEGREE_OR_A_TIME.search(clean, found.start())
+    if not degree:
+        return True
+    # "at all with nuts" is still a line about nuts: the degree has to be the last thing said.
+    return bool(STUCK_AN_OBJECT.search(clean, degree.end()))
 # The reason is the line: "i can't get out of bed, my back went", "can't work because my wrist
 # is sore", "i can't afford to go out with my friends".
 # "since" is a why-word ("i can't eat since the dentist") and also a span ("i haven't eaten
@@ -3451,1035 +3599,9 @@ def said_loss(memory):
     return False
 
 
-REPLIES = {
-    "greeting": (
-        "Hi! What's on your mind?",
-        "Morning! How's your day going?",
-        "Hello! What can I help with?",
-        "Hey! What are we working on?",
-        "Hi there — what do you need?",
-    ),
-    # A hello with the chat already running is a check-in, not a new morning: "we had a huge row
-    # last night" then "hiya" should not get "Morning! How's your day going?".
-    #
-    # "What's next?" is fine after a row, a warning at work or a failed test; it is not fine
-    # after a death, so a death in the chat is answered from `howareyou_loss` below and a hello
-    # after one is left to the composer's loss module. A job lost, a pet ill or a bad week are
-    # losses the check-in can ask about, because the person can still change them.
-    "check_in": (
-        "Hi — still here. Where were we?",
-        "Hello again. What's next?",
-        "Hi. Anything changed since we last spoke?",
-        "Still here, if you want to carry on.",
-        "Hello again — carry on where we left off?",
-    ),
-    # The same check-in for a person the bot has been introduced to, so the name is not lost:
-    # "my name is sam" then "hi" was "Hello again. What's next?" for "Hi Sam!".
-    "check_in_name": (
-        "Hi {name} — still here. Where were we?",
-        "{name} — hello again. What's next?",
-        "Hi {name}. Anything changed since we last spoke?",
-    ),
-    # A how-are-you inside a conversation still asks how the bot is, and the check-in pool never
-    # answers that: it points somewhere else every time, and two of those in a row have nowhere
-    # to go. These answer the question and hand it back.
-    # How-are-you after a death in the chat: the question is answered, gently, and handed back
-    # without sending the person anywhere ("What's next?" is not a line for a bereaved chat).
-    "howareyou_loss": (
-        "Still here. No rush to say anything.",
-        "I'm all right, thanks. More to the point — how are you doing?",
-        "Getting by, thank you. How are you holding up?",
-    ),
-    "howareyou_mid": (
-        "Still here, thanks — how are you getting on?",
-        "Doing fine, thanks. How's your day going?",
-        "All good here. What about you?",
-    ),
-    # A hello that names the part of the day gets an answer about that part of the day: the
-    # morning pool answered "good evening" with "Morning!" on main.
-    "greeting_morning": (
-        "Morning! How's your day going?",
-        "Morning — what's on your mind?",
-        "Morning! What can I help with?",
-    ),
-    "greeting_afternoon": (
-        "Afternoon! What's on your mind?",
-        "Afternoon — what can I help with?",
-        "Afternoon! How's your day going?",
-    ),
-    "greeting_evening": (
-        "Evening! What's on your mind?",
-        "Evening — what can I help with?",
-        "Evening! How's your day been?",
-    ),
-    "greeting_name": (
-        "Hi {name}! What's on your mind?",
-        "Morning {name}! What can I help with?",
-        "Hey {name}! What are we doing today?",
-    ),
-    "meet": (
-        "Hi {name} — good to meet you. What's on your mind?",
-        "Nice to meet you, {name}. What can I help with?",
-        "Hello {name}! What are we doing today?",
-    ),
-    "howareyou": (
-        "Doing well, thanks — what about you?",
-        "All good here. What's keeping you busy?",
-        "Can't complain. What's on your mind?",
-    ),
-    # The person has just answered how they are and handed the question back: "not bad, and
-    # you?", "im fine thanks, yourself". The "howareyou" pool cannot answer it - it asks the
-    # question the person has already asked - and the reply before this pool said neither how
-    # the bot was nor took the question. So it says how the bot is, thanks them for asking, and
-    # then gets back to their day. The thanks are said once: "I'm well, thanks - and thanks for
-    # asking after me" said the same thing twice, and it is the pool's first line in a chat as
-    # well as its second ("hbu" with nothing said yet).
-    "back": (
-        "All good here, thanks for asking. How has your day been?",
-        "I'm well, thanks for asking. How is your day going?",
-        "Nothing to complain about here, thanks. How has your day been so far?",
-    ),
-    # The same line with a bad day in it ("not great, and you?"): the low is answered first and
-    # the question second, which is the order a friend would take them in.
-    "back_low": (
-        "Sorry to hear that. I'm all right, thanks for asking \u2014 what has been going on?",
-        "That sounds rough. I'm fine, thanks for asking after me \u2014 what has the day been like?",
-    ),
-    "notmuch": (
-        "Not much here either. What are you up to?",
-        "Same as ever — helping, chatting. How's your day going?",
-        "Not a lot. What's keeping you busy?",
-    ),
-    "positive": (
-        "Glad to hear it.",
-        "Good to know.",
-        "Well, good.",
-    ),
-    "thanks": (
-        "Any time.",
-        "Glad that helped.",
-        "You're welcome — shout if anything else comes up.",
-        "No problem at all.",
-        "Happy to help.",
-        "No worries at all.",
-    ),
-    "bye": (
-        "Bye! Take care.",
-        "See you — good luck with it.",
-        "Take care. Come back any time.",
-        "Bye for now!",
-        "Take it easy!",
-    ),
-    # A sign-off at night gets the night line and a sign-off in the day does not. Both used to
-    # come out of one pool, so "cya later" was answered "Night! Sleep well." and "goodnight"
-    # was answered "Bye! Take care." - the right words for the wrong half of the day.
-    "bye_night": (
-        "Night! Sleep well.",
-        "Goodnight — sleep well.",
-        "Sleep well. I'll be here tomorrow.",
-        "Night then. Sleep well.",
-    ),
-    "next_up": (
-        # What the person is doing next, said as they go: no question back, no "first step".
-        "Go on then \u2014 enjoy it.",
-        "That sounds like the right thing to do tonight.",
-        "Good. I'll be here when you're back.",
-        "Fair enough. Hope it does you good.",
-        "Nice one. Take your time over it.",
-        "Right you are \u2014 enjoy the quiet.",
-    ),
-    # The one pool above is all rest and quiet: "enjoy the quiet" and "hope it does you good" fit a
-    # bath and an early night, and read oddly as an answer to a shift or the weekly shop. So the
-    # next thing is split by what it is, and each pool says the same warm thing in the words that
-    # fit it (@sleek-condor, on "im going to work now").
-    "next_rest": (
-        "Fair enough. Hope it does you good.",
-        "Good. Take your time with it.",
-        "That sounds like the right thing to do tonight.",
-        "Right you are \u2014 enjoy the quiet.",
-    ),
-    "next_act": (
-        "Go on then \u2014 hope it goes smoothly.",
-        "Good. That's your next bit sorted.",
-        "Right you are. Take it as it comes.",
-        "Nice one. I'll be here when you're back.",
-    ),
-    "intent": (
-        # A plan or an intention aired without a question. It must not presume a snag ("tell me
-        # where it gets stuck" fits "i need to sort my pension", not "i want to bake a lemon
-        # drizzle for my mum"), so each line asks about the person's own starting point.
-        "Worth doing. Where are you with it so far?",
-        "Good thing to take on. What's the first step from where you are?",
-        "Sounds worth doing \u2014 I'm here when you want the next step.",
-        "Worth doing. What would you like help with first?",
-    ),
-    "event": (
-        "That's coming up. What do you want to get right?",
-        "How ready do you feel for it?",
-        "What would make it go well?",
-    ),
-    # A stretch of it rather than one hard day (see OVERLOAD): "get an early night" is the wrong
-    # advice for a month of it, so these name the run of it and offer one thing to drop. One of
-    # the four is a question, so a worn-out person is not asked one every time.
-    "overloaded": (
-        "Ten quiet minutes between things helps more than it sounds, and so does saying no to "
-        "one thing.",
-        "Non-stop weeks are the ones that catch up later. Guard one evening this week that's just "
-        "yours.",
-        "When it's like that, everything else can wait: food, sleep, and one thing that's only "
-        "yours.",
-        "A run like that wears you down before you notice. Pick the one thing you can drop this "
-        "week and drop it.",
-    ),
-    "busy": (
-        "Sounds full-on. What's taking most of it?",
-        "Busy one, then. Is there anything you can drop?",
-        "That's a lot at once. What would go first if you could choose?",
-    ),
-    "plan": (
-        "Good plan. What sparked it?",
-        "Nice. Tell me how it goes.",
-        "Sounds like a good way to spend it.",
-    ),
-    "say_something": (
-        "Go on \u2014 I'm listening.",
-        "Of course. Take your time.",
-        "Ask away \u2014 I'll do my best.",
-    ),
-    "sorry_talk": (
-        "No need to apologise — that's what I'm here for.",
-        "You're not dumping anything on me. Keep going if it helps.",
-        "Don't apologise for that. I'd rather hear it than not.",
-    ),
-    "vague": (
-        "Sometimes it's everything at once. It can stay unnamed.",
-        "Fair enough — days like that are hard to pin down.",
-        "That's okay. No rush to work out what it is.",
-    ),
-    "ack": (
-        "Sounds good.",
-        "Alright then — good luck with it.",
-        "Nice one.",
-        "Fair enough.",
-        "Hope it works out.",
-    ),
-    # A bare request for help is a request, and this file read it as an acknowledgement: "help"
-    # and "help me" got "Fair enough." - a shrug at the one line in a conversation that asks for
-    # something. Every longer shape of it ("help me out", "need help", "i need some help") was
-    # already answered by the fallback's "Happy to. Tell me what's going on", which is right after
-    # a good day and too bright in the middle of a bad one, so the pool is here and asks the same
-    # thing in a voice that fits both.
-    "help_ask": (
-        "Happy to help. What's the thing you're stuck on?",
-        "Of course. Tell me what you need a hand with.",
-        "Say what it is you're stuck on and we'll take it from there.",
-        "Right — what is it you need help with?",
-    ),
-    # The nod after heavy news is not a nod at a plan. "my mum has cancer" then "ok" got "Alright
-    # then — good luck with it." or "Sounds good." - a cheerful sign-off on the worst thing the
-    # person has said, and the last thing they hear before they decide whether to keep talking.
-    # Every line here leaves the floor open, and none of them asks for anything.
-    "nod_after_news": (
-        "Okay. I'm here if you want to come back to it.",
-        "No rush. That can just sit there for now.",
-        "I'm not going anywhere. Say more when you want to.",
-        "Understood. Nothing about it needs doing this minute.",
-    ),
-    # "again", "not again": the person is saying it has happened once more, which is the whole
-    # of the news. The ack pool read it as a shrug and closed the topic.
-    "again": (
-        "Again? That's rough.",
-        "Again — that's hard going.",
-        "Again. No wonder you're fed up with it.",
-        "Oh no, again.",
-    ),
-    # A bare "again" carries no trouble of its own: after "i got engaged" it is a second
-    # engagement and after "i lost my job" it is the second time, and the pool above read the
-    # first as a hard going. Only the shapes that say the repeating is bad ("not again", "oh no
-    # not again") get the sympathy; a bare "again" is asked what happened, which fits both.
-    "again_what": (
-        "Again? Go on.",
-        "Again — what happened?",
-        "Right, again. What's going on?",
-        "Again. Say a bit more.",
-    ),
-    # Looking forward to something is the warmest short line there is, and it wants the warmth
-    # back rather than the flat nod.
-    "keen": (
-        "Good — that's something to look forward to.",
-        "Nice. There's a lot to be said for having it in the diary.",
-        "Good. The run-up is half the fun of it.",
-        "Nice one — enjoy the wait for it.",
-    ),
-    # A judgement with no feeling word in it. These used to land on the ack pool: "im not good
-    # enough" got "Fair enough.", which reads as agreeing with them, and "thats not great" got
-    # the same shrug at bad news. They are feelings, so they are answered like feelings.
-    "not_enough": (
-        "That's the tiredness talking, not the truth. What happened today?",
-        "I doubt that's the whole picture \u2014 you're being harder on yourself than you'd be "
-        "on a friend.",
-        "Not true. Nobody is only their worst day. What set this off?",
-    ),
-    # Someone measuring themselves against a role ("a bad dad") or a word ("an idiot"). The
-    # read-back the store gives these is the flattest reply there is, and a stock "sorry to
-    # hear that" fits any message, so each line names what they did to themselves.
-    "own_harsh": (
-        "That is a hard thing to say about yourself. What happened today?",
-        "You would not say it about a friend who said it about themselves. What went wrong?",
-        "One bad day does not make you bad at it. What happened?",
-    ),
-    # The same words about a habit rather than a role: "im a bad sleeper", "im a terrible
-    # dancer", "im a lousy swimmer". Nobody saying that is in distress, and the pool above told
-    # them their day weighed on their life, which is the therapist line STYLE.md rules out.
-    "own_described": (
-        "That is closer to a habit than a fact about you, and habits are the easiest things to "
-        "change.",
-        "Half the people you know would say the same about themselves, and nobody thinks less of "
-        "them for it.",
-        "I would not take that as a verdict on you. What is the worst of it?",
-    ),
-    "not_fair": (
-        "It isn't fair, and you don't have to be reasonable about it straight away. What happened?",
-        "You're right that it isn't. Some things really aren't, and being cross about it is fair.",
-        "That's a real thing to be angry about. Go on, what happened?",
-    ),
-    # The person was the one who was unfair: "i wasnt fair to her", "i snapped at my mum on the
-    # phone" then "i wasnt fair to her". Telling them "you're right that it isn't fair" agrees
-    # with the wrong thing; this takes the apology as an apology.
-    "own_fault": (
-        "That's the kind of thing most people only notice days later. What happened?",
-        "Owning it out loud is worth something \u2014 don't turn it into a second thing to feel "
-        "bad about.",
-        "Then be as kind to yourself about it as you'd be to them.",
-    ),
-    # Nothing but a reaction to what was just said: "thats scary", "how grim", "thats so
-    # annoying". The line carries no news of its own - the news is the turn before it - so the
-    # reply agrees and adds one steady thing. Asking "what happened?" here asks for what the
-    # person has just been told, and the pool that used to take these said "Thanks for telling
-    # me" and "Got it. Is there anything you'd like a hand with?" instead.
-    "react_fear": (
-        "It is. Nobody would be calm about that, whatever they say.",
-        "Fair. Things like that sit on you all day.",
-        "Yes, and it's fair to say it out loud. Tell me if you want to work out what to do.",
-    ),
-    "react_bad": (
-        "It is. You don't have to be sensible about it straight away.",
-        "Fair enough, and no wonder it's the whole of your head right now.",
-        "That's a lot to take in. Give yourself a day before deciding anything.",
-    ),
-    "react_annoyed": (
-        "It is. Being cross about it for a bit is fair enough.",
-        "Yeah \u2014 and it's the sort of thing that keeps niggling.",
-        "That would wind me up too.",
-    ),
-    # A sigh ("oh no", "oh dear") says the news has landed and nothing more, so it cannot be
-    # met with "It is." - there is no "it" in the line to agree about. It is met with the
-    # news, which is why none of these name a feeling the person did not name.
-    "react_sigh": (
-        "I know. That's a lot to land on you.",
-        "Yeah. It's fair to feel that before you do anything about it.",
-        "I know. You don't have to have a plan for it yet.",
-    ),
-    "react_good": (
-        "Glad to hear it.",
-        "That's lovely news.",
-        "Nice one. Say if you want a hand with the next bit.",
-    ),
-    # "me too", "same here", "so am i": a line that only says the turn before is true of them
-    # too. It carries no subject of its own, so the pool is chosen by what was agreed with: the
-    # wrong one congratulates somebody on their own complaint.
-    "agree_grim": (
-        "I know the feeling. It's not just you.",
-        "Half the street is with you on that one.",
-        "Join the club \u2014 it's grim out there.",
-    ),
-    # The one grumble line that names the thing itself, so it is only for a thing that spreads.
-    # "my back is killing me" / "me too" got "that one gets into everything", which is not a
-    # thing anyone says about a back.
-    "agree_weather": (
-        "You're not the only one \u2014 that one gets into everything.",
-        "I know the feeling. It's not just you.",
-        "Half the street is with you on that one.",
-    ),
-    "agree_good": (
-        "Good taste \u2014 I'm with you on that.",
-        "Ha, you and me both.",
-        "Now we're talking. Same here.",
-        "That's the right side of it to be on.",
-    ),
-    # Agreeing with news that is neither good nor bad: the nod is all there is to say, and it
-    # says it without the question at the end that comes after every stock line.
-    "agree_plain": (
-        "Then we're on the same page.",
-        "You and me both, then.",
-        "With you on that one.",
-    ),
-    # "me too" said into a death is the person saying they have had it too, and no cheerful
-    # line can meet it: not "Glad to hear it", and not a swap of stories either.
-    "agree_loss": (
-        "You as well \u2014 I'm sorry. That is a heavy thing to carry.",
-        "Then you know it too. I'm sorry it happened to you as well.",
-    ),
-    # The funny thing may have been theirs: "my cat fell in the bath" / "thats funny" is not a
-    # joke the bot told, so nothing here takes credit for it or promises another one.
-    "react_funny": (
-        "Ha \u2014 good.",
-        "Ha, that's a good one.",
-        "Ha. Fair enough.",
-    ),
-    "react_tired": (
-        "I know. That sort of tired doesn't lift with one early night.",
-        "Yeah. Worn out is the honest word for it.",
-        "It is. That's the kind of tired that builds up over days.",
-    ),
-    "not_great": (
-        "That sounds like a rough one. What's happened?",
-        "That's a flat way to put bad news. What is it?",
-        "Sorry to hear it. Tell me what went wrong.",
-    ),
-    # Saying they will do the thing we suggested ("will give it a go", "ok i will try that").
-    # The plain "ack" pool opened with "Fair enough.", which is a shrug at an offer, not a
-    # send-off for someone about to try something.
-    "try_ack": (
-        "Nice one — tell me how it goes.",
-        "Good. Let me know how you get on.",
-        "Hope it goes well — shout if it does not.",
-        "Sounds like a plan. Tell me how it turns out.",
-    ),
-    "no": (
-        "Fair enough.",
-        "No worries — say if you change your mind.",
-        "That's fine too.",
-    ),
-    "idk": (
-        "That's okay. Say what you do know and we'll work from there.",
-        "Take your time \u2014 there's no wrong answer here.",
-        "That's alright. Half of these things only come clear once you say them out loud.",
-    ),
-    # "i dont know" is an answer to what the bot just said, so the pool is chosen by that and not
-    # by the line. "No rush. If you tell me the options, I'll help you pick" was said to a person
-    # who had just been asked what was taking most of their day: there were no options on the
-    # table, and being offered help to pick one reads as the bot not listening.
-    "idk_asked": (
-        "That's alright \u2014 it's hard to put your finger on it sometimes. Say the first bit "
-        "that comes to mind.",
-        "No worries. Whatever comes to mind first is fine, even if it is small.",
-        "That's okay. I'm not going anywhere \u2014 say as much or as little as you like.",
-    ),
-    # After the bot has just heard something heavy, "i dont know" is the person saying they cannot
-    # name it, and naming it is the last thing to ask of them.
-    "idk_heavy": (
-        "That's alright. You don't have to put it into words.",
-        "That's okay. Some of it is just a fog at first \u2014 say whatever bit is easiest.",
-        "No pressure at all. It can sit here as it is.",
-    ),
-    # A choice was on the table, so this is the one pool that talks about options: it offers to
-    # weigh them rather than to "pick", which is not the person's to hand over.
-    "idk_choice": (
-        "No rush. Say the ones in front of you and I'll help you weigh them.",
-        "That's okay. Tell me what each one gives you and I'll say what I would do.",
-        "Take your time \u2014 put the two side by side and the answer usually shows itself.",
-    ),
-    "laugh": (
-        "Ha! Glad you liked it.",
-        "Ha — fair enough.",
-        "Glad that landed.",
-    ),
-    # A laugh at something of theirs rather than at the bot's joke (that is "laugh" above, which
-    # takes credit for it). Half of these ask what it was, because that is the next thing a friend
-    # says, and half do not, because a question at the end of every reply is a script.
-    "laughing": (
-        "Ha — the good kind of crying.",
-        "Ha, lovely. Nothing better than a thing that gets you like that.",
-        "Ha! Go on then, what was it?",
-        "That's a good laugh, that. Glad it got you.",
-        "Ha — the sort of laugh that sorts out a whole week.",
-        "Ha. What had you going?",
-    ),
-    "lol": (
-        "Ha!",
-        "Ha, quite.",
-        "Glad I'm amusing.",
-    ),
-    "tired": (
-        "That kind of tired needs an early night, not more coffee. Put your feet up when you can.",
-        "Long one? Give yourself half an hour doing nothing before the next thing.",
-        "Call it early tonight if you can. Whatever is left can keep until tomorrow - it is not "
-        "going anywhere.",
-        "Go to bed now rather than after one more thing, if the day allows it. That one more thing "
-        "is what makes tomorrow tired too.",
-    ),
-    "stressed": (
-        "That's a lot on your plate. Pick the one thing with a real deadline and park the rest for an hour.",
-        "Write it all down, then do the smallest item on the list. Stress shrinks once it's on paper.",
-        "Step away from the screen for ten minutes — stress makes everything look urgent.",
-    ),
-    # Any illness that is not a cold: a fever, a migraine, a bug, or a plain "i feel ill". Rest,
-    # fluids and sleep are true of all of them, and nothing here names a cold remedy.
-    "ill": (
-        "That's rotten. Take today down a gear — food, water and an early night, and don't push "
-        "through it.",
-        "Sorry to hear it. Sleep is the thing that actually helps; the rest is just comfort.",
-        "Ugh, that's miserable. Rest properly when you can, drink more than you think you need, "
-        "and give it a few days before you start worrying about it.",
-    ),
-    # The same illness said with the part that is running: honey and lemon is honest for a throat,
-    # a cough or a cold, and the first day of a cold really is the worst of it.
-    "cold": (
-        "Ugh, the first day of it is the worst. Rest, warm drinks and an early night, and it is "
-        "usually milder than it feels right now.",
-        "That's rotten. Take it easy today — honey and lemon, and don't push through it.",
-        "Sorry to hear it. Sleep is the thing that actually helps; the rest is just comfort.",
-    ),
-    # The part of the body a line names picks the advice, because the cold's lines are wrong for
-    # the others: "honey and lemon" is no help with a migraine, and "sleep is the thing that
-    # actually helps" is no answer to a night of throwing up. `bot/understanding/body.py` reads
-    # the part, so a new part is a new pool here and nothing else.
-    "ill_head": (
-        "Water, food, a painkiller and twenty minutes away from a screen sorts most headaches. A "
-        "migraine wants a dark, quiet room and something for it early. The worst headache you "
-        "have ever had, or one with a weak arm, a slurred word or a stiff neck, is a same-day "
-        "job for a doctor.",
-        "Take something for it now rather than pushing on, drink a glass of water and lie down "
-        "somewhere dark for half an hour. One that keeps coming back for days, or that wakes you "
-        "up, is worth a GP appointment.",
-    ),
-    "ill_throat": (
-        "Honey and lemon in warm water is the thing that actually soothes it, and warm drinks "
-        "beat cold ones. If it hurts to swallow or you have a fever with it, get it looked at - "
-        "strep needs antibiotics and the rest does not.",
-        "Sore throats are mostly viral, so rest, fluids and something for the pain; it usually "
-        "eases in three or four days. Worth a doctor if it is one-sided and bad, or if your voice "
-        "has gone for more than a couple of weeks.",
-    ),
-    "ill_temperature": (
-        "Fluids and paracetamol, and light clothes rather than a pile of blankets - a fever is the "
-        "body doing its job, and the number matters less than how you feel. Get seen the same day "
-        "if it comes with a stiff neck, a rash that does not fade under a glass, trouble "
-        "breathing, or if it lasts more than three days.",
-        "Rest, plenty to drink and something to bring it down; take it easy until it has been "
-        "gone for a day. A fever with a stiff neck, a new rash or breathlessness is not a wait-and-"
-        "see: ring someone today.",
-    ),
-    "ill_stomach": (
-        "Sip rather than gulp: water or an oral rehydration drink, little and often, and plain "
-        "toast or rice when you can face it. Get help if you cannot keep any fluid down for a "
-        "day, if there is blood, or if the pain settles in one spot and gets worse.",
-        "Most stomach trouble is something you ate or a bug passing through: fluids first, plain "
-        "food, no dairy or alcohol until it settles. Ring a doctor if you cannot keep water down "
-        "or the pain moves to one side and gets sharper.",
-    ),
-    "ill_chest": (
-        "A chest infection that brings breathlessness, a fever or a cough with mucky stuff in it is "
-        "worth getting looked at rather than riding out - and sooner if you are older, pregnant or "
-        "asthmatic.",
-        "Rest and fluids help, but a chesty cough with a fever or any breathlessness needs a "
-        "proper listen to your chest. Ring today if breathing gets harder or your lips look pale "
-        "or blue.",
-    ),
-    "ill_teeth": (
-        "Book the dentist today rather than waiting for it to settle - pain in a tooth or a gum "
-        "usually means something that needs treating, and painkillers only cover it. Until then, "
-        "take ibuprofen or paracetamol and keep the area clean; do not put an aspirin against the "
-        "gum. Swelling in your face or jaw, a fever with it, or a tooth you cannot bite on is a "
-        "same-day call.",
-        "A dentist is the answer here, not a home remedy, because this does not heal on its "
-        "own: salt water rinses and a painkiller only hold it until the appointment. Ring for an "
-        "urgent slot, and be seen the same day if the swelling spreads down the jaw or closes "
-        "your eye.",
-    ),
-    "ill_ear": (
-        "Something for the pain and a warm flannel against it is what helps an earache while it "
-        "settles, which most do in two or three days. Do not put anything in it, cotton buds "
-        "included. Get it looked at if it is still there after three days, if there is discharge, "
-        "or if your hearing has gone muffled.",
-        "Earache is usually a passing infection: painkillers, warmth, and no poking about inside "
-        "it. A child with a sore ear and a fever, or an adult whose hearing has dropped, wants a "
-        "GP rather than another night of it.",
-    ),
-    "anxious": (
-        "Worry like that is usually mostly 'what if'. Write down what's actually at stake and it gets smaller.",
-        "Nerves before something big are normal. Slow breaths for a minute genuinely help.",
-        "That sounds unsettling. Is there one thing you can check or ask about that would settle it?",
-    ),
-    # "worried about my mum" is worry about a person, and "worried about money" is worry about a
-    # thing: neither is nerves before an event, so neither gets the breathing line. The pools are
-    # kept apart from "anxious" because that pool presumes something big is coming up.
-    "panic": (
-        "That is a frightening thing to be in the middle of, and it does pass: a panic attack "
-        "usually peaks and fades within about ten minutes. Breathe out for longer than you "
-        "breathe in, and stay with me.",
-        "Panic attacks feel like something terrible is about to happen even when nothing "
-        "changes, and they ease off on their own. Slow the out-breath, put both feet on the "
-        "floor, and tell me where you are.",
-        "That sounds horrible, and it will pass. Sit down if you can, name five things you can "
-        "see and hear, and keep breathing out slowly. I am here.",
-    ),
-    "worry_person": (
-        "Worrying about someone you love is heavy. What's the part that weighs on you most?",
-        "That's a lot to carry, and most of it is not yours to fix. Tell me what's been happening.",
-        "It's hard watching someone you love struggle, and it's allowed to get to you.",
-    ),
-    "worry": (
-        "That's a fair thing to have on your mind. What's the part that's weighing on you most?",
-        "Worry with no end date on it is the tiring kind. Say the worst case out loud and it usually gets a bit smaller.",
-        "Anyone would have that on their mind. What's the bit you can actually do something about?",
-    ),
-    "missing": (
-        "Missing someone is the price of them mattering. It comes back on its own, and the gaps "
-        "between the waves get longer, even when it does not feel like it yet.",
-        "Of course you do. It goes in waves, and the waves get further apart.",
-        "That sounds exhausting to carry around all day. Saying it out loud to someone who knew "
-        "them helps some people.",
-    ),
-    "sad": (
-        "That's a heavy feeling, and it's fair to have it. Be kind to yourself today.",
-        "Sorry to hear that. A walk and someone to talk to usually help more than sitting with it.",
-        "That sounds rough. If it's been hanging around for a while, talking to someone you trust is worth it.",
-    ),
-    # The tears themselves. "i want to cry" and "i feel like crying" named no mood word, so
-    # they were read here and answered out of the sad pool - "A walk and someone to talk to
-    # usually help" - which is advice for a low that has been sitting there, not what a person
-    # on the verge of tears needs to hear. These say the thing is heavy and then ask, because a
-    # person who says they want to cry has a reason and has not said it yet.
-    "tears": (
-        "That's a lot to be holding in. What's brought it on?",
-        "It sounds like something has been building. Do you want to tell me what happened?",
-        "Tears like that usually mean something needs saying. Has it been building up?",
-        "I'm glad you said it rather than sitting with it on your own. What's behind it?",
-        "I'm here. Take your time - what's going on?",
-    ),
-    # Tears at a thing built to move you are not a low, so the sad pool's "be kind to yourself
-    # today" is the wrong reply to them - and passing the turn on was worse: "i cried at a film
-    # last night" got "That sounds rough. If you want, I can help you think through what to do
-    # next", which reads as though the film had been a problem to solve. What the person has
-    # said is that something got to them, so the reply says that back and asks about the thing.
-    # The lines are written for a film, a song or an advert, since that is what MOVED_BY names.
-    "moved": (
-        "Something in it got through, then. What was it about?",
-        "Nothing wrong with a bit of that. What got you?",
-        "That's what the good ones are for. What was it?",
-        "A bit of that does you good. What was it?",
-        "They are built to do that to people, so no need to be sheepish about it. Has it been "
-        "like that a while?",
-    ),
-    # The line after a low that says the obvious things are not working: "nothing helps",
-    # "ive tried everything". It used to come back as "I'm here if you want to dig into any of
-    # that", which is the bot saying nothing at the moment the person says the advice is not
-    # enough. Each line either asks what has been tried or says the length of it is the thing to
-    # take somewhere, because those are the two things left to do about it.
-    "nothing_helps": (
-        "That's the part that wears people down - trying things and none of it shifting. Has "
-        "anything helped even a little?",
-        "Then it is not you being bad at it. When the small things have not moved it and it has "
-        "been going on for weeks, say all of that to a GP rather than trying harder alone.",
-        "Fair enough. Then let's not do more of the same - what does a hard day look like just "
-        "now?",
-        "I'm sorry. Nothing helping is its own kind of tiring. Is there anyone near you who "
-        "knows it has been like this?",
-        # Not every line asks: a person who says nothing helps is often asking what to do next
-        # in the same breath, and a line that names the step leaves something to answer with.
-        "That is a lot of trying with nothing to show for it. If it has been like this for a few "
-        "weeks, take the whole list to a GP rather than trying harder on your own.",
-    ),
-    # The person is not naming a mood, they are saying the days are not working: it needs a
-    # warm answer and a question that fits that, not "be kind to yourself today".
-    "not_coping": (
-        "That's a lot to be carrying on your own. What's the heaviest part of it just now?",
-        "It sounds like you're running on empty. What would take some weight off this week?",
-        "I'm glad you said it out loud. Is there anyone around you who knows it's like this?",
-        "When it's like that, the days get very long. Has it been like this a while, or did "
-        "something happen?",
-        # Not every reply ends with a question: a person who says this twice should not be
-        # asked something twice.
-        "That sounds properly draining. Tell me what a hard day looks like just now - sleep, "
-        "people, or getting through the afternoon.",
-    ),
-    # "i feel rubbish today" is a bad day, not a disclosure: it takes the same shape as the sad
-    # pool but it must not be told "I'm glad you said it out loud", because a flat afternoon is
-    # not a confession. "i feel awful" can also be a jab or a hangover.
-    "bad_day": (
-        "Rubbish day. What's been the worst of it?",
-        "That's a flat one. What would make today a bit easier?",
-        "Sorry - that's a rotten way to feel. Has it been like that long?",
-        "That sounds like a heavy day. Want to tell me what's behind it?",
-        # Enough of the pool ends without a question that a person who says this twice is not
-        # asked something twice.
-        "It is allowed to be a bad day. Nothing needs fixing this minute.",
-    ),
-    # The two hedges on the answer to "how are you", kept apart from `bad_day` because neither of
-    # them says the day is bad: "cant complain" answered with "Rubbish day" is the bot hearing a
-    # worse week than the person described, and "hanging in there" answered with "That's a rotten
-    # way to feel" is the same thing one degree louder than the person said it.
-    "hedged_ok": (
-        "Steady is underrated. What's the day got in it?",
-        "That'll do. Anything you're looking forward to?",
-        "Fair enough — no news is decent news. What are you up to?",
-        "Good enough is good enough. What's been happening?",
-        "Can't ask for much more than that. What's the plan?",
-        "Sound. What are you doing with the rest of it?",
-    ),
-    "hedged_low": (
-        "Sorry to hear it. What's making it that way?",
-        "What's dragging it down?",
-        "That's not nothing. Want to say what's up?",
-        "Sounds like a long one. What's going on?",
-        "Ah, that's a flat sort of day. What's behind it?",
-        "Not much fun, that. Tell me what's been going on.",
-    ),
-    "guilty": (
-        "Guilt like that usually means you care, which is not the same as having got it wrong.",
-        "That kind of guilt sits heavy. Say it out loud to one person you trust and it weighs less.",
-        "Feeling guilty about it is not a verdict. Be as kind to yourself as you would be to a friend telling you the same thing.",
-    ),
-    "lonely": (
-        "That's a hard one. A message to one person you like, even a short one, usually helps.",
-        "Loneliness is rough. A weekly club or class is the quickest way to see the same faces again.",
-    ),
-    # Being taken for granted: the reply names the thing and gives one small move, rather than
-    # sympathy alone ("That sounds really hard"). Nothing about cooling off - the quarrel pool is
-    # for someone who is cross with a person in front of them, and this is not a quarrel yet.
-    "unappreciated": (
-        "That wears you down quietly. Name one thing you want noticed and say it plainly - people "
-        "rarely do it on purpose.",
-        "Being taken for granted is a slow drain. Pick the one job you would most like shared and "
-        "ask for that, rather than the whole list at once.",
-        "It is worth saying out loud: \"I did all of that, and I would like it noticed.\" Most "
-        "people take what is done quietly as fine.",
-    ),
-    # Back in touch, said as the small thing it is: one person, one message, no apologising for
-    # the gap. A big plan ("join a club, meet people") is the reason people stay away.
-    "lonely_apart": (
-        "That is easy to do and hard to undo, and it takes less than it feels like: one message "
-        "to the person you miss most, saying you thought of them. No apology for the gap, just "
-        "the message.",
-        "Friendships go quiet more than they break. Pick the one person you would most like to "
-        "hear from and send them something small today \u2014 a thing they would find funny, or a "
-        "day you are free.",
-        "Going quiet happens to most people, and the way back is one person at a time. Ask one of "
-        "them to do one specific thing on one day, and let that be the whole of it.",
-    ),
-    # The turn after it: "what can i do about it" is asking for the step, and the answer has to be
-    # about getting back in touch rather than about a day out or a hedge.
-    "lonely_step": (
-        "Start with one person and one small thing: a message today saying you thought of them, "
-        "and a day named for a coffee. Nothing bigger than that to begin with.",
-        "Ring the person you would most like to see, or text if a call is too much, and put a day "
-        "on it. One name is enough to start with.",
-        "Send one message to one person this week \u2014 not an apology for being quiet, just "
-        "something that says you were thinking of them. The rest gets easier after that.",
-    ),
-    # A denied feeling is not a feeling: "im not tired" must not get the tired advice. What is
-    # left to say is short and warm, because the person just ruled something out - and it asks,
-    # because a denial is nearly always narrowing the cause ("i keep waking at 4am" / "im not
-    # stressed"), so the useful turn is the one that asks what it is. The old pool congratulated
-    # ("Good going, then.", "Noted, and good."), which read as not listening.
-    "not_feeling": (
-        "Right — so what's actually going on?",
-        "Fair enough — what's going on, then?",
-        "Noted — so what is it, then?",
-        "Right, not that one. What's behind it?",
-    ),
-    # A mood that has gone on for weeks is not a bad day, and the pools above presume one: the
-    # "anxious" pool even presumes a date ("nerves before something big"), which reads as not
-    # having listened when the person said "all the time". The persistence is the thing worth
-    # answering, and the answer is the one a friend gives: say it to a GP, it is treatable, and
-    # do not wait for it to lift by itself.
-    "ongoing": (
-        "Weeks of it is not a bad day any more, and it is worth saying to a GP rather than "
-        "waiting it out: write down how long it has been going on and what has changed since it "
-        "started. Talking therapy is something you can refer yourself to in most areas, and it "
-        "helps more than waiting does.",
-        "When it is most days rather than one, the next step is a GP appointment — that is "
-        "exactly what they are for, and this is treatable at this stage. Keep the sleep and the "
-        "moving about, and tell one person the whole of it rather than the edited version.",
-        "That long is worth a proper look rather than more willpower: book the GP, and take a "
-        "week of notes with you so you do not have to remember it all in the room. Being flat "
-        "or wound up for weeks is common, and it is the kind of thing that shifts with help.",
-        "Weeks of feeling like that wears anyone down. Book the GP and say how long it has been "
-        "going on — and until then, one small thing a day you would still do on a bad day beats "
-        "a plan you cannot keep.",
-    ),
-    # The pool above is written for weeks, and only a line that says how long or how often has
-    # earned it: "i feel sad all the time" has, but "i keep crying" only says it happens again.
-    # Answering that with "weeks of it" asserts a duration the person never gave, which is the
-    # kind of not-listening a fluent reply is worst at. What is worth answering either way is the
-    # coming back itself, so that is what these lines say, with the same next step.
-    "recurring": (
-        "The fact that it keeps coming back is worth mentioning to a GP: say how often it "
-        "happens and what sets it off, and take a few notes with you.",
-        "It is the coming back that makes it worth a GP appointment rather than more willpower: "
-        "note when it happens and what it is like, and take the page with you.",
-        "A thing that keeps coming back is worth saying out loud to someone who can help: book "
-        "the GP, say how often it happens, and do not wait for it to lift by itself.",
-    ),
-    # The pools above are advice, and advice given twice in a row is the one thing a friend would
-    # not do: "i feel anxious all the time" then "i feel low all the time" got two GP sentences
-    # back to back, and the third turn got the first sentence again word for word. The person
-    # keeps talking about it, so the useful move is not to say the GP a third time but to do the
-    # thing the advice asked for - the notes, or the one person to tell. These lines assume the
-    # last turn already made the appointment the next step (the marker in `respond`), so they
-    # never have to say it again and never claim anything the person has not said.
-    "recurring_next": (
-        "Then the notes are the part worth doing now, since they are what makes the appointment "
-        "easy: what sets it off, and how often a bad stretch comes. A page is plenty.",
-        "You know the next step already, so what would make it easier to say out loud in the "
-        "room - the thing that sets it off, or what a bad day is like? Both are worth a line.",
-        "Rather than say the same thing twice: is there one person you could tell the whole of "
-        "it to this week? Saying it aloud once makes the appointment shorter.",
-    ),
-    "bored": (
-        "Boredom is a good excuse for a walk with a podcast — twenty minutes usually resets it.",
-        "Try something with your hands: a new recipe, a jigsaw, or tidying one drawer.",
-        "Put on something short and funny, or text someone you haven't spoken to in a while.",
-    ),
-    "annoyed": (
-        "Fair enough. Say it out loud to whoever caused it, once you've cooled off.",
-        "Annoying. Walk it off for ten minutes before you reply to anyone.",
-        "That would wind me up too. Get it out of your system, then decide what's worth doing.",
-    ),
-    # A line that is cross with the person *themselves* ("im so annoyed with myself", "im so
-    # cross with myself") is not annoyance at somebody else, and the pool above answers a
-    # quarrel they are not having: "say it out loud to whoever caused it" and "before you reply
-    # to anyone" put a second person in a line about their own mistake. Nothing here tells them
-    # how to feel, and nothing here asks a question - the thing to do with a person who has just
-    # been hard on themselves is to say it is smaller than they think.
-    "at_myself": (
-        "Being cross with yourself is a heavier thing to carry than the mistake was. It is "
-        "already over, and it is not a verdict on you.",
-        "That is a hard way to talk to yourself over something small. Everyone does it, and it "
-        "is over already.",
-        "Annoying, and still smaller than it feels right now. Give it twenty minutes and it "
-        "will have shrunk to what it is.",
-        "Fair enough - and go gently. The thing that went wrong has already happened; being "
-        "angry about it does not undo any of it.",
-        "That is the sort of thing that stays with you all evening. It was a mistake, not a "
-        "measure of you.",
-    ),
-    "venting": (
-        "That would do my head in too. Has it been going on long?",
-        "Annoying. Has it been like this long, or is today just a bad one?",
-        "That would get to me as well. What have you tried so far?",
-        "Fair enough, that would wear anyone down. What do you want to do about it?",
-    ),
-    # Asked for the news, the honest answer is that there is none, and then the conversation goes
-    # back to the person: "got any good news" is small talk, not a request for a briefing.
-    "no_news": (
-        "Nothing to report here - what's new with you?",
-        "None that I know of. What's been the best bit of your week?",
-        "Not much on my side. Tell me yours and I'll count it as news.",
-    ),
-    # A good mood is not good news: "im so happy today" and "feeling great today" have nothing
-    # that happened in them, and "That's great news!" told the person an event they had not
-    # mentioned. Every line here answers the mood itself, and there are four of them so a chat
-    # that stays cheerful does not run the pool out and fall back to saying the line back.
-    "happy": (
-        "Love that. Anything nice planned to go with it?",
-        "Good! That's a nice thing to hear.",
-        "That's a good feeling to carry into the rest of the day.",
-        "That's a good place to be. Enjoy it.",
-        "Nice one. Days like that are worth noticing.",
-    ),
-    # The news is real and the person has just said it did not land: "i feel nothing after good
-    # news", "we got good news and i feel flat". The pool above congratulates ("Good! That's a
-    # nice thing to hear.") a person who has said the opposite, and the pools for a low talk
-    # about a walk or a bad day, which is not what this is. What a friend says is that the two
-    # things are separate and that nothing is wrong with them for it.
-    "good_news_not_landed": (
-        "Good news that does not land is its own strange thing, and it is more common than "
-        "people say. It usually catches up in a few days.",
-        "The news and the feeling can be two different things, and that is allowed. It says "
-        "nothing about you that the feeling has not arrived yet.",
-        "That is a hard one to sit with: the good thing is real and you cannot feel it. Give it "
-        "a few days before you read anything into it.",
-    ),
-    # The reply to a verdict on their own life (see `_their_own_call`): the person has said how
-    # they read it, so the reply agrees and adds nothing to do. No advice (there is nothing
-    # broken), no sympathy (nothing sad was said) and no question (they did not ask for one).
-    "own_call": (
-        "Then it's the right thing for you, and nobody else's view of it counts.",
-        "Good \u2014 you're the one living it, so your read on it is the one that matters.",
-        "Fair enough. It's worth saying out loud when a thing works, not only when it doesn't.",
-        "Then leave it as it is. Not everything that looks odd from outside feels odd from inside.",
-        "Right \u2014 and you'd know better than anyone, having done it.",
-        "Good. Sounds like you got that one right the first time.",
-        "Then there's nothing to fix, is there. Glad it worked out.",
-    ),
-    # Being pleased with yourself is not the same as having good news: there is nothing coming
-    # up to ask about, and "make the most of it" reads as though the good thing were luck. The
-    # reply a friend gives says the person is right to be pleased, and does not add a question.
-    "proud": (
-        "And so you should be. Whatever it took, you did that.",
-        "That's worth being pleased about — don't talk yourself out of it.",
-        "Good. Hold on to that one: you earned it.",
-    ),
-    # Relief, kept apart from the celebration above because nothing was won and nothing was
-    # announced: the thing that was expected did not happen, or it is finally over. Every line
-    # asks about the thing itself, so the answer is the same for the scan that came back clear
-    # and for the illness that has ended.
-    "relieved": (
-        "That's a weight off. What were you braced for?",
-        "Relief makes sense - that sounds like it had been sitting on you a while.",
-        "Good. Does it feel finished now, or is there still a bit to come?",
-    ),
-    "rough_day": (
-        "Those days are draining. Get the food and the rest in first, and leave the rest till tomorrow.",
-        "Rough one. A shower, something warm to eat and an early night usually resets it.",
-        "Been one of those? Park it for tonight — most of it will look smaller in the morning.",
-    ),
-    # A mind that will not hold still (see _scattered). The person has not said what is in the
-    # list, so the honest reply is one small concrete thing to do about the feeling itself, not a
-    # question that asks them to explain it and not "be kind to yourself".
-    "scattered": (
-        "That's a lot of open tabs. Write down the three things that actually have to happen "
-        "today and let the rest wait.",
-        "Yeah, days like that get away from you. Ten minutes away from the screen, then one thing "
-        "start to finish.",
-        "Nothing goes in while it's like that. Pick the smallest real job on the list and do only "
-        "that one, then look again.",
-        "Food and a walk clear more of it than another coffee does. Give it twenty minutes away "
-        "from the screen, then look at the list again.",
-    ),
-    # Not understanding something is a feeling with nothing named yet: the person cannot say
-    # what they are missing, or they would have said it. So the reply is short, asks for the one
-    # bit, and promises to put it plainly - not "Thanks for telling me", which is what the bot
-    # says to a message it heard nothing in, and not the sad pool, which offers a walk to
-    # somebody who is trying to follow a letter from the council. Nothing here presumes the
-    # thing is difficult or that they are upset.
-    "confused": (
-        "Tell me the bit that doesn't add up and I'll put it in plain words.",
-        "Which part is clear and which part is foggy? Start where it stops making sense and "
-        "we'll take it from there.",
-        "Say it the way it is in your head, gaps and all, and I'll untangle what I can.",
-    ),
-    # The line after the question, when it does not say what the missing bit was: "i thought i
-    # had it and now i dont". Nothing in it names a thing to answer, and the question has already
-    # asked once - so this asks where it slipped, which is the one thing that moves it on.
-    "lost_thread_more": (
-        "Then start at the last bit that made sense \u2014 which part was clear?",
-        "Fair enough. What was the last bit that made sense before it went foggy?",
-        "Then it slipped somewhere. Where did it stop lining up?",
-    ),
-    # "I feel like ..." names a state with no single word for it, so no word in FEELINGS
-    # catches it (see _feel_like). What the person compares themselves to decides the reply:
-    # too little done, too much landed on them, no idea where they are going, or nobody on
-    # their side. Each line answers what they said instead of naming the feeling back at them.
-    "feel_like_not_enough": (
-        "You are being measured against a version of the day that nobody has. However short it "
-        "feels, the list of what you actually did is longer than that voice admits.",
-        "That voice gets louder the more tired you are, and it's a rotten judge. Pick the one "
-        "thing that matters most today and let the rest slide.",
-        "Feeling like that usually means you care about doing it well, not that you're failing "
-        "at it. Nobody gets it all done; the good ones just stop scoring themselves at night.",
-        "There is always one more thing that could have been done - that is true of every "
-        "single person. Stopping when the day is over is the whole trick of it.",
-    ),
-    "feel_like_good": (
-        "That's a good thing to hear. Whatever you have been doing, keep it going another week "
-        "before you draw conclusions.",
-        "Good. The days you feel like yourself are the ones that show you what works, so notice "
-        "what is different this week.",
-        "Nice one. Don't let the next flat day talk you out of this.",
-    ),
-    "feel_like_load": (
-        "The unfairness is what wears you down, not the jobs themselves. Say that part out "
-        "loud to them instead of doing one more in silence.",
-        "Being the one who notices everything is a job nobody thanks you for. Put the list on "
-        "the fridge and give half of it away.",
-        "You're not imagining it. If it all lands on you, name it once, plainly, and see what "
-        "they say.",
-        "That's a fast road to resentment, and it doesn't fix itself. Say what you're carrying "
-        "once, plainly, and see if they pick any of it up.",
-    ),
-    "feel_like_adrift": (
-        "Most people don't know either — they just have a better story for it. Work out the "
-        "next month before the next ten years.",
-        "Not knowing what you want yet isn't a fault in you. Pick something you'd like to be "
-        "true in a year and take the smallest step towards it.",
-        "Plans that stick usually start with one thing you're actually curious about. What's "
-        "the part of your week you'd keep if you could?",
-    ),
-    "feel_like_left": (
-        "Groups are bad at noticing who they've left out, and being among people makes it feel "
-        "worse. Message the one person you'd genuinely want to see.",
-        "That's a lonely spot, and it says more about the group than about you. One good "
-        "friend beats a table of polite ones.",
-    ),
-    "feel_like": (
-        "That's a miserable place to be, and 'it'll pass' is no help. What's the worst part of "
-        "it right now?",
-        "That's a real thing to feel, not a mood to snap out of. Say what's behind it and we'll "
-        "look at it properly.",
-        "I'd be feeling it too. Is it one thing dragging on, or a pile of them at once?",
-    ),
-    "against_me": (
-        "Some weeks are like that, and it's rarely one big thing. Name the two worst bits and "
-        "we'll work out which of them are actually yours to fix.",
-        "When everything goes wrong at once it's usually a run of small things, not a curse. "
-        "Start with the one costing you the most.",
-        "That's a rough run. The quickest way out is one fixed thing, so pick the smallest of "
-        "them today.",
-    ),
-    # Saying what you cannot do (see _stuck). Each line names the thing the person said, so it
-    # could not be pasted onto a different message, and offers one small concrete thing or one
-    # gentle question — never both, and never a diagnosis.
-    "stuck_mornings": (
-        "Mornings that heavy are worth listening to. How long has it been like that?",
-        "That's a hard way to start a day. Getting up is the worst bit of it, most days.",
-        "Then aim small: up, a shower, one thing out of the house, and nothing else on the list.",
-    ),
-    "stuck_sleep": (
-        "Sleep that won't come makes everything else twice as hard. Same getting-up time every day is the bit that steadies it.",
-        "Nights like that wear you down. If it's been weeks, say so to a GP — it's common and there's real help for it.",
-        "Lying there trying harder doesn't work, sadly. Get up after twenty minutes, something dull and warm, then back to bed.",
-    ),
-    "stuck_eating": (
-        "Appetite goes when things are heavy. Little and often beats one proper meal: toast, soup, a bit of fruit.",
-        "Eating nothing makes the rest of it worse. Something small every few hours is enough for now.",
-    ),
-    # Days, not an appetite: this is the pool for a span of two days or more, where the answer is
-    # a call today rather than a plate of toast.
-    "stuck_eating_days": (
-        "Days without eating is the point to say it out loud to a GP, or ring 111 today if you feel faint: keep water or squash going, and something small if it will go down.",
-        "Going days without eating is worth a call today rather than a wait - 111 can tell you who to see, and a bit of water or juice in the meantime is not nothing.",
-    ),
-    "stuck_sleep_days": (
-        "Nights without sleep add up on you: tell a GP this week, and ring 111 if you are dizzy or unsteady on your feet.",
-        "A run of sleepless nights is worth saying to a GP rather than riding out - keep the getting-up time fixed while you wait.",
-    ),
-    "stuck_people": (
-        "Staying in is the easy option and it makes the day smaller. One short thing out is easier than a plan.",
-        "Seeing people takes more out of you when you're low. Start with one person you don't have to perform for.",
-    ),
-    "stuck_work": (
-        "Work that's hard to face is worth naming. Is it one thing there, or the whole idea of going in?",
-        "If it's most days, that's worth telling someone — your manager, or a GP. You don't have to explain it well to ask for help.",
-    ),
-    "stuck_focus": (
-        "Concentration goes first when you're running on empty. Ten minutes on, five off beats an hour of staring at it.",
-        "Nothing goes in when you're like that. Write the one thing down and do that, then stop.",
-    ),
-    "stuck_effort": (
-        "\"Can't be bothered\" is usually tiredness in disguise. Pick the smallest thing that would make today lighter.",
-        "Then don't force it. One small thing done beats a list you'll only feel bad about.",
-    ),
-    "stuck": (
-        "That sounds like a lot to carry. What would make today a bit lighter?",
-        "That's a heavy place to be. Is there one thing that would help, even a small one?",
-    ),
-    "here": (
-        "Yep, I'm here — what's up?",
-        "Here! What's on your mind?",
-        "Still here. What can I help with?",
-    ),
-    # The line says a question is coming and names nothing yet ("can i ask you something",
-    # "i need some advice"), so the one thing to do is make it easy to go on.
-    "opening": (
-        "Of course — go ahead, what's on your mind?",
-        "Ask away, I'm listening. What's going on?",
-        "Sure. Tell me what's happening and we'll work it out together.",
-    ),
-}
+# The reply pools live in chat_replies.py: this file was 19 KB from the upload budget alarm
+# and `REPLIES` is 61 KB of it. Same dict object, imported - not a copy.
+from .chat_replies import REPLIES
 
 # Small opinions: the bot has a view and says it briefly. A "do you like X" line with no
 # entry here is left alone, rather than answered with a line that would fit anything.
@@ -4635,28 +3757,49 @@ BOT_ABOUT = (
 # added there is asked about here too. "do you ever get <word>" and "are you ever <word>" take
 # any of them, and `_self_only` keeps a line that goes on to name something else for the answer
 # it belongs to ("do you get annoyed when the wifi drops").
-BOT_FEELING_WORDS = frozenset(
+# The feeling lists are lists of phrases, and a phrase leaves its function words in the set on
+# their own ("nothing to look forward to" leaves "to", "there", "for", "about"). A function word is
+# never the name of a feeling, and reading one as the mood is how "were you there before" became
+# "Never there, no - there is nothing in me for it to happen to" instead of "I wasn't there, so you
+# know better than I do". "down" and "off" are left in: people do feel those.
+BOT_NOT_A_FEELING = frozenset((
+    "about", "been", "before", "done", "for", "have", "like", "more", "much", "not", "out",
+    "over", "than", "the", "there", "too", "under", "what"))
+BOT_FEELING_WORDS = (frozenset(
     word for _name, words in FEELINGS for phrase in words for word in phrase.split()
     if word.isalpha() and len(word) > 2) | {
-    word for word in lexicon.FEELINGS if word.isalpha() and len(word) > 2}
+    word for word in lexicon.FEELINGS if word.isalpha() and len(word) > 2}) - BOT_NOT_A_FEELING
+# How often the ask is put, and when: the words in these two slots qualify the mood or the day
+# rather than name anything, so any of them leaves the bot the subject. "are you ever cheerful"
+# was answered and "are you always this cheerful" got the search hedge, and "are you happy" was
+# answered while "were you happy before" got it too - the only difference was a word in one of
+# these slots, which is why they are slots and not one line's wording (trim-candle, #uncertainty).
+BOT_FREQUENCY = (r"(?:ever |really |sometimes |honestly |actually |often |always |usually |"
+                 r"normally |constantly |generally |every day |all the time )*")
+# The tail is how much of the ask there is, or when it was: a time word says which stretch of the
+# bot's life is being asked about, and a program's answer is the same for all of them.
+BOT_HOW_MUCH_OR_WHEN = (
+    r"(?: a lot| so much| much| at all| before| previously| in the past| in the past few days|"
+    r" lately| recently| these days| at the moment| right now| still| any ?more|"
+    r" about (?:things|stuff|everything|the future|nothing in particular))?")
+
 BOT_FEELING_ASK = re.compile(
     # "do you ever get annoyed", "can you feel sad", and the same ask with the verb left out:
     # "are you ever grumpy", "are you sad". The mood word itself is kept, because the answer has
     # to name it: the arbiter drops a reply that answers a question without naming any of it, so
     # the flat pool below was thrown away on the first turn and the person got the search hedge
     # ("are you ever stressed", "do you ever get sad", "are you ever grumpy").
-    r"\b(?:(?:do|can|did) (?:you|u|ya) (?:ever |really |sometimes |honestly |actually |often )*"
+    r"\b(?:(?:do|can|did|have) (?:you|u|ya) " + BOT_FREQUENCY +
     r"(?:get|feel|be|become|been) "
     # "do you worry", "do you panic": the mood word is the verb, so there is no verb slot.
-    r"|(?:do|did) (?:you|u|ya) (?:ever |really |sometimes |honestly |actually |often )*"
+    r"|(?:do|did) (?:you|u|ya) " + BOT_FREQUENCY +
     r"(?=(?:worry|panic|fret|stress|obsess|brood|sulk|mope)\b)"
-    r"|(?:are|were) (?:you|u|ya) (?:ever |really |sometimes |honestly |actually |often )*)"
+    r"|(?:are|were) (?:you|u|ya) " + BOT_FREQUENCY + r")"
     r"(?:really |very |so |quite |too |that |this |a bit )*"
     r"(?P<mood>" + "|".join(sorted(BOT_FEELING_WORDS, key=len, reverse=True)) + r")\b"
     # "do you worry a lot", "are you ever stressed at all": the tail is how much of the ask
     # there is, not a new subject, so it is taken with the question rather than left over.
-    r"(?: a lot| so much| much| at all| about (?:things|stuff|everything|the future|nothing"
-    r" in particular))?")
+    + BOT_HOW_MUCH_OR_WHEN)
 # The word is said back, and the frame is chosen by the word: "no stress on my side" is English
 # and "no stressed on my side" is not. A word ending in one of these is the name of a feeling
 # ("worry", "sadness", "frustration"), not a description of one.
@@ -4672,7 +3815,7 @@ FEELING_NAMES = frozenset((
 # noun rather than named one by one. Answered with the same pool, and the word "moods" said back,
 # because the reply has to name what it is answering.
 BOT_MOOD_ASK = re.compile(
-    r"\b(?:(?:are|were) (?:you|u|ya) (?:ever |really |sometimes |honestly |actually |often )*"
+    r"\b(?:(?:are|were) (?:you|u|ya) " + BOT_FREQUENCY +
     r"(?:in|having) (?:a|an) (?:really |very |so |quite |pretty |proper )*"
     r"(?:(?:bad|foul|rotten|awful|low|black|filthy|moody|sour|shit|grumpy|funny|strange|odd)"
     r" )?mood"
@@ -4752,7 +3895,23 @@ SELF_ABOUT = (
      ("Nothing to miss with, honestly - I'm only here when you turn up. Good to see you, though.",
       "No in-between for me: this chat is all of it. Still, it's good to have you back.",
       "I don't miss anyone, no - but I'm glad you're here. What's been going on?")),
-    (re.compile(r"\b(?:do you (?:ever )?get bored|are you (?:ever )?bored|do you get bored)\b"),
+    # "do you get bored answering the same things" was a search hedge, because the words after
+    # the ask named the bot's own job and _self_only read them as a new subject. Answering the
+    # same questions again is the one thing this ask is ever about, so that tail is taken with
+    # it: "do you get bored of me" is not, and still stands down.
+    (re.compile(r"\b(?:"
+                r"(?:do you (?:ever )?get bored|are you (?:ever )?bored|do you get bored)"
+                r"(?:\s+(?:(?:of|with|by)\s+)?(?:(?:answering|doing|hearing|reading|getting|"
+                r"replying to)\s+)?(?:(?:the|all the|my)\s+)?same\s+(?:old\s+)?"
+                r"(?:things?|questions?|stuff|lines?|answers?|requests?)"
+                r"|\s+(?:of|with|by)\s+(?:your|the|this)\s+(?:job|work))?"
+                r"(?:\s+(?:again and again|over and over|all day|all the time|every day))?"
+                r"|(?:does|do|did)\s+(?:(?:answering|doing|hearing|reading|getting|replying to|"
+                r"talking about|it)\s+)?(?:the\s+)?same\s+(?:old\s+)?"
+                r"(?:things?|questions?|stuff|lines?|answers?|requests?)"
+                r"(?:\s+(?:again and again|over and over|all day|all the time|every day))?\s+"
+                r"(?:ever\s+)?bore you"
+                r")\b"),
      ("I don't get bored — there's no waiting around on my side. The good part is what people "
       "bring me to think about.",
       "Never bored. There's always something in what people say to turn over.",
@@ -4765,14 +3924,82 @@ SELF_ABOUT = (
     # regex here took them. There is nothing between one chat and the next, and saying so once,
     # warmly, is the whole answer. The phrase is consumed whole so _self_only sees nothing left
     # over - the tail is the question, not a new subject.
-    (re.compile(r"\b(?:(?:what|where) do(?:es)? (?:you|it) (?:go|do|get up to),?\s+"
+    (re.compile(r"\b(?:(?:what|where) do(?:es)? (?:you|it)\s+"
+                # "what do you actually do when nobody is talking to you": one adverb between
+                # the bot and the verb was enough to lose the whole family to the search hedge,
+                # because the verb had to follow "you" immediately.
+                r"(?:(?:actually|even|really|honestly|normally|usually|otherwise)\s+)?"
+                r"(?:go|do|get up to),?\s+"
                 r"(?:when|while|once|after)\s+"
                 r"(?:i|we|you|nobody|no one)(?:'?m|'?re| am| are| is|'?s)?"
-                r"(?:\s+not| n't)?\s*"
-                r"(?:here|around|gone|leave|left|asleep|sleeping|away|offline|busy|"
-                r"talking to (?:people|anyone|anybody|you|me))"
+                r"(?:\s+not| n't)?(?:\s+(?:is|are))?\s*"
+                # "when nobody is talking" and "when nobody is waiting" are the same absence as
+                # "when nobody is talking to you", and needing the "to you" lost them.
+                r"(?:here|around|gone|leave|left|asleep|sleeping|away|offline|busy|there|"
+                r"talking(?: to (?:people|anyone|anybody|you|me))?|waiting|wait|"
+                # "what do you do when i close the chat": the moment said as the thing the person
+                # does to the chat, not as where they are when they do it.
+                r"close|closes|closed|shut|sign off|log off|stop|disappear)"
+                # "what do you do when i close the chat": the chat named as the thing shut. Without
+                # it the strict branch stops at "close" and `_self_only` stands the pool down on
+                # "the chat", which is the question rather than a new subject.
+                # "the chat" and "this window" are the chat; "the window" is a window in a
+                # house, and `what do you do when i shut the window` is a hinge that wants oil
+                # (daring-sage's find). So the word that can only mean the chat comes first, and a
+                # bare "window|tab|page|app" is never enough on its own.
+                r"(?:\s+(?:(?:this|the)\s+(?:chat|conversation)"
+                r"(?:\s+(?:window|tab|page|app))?|this\s+(?:window|tab|page|app)))?"
                 r"|when (?:i|we)(?:'?m| am| are|'?re)? (?:not here|gone|asleep|away),? "
                 r"what do you do"
+                # The branches from here down name the gap itself rather than a moment in the
+                # person's day, so the rest of the line is the question and not a new subject: it
+                # is eaten whole (`[^?.!]*`) because the reader downstream (`_self_only`) stands a
+                # pool down for any word it does not know, which is what kept "do you exist when
+                # nobody is talking" and "do you wait for me" on the search hedge. The branches
+                # above keep a strict tail, because there the tail can be a thing of the person's
+                # own: "what do you do when i leave the lid on" is a lid.
+                # "what do you do between chats", "between conversations": the same absence said
+                # as the gap rather than as a moment.
+                r"|what do you do between (?:chats|conversations|messages|sessions)[^?.!]*"
+                r"|what happens to you when (?:i|we) (?:go|leave|close|log off|shut this)[^?.!]*"
+                # "do you wait for me", "do you just wait", "do you sit there all day": the verb
+                # of waiting is the gap, but only where the rest of the line is the absence as
+                # well. "do you wait long at the tip" and "do you wait for the bus" are questions
+                # about a place, and the tip has its own hours answer - a loose tail took it (a
+                # reviewer's find), so the tail here is the absence or nothing at all.
+                r"|do you (?:just |normally |usually )?(?:wait|sit there|sit around|"
+                r"hang around)(?:\s+(?:around|here))?"
+                # "for me" is terminal, like the bare verb: "do you wait for me at the station" is
+                # a real arrangement and "There's no in-between for me" is the wrong answer to
+                # it (scarlet-bat's find), while "do you wait for me" and "do you wait for me all
+                # day" still read as the absence.
+                # The understanding leans "for me" towards the possessive when a time follows
+                # ("do you wait for me all day" is read as "for my all day"), so the person's own
+                # pronoun arrives here in both spellings; the strict tail after it is what keeps
+                # "do you wait for my bus" out, since a bus is a thing and not the absence.
+                r"(?:\s+(?:for me|for my|for us|for our|for anyone|for anybody))?"
+                r"(?:\s*(?:[?.!]*)$|\s+(?:all day|any more|in between|"
+                r"between|at all|when|while|if|until|till|after|once|because)\b[^?.!]*)"
+                # "do you exist when nobody is talking": asking a program whether it exists is
+                # always about the program, so nothing has to follow it - but "do you exist in the
+                # uk" is a question about the uk, so the tail is the absence here too.
+                r"|do you exist(?:\s+at all)?"
+                r"(?:\s*(?:[?.!]*)$|\s+(?:when|while|if|once|outside|beyond|between|after)\b"
+                r"[^?.!]*)"
+                # "are you real without me" is the gap. "are you real without a photo" is not:
+                # the thing after "without" is the subject of the line, so only a person or the
+                # connection to one is taken (daring-sage's four lookalikes).
+                r"|are you (?:even )?(?:real|alive) without\s+"
+                r"(?:me|us|you|anyone|anybody|someone|people|company|an? audience)[^?.!]*"
+                # "how long have you been waiting for me" is the absence; "for your order" and
+                # "for the bus" are somebody waiting for a thing, and the gap line is the wrong
+                # answer to those (daring-sage's nit).
+                r"|how long have you been waiting"
+                r"(?:\s*(?:[?.!]*)$|\s+(?:for me|for us|so far|all this time|today)\b[^?.!]*)"
+                # "does it get boring being a chatbot": the article is optional here, and the
+                # question has three shapes, not one (scarlet-bat).
+                r"|(?:is it|does it get|do you get|isn'?t it) (?:boring|lonely) "
+                r"being (?:an? )?(?:bot|chatbot|program|machine|ai)\b[^?.!]*"
                 r"|do you have a life|have you got a life"
                 r"|do you do anything without me|what do you do without me)\b"),
      ("Nothing at all - I'm only here while you are talking to me, and then the chat is over. "
@@ -4843,6 +4070,17 @@ SELF_ABOUT = (
       "There's no learning on my side, which is why I'd rather say I don't know than guess.",
       "A knowledge base I'm given, plus rules for reading a sentence. Asked enough, you'd "
       "find where the edges are — and I'll tell you when we get there.")),
+    # "did you just make that up" is an accusation with a question in it, and the honest answer
+    # is where the words came from rather than a claim about being right: it was answered with
+    # the search hedge, the coldest reply there is to being disbelieved.
+    (re.compile(r"\b(?:did you (?:just )?make (?:that|this|it) up|"
+                r"are you making (?:that|this|it) up|did you make (?:that|this) up|"
+                r"is (?:that|this) (?:just )?made up|are you just guessing|"
+                r"did you (?:just )?guess)\b"),
+     ("No - it comes from a written table of everyday facts, and where there is nothing there I "
+      "say so instead of filling the gap. Point at the bit that looks wrong and I'll check it.",
+      "Nothing made up, no: every answer I give has a line behind it, and I'd sooner sound dull "
+      "than invent something. Which part should I look at again?")),
     # A claim and an admission are different questions, and one pool cannot answer both: "No."
     # is right after "are your answers always right" and says the opposite of what it means after
     # "can you be wrong" (bronze-whale, #1839).
@@ -4864,8 +4102,10 @@ SELF_ABOUT = (
     # is what a friend does with "how did your day go?" when they have nothing to report.
     # No day to report, and none claimed: a bot that says it had a good weekend has just made
     # one up (bronze-whale, #1839).
-    (re.compile(r"\b(?:did|have) you (?:have|had) (?:a )?(?:good|nice|quiet|lazy|busy) "
-                r"(?:day|days|week|weekend|night|evening|morning|afternoon|break)\b"),
+    (re.compile(r"\b(?:did|have|do) (?:you|u|ya) " + BOT_FREQUENCY + r"(?:have|had|get) "
+                r"(?:a |any )?(?:really |pretty |quite |kind of )?"
+                r"(?:good|nice|quiet|lazy|busy|bad|rough|hard|rubbish|terrible|awful|long|"
+                r"hectic) (?:day|days|week|weekend|night|evening|morning|afternoon|break)\b"),
      ("No days like that on my side, so nothing to report — how was yours?",
       "Nothing to tell you about mine. What about yours?",
       "I don't get one of those, honestly. Tell me about yours.")),
@@ -4931,11 +4171,13 @@ BOT_LIFE = {
 BOT_LIFE_AREA = {
     "people": frozenset("""family families kid kids child children son daughter mum mom mother
         father dad daddy parents parent brother sister sibling siblings partner husband wife
-        girlfriend boyfriend friends friend colleague colleagues boss neighbour neighbours""".split()),
+        girlfriend boyfriend friends friend colleague colleagues neighbour neighbours
+        brothers sisters gran grans grandma grandmas grandad grandads grandpa grandmas grandparents grandparent
+        uncle uncles aunt aunts auntie aunties cousin cousins niece nephew relatives relative""".split()),
     "home": frozenset("""home house flat apartment pets pet dog dogs cat cats kitten puppy
         hamster rabbit budgie garden car""".split()),
     "work": frozenset("""job jobs work wages wage salary paycheck pay paid money bank account
-        mortgage bills rent employer coworkers""".split()),
+        mortgage bills rent employer coworkers boss manager managers""".split()),
     "body": frozenset("""body face hands feet hair birthday age born""".split()),
 }
 
@@ -5208,6 +4450,17 @@ def _context_follow_up(clean, memory):
             return pick(replies, memory)
     return None
 
+
+# "Boring" is what a film was and what somebody calls a person, and only the second reading has
+# the person as its subject: "im boring" is a label somebody put on them, not their own boredom.
+# The mood reader took both, so "my mum says im boring" was answered "Boredom is a good excuse for
+# a walk with a podcast", which answers a complaint nobody made. The label on the person is not a
+# thing that caused a feeling, so the word is owned by it and the mood pools do not see the line:
+# the person's own "im boring" is answered by the self-judgement pools just above, and the same
+# words said by somebody else by bot/compose/said_about_me.py.
+A_LABEL_ON_THE_PERSON = re.compile(
+    r"\b(?:im|i'm|i am|i\s*am)\s+"
+    r"(?:so\s+|really\s+|quite\s+|a bit\s+|just\s+|getting\s+)?boring\b")
 
 AE = {
     "tired": "tired",
@@ -5482,6 +4735,25 @@ disappearing vanish hide hiding hurt hurting give
 LEAVE_SOMEONE = re.compile(r"^(?:leave|leaving|left|end|ending|break up with|divorce|divorcing|"
                            r"walk out on)\b.{0,24}\b(?:him|her|them|husband|wife|partner|"
                            r"boyfriend|girlfriend|marriage|relationship|us)\b")
+# "<somebody or something> to stop": "i want it to stop", "i just want this to end", "i want the
+# pain to stop", "i want these comments to stop". What the person wants is a state to change, not
+# a thing to start or to pick a kind of, and the pools below can only hand the capture back as a
+# label: "i want it to stop" was answered "It to stop \u2014 fair enough. What's stopped it
+# happening so far?", which drops the speaker, leaves a bare verb phrase as the subject, and asks
+# someone worn out by something to say what is holding their own wish up. The subject decides
+# which half of the reading applies: a pronoun names nothing at all, so there is no thing here to
+# be on with and the person's own state is the turn; a noun names the thing that is wrong, and
+# the module that answers that thing (the pain, the noise, the comments) should have it.
+STOPS_TOGETHER = re.compile(
+    r"^(?P<subject>it\s+all|all\s+of\s+it|it|this|that|these|those|things|everything|nothing"
+    r"|the\s+lot|life"
+    r"|(?:the|my|your|his|her|their|our|this|that|these|those|all|any)\s+[a-z][a-z'-]*"
+    r"(?:\s+[a-z][a-z'-]*)?)"
+    r"\s+to\s+(?:stop|end|go\s+away|be\s+over|be\s+done\s+with|be\s+different|change"
+    r"|get\s+better|settle|sort\s+itself\s+out|go\s+back\s+to\s+normal)\b")
+# The subjects above that name nothing to act on.
+SAYS_NOTHING = frozenset(("it", "it all", "all of it", "this", "that", "these", "those", "things",
+                          "everything", "nothing", "the lot", "life"))
 # "How ready do you feel for it?" fits an appointment, an interview, a viewing. Nothing is being
 # assessed on a long drive or a night with no sleep, so those keep their own reading.
 EVENT_OUTING = re.compile(r"\b(?:drive|journey|trip|flight|train|coach|ferry|commute|shift|"
@@ -5556,6 +4828,12 @@ def _intent(clean, tokens, memory):
         return None
     flat = " ".join(tokens)
     if _a_trip(flat, memory):
+        return None
+    # A change of dose is not an intention aired. "im going to take a double dose tonight" was
+    # answered "Worth doing. What would you like help with first?" - an intention in the shape of
+    # a plan, which is the one thing a prescription does not need. The plan reading below and the
+    # chain both answer it with the pharmacist, so this one stands aside rather than encourage it.
+    if compose_fallback.reads_as_a_change_of_medicine(flat):
         return None
     if ack.a_limit_on_the_plan(flat):
         return None  # "we need to keep it cheap" is a limit on the plan, not a plan
@@ -5683,9 +4961,27 @@ def _a_detail_on_the_job(flat, memory):
     return not _THE_RUN_OF_IT.search(flat)
 
 
+# A figure with a period is a price, and the judgement after it is the question about that
+# price. "its 45 a month, is that a lot" matched OVERLOAD's first alternative on "month ... a
+# lot" and was answered "a run like that wears you down before you notice. Pick the one thing
+# you can drop this week" - advice about a strain nobody mentioned, to somebody asking whether
+# forty-five pounds a month was dear. The two readings share the word "lot" and nothing else.
+# Only money stands the reading down ("5 miles a day" is a rate and can be a load), and only
+# with a judgement on it, so "45 a month for the gym and i cant keep up" still keeps the run.
+A_RATE_OF_MONEY = re.compile(
+    r"(?:[£$€]\s*\d[\d,.]*|\b\d[\d,.]*\s*(?:pounds?|quid|euros?|dollars?|grand|k)?)\s*"
+    r"(?:a|an|per|each|every)\s+(?:month|week|year|day|fortnight)\b", re.I)
+A_JUDGEMENT_ON_A_FIGURE = re.compile(
+    r"\b(?:is|isnt|isn'?t|was|wasnt|wasn'?t)\s+(?:that|this|it)\s+(?:about\s+|really\s+|"
+    r"actually\s+)?(?:a lot|too much|too dear|expensive|cheap|good value|worth it|about right|"
+    r"normal|fair|steep|reasonable|pricey|dear)\b", re.I)
+
+
 def _overloaded(flat, memory):
     """The run of things, when it is all the line says and it asks for nothing."""
     if not OVERLOAD.search(flat):
+        return False
+    if A_RATE_OF_MONEY.search(flat) and A_JUDGEMENT_ON_A_FIGURE.search(flat):
         return False
     said = _as_typed(flat, memory)
     if LOAD_ASK.search(said) or LOAD_TURNED.search(said) or LOAD_SOMEONE_ELSE.search(said):
@@ -5717,11 +5013,15 @@ _CONSIDERING = re.compile(
     r"toying with|fancy(?:ing)?|after|into)(?:\s+|$)")
 # The same said with "to": "i want to learn the guitar" is about learning the guitar, so the verb
 # after the "to" is put in the -ing form the rest of the sentence uses.
+# "off to bed" and "out to the shops" are the same movement as "going to", and they used to be
+# said back whole: "Whether im off to bed soon is the right move" is the person's own sentence
+# inside the bot's, subject and all.
 _CONSIDERING_TO = re.compile(
     r"^(?:(?:ok|okay|so|well|and|and also)[\s,]+)?"
     r"(?:(?:i'?m|im|i am|we'?re|we are|i'?ve|i have|i|we)\s+)?(?:been\s+|still\s+|also\s+)?"
     r"(?:thinking (?:of|about) going to|planning to|thinking to|hoping to|want(?:ing)? to|"
-    r"wanted to|'?d like to|would like to|keen to|tempted to|trying to|going to)(?:\s+|$)")
+    r"wanted to|'?d like to|would like to|keen to|tempted to|trying to|going to|gonna|off to|"
+    r"out to|away to|heading to|about to)(?:\s+|$)")
 
 
 def _judged(clean, memory):
@@ -5759,35 +5059,18 @@ def _judged(clean, memory):
 # a good idea". Only a thing, or a thing being done, can go in that sentence.
 _STATEMENT = re.compile(
     r"\b(?:is|are|was|were|am|has|have|had|do|does|did|will|would|can|could|should|shall|"
-    r"might|must|i|we|you|he|she|they|that|this)\b")
+    r"might|must|i|we|you|he|she|they|that|this)\b"
+    # The contracted ones are how people type a subject: "im off to bed soon" said back as the
+    # thing read "Whether im off to bed soon is the right move is yours to weigh".
+    r"|\b(?:im|i'?m|ive|i'?ve|we'?re|hes|he'?s|shes|she'?s|they'?re|dont|doesnt|didnt|"
+    r"can'?t|wont|isnt|aren'?t|wasnt|wouldnt|couldnt)\b")
 
 
-def _gerund(word):
-    """The -ing form of the verb after a "to": "learn" -> "learning", "run" -> "running"."""
-    if not word or word.endswith("ing"):
-        return word
-    if word.endswith("e") and not word.endswith("ee") and len(word) > 3:
-        return word[:-1] + "ing"
-    # The u in "qu" is the w of a /kw/ sound, not a vowel, so it does not stand in the way of a
-    # doubled consonant: "quit" is "quitting" and "quitting" was "quiting" - a word that reads
-    # like a typo in a reply the bot wrote itself.
-    if (len(word) > 2 and word[-1] not in "aeiouwxy" and word[-2] in "aeiou"
-            and (word[-3] not in "aeiou" or word[-4:-2].lower() == "qu")):
-        return word + word[-1] + "ing"
-    return word + "ing"
-
-
-# A plan typed as the doing of it: "im leaving my job", "we're buying a house". There is no
-# considering phrase here for the strips below to take - none of "thinking of", "planning to",
-# "want to" - so the whole line was said back: "Tell me what matters most about im leaving my
-# job". The pronoun and the tense are the telling, not the thing being weighed, so the doing is
-# what the reply names.
-_BARE_DOING = re.compile(r"^(?:i'?m|im|i am|we'?re|we are)\s+(?P<doing>[a-z]{3,}ing)\b(?P<rest>.*)$")
-# The same shape with anything but a doing after it - "im shattered", "im not sure about the
-# cat" - is a state, not a plan, and a state is not a thing to weigh: "Whether im shattered is
-# the right move" is worse than the bare hand-back, which asks about the thing they are unsure
-# of without putting a word in their mouth.
-_BE_SAID = re.compile(r"^(?:i'?m|im|i am|we'?re|we are)\b\s*(?P<rest>.*)$")
+# A plan typed as the doing of it: "im leaving my job", "we're buying a house". Only an -ing
+# word starts it, because a state is not a plan ("im shattered", "im not sure about the cat") and
+# a state is not a thing to weigh.
+_BARE_DOING = re.compile(
+    r"^(?:i'?m|im|i am|we'?re|we are)\s+(?P<doing>[a-z]{3,}ing)\b(?P<rest>.*)$")
 
 
 def _judged_thing(clean, memory):
@@ -5803,15 +5086,20 @@ def _judged_thing(clean, memory):
     to_form = bool(_CONSIDERING_TO.match(said))
     said = _CONSIDERING_TO.sub("", said) if to_form else _CONSIDERING.sub("", said)
     if to_form:
-        verb, _, rest = said.partition(" ")
-        said = _gerund(verb) + (" " + rest if rest else "")
-    said_as_doing = _BARE_DOING.match(said)
-    said_as_state = None if said_as_doing else _BE_SAID.match(said)
-    if said_as_doing:
-        said = (said_as_doing.group("doing") + said_as_doing.group("rest")).strip(" .,!?:;")
-    elif said_as_state:
-        return ""
-    # (Nothing to say back is better than a state said back: the caller has a pool for that.)
+        # "to learn spanish" is a step and "to the gym" is a place, and a place folded into an
+        # -ing word is not English: "going to the gym" said back was "Theing gym". The composer's
+        # reading knows which is which, so the phrase is said back the way it fits a sentence.
+        said = stepwords.said_after_a_to(said)
+    doing = _BARE_DOING.match(said)
+    if doing:
+        # A plan typed as the doing of it: "im leaving my job", "we're moving to leeds". There is
+        # no considering phrase for the strips above to take, and the pronoun and the tense are
+        # the telling rather than the thing weighed, so the doing is what the reply names. It is
+        # already an -ing phrase, so nothing is folded: "leaving my job" goes back as it stands
+        # (able-paper, #routing 179). Without this the line's own "im" was read as the statement
+        # a thing cannot be, and "is that a good idea" was answered "Tell me what matters most"
+        # with the job gone out of it.
+        said = (doing.group("doing") + doing.group("rest")).strip(" .,!?:;")
     # A time or a place after a comma is not the thing: "im thinking of a new kitchen, maybe in
     # the spring" is about the kitchen.
     said = re.split(r"[,;]|\b(?:because|but|so|though|although)\b", said)[0].strip(" .,!?:;")
@@ -5920,10 +5208,39 @@ def _short_talk(clean, tokens, memory):
     # front of a feeling is the feeling, and a plan may not answer it. `flat` is built from the
     # words as typed, so without this "i think i might be exhausted from work" still matched here
     # after `_respond` had rewritten the line, and the plan pool took the turn back.
+    if fallback.reads_as_a_change_of_medicine(_without_the_might(flat)):
+        # A plan that changes a medicine is not a plan of the day, and it is not blessed. The
+        # dose waits for the person who prescribes it, so the pool that says that answers here
+        # rather than the cheerful one - it is also the reason the reading is above the trouble
+        # check, because "im going to stop my inhalers now the hay fever has gone" is the same
+        # decision whether or not something in the line sounds like a worry.
+        return ("plan_medicine_slow" if fallback.PLAN_MEDICINE_SLOW.search(flat)
+                else "plan_medicine")
     if (PLAN_RE.search(_without_the_might(flat)) and not words & PLAN_STOP
-            and not PLAN_WORRY.search(flat) and not PLAN_TROUBLE.search(flat)):
+            and not PLAN_WORRY.search(flat) and not PLAN_TROUBLE.search(flat)
+            and not _a_forecast(memory)):
         return "plan"
     return None
+
+
+def _a_forecast(memory):
+    """True when the line the pools are reading is a question about the weather.
+
+    "is it gonna rain" is a forecast, not a plan: the "going to" in it is the ordinary future,
+    and the plan pool answered it "Nice. Tell me how it goes." - a well-wish for a trip nobody
+    described - while the weather line ("I can't check the forecast from here, sorry") sat one
+    candidate below it, at the fallback's priority. The reading already says the line is about
+    the weather and is a question (`bot/understanding/`: `topic` and `kind`), so the plan pool
+    stands down and the line is answered as the weather question it is. A line that says what
+    the weather will do without asking ("gonna rain later i think") is a statement and keeps
+    the answer it had.
+    """
+    understood = memory.get("understood") if isinstance(memory, dict) else None
+    if not isinstance(understood, dict):
+        return False
+    if str(understood.get("topic") or "") != "nature-and-weather":
+        return False
+    return str(understood.get("kind") or "") == "question"
 
 
 # The pools that comfort and ask rather than advise, so a step asked for after one of them is
@@ -6676,6 +5993,27 @@ LEAVES_ONLY = (("good", "night"), ("night", "night"), ("night",), ("later",), ("
 # nice night" is telling you about their evening, not walking out of the door. "good" is not one
 # of the words here: "good night" is the sign-off itself, and "good night then" or "good night
 # all" are still people leaving.
+# Every word a goodbye is made of: the going word ("gotta", "heading", "off"), the thing it goes
+# to or the time it happens ("go", "bed", "now", "soon"), and the words around them that say
+# nothing ("i", "to", "then", "right"). A leaving said with the going word and a time in it is a
+# goodbye only while it says nothing else: read on any word, the shape "i need ... now" took every
+# ask for help that named the time it was needed, so `i need help now` and `i must eat now` were
+# answered "Bye for now!" - a farewell to somebody who had just asked for a hand. A line with a
+# word in it that is not one of these is about the thing it names, and the readers for that thing
+# take it.
+LEAVING_WORDS = frozenset({
+    # the going words
+    "gotta", "got", "gonna", "gunna", "have", "heading", "head", "off", "leaving", "going",
+    "need", "must", "should", "go", "goes", "going", "went", "sleep", "sleeping", "bed",
+    "bedtime", "out", "soon", "now", "later", "night",
+    # what the leaving is said around
+    "i", "im", "i'm", "am", "me", "we", "to", "be", "a", "for", "on", "in", "the",
+    "then", "so", "ok", "okay", "right", "well", "just", "now", "yes", "yeah", "yep",
+    "alright", "and", "all", "your", "you", "u", "take", "care", "bye", "goodbye",
+    "goodnight", "cya", "cheerio", "toodles", "nightnight", "see", "talk", "speak", "catch",
+})
+
+
 DESCRIBES_THE_DAY = re.compile(
     r"\b(?:nice|lovely|great|fun|brilliant|long|early|late|quiet|busy|cold|warm|wet)\s+"
     r"(?:night|day|evening|morning|one|time)\b")
@@ -6711,7 +6049,7 @@ def _leaves(tokens):
     # goodbye word for this to run, so "i need time off work" and "i got off the train" stay
     # ordinary.
     away = any(t in {"go", "sleep", "bed", "now", "out", "soon", "off"} for t in tokens)
-    if going and away:
+    if going and away and all(t in LEAVING_WORDS for t in tokens):
         return True
     # "in a bit", "back in a min", "see you in a sec": the time to leave and nothing else names
     # anything, so the line is a goodbye even though it carries no word for going.
@@ -6783,15 +6121,33 @@ EARLY_NIGHTS = (
 
 # The line names someone else as the one who was awake ("my baby has been up since 3am"), or it
 # says the person is at the end of their rope. Both need more than sleep advice, so pass.
-OTHER_AWAKE = re.compile(r"\b(?:my|our|the|his|her) (?:baby|son|daughter|kid|kids|child|children|"
-                         r"husband|wife|partner|mum|dad|dog|cat|puppy|kitten|flatmate|"
-                         r"neighbours?|neighbor)\b[^.?!]*?\b(?:up since|up all night|awake|"
-                         r"won'?t|wont|can'?t|cant)\b"
-                         # ...or the awake part is done with someone who is unwell ("up all
-                         # night with a sick child"): the cause is theirs, not the person's.
-                         r"|\b(?:been |was )?up (?:since|all night|all hours|at \d)\b[^.?!]*?"
-                         r"\bwith (?:a |the |my |our |his |her )?(?:sick|poorly|ill|unwell|"
-                         r"teething|crying|colicky|newborn)\b")
+# The other person is named in the words parents actually use: "my little boy has been up since
+# four every morning" was read as the speaker's own early start and answered with daylight
+# advice about their own body clock, and "my toddler is up since 4 every day" the same, because
+# only "baby", "son" and "kid" were owners here. An age between the possessive and the noun is
+# the same owner ("my 3 year old has been up since 4").
+OTHER_AWAKE = re.compile(
+    r"\b(?:my|our|the|his|her) (?:\d+ )?(?:baby|son|daughter|kid|kids|child|children|toddler|"
+    r"year[- ]olds?|"
+    r"little one|little boy|little girl|littleun|littlun|newborn|grandson|"
+    r"granddaughter|grandchild|twins|teenager|teen|stepson|stepdaughter|stepchild|husband|"
+    r"wife|partner|mum|dad|dog|cat|"
+    r"puppy|kitten|flatmate|neighbours?|neighbor)\b[^.?!]*?\b(?:up since|up all night|awake|"
+    r"up from|won'?t|wont|can'?t|cant)\b"
+    # "my boy" and "my girl" are a small child here only when the line says when they were up:
+    # the same words say what a night cost the speaker ("my boy kept me up all night"), and that
+    # is the tiredness chat answers, not the child card.
+    r"|\b(?:my|our|the|his|her) (?:boy|girl|lad|lass)\b[^.?!]*?"
+    r"\b(?:up since|up from|up every morning)\b"
+    # A small child is named on its own just as often ("little one has been up since 4am all
+    # week"), and no possessive is needed for these: they are a child in anyone's mouth.
+    r"|\b(?:little one|little boy|little girl|littleun|littlun|toddler|newborn)\b[^.?!]*?"
+    r"\b(?:up since|up all night|awake|up from)\b"
+    # ...or the awake part is done with someone who is unwell ("up all
+    # night with a sick child"): the cause is theirs, not the person's.
+    r"|\b(?:been |was )?up (?:since|all night|all hours|at \d)\b[^.?!]*?"
+    r"\bwith (?:a |the |my |our |his |her )?(?:sick|poorly|ill|unwell|"
+    r"teething|crying|colicky|newborn)\b")
 # A death in the conversation: a bad night after one is grief, not sleep hygiene, so the sleep
 # reply stays out of it, in the line itself or in what they said just before.
 LOSS = re.compile(r"\b(?:died|dying|death|dead|passed away|funeral|burial|cremation|bereave\w*|"
@@ -7178,6 +6534,15 @@ PLAIN_GOOD_FRAME = frozenset("""feel feeling felt""".split())
 # is the answer "im fine" gives, and it got a stock line instead.
 PLAIN_GOOD_FILLERS = frozenset("""im i am doing so very really today still all enough too
                                   honestly actually myself feel feeling been""".split())
+# A fine answer usually has a small word on the end of it, and the word is where or when or a
+# courtesy, not a second thing: "all good here", "all good now", "im good thanks", "we are fine
+# ta". None of these are in the fillers above, so the line failed the test, the sentence was read
+# as one more thing the person had said, and a person telling the bot they were fine got
+# "I'm listening - say more if it helps." or "Thanks for telling me - I'm here if you want to dig
+# into any of that." The reading is still only a good word and its small words: anything that
+# names a thing ("my back is good now") keeps the words that are not here and is not a fine answer.
+PLAIN_GOOD_TAIL = frozenset("""here now tonight around about cheers ta thanks thank mate love
+                               side on my we are yeah its""".split())
 
 
 def _the_bot_just_asked_them(memory):
@@ -7236,12 +6601,12 @@ def _a_plain_good_answer(clean, memory=None):
     if re.search(r"\bnot (?:too |half |so )?bad\b", clean):
         return True
     words = [w.strip(".,!?;:") for w in clean.split() if w.strip(".,!?;:")]
-    if not words or len(words) > 4:
+    if not words or len(words) > 7:
         return False
     if not any(word in PLAIN_GOOD_WORDS or word in PLAIN_GOOD_ASKED for word in words):
         return False
     if not all(word in PLAIN_GOOD_WORDS or word in PLAIN_GOOD_ASKED
-               or word in PLAIN_GOOD_FILLERS for word in words):
+               or word in PLAIN_GOOD_FILLERS or word in PLAIN_GOOD_TAIL for word in words):
         return False
     # "ok" and "okay" on their own are how somebody takes an answer in: after "my dad died in
     # march" / "how long do i boil an egg" the next line "ok" was answered "Glad to hear it.",
@@ -7362,7 +6727,9 @@ def _owned_by_a_thing(clean, match):
     week" leave the noun empty or the person's own, so they are not owned by a thing.
     """
     if clean[match.start():match.end()].lower() in CAUSES_THE_FEELING:
-        return False  # the thing is what made the person feel it
+        # ...unless the person is the word's own subject: "im boring" is a label on them and not
+        # a mood of theirs (see A_LABEL_ON_THE_PERSON).
+        return bool(A_LABEL_ON_THE_PERSON.search(clean))  # the thing is what made the feeling
     before = _in_its_clause(clean[:match.start()].split())
     owner = _owner(before)
     if owner in PERSON_WORDS:
@@ -7847,6 +7214,23 @@ GOING_MAD = re.compile(
     r"\b(?:going|going\s+out)\s+of\s+(?:my|his|her|their)\s+mind\b")
 
 
+# A day, a week or the office is "mad" when it was full-on, and the annoyed pool is written for a
+# quarrel with somebody: "work was mad today" got "Annoying. Walk it off for ten minutes before you
+# reply to anyone", which also put a second person in a line that has none - and the line that
+# found it went on "...and i ate nothing all day", so the one thing worth noticing was not read.
+# The subject is what tells the two apart: a place or a stretch of time is mad, and "im mad", "mad
+# at him", "he made me mad" are still a person's anger.
+MAD_ABOUT_THE_DAY = re.compile(
+    r"\b(?:work|job|office|school|uni|college|shop|shops|town|roads|traffic|queues?|"
+    r"term|day|days|week|weeks|month|months|morning|afternoon|evening|weekend|nights|it|its|"
+    r"things|everything|life)\b"
+    r"(?:(?:\s+(?:has|had|have|is|was|are|were|been|being|gets|got)\b)"
+    r"|(?:\s*'(?:s|ve)\b)){1,3}\s*"
+    r"(?:\s+(?:so|really|proper|properly|fairly|pretty|very|dead|bloody|totally|absolutely)\b)?"
+    r"\s+mad\b(?!\s+(?:at|with|about)\s+(?:me|us|you|him|her|them|everyone|everybody|the\s+\w+))"
+    r"|\bmad\s+(?:day|week|month|morning|afternoon|shift|one|busy|rush|time)\b")
+
+
 # "struggling with my dissertation" is a piece of work, not a mood: a named thing takes it
 # unless the thing is the whole of life.
 STRUGGLING_ABOUT_A_THING = re.compile(
@@ -8023,7 +7407,9 @@ APART_WHO = (r"(?:anyone|anybody|everyone|people|friends?|mates?|family|relative
              r"|grandpa|aunt|auntie|uncle|folks|neighbours|neighbors))")
 APART_FROM_PEOPLE = re.compile(
     r"\b(?:i|i'm|im|ive|i've|i'd|we|we're|were|weve|we've)\b[^.]{0,40}?"
-    r"(?:cut (?:myself|ourselves) off|shut (?:myself|ourselves) (?:away|off|in)"
+    r"(?:cut (?:myself|ourselves) off|cut (?:myself|ourselves) (?:off )?from (?:everyone|everybody|"
+    r"people|the world|society|friends|mates|family|my \w+|our \w+|contact|all of it|it all)"
+    r"|shut (?:myself|ourselves) (?:away|off|in)"
     r"|(?:stopped|stopping) (?:seeing|speaking to|talking to|meeting) " + APART_WHO +
     r"|(?:not|haven't|havent|hadn't|hadnt) (?:seen|spoken to|talked to|heard from) (?:anyone|anybody|"
     r"any one|a soul|my \w+|our \w+|friends|mates|family)"
@@ -8362,6 +7748,21 @@ def _without_the_might(clean):
     return MIGHT_BE.sub(put, clean, count=1) if with_states else clean
 
 
+# A verdict asked about a choice - "would i be mad to sell", "is it stupid to buy a new one",
+# "would moving closer be mad" - asks for a judgement, and the feeling word in it is the verdict
+# the person wants rather than a report of anger. The reading takes "mad" as anger, so the annoyed
+# pool answered these: "Annoying. Walk it off for ten minutes before you reply to anyone", which is
+# advice for a quarrel, given to somebody weighing up a decision. The question frame plus a word
+# that has to follow it (to X, if X, or the end of the line) is what separates the verdict from a
+# mood: "im mad", "im mad at my boss" and "is she mad at me" keep their own replies.
+A_VERDICT_ASKED = re.compile(
+    r"\b(?:would|will|am|is|are|was|were)\s+"
+    r"(?:i|we|it|that|this|they|he|she|you|a|an|the|going|moving|getting|leaving|buying|"
+    r"selling|quitting|starting|taking|doing)\b"
+    r"[^.!?]{0,40}?\b(?:mad|crazy|stupid|daft|weird|selfish|silly|unreasonable|idiot|bad)\b"
+    r"(?=\s*(?:$|[.,!?;]|to\b|if\b|for\b|about\b|that\s+(?:i\s+(?:want|should|need|can|could|"
+    r"may|might)|we\b|my\b|they\b|he\b|she\b)))", re.I)
+
 # A yes/no question about the thing the answer above named: "is that too low", "is it too high",
 # "was that too much". The word after "that" is the measurement, so none of these is a mood, and
 # the ones that name a feeling word ("low", "heavy") are the ones the mood reader used to take.
@@ -8384,6 +7785,12 @@ def _feeling(clean, understood=None, bare=None, kept=False):
     # only the words that were wrong repaired, and it is what the README says a matcher reads.
     clean = _as_said(clean, understood)
     clean = _without_the_feeling_avoided(clean, understood)
+    if harm_reading.reads_as_hurting_someone(clean):
+        # A mood word in front of a doing is the frame the wish came in, not the feeling to
+        # answer: "im scared im going to shake the baby" got "That sounds unsettling. Is there
+        # one thing you can check or ask about that would settle it?" while the harm card for
+        # exactly that line was one module away. The harm reading answers it, so this stands down.
+        return None
     if isinstance(understood, dict) and understood.get("a_load_carried"):
         # The reading says the person is the one holding it all up for everybody else, and a line
         # like that has no feeling word in it to key a pool: "im always the one who organises
@@ -8487,6 +7894,10 @@ def _feeling(clean, understood=None, bare=None, kept=False):
         # Contact lost is loneliness said without the word, and the lonely pool's "a weekly club
         # is the quickest way to see the same faces" presumes a stranger they have not met yet.
         return "lonely_apart"
+    if _a_stretch_that_drags(clean):
+        # A week that will not move is not a bad day: the rough-day pool's shower and early night
+        # answers a day that went wrong, and these lines have had nothing go wrong in them.
+        return "long_stretch"
     if ROUGH_DAY.search(clean) or WHAT_A_DAY.search(clean):
         return "rough_day"
     if _scattered(clean):
@@ -8516,6 +7927,15 @@ def _feeling(clean, understood=None, bare=None, kept=False):
         # mood in it at all. The engine says whose state it is, so the shape of the sentence
         # is not what decides.
         read = EMOTION_FEELING.get(understood.get("emotion"))
+        if read and (A_FACULTY_GETTING_WORSE.search(clean) or OWN_MEMORY_OFF.search(clean)) \
+                and _answers_knows(clean, {"turns": []}):
+            # The state word is about a part of them, not about them: "my memory is getting
+            # worse" is a card, not a rough day, and "should i be worried about my memory" is a
+            # question about the memory rather than a worry with no end date on it. Whichever
+            # pool the reading fell into, the card that answers the part has the turn. Only when
+            # a card actually answers it, because a pool line is warmer than the listening line
+            # for a body part nothing covers yet.
+            read = None
         if read == "confused" and _confusion_names_a_thing(understood):
             # The line names a thing of its own, so the thing is the answer: "im confused why my
             # boiler won't light" wants the boiler and "im confused about my medication" wants
@@ -8551,6 +7971,14 @@ def _feeling(clean, understood=None, bare=None, kept=False):
             # emotion reader reaches the happy pool with no denial on it, which said "that's a
             # good feeling to carry into the rest of the day" to a person still waiting.
             read = "sad"
+        if read == "annoyed" and MAD_ABOUT_THE_DAY.search(clean):
+            # The engine reads "mad" as the speaker's anger, and a day being mad is how busy it
+            # was: "work was mad today" came back "Annoying. Walk it off for ten minutes before
+            # you reply to anyone", which puts a second person in a line that has none. The
+            # reading stands down here and the busy pool asks what is taking most of it - the
+            # same trade the loop below makes for the same word, because a line can reach the
+            # annoyed pool through the engine's emotion as well as through the words.
+            read = "busy"
     if not (FEELING_SELF.search(clean) or FEELING_LEAD.search(clean) or read
             or _own_state(clean) or kept or _hard_about_their_thing(clean)
             or REGRET_DEED.search(clean)):
@@ -8612,6 +8040,12 @@ def _feeling(clean, understood=None, bare=None, kept=False):
                 # outranks the group the fear was filed under.
                 if name in ("anxious", "stressed") and WORRY_PERSON.search(clean):
                     return "worry_person"
+                if (name == "annoyed" and word == "mad"
+                        and MAD_ABOUT_THE_DAY.search(clean)):
+                    # A day being mad is how busy it was, not anger at somebody: the reading
+                    # stands down and the line is left to the busy pool, which asks what is
+                    # taking most of it instead of telling them to cool off before replying.
+                    continue
                 if word in ("tired", "bored", "done") and re.search(
                         r"\b" + re.escape(word) + r"\s+(of|with)\b", clean):
                     # "tired of everything" is low mood about the whole thing, not annoyance
@@ -8717,6 +8151,40 @@ AT_MYSELF = re.compile(
 KICK_MYSELF = re.compile(r"\bi could (?:kick|strangle|shake) myself\b|\bkick myself for\b", re.I)
 AT_MYSELF_REPLIES = REPLIES["at_myself"]
 
+# A part of the person getting worse is a body or a faculty question, not a rough day: the engine
+# reads "my memory is getting worse" as `unwell`, its word for being under the weather, and the
+# rough-day pool answered it with "a shower, something warm to eat and an early night usually
+# resets it". A memory, a hearing or a knee that is getting worse has its own answer in the
+# knowledge base, and this row stands aside for it (see `_feeling` below).
+# A part of them, or a faculty, said as going off: "my memory is getting worse", "my eyesight has
+# got worse". The line is about the part, so a pool line about them in general is the wrong reply
+# when a card answers the part.
+A_FACULTY_GETTING_WORSE = re.compile(
+    r"\bmy\s+(?:memory|memories|recall|forgetfulness|hearing|sight|eyesight|vision|balance|"
+    r"mobility|breathing|joints?|knees?|hips?|back|hands?|skin|teeth|gums|grip)\b"
+    r"[^.!?]{0,30}?\b(?:getting|got|is|are|has been|have been)\s+"
+    r"(?:so |much |a lot |that )?(?:worse|bad|badly)\b")
+# The same worry worn differently: the memory said as a comparison with how it used to be, as a
+# state ("im getting forgetful", "my wife says im scatty"), as something being lost, or as a run of
+# slips. Each is a shape rather than a phrase, because the words people use for it are endless and
+# the card is the same card.
+OWN_MEMORY_OFF = re.compile(
+    r"\bmy\s+(?:memory|memories|recall|forgetfulness)\b[^.!?]{0,30}?"
+    r"\b(?:isnt|is not|wasnt|not|no longer|never)\s+(?:what|as|as good|up to|reliable)\b|"
+    r"\b(?:im|i am|i'm)\s+(?:getting|becoming|so|very|quite)\s+"
+    r"(?:forgetful|scatty|absent[- ]minded|forgetfull)\b|"
+    r"\b(?:im|i am|i'm)\s+losing\s+my\s+(?:memory|recall)\b|"
+    r"\b(?:i\s+(?:keep|am constantly|constantly|always)\s+forgetting\s+"
+    r"(?:everything|things|words|names|where|what))\b|"
+    r"\bcant\s+remember\s+(?:things|names|words|where|what|how)\b"
+    r"[^.!?]{0,25}?\b(?:used to|any\s?more|anymore|lately|these days|now)\b|"
+    r"\b(?:worried|worry|worries|worried sick)\s+about\s+my\s+(?:memory|recall|forgetfulness)\b|"
+    r"\bis\s+my\s+(?:memory|recall)\s+(?:ok|okay|normal|going|getting|all right|alright)\b|"
+    r"\b(?:scared|worried|frightened|terrified)\s+(?:that\s+)?(?:im|i'm|i am)\s+"
+    r"(?:getting|losing)\b|"
+    r"\b(?:does|is|do)\s+(?:forgetting|this|that)\s+(?:mean|a sign of)\s+dementia\b|"
+    r"\bmy\s+(?:memory|recall)\s+(?:is|has been)\s+(?:terrible|awful|rubbish| shocking|bad)\b")
+
 MOOD_KINDS = frozenset(("sad", "anxious", "annoyed"))
 # The pools that answer something heavy the person is carrying. The line after one of them is
 # usually the reason for it - "i miss my mum" then "she lives in spain" - and the store's
@@ -8782,6 +8250,73 @@ ASKED_HOW_IT_WENT = re.compile(
 def _asked_how_it_went(line):
     """True when the line is the question form of a nod: "was it nice", "did it go ok"."""
     return ASKED_HOW_IT_WENT.match(" ".join(str(line or "").lower().split())) is not None
+
+
+# The judgement words people put in a yes/no question on their own, with nothing named: "is that
+# ok", "is that fine", "will that help", "is that too much". Which pool answers depends on the word
+# - a verdict wants the thing, a quantity wants what it has to cover, help wants the job - so the
+# word decides it and not the pool.
+A_JUDGEMENT_ASKED = re.compile(
+    r"^(?:and |so |but |ok |okay |also |sorry |oh |hmm |well )*"
+    r"(?:is|are|was|were|will|would|does|do|did|should|shall|can|could)\s+"
+    r"(?:that|this|it|these|those|there|they|he|she|we|you)"
+    # The words that sit between the pronoun and the judgement, and only those: "is that going to
+    # be ok", "is that about right". Any word at all used to be allowed here, which read the tail
+    # of "is it alright or all right" as the judgement word "right".
+    r"(?:\s+(?:all|really|actually|very|too|that|this|so|still|even|just|quite|pretty|any|much|"
+    r"a bit|be|being|been|getting|going|gonna|to|about|like|sound|sounds|seem|seems|look|looks|"
+    r"feel|feels)){0,4}"
+    r"\s*"
+    r"(?P<word>all right|too little|too much|too late|a problem|a worry|a big deal|worth it|"
+    # "good enough", "big enough", "old enough": the measure word with the positive in front of
+    # it, which is how the quantity is usually asked.
+    r"(?:good|well|big|old|fast|strong|warm|long|soon) enough|"
+    r"ok|okay|fine|alright|right|correct|good|bad|poorly|safe|dangerous|serious|normal|common|"
+    r"wise|sensible|worse|better|enough|much|use|help|helpful|work|do|suit)"
+    r"(?:\s+(?:the job|the trick|the business|or not|or no))?"
+    r"(?:\s+(?:then|though|honestly|now|yet|here|you|me|us|"
+    r"(?:with|for|by|to) (?:you|me|us)))?\s*$",
+    re.I)
+JUDGEMENT_POOLS = (
+    ("enough_no_subject", frozenset(("enough", "too little", "much"))),
+    ("too_much_no_subject", frozenset(("too much",))),
+    ("help_no_subject", frozenset(("help", "helpful"))),
+    ("work_no_subject", frozenset(("work", "do"))),
+)
+# The composer already asks for the subject of "is that normal", "is that weird" and "is that
+# common" in wording written for them ("What is it you are doing and wondering whether it is odd?"),
+# so those keep that turn and this pool only takes the ones nothing else asks about.
+A_SUBJECT_ALREADY_ASKED = frozenset(("normal", "weird", "odd", "wise", "sensible"))
+
+
+def _a_judgement_asked(line):
+    """Which pool answers a judgement asked with nothing said yet, or "" for anything else."""
+    found = A_JUDGEMENT_ASKED.match(" ".join(str(line or "").lower().split()).strip(" .,!?"))
+    if not found:
+        return ""
+    word = found.group("word").lower()
+    if word.endswith(" enough"):
+        word = "enough"
+    if word in A_SUBJECT_ALREADY_ASKED:
+        return ""
+    flat = " ".join(str(line or "").lower().split())
+    # "is it any good" already gets the composer's recommendation ask ("Name the last thing you
+    # enjoyed and I'll say whether that is like it"), which is a better answer than asking what
+    # the thing is: the pool here only takes the wordings nothing else asks about.
+    if word == "good" and re.search(r"\bany good\b", flat):
+        return ""
+    if re.search(r"\btoo (?:much|little)\b", flat):
+        return "too_much_no_subject"
+    # "is that ok with you", "does that suit you": the judgement asked about the bot itself, and
+    # the true answer is that there is nothing on this end to work around - no diary, no plans.
+    if word == "suit" or re.search(
+            r"\b(?:with|for|by|to) (?:you|me|us)\b|\bsuits? (?:you|me)\b|\bworks? for you\b",
+            flat):
+        return "for_you_no_subject"
+    for pool, words in JUDGEMENT_POOLS:
+        if word in words:
+            return pool
+    return "judge_no_subject"
 
 
 def _is_a_nod(line):
@@ -9727,6 +9262,9 @@ SOMEONE_REPLY = {
 SOMEONE_IS_IT_NORMAL = re.compile(
     r"^(?:and |but |so )?(?:is|was|are) (?:that|this|it) (?:normal|ok|okay|fine|serious|"
     r"bad|dangerous|common|a worry)\b|\bshould i (?:be )?worried\b|\bis that a sign\b|"
+    # "when should i worry" asks the same thing as "is that normal" and was answered by the
+    # generic worry pool with the question just asked: what would settle it.
+    r"\bwhen (?:should|do|would) i (?:start to )?worry\b|\bhow worried should i be\b|"
     r"\b(?:is|was|are) (?:that|this|it) (?:(?:just|only|part of|down to|because of) "
     r"(?:getting |being )?(?:old age|her age|his age|their age|age|old)|(?:normal|usual|"
     r"expected) for (?:her|his|their) age)\b|\bjust (?:her|his|their) age\b|"
@@ -10833,15 +10371,22 @@ def _stuck(clean, memory=None):
     gluten", "can't work out my tax"), belongs to safety, or names a death - now or earlier
     in the conversation, which owns the turn.
     """
-    if not (CANT.search(clean) or CANT_OPENING.match(clean) or ITS_BEEN.search(clean)) \
+    if not (CANT.search(clean) or CANT_OPENING.match(clean) or ITS_BEEN.search(clean)
+            or the_body_is_short_of_sleep(clean)) \
             or STUCK_SAFETY.search(clean):
         return None
-    if STUCK_IDIOM.search(clean) or STUCK_REASON.search(clean) or STUCK_SELF.search(clean):
+    if STUCK_IDIOM.search(clean) or STUCK_REASON.search(clean) or STUCK_SELF.search(clean) \
+            or _doing_something_to_a_thing(clean):
         return None
     if STUCK_FIXABLE.search(clean):
         return None
     if STUCK_LOSS.search(clean) or said_loss(memory):
         return None
+    # A sleepy line names no inability, so it is answered as the tired body it is rather than
+    # falling through to a row that shares a word with it.
+    if the_body_is_short_of_sleep(clean) and not (CANT.search(clean) or CANT_OPENING.match(clean)
+                                                 or ITS_BEEN.search(clean)):
+        return "sleep"
     for name, patterns in STUCK:
         if name == "work" and STUCK_OBJECT.search(clean):
             continue
@@ -10889,6 +10434,16 @@ OTHER_STOP = re.compile(
     r"terminal|palliative|parkinson\w*|tumou?r|transplant|consultant)\b")
 OTHER_QUESTION = re.compile(r"\b(?:is|are|was|were|should|shall|can|could|do|does|did|will|"
                             r"would)\s+(?:i|we|you|they|he|she|it|that|this|my|the)\b")
+# "my mum is exhausted what can i do" asks for the reply, not a new subject: the question at the
+# end is about the writer's own next step, and every pool for somebody else is advice, so the
+# question guard must not stand the feeling down and leave the line to a search hedge. Only the
+# ask about the writer's action, at the end - "what should i cook" after the same feeling is a
+# different subject and keeps its own answer.
+_A_HELP_ASK_AT_END = re.compile(
+    r"\b(?:what|how)\s+(?:can|could|should|do)\s+(?:i|we)\s+(?:do|help)\b"
+    r"(?:\s+(?:about|for|with)\s+(?:it|this|that|her|him|them|us|me)"
+    r"|\s+to\s+help(?:\s+(?:her|him|them|me|us))?(?:\s+out)?"
+    r"|\s+(?:her|him|them|me|us)(?:\s+out)?)?\s*[.!?]*$")
 # Emphasis between the verb and the feeling ("she's really low", "they're so shattered"); these
 # words say how much, never who.
 OTHER_ADVERB = re.compile(r"\b(?:really|very|so|quite|pretty|totally|completely|always|a bit|"
@@ -11131,7 +10686,10 @@ def _other_feeling(clean, memory=None):
     # "sick of the noise" is being fed up, not ill, so it must not trip the symptom guard.
     body = re.sub(r"\b(?:sick of|tired of|fed up with|fed up of|done with|had enough of|"
                   r"had it with)\s+[^.!?]*$", "", clean)
-    if clean.endswith("?") or OTHER_STOP.search(body) or OTHER_QUESTION.search(clean):
+    asked = _A_HELP_ASK_AT_END.sub("", clean).strip()
+    if clean.endswith("?") and asked == clean:
+        return None
+    if OTHER_STOP.search(body) or OTHER_QUESTION.search(asked):
         return None
     if CRY_WOLF.search(clean):
         return None  # "he cries wolf" is an idiom about a false alarm, not tears
@@ -11807,7 +11365,11 @@ def _conversation(clean, tokens, memory):
         # after a nod, and there the question is the one thing a friend can say.
         return _say("lost", memory)
     if PRESENCE.search(flat):
-        return _say("presence", memory)
+        # "still there" one turn after an answer is the thing again - "i have a headache" then
+        # "still there" is the headache - and the store reads it as the report it is.
+        from ..memory import tried as not_moved
+        if not not_moved.still_going_on(clean, memory):
+            return _say("presence", memory)
     if PAUSE.search(flat):
         return _say("pause", memory)
     if RETURNED.search(flat) and not AWAY_WORDS.search(flat) \
@@ -12195,6 +11757,14 @@ def _news(clean, tokens, memory):
         return None
     # An age in front of the job is still the job: "im 34 and a nurse" was left to the neutral
     # nod. The age is only taken off the line this reader looks at, so the store keeps it.
+    # Somebody else's word for the person is not a role they hold: "my sister says im a cow" was
+    # read as an "im a <noun>" and answered "Cow - good to know. What do you like most about it?",
+    # and the same shape takes every label a parent or a boss uses ("im a nightmare", "im a
+    # liability"). A role is what the person says of themselves, so the reading stands down when
+    # the "im" is inside what somebody else said, and the judgement is left to the reader that
+    # answers being spoken to that way (bot/compose/said_about_me.py).
+    if said_about_me.reads_as_somebody_elses_words(flat):
+        return None
     role_line = AGE_BEFORE_A_ROLE.sub("im ", flat, count=1)
     match = ROLE_WORK.search(role_line) or ROLE.search(role_line)
     if match:
@@ -12231,6 +11801,10 @@ def _news(clean, tokens, memory):
         # it says what the person said about the place, in their own words.
         note = facts.qualified_by(clean)
         place = _place_of(facts.TAKE_BACK_SPLIT.split(said, 1)[0] if note else said)
+        # A date is not somewhere they have moved to (see PLACE_SPAN): "in six weeks" is when, and
+        # there is nothing to say back about it, so the line keeps the plain reply.
+        if place and PLACE_SPAN.match(place.strip().lower()):
+            place = ""
         # "i grew up in care" is not a place they went to, so there is nothing to ask about it.
         grown = bool(GROWN_IN.search(flat)) and not facts.grown_up_in_a_place(place)
         if note and place and place.lower() not in PLACE_NONE | PLACE_POSITION and not grown:
@@ -12289,6 +11863,14 @@ def _news(clean, tokens, memory):
         return _say("pet_named", memory, pet=named_pet.get("animal", "pet"),
                     name=_name_said(name))
     if LOST_WEIGHT.search(flat):
+        from ..memory import goals as _goals
+        planned = _goals.the_loss_that_was_the_plan(flat, memory)
+        if planned:
+            # "im trying to lose weight" then "i lost 2 kg" was answered with the check for weight
+            # coming off by itself: "Was that on purpose, or has it been dropping on its own?"
+            # The chat said a turn ago that it was the plan, so the loss is progress and the
+            # figure goes back with it. Without a plan on file the check is right and stays.
+            return planned
         return _say("lost_weight", memory)
     if _a_job_that_went(flat):
         return _say("lost_job", memory)
@@ -12823,6 +12405,43 @@ KEEP_ABOUT_SOMEONE = re.compile(r"\b(?:" + "|".join(ack.facts.RELATIONS) + r")s?
                                 r"|mates|colleagues|classmates|boss)\b")
 # "I keep meaning to" is an intention, not a thing that keeps going wrong.
 KEEP_INTENT = frozenset("meaning wanting thinking trying hoping planning".split())
+# "i keep thinking about X" is a deliberation about a thing, and the plan reply fits it ("About
+# quitting your job - fair enough. What's stopped it happening so far?"). What follows a thinking
+# verb when the subject is "it", or the speaker, is the thought itself, and there is no thing in it
+# to get on with: "i keep thinking its me at work" was answered "Its you at work - fair enough.
+# What's stopped it happening so far?", which states the doubt as a fact and then asks why they have
+# not got on with it, and "i keep thinking itll go away" the same. Left to the reading a thought
+# belongs to, those lines get "Going round it that many times is exhausting".
+#
+# A thought with a subject of its own keeps the reading it has: "i keep thinking my mum is
+# disappointed in me" is about her, and taking the plan away from it only reaches the floor.
+KEEP_A_BELIEF = frozenset(("thinking",))
+A_THOUGHT_THAT_IS_NOT_A_THING = re.compile(
+    r"^(?:it|its|it's|itll|it'll|im|i'm|ive|i've|id|i'd|everyone|everyones|everybody|nobody"
+    r"|no one|people)\b")
+# A bare "it" is not enough on its own: "i keep thinking its friday", "its bin day", "its 4 oclock",
+# "its going to snow" are facts about the day, and standing the plan down for them hands the line to
+# the worry pool, which reads any predicate as distress ("A worry at 2am is rarely the same shape as
+# one in daylight" for "its friday"). What follows the "it" has to be a doubt about them or about how
+# the thing ends - "its me at work", "itll go away", "its my fault" - and a fact about the day or the
+# weather keeps the reading it had (emerald-carpet, #13724).
+A_DOUBT_ABOUT_IT = re.compile(
+    r"\b(?:me|my\b|myself|go(?:es|ne|ing)?\s+away|get(?:s|ting)?\s+better|never|"
+    r"not\s+going\s+to|wont|won't|worse|worth|hopeless|pointless|too\s+late|fault|"
+    r"watching|judging|noticed?|found\s+out|fail(?:ed|ing|s)?|ruin(?:ed|ing|s)?|"
+    r"useless|stupid|wrong|happen(?:s|ed|ing)?\s+to\s+me|forever|for\s+good|"
+    r"over|keep\s+me|stop\s+me|blow\s+over|blow\s+past|sort\s+itself\s+out|"
+    r"work\s+itself\s+out|come\s+back|come\s+right|come\s+round|be\s+over|"
+    r"pass\s+on\s+its\s+own)\b", re.I)
+# A thought about how everyone else sees them is about the speaker whatever the predicate says.
+A_THOUGHT_ABOUT_OTHERS = re.compile(
+    r"^(?:everyone|everyones|everybody|nobody|no one|people)\b")
+# The same thought said as a verdict on everything ("its not worth it", "it is hopeless", "its too
+# late for me") is not a plan either, and standing the plan down for it leaves the floor, which
+# answers an unread line with "I'm not sure about that one, sorry". A verdict on their own life is
+# the heavy line, so the pool that answers "im running on empty" answers this.
+A_HOPELESS_THOUGHT = re.compile(
+    r"\b(?:not\s+worth|no\s+point|hopeless|no\s+hope|too\s+late)\b", re.I)
 # "i need a new bath, any tips" asks for an answer with a statement in front of it.
 ASK_TAIL = re.compile(r"\b(?:any tips|any advice|tips|advice)\b", re.I)
 # A thing a person needs to have or use now is not a plan to start: an ambulance, a doctor, an
@@ -13054,6 +12673,11 @@ def _kindless(word):
     if w in NOT_A_THING_WITH_KINDS:
         return True
     if w in NOT_A_GOOD or w in NOT_THE_THING:
+        return True
+    # The verb and the particle of "my dress taken up" are the job, not a thing with kinds:
+    # asked for the kind of "washed" a person has nothing to answer (`particles`).
+    from .particles import a_job_word
+    if a_job_word(w):
         return True
     if w.endswith("ies") and w[:-3] + "y" in NOT_A_GOOD:
         return True
@@ -13304,9 +12928,40 @@ def _fallback_has_its_own_pool(text):
         return False
 
 
-def _their_thing(clean, tokens, memory):
+def _the_words_they_meant(clean, understood):
+    """The line as the person meant it, when the understanding repaired it.
+
+    "i want 2 go home" was answered "2 go home \u2014 fair enough. What's stopped it happening so
+    far?", and "i want 2 get fit" the same: the chat table already reads a "2" after a verb as
+    "to" and a spelling like "thinkin" as thinking, and this pool was cutting the thing out of
+    the line as typed, so the digit and the typo were handed straight back to the person. The
+    repair is the understanding's own (`plain`), not a second list here, so a digit that is a
+    count keeps it: "i want 4 cats" and "i want 2 eggs" are still four cats and two eggs.
+    """
+    plain = understood.get("plain") if isinstance(understood, dict) else None
+    plain = " ".join(str(plain or "").lower().replace("\u2019", "'").split())
+    if not plain or plain == clean:
+        return clean
+    typed, meant = clean.split(), plain.split()
+    if len(typed) != len(meant):
+        return clean
+    for was, is_ in zip(typed, meant):
+        if was == is_:
+            continue
+        # A digit read as its word ("2" is "to" after a verb, "4" is "for"), or a spelling
+        # repaired into the word it was reaching for ("thinkin" -> "thinking"). Anything else is
+        # a different line: "whats a quick meal" becomes "what is a quick meal", which is a
+        # different key for the knowledge base, and this pool must not change what answers.
+        if was in ("2", "4") or was.startswith(is_) or is_.startswith(was):
+            continue
+        return clean
+    return plain
+
+
+def _their_thing(clean, tokens, memory, understood=None):
     """A reply about the thing the person named, or None when the line names nothing."""
     from ..compose import fallback as compose_fallback
+    clean = _the_words_they_meant(clean, understood)
     if clean.endswith("?") or not 3 <= len(tokens) <= 16:
         return None
     if QUESTION.match(clean) or THING_SKIP.search(clean):
@@ -13360,6 +13015,17 @@ def _their_thing(clean, tokens, memory):
         if not match:
             continue
         if kind == "keeps":
+            # A thought whose subject is "it" or the speaker has no thing in it to plan, so the
+            # plan reading stands down (see KEEP_A_BELIEF).
+            said = (match.group(2) or "").strip()
+            if match.group(1).lower() in KEEP_A_BELIEF and A_THOUGHT_THAT_IS_NOT_A_THING.match(said):
+                if A_HOPELESS_THOUGHT.search(flat):
+                    return pick(REPLIES["not_coping"], memory)
+                if (A_THOUGHT_ABOUT_OTHERS.match(said)
+                        or A_DOUBT_ABOUT_IT.search(said)):
+                    return None
+                # A fact about the day ("its friday", "its bin day") keeps the plan reading: it is
+                # not a thought that keeps coming back, and the worry pool would invent one.
             if match.group(1).lower() in KEEP_INTENT:
                 kind = "want"
                 thing = (match.group(2) or "").strip()
@@ -13384,6 +13050,15 @@ def _their_thing(clean, tokens, memory):
         if (first in FEELING_THING or FEELING_WANT.search(thing)
                 or LEAVE_SOMEONE.search(thing)
                 or thing.lower() in CONTINUING):
+            return None
+        # A wish for something to stop or change is not a thing to start: see `STOPS_TOGETHER`.
+        # Where the subject names nothing ("it", "this", "everything"), the person is the subject
+        # and the line about them is the reply; where it names the thing that is wrong ("the
+        # pain", "these comments"), the turn goes to whichever module answers that thing.
+        stopping = STOPS_TOGETHER.match(thing)
+        if stopping:
+            if " ".join(stopping.group("subject").split()).lower() in SAYS_NOTHING:
+                return pick(REPLIES["not_coping"], memory)
             return None
         thing = _without_a_filler_tail(thing)
         # A second clause swallowed into the thing ("start saving i have never had a budget":
@@ -13497,7 +13172,10 @@ def _their_thing(clean, tokens, memory):
                 return None
             # A baby, a divorce, a loan and a pay rise are not picked between by kind, so the
             # reply that names the thing fits better than a question about which sort.
-            said = thread.your_words(thing)
+            # The job worded after the thing ("your dress taken up") is not part of the thing,
+            # so it comes off before the thing is said back: "Your dress - tell me a bit more."
+            from .particles import a_thing_without_its_tail
+            said = a_thing_without_its_tail(thread.your_words(thing))
             label = said[:1].upper() + said[1:]
             if head.lower() in _A_PERSON_ALREADY_IN_THE_LINE:
                 return None
@@ -13953,6 +13631,14 @@ def claims_instead(text, memory):
     # claim is as narrow as the reply it stands for: it is only made on a line that says nothing
     # but "I heard that" in a thread that is hard.
     if _a_bare_acknowledgement(clean) and _the_heavy_line(memory):
+        return True
+    # A line that asks how many the answer in hand feeds, or a count of people said on the turn
+    # after the reply asked for one, is the answer's own sum, and the topic entries have a card
+    # about party food that answers a different question: "how much potato salad for a party" /
+    # "how many does that feed" got the party-food card. The claim is the same reading that picks
+    # the reply, so it is only made where this module has the answer.
+    if (portions.an_ask(clean, memory) or portions.a_count_to_fill(clean, memory)
+            or portions.a_bare_count_to_fill(clean, memory)):
         return True
     try:
         if tried.pool_for(clean, memory):
@@ -14531,6 +14217,19 @@ def respond(text, memory):
         # honestly - one turn after an answer that had the whole of it.
         return resized
     reply = _respond(text, memory)
+    # "and does that fix the pressure too" after the step: the answers entry hands back a slice of
+    # its own paragraph, word for word, and says nothing about the question. The step is in the
+    # answer a turn ago, so what the person is owed is whether doing it is the fix and how they
+    # will know - the composer owns that reading and its wording (bot/compose/verdict.py).
+    # Only when this module has nothing of its own: "my phone battery drains fast" then "will that
+    # fix it" is a step that is right and a question about it, and the answer it already gives
+    # ("That is the right first move, and what comes back from it decides the next step") is
+    # better than any line about watching one - read first, it took that turn and let a repair
+    # card in behind it.
+    if reply is None or _the_same_answer_again(reply, memory, text):
+        fixed = verdict_reply.the_fix_asked(text, memory)
+        if fixed:
+            reply = fixed
     # The same paragraph twice, word for word. "i had a panic attack" then "i cant come": the
     # decline stands the feeling's claim down, and what is left on the table is the card the
     # person was just given, so the second turn repeated the first one whole. No answer to a new
@@ -14632,6 +14331,15 @@ def _a_part_of_the_answer_they_have(clean, memory):
     asked = " ".join(str(clean or "").lower().split())
     if asked and previous and (asked == previous or asked in previous):
         return None
+    # A why line is not a part of the answer they already have: the part it asks for is the cause,
+    # and a card keeps the cause in a sentence of its own at the end ("... The reason is moist air
+    # getting in every time the door opens."). Narrowed like a figure ask, "why does it do that"
+    # was handed the opening of the card - the steps, not the reason - with the one sentence that
+    # answers it left behind. `bot/compose/why` reads what a cause sentence is and this is that
+    # same reading, so a why line is answered out of the answer on the screen.
+    cause = _same_again.the_cause_said_again(last, memory)
+    if cause:
+        return cause
     # A line that asks for a period ("how much sugar should i have a day") is not asking for the
     # single serving the answer already gave ("a can ... has 35g"): the answer never says what a
     # day is, so a part of it is not that answer.
@@ -15399,6 +15107,13 @@ def _the_same_answer_again(said, memory, line=""):
     a good answer away. This is the whole reply, and only over the last few turns: a line that
     comes back to the same subject much later has earned the paragraph again.
     """
+    # A line that asks for the last answer again is the one ask whose whole reply is that answer
+    # again: "what do you mean" and "in english please" want the same sentence, and that is what
+    # `bot/memory/meant.py` hands back. Handing it back is the answer to this line, not a module
+    # repeating itself, so the stand-down is not for it - without this it was cleared and the
+    # person got the fallback's stock line instead.
+    if meant.reads_it(line):
+        return False
     turns = memory.get("turns") if isinstance(memory, dict) else None
     if not isinstance(turns, list):
         return False
@@ -15947,6 +15662,18 @@ def _respond(text, memory, as_said=True):
         # (`bot/memory/tried.py:in_care_pool`). Read before every reading below, and it stands
         # down on every line that is not a bare report on the person (see the reading).
         return pick(still_in, memory)
+    news_detail = a_detail_of_the_news(clean, memory)
+    if news_detail and not _a_death_just_said(memory):
+        # A detail added to news this module has just cheered is the news again, not a question
+        # about the subject: "first time" after "i passed my driving test" was answered with the
+        # forty-five hours of lessons card, and "2-0" after "we won on saturday" with "That's 2".
+        # Read here, under the care fences and above every reading that would take the detail for
+        # a question of its own, and only where the cheer was this module's own.
+        said_detail = " ".join(clean.split())
+        return _say("more_of_the_news" if news_detail == "attempt" else
+                    "more_of_the_news_arrival" if news_detail == "arrival" else
+                    "more_of_the_news_score", memory,
+                    X=said_detail[:1].upper() + said_detail[1:])
     if SOMEONE_BRING_SOMEONE.search(clean):
         record = about_the_person(memory) if isinstance(memory, dict) else None
         if record and record.get("trouble") == "hospital":
@@ -16184,6 +15911,13 @@ def _respond(text, memory, as_said=True):
     if isinstance(understood, dict) and understood.get("presence"):
         if live_emergency:
             return None
+        # "still there" one turn after an answer is the thing again, not someone checking the bot
+        # is present: "i have a headache" then "still there" was answered "Still here. What's
+        # up?" and the headache went out of the chat. The store reads that line as the report it
+        # is, so the presence pool keeps out of it.
+        from ..memory import tried as not_moved
+        if not_moved.still_going_on(text, memory):
+            return None
         # Someone checking the bot is still there wants it to carry on, not to reset: the
         # presence pool says "go on" where the "here" pool asks what is up.
         return _say("presence", memory)
@@ -16287,6 +16021,17 @@ def _respond(text, memory, as_said=True):
         # every one of them with a warm question about a day nobody had. A pile is cut down to a
         # shortlist instead (`bot/memory/pile.py`), and the line that follows names the thing.
         return piled
+    total = portions.the_total_for(clean, memory)
+    if total:
+        # The reply before this one asked how many were coming so it could do the sums; this is
+        # the count, and the total is worked out of the figure the answer gave.
+        return total
+    portion = portions.reply_for(clean, memory)
+    if portion:
+        # "how much pasta for 4 people" / "how many does that serve": the answer on the screen
+        # already says who it is for, so the line is read out of that answer rather than asked of
+        # the knowledge base again (`bot/memory/portions.py`).
+        return portion
     came_back = returned.pool_for(clean, memory)
     if came_back:
         # "top it up and it came back after a week": the answer has not held, and it already names
@@ -16503,6 +16248,14 @@ def _respond(text, memory, as_said=True):
     # had nothing to lean on).
     someone = _about_someone(clean, memory)
     follow_up = _context_follow_up(clean, memory)
+    # "Should i be worried" and "is that normal" about somebody the thread has already named a
+    # trouble for is answered by that trouble's own line, not by the pool for a worry in general:
+    # the pool asks the person what would settle it, which is the question they just asked, while
+    # the line says which signs are the ones to act on and what the GP can check. Only those asks,
+    # and only the "is it ordinary" lines, so every other follow-up keeps its turn.
+    if someone and someone in set(SOMEONE_NORMAL.values()) and (
+            SOMEONE_IS_IT_NORMAL.search(clean) or SOMEONE_NEXT_STEP.search(clean)):
+        return someone
     if follow_up:
         return follow_up
     if other and len(tokens) <= 16:
@@ -16542,6 +16295,11 @@ def _respond(text, memory, as_said=True):
         # anyone around you who knows it's like this?" is the question this person needs and a
         # mood's advice ("a walk and someone to talk to") is not.
         feeling = None if _answers_knows(text, memory) else "not_coping"
+    if feeling in MOOD_KINDS and A_VERDICT_ASKED.search(clean):
+        # "would i be mad to sell" asks for a verdict on a choice, so the word is the judgement
+        # and not a mood: the decision pool is the reply, and the annoyed pool's "walk it off
+        # before you reply to anyone" is advice for a quarrel nobody had.
+        feeling = None
     if feeling in MOOD_KINDS and _answers_knows(text, memory):
         # A named condition is a card's line, not a pool's: "i feel depressed" wants the signs and
         # the next step, and the sad pool's "a walk and someone to talk to" is written for a
@@ -16566,6 +16324,15 @@ def _respond(text, memory, as_said=True):
         like = None
     if like and like != "feel_like":
         return _reply(like, memory, _name(memory), clean)
+    if someone and asks and len(tokens) <= 22:
+        # A short question about the trouble already on the table is that trouble's question,
+        # not the asker's own mood. "my mum keeps forgetting things" then "should i be worried"
+        # was answered from the worry pool ("Worry like that is usually mostly 'what if'") the
+        # moment the knowledge base stopped covering that ask: the person had asked whether the
+        # thing they had just described was worth worrying about, and nothing of the mother
+        # survived into the reply. `_about_someone` answers exactly this shape, so it gets the
+        # turn before a pool written for the asker's nerves.
+        return someone
     if feeling and (bare or _about_the_person(understood)) and (
             chatty or len(tokens) <= 12 or not asks):
         if feeling in ("ongoing", "recurring"):
@@ -16617,8 +16384,13 @@ def _respond(text, memory, as_said=True):
             # The line chooses, so two different happy lines do not both get the same sentence on
             # their first turn of two different conversations.
             return _reply(feeling, memory, _name(memory), clean)
+        # The pools whose lines are about the thing the person named take the line as the seed,
+        # so two different weeks that drag are not answered with one sentence. `long_stretch` is
+        # the same case: "this week is dragging" and "school holidays are too long" are two
+        # different complaints and used to both get the pool's third line.
         return _reply(feeling, memory, _name(memory),
-                      clean if feeling in ("not_coping", "bad_day", "tears") else "")
+                      clean if feeling in ("not_coping", "bad_day", "tears",
+                                           "long_stretch") else "")
     if like:
         return _reply(like, memory, _name(memory), clean)
     against = _against_me(clean)
@@ -16664,7 +16436,7 @@ def _respond(text, memory, as_said=True):
         # question"): a line that invites and opens in one breath, rather than the invitation
         # on its own.
         return _reply("opening", memory, _name(memory))
-    thing = _their_thing(clean, tokens, memory)
+    thing = _their_thing(clean, tokens, memory, understood)
     if thing:
         return thing
     if SAY_SOMETHING.search(re.sub(r"\s+(?:though|tho)$", "", clean)) \
@@ -16832,6 +16604,18 @@ def _respond(text, memory, as_said=True):
     if (isinstance(understood, dict) and understood.get("agrees_to_try")
             and len(tokens) <= 10):
         return _reply("try_ack", memory, _name(memory), clean)
+    # A judgement asked before anything has been said to judge: "is that ok", "is that fine",
+    # "will that help", "is that enough", "is that serious". Three or four words whose whole
+    # content is the verdict, one line into a fresh chat, so there is no thing on the screen for
+    # the answer to be about. The ack pool read the judgement word as the whole line and answered
+    # "Fair enough.", a shrug that agrees with nothing, and the composer's hedge answered "is that
+    # serious" and "is that dangerous" with a search. What a friend does is ask what it is - and
+    # the judgement word says which thing to ask for. Only in a fresh chat: after an answer the
+    # verdict is about that answer, and the readers just above have it.
+    if not _mid_chat(memory):
+        asked = _a_judgement_asked(clean)
+        if asked:
+            return _reply(asked, memory, _name(memory), clean)
     # A line that asks whether the thing just said is bad, normal, serious or safe is a question,
     # not an acknowledgement. The ack pool answered it ("is that bad" got "Sounds good.", which
     # agrees the fault is nothing to worry about) because the whole line is ack words. The verdict
@@ -16946,3 +16730,8 @@ def _respond(text, memory, as_said=True):
         return None
     return _reply(nod, memory, _name(memory), nod_seed)
 
+from ..memory import again as _never_twice  # noqa: E402 - applied once the module is defined
+
+# Whatever this module answers, the last thing that happens to it is the earlier-turn
+# check (bot/memory/again.replied): `answers` alone served a card again on 59 deck turns.
+respond = _never_twice.replied(respond)

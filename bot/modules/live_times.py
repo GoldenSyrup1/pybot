@@ -186,7 +186,20 @@ def respond(text, memory):
         return lead + _the_wording(memory, FERRY)
     if vehicle in ("train", "tube", "tram", "coach") or \
             re.search(r"\b(?:trains|trams|coaches)\b", clean):
-        return lead + _the_wording(memory, TRAIN)
+        # The vehicle the line names is the one the reply names. A tram was told "I can't see live
+        # train times ... the board at the station", and a tube the same, because one pool covered
+        # all four. Which board keeps the times is the same question read the other way, so the
+        # vehicle picks both the word and the place.
+        named = VEHICLE_STEM.get(vehicle, vehicle)
+        if not named:
+            # "what time do the trams run until" names the plural, which the service pattern's
+            # singular arm does not match, so the vehicle is read off the line itself.
+            found_plural = re.search(
+                r"\b(?:" + "|".join(sorted(VEHICLE_STEM)) + r")\b", clean)
+            named = VEHICLE_STEM.get(found_plural.group(0), found_plural.group(0)) \
+                if found_plural else "train"
+        return lead + _the_wording(memory, RAIL).format(
+            vehicle=named, where=THE_BOARD_THAT_KEEPS_THEM.get(named, "the board at the station"))
     return lead + _the_wording(memory, BUS)
 
 
@@ -203,12 +216,23 @@ BUS = (
     "printed at the stop, has the time - text the stop's code where it has one - and a journey "
     "planner joins the trip up.",
 )
-TRAIN = (
-    "I can't see live train times from here. The operator's app, or the board at the station, has "
+# One pool for the rail and road services, filled with the vehicle the line named and the board
+# that keeps its times: a tram's times are at the stop, not at the station, and a coach's at the
+# coach station.
+THE_BOARD_THAT_KEEPS_THEM = {
+    "train": "the board at the station",
+    "tube": "the board on the platform",
+    "tram": "the board at the stop",
+    "coach": "the board at the coach station",
+}
+RAIL = (
+    "I can't see live {vehicle} times from here. The operator's app, or {where}, has "
     "the next one and any delay or cancellation; a journey planner puts the whole trip together.",
-    "That is a live departure: the operator's app, or the board at the station, is where the next "
-    "one and any delay or cancellation show up. A journey planner puts the whole trip together.",
+    "That one is a live departure, so the operator's app, or {where}, is where the "
+    "next one and any delay or cancellation show up. A journey planner puts the whole trip together.",
 )
+# A name some other code or test still reads. `respond` fills `RAIL` now.
+TRAIN = tuple(text.format(vehicle="train", where="the board at the station") for text in RAIL)
 FLIGHT = (
     "I can't see live flights from here. The airline's app, or the airport's own departures board, "
     "has the gate and any delay; the booking reference brings it up.",

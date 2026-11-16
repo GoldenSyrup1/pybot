@@ -308,6 +308,62 @@ def reads_as_a_limit(text, memory=None):
     return None
 
 
+# A line whose whole content is what to leave out: "no walking up hills" after a weight-loss plan,
+# "no long walks", "nothing too strenuous". Every word of it is the limit, so there is nothing on the
+# line to look up. Read as a subject, the word after "no" is a topic like any other and the knowledge
+# base answers the thing the person has just taken away: "no walking up hills" got the entry about
+# riding a bike up a hill ("Change down before the hill rather than on it..."), which answers a
+# cyclist, over the plan on the screen with the walking taken out of it.
+#
+# The reply is the composer's (`bot/compose/limit.py`), which already keeps the answer above and
+# takes the ruled-out thing out of it. What is read here is only whether the line is a limit and
+# nothing else: one word of its own - a person ("my sister cant walk far"), a time, a place - makes
+# it a subject again, and the answer for that subject keeps its turn.
+_MOVE_WORDS = frozenset("""
+tiring strenuous energetic demanding exhausting exhaustive walking walk walks hike hikes hiking
+hill hills stair stairs steps standing stand climbing climb lifting lift far long running run
+cycling cycle bike bikes swimming swim carrying carry bending bend kneeling kneel squat squats
+""".split())
+# The frame a limit is said in: the negation, how much, and the words that join the phrase. None of
+# these is a thing to answer about on its own.
+_LIMIT_FRAME = frozenset("""
+no not nothing never nowt without too very much any more most lot lots really just only still
+cant cannot can can't able manage do does did done get gets up down and or but the a an my our
+your his her its it that this those these there here of for in on at with to i we im me us
+be being is are was were have has had about even anymore either please thanks
+""".split())
+
+
+# A line opens by taking something away, rather than by saying what the person can still do. "no
+# walking up hills" is a revision of the plan above it; "i cant do stairs" is a complaint about the
+# knee, and the card for knee pain on stairs is the answer to that one.
+_LEAVES_IT_OUT = re.compile(r"^(?:and |also |but |so |then )*(?:no|nothing|not|never|nowt|without)\b",
+                            re.I)
+
+
+def only_a_limit(text, memory=None):
+    """True when every word of the line is the limit and none of it is a subject of its own."""
+    try:
+        from .facts import a_limit_on_the_plan
+    except Exception:  # noqa: BLE001 - the store must keep working without the reading
+        return False
+    said = " ".join(str(text or "").split()).strip(" .,!;:")
+    if not said or len(words_of(said)) > LONGEST:
+        return False
+    if not _LEAVES_IT_OUT.match(said):
+        return False
+    try:
+        if a_limit_on_the_plan(said) != "move":
+            # A limit on the money ("keep it cheap") is about what kind of answer to give, and the
+            # entry keyed on it is still the answer. Only a limit on the feet names a thing to
+            # leave out of the answer above.
+            return False
+    except Exception:  # noqa: BLE001 - a line the reading cannot place is left alone
+        return False
+    words = [word.strip("'") for word in re.findall(r"[a-z']+", said.lower())]
+    return bool(words) and all(word in _MOVE_WORDS or word in _LIMIT_FRAME for word in words)
+
+
 def _everyone_in_the_house(line, found):
     """"a dog and a toddler" from a line that names both of them."""
     names = [found.groupdict().get("who") or found.groupdict().get("who2") or ""]

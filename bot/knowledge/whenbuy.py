@@ -22,9 +22,15 @@ ANSWERS = ("shopping", "money")
 
 # The calendar a line has to be asking about: a time word is what makes it a when question, and
 # "prices drop" and "sell off" are timing words even without one ("will tv prices drop").
-TIME_ASK = ("when", "what month", "which month", "what time of year", "time of year", "month",
-            "months", "best time", "best month", "cheapest time", "cheapest month", "right time",
-            "good time", "time to buy", "when to buy", "what time", "black friday", "january",
+# The words are the ask, never the noun it is about. "month" and "months" were in this list and
+# a noun is not a question: "a bit short this month" and "my phone bill is 30 a month" say what
+# they pay or how long the money has to last, and the calendar is no answer to either. What asks
+# when is the ask around the noun ("what month", "which month", "cheapest month", "good month"),
+# and the time words below that are a date on their own ("january", "black friday").
+TIME_ASK = ("when", "what month", "which month", "what time of year", "time of year",
+            "best time", "best month", "cheapest time", "cheapest month", "right time",
+            "good time", "good month", "month to buy", "time to buy", "when to buy", "what time",
+            "black friday", "january",
             "january sales", "sell off", "price drop", "prices drop", "go down", "come down",
             "going down",
             # "how do i get the best deal on a car" is a cheaper-price question with no time
@@ -33,6 +39,13 @@ TIME_ASK = ("when", "what month", "which month", "what time of year", "time of y
             # the asking-to-pay-less half is here.
             "get the best deal", "get a better deal", "get a good deal", "get the cheapest",
             "get a cheaper")
+
+# Every phrase above is written singular, and people say the ask in either number: "which months
+# are cheapest for a tv" and "are sofas cheaper in the summer months" are the ask this row exists
+# for, and with whole words only they matched nothing, so the calendars stood down and the lines
+# fell through to whatever else their words reached (a drill card, a sofa price). One `s?` on the
+# last word of each phrase covers both numbers, and it covers the next noun added to the list too.
+TIME_ASK_SHAPE = tuple(re.compile(" " + re.escape(phrase) + "s? ") for phrase in TIME_ASK)
 
 # A bare "when" is as often a relative clause as a question: "my phone gets hot when charging",
 # "when it rains" and "when i'm 40" carry the word and ask nothing about the calendar, and the
@@ -51,6 +64,32 @@ PRICE_ASK = ("sale", "sales", "cheapest", "cheaper", "cheap", "discount", "disco
              "deals", "half price")
 
 WHEN_ASK = TIME_ASK + PRICE_ASK
+
+# A bare period is a noun, not a question: "a month", "after 6 months", "next month" say how long
+# or when something is paid. But the same period inside a preposition, beside a word of comparing,
+# is the comparison turned into a question - "are sofas cheaper in the summer months", "are phones
+# cheaper at christmas" - and that is the calendar. So the period names are kept out of TIME_ASK
+# and count only in that shape, which is why "my car costs 200 a month, is that cheap" is not a
+# when question: nothing sits in front of its period.
+PERIOD_NOUNS = ("month", "months", "week", "weeks", "weekend", "weekends", "summer", "winter",
+                "spring", "autumn", "christmas", "easter", "season", "seasons", "year", "years")
+PERIOD_PREPOSITION = ("in", "at", "over", "during", "for")
+COMPARING = ("cheaper", "cheapest", "best", "deal", "deals", "discount", "discounts", "sale",
+             "sales", "half price", "price drop", "prices drop")
+
+
+def _a_period_beside_a_comparison(line):
+    """True when a period named after a preposition is being compared: "cheaper in the summer months"."""
+    words = line.split()
+    if not any(word in COMPARING for word in words) and not any(
+            phrase in line for phrase in ("half price", "price drop", "prices drop")):
+        return False
+    for at, word in enumerate(words):
+        if word not in PERIOD_NOUNS:
+            continue
+        if any(before in PERIOD_PREPOSITION for before in words[max(0, at - 3):at]):
+            return True
+    return False
 
 # A line can hold a when word and still be about something else: how long a thing lasts, whether
 # to repair it, and how to look after it are all "when" lines in shape only. These are the words
@@ -222,10 +261,15 @@ def _asks_the_calendar(understood, own=()):
         line = line.replace(" " + name + "s ", " ")
     # a price word is the question only beside a time word: "when are the sales" yes, "is a
     # discount mattress worth it" no - and a line with no time word at all is not this row
-    if not any((" " + phrase + " ") in line or phrase in line for phrase in TIME_ASK):
+    # Whole words only: `_line` pads the line with spaces, and the substring test that used to
+    # sit beside this one defeated it - "month" in "a month" is not "what month", and "when" in
+    # "whenever" is not an ask either.
+    ask = [phrase for phrase in TIME_ASK if phrase in line]
+    compared_period = _a_period_beside_a_comparison(line)
+    if not (any(shape.search(line) for shape in TIME_ASK_SHAPE) or compared_period):
         return False
     # "when" on its own is the one time word that does not have to be asking anything
-    if not [phrase for phrase in TIME_ASK if phrase != "when" and phrase in line]:
+    if ask and not [phrase for phrase in ask if phrase != "when"]:
         if not any(phrase in line for phrase in WHEN_ASKING):
             return False
     if (any(phrase in line for phrase in _HAS_FAILED)
@@ -292,7 +336,14 @@ WHEN_TO_BUY = (
      "target and will move on price, and in the quiet weeks of August and late December. New "
      "plates in March and September make the previous plate's stock cheaper, and a pre-registered "
      "car saves the most of all - just check you are the first registered keeper."),
-    (("coat", "coats", "winter coat", "winter coats", "jacket", "jackets", "boots", "wellingtons"),
+    # The bare "boots" answered "cheap football boots" with the January sales on winter coats,
+    # because a price word and a boot was enough for the calendar. A boot for a pitch and a boot
+    # for the snow are two different spends, and only the winter one is a season's end.
+    (("coat", "coats", "winter coat", "winter coats", "jacket", "jackets", "winter boots",
+      "wellingtons",
+      # a ski boot is a winter boot and it is bought in the same January clear-out. Without this
+      # the baby-shoe row took "when to buy ski boots" and answered barefoot indoors.
+      "ski boots", "ski boot", "skiing", "ski", "snowboard", "snowboarding"),
      "Winter coats and boots are cheapest in the January sales and at the end of the season in "
      "February, when the shops clear the rails for spring. Buy then for next winter, and buy the "
      "best you can afford: a waterproof shell at the higher price outlasts three cheap ones."),

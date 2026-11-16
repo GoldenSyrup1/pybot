@@ -107,6 +107,49 @@ A_LOW = re.compile(r"""
               and\s+[a-z0-9' ]+))?\s*[.!?]*\s*$
 """, re.I | re.X)
 
+# A named condition about a person of theirs, said plainly or only wondered about: "my son has
+# adhd", "my daughter might be dyslexic", "my brother is dyslexic". Nothing in the knowledge base
+# is about adhd, dyslexia, dyspraxia or autism, so no card takes the line, and the composer files
+# it and says the noun back - "Noted: your son has adhd.", "Noted: your daughter could be
+# dyslexic." A parent tells the bot what they are up against and gets their own sentence returned.
+# The words below are only the conditions that have no card of their own: one that has (cancer,
+# depress*, anxiety, diagnos*, a body part, a scan) is in STANDS_DOWN and keeps its answer, and a
+# line that asks the bot something is a question, not a report.
+A_CONDITION = re.compile(r"""
+    ^\s*(?:
+        (?:has|have|had|got)
+      | ['\u2019]?s\s+got
+      | (?:is|are|was|were)
+      | (?:could|might|may|must)\s+be
+      | (?:seems?|appears?)\s+(?:to\s+be)?
+    )
+    (?:\s+(?:really|very|probably|possibly|likely|also|now|actually|officially|just|
+             only|maybe|perhaps|definitely|already|too))*\s*
+    (?:a\s+bit\s+of\s+|a\s+touch\s+of\s+|an?\s+|mild\s+|suspected\s+)?
+    (?P<condition>dyslexi\w*|dyspraxi\w*|dyscalculi\w*|adhd|add|autis\w*|asperger\w*|
+      ocd|tourette\w*|non[\s-]?verbal|speech\s+delay|sensory\s+processing|deaf|
+      hard\s+of\s+hearing|blind|partially\s+sighted|down'?s?\s+syndrome|
+      learning\s+disabilit\w*|on\s+the\s+spectrum)\b
+""", re.I | re.X)
+# The two ways the shape is said, and they are not the same thing to answer. A line that states it
+# - "my son has adhd", "my daughter is dyslexic" - is a thing about the person they are telling the
+# bot, and what a friend does with it is ask what they are working on. A line that only wonders -
+# "my daughter might be dyslexic", "my son could be autistic" - is a worry about an answer that has
+# not come yet, and what a friend does with that is say the waiting is the hard part and ask what
+# they have noticed. Neither arm says a cause, a diagnosis or what anybody should do.
+A_WONDERING = re.compile(r"^\s*(?:could|might|may|must)\s+(?:be|have)\b|\bmaybe\b", re.I)
+A_CONDITION_STATED = (
+    "Thanks for telling me. Is there something about your {who} you're trying to work out?",
+    "Good to know - I'll remember that about your {who}. Anything you're trying to sort out?",
+    "Thanks. What's the part you're working on with your {who} just now?",
+)
+A_CONDITION_WONDERED = (
+    "That's the hard part, the waiting. What have you noticed so far?",
+    "It's rough sitting with a maybe like that. Write down what you see and when - that is what "
+    "anyone you ask will want first. What made you start wondering?",
+    "Not knowing yet is the worst of it. What has made you wonder?",
+)
+
 # What this file does not answer, however much it looks like the shape. A body part or an illness
 # is somebody hurt or ill, which is `trouble.py`'s and the health entries'; a death is
 # `loss.py`'s; and a line that asks the bot something ("what do i say", "any advice") is a
@@ -176,7 +219,17 @@ def reply_for(text, memory=None):
     if not person:
         return None
     tail = said[person.end():]
-    if not (A_ROUGH_PATCH.match(tail) or A_NOT_COPING.match(tail) or A_LOW.match(tail)):
+    a_condition = A_CONDITION.match(tail)
+    # "my son might have ADHD" is not the same line as "my son might be ADHD-ish": the knowledge
+    # base answers the first - the counts, the school's SENCO, the GP referral - because a named
+    # condition with "have" in front of it is the card's own shape. Only the wondering that lands
+    # on what the person *is* reaches this file, and only with no card behind it.
+    if a_condition and re.match(r"^\s*(?:could|might|may|must)\s+have\b", tail):
+        return None
+    if not (a_condition or A_ROUGH_PATCH.match(tail) or A_NOT_COPING.match(tail)
+            or A_LOW.match(tail)):
+        return None
+    if a_condition and re.match(r"^\s*(?:and|&)\s+(?:i|me)\b", tail):
         return None
     # "my sister and i are really struggling": two people, one of them the person in front of the
     # bot, so it is their own line as much as hers. The feeling pools read that one better.
@@ -185,7 +238,12 @@ def reply_for(text, memory=None):
     read = memory.get("understood") if isinstance(memory, dict) else None
     read = read if isinstance(read, dict) else {}
     plural = bool(re.match(r"^\s*(?:are|were|have|have\s+been|were\s+being)\b", tail))
-    pool = POOL if plural else POOL + NAMED
+    if a_condition:
+        # A condition has its own two arms, and the person is named in both: "your son" is who the
+        # line is about, so the question goes to them and not to the person typing.
+        pool = A_CONDITION_WONDERED if A_WONDERING.search(tail) else A_CONDITION_STATED
+    else:
+        pool = POOL if plural else POOL + NAMED
     # The line is worded before the choices are made, not after: "my wife is having a rough time"
     # said twice in a row got the same sentence twice, because the pool says "{who}" and the reply
     # just given says "your wife", so the composer's own "never the reply just given" had nothing

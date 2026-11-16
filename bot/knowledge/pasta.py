@@ -161,6 +161,14 @@ DISH_WORDS = tuple(word for keys, _shapes, _why in PASTA_FOR_DISH for word in ke
 # from the list they stand down for.
 NOT_A_DISH = tuple(word for word in NOT_A_TIME if word not in DISH_WORDS)
 
+# A fault in the dish is not a question about the shape. "my pasta salad is watery" named a salad
+# and the shape row answered it with the shapes that hold a dressing, when the fix was the salt
+# and the drain; "the lasagne is dry" and "my pasta bake is bland" the same. The fault rows read
+# the dish, so this row stands aside for the words a fault is said in.
+_A_FAULT_IN_THE_DISH = ("watery", "soggy", "limp", "dry", "drier", "bland", "tasteless",
+                        "mushy", "stodgy", "sticky", "gluey", "overcooked", "burnt",
+                        "salty", "too salty", "undercooked", "stale")
+
 
 def _for_the_dish(memory=None, understood=None):
     """The shapes for the dish the line names, then why those and not the ones next to them."""
@@ -187,7 +195,8 @@ ENTRIES = [
           # the timing, the pan, the portion, the keeping and the swap questions are other rows',
           # and so is a recipe: "spaghetti bolognese recipe" is the sauce's method and its time,
           # not a question about which shape to put it on.
-          avoid=NOT_A_DISH + ("how long", "how much", "per person", "portion", "portions",
+          avoid=NOT_A_DISH + _A_FAULT_IN_THE_DISH
+          + ("how long", "how much", "per person", "portion", "portions",
                               "calories", "carbs", "instead", "substitute", "swap", "stand in",
                               "replace", "difference between", "how do i", "recipe", "recipes",
                               "how to make", "how do i make", "im making", "i am making",
@@ -282,6 +291,37 @@ ENTRIES = [
           "will pass. Next time taste a piece a minute before the packet time.",
           avoid=("rice", "clump", "clumps", "together", "stuck", "sticking", "pan", "how long",
                  "minutes", "portion", "leftover", "sauce recipe", "in the oven", "bake"),
+          bias=2),
+
+    # "how do i drain pasta" was a punt, and so were "how do i strain spaghetti" and "how do i
+    # drain noodles": the rinse row in cooking_entries.py keys the verb "rinse" and these lines
+    # never say it, and the no-kit table only fires when a tool is *missing* ("drain the pasta
+    # without a colander"), so the plain step of getting the water off had no row in any domain.
+    # The same word sent a *food* line to the plughole: "how do i drain broccoli" and "how do i
+    # drain chickpeas" got the weekly kettle down the waste pipe, because `drain-clean` in
+    # cleaning.py took a bare "how" as its second key word and any line with "drain" in it plus
+    # "how" scored. The rule is one rule - a draining line that names food is the step between
+    # the pan and the plate - so it is one row, keyed on the draining words and the food, and
+    # food covers the shapes of pasta and the things that come out of a pot of water.
+    entry("drain-the-pot", (("drain", "drains", "draining", "drained", "strain", "strains",
+                             "straining", "strained", "colander", "sieve"),
+                            ("pasta", "spaghetti", "penne", "macaroni", "linguine", "fusilli",
+                             "tagliatelle", "orzo", "noodles", "noodle",
+                             "potato", "potatoes", "new potatoes", "veg", "vegetables",
+                             "broccoli", "cauliflower", "carrots", "carrot", "greens", "peas",
+                             "green beans", "spinach", "kale", "cabbage", "courgette",
+                             "courgettes", "chickpeas", "lentils", "beans", "sweetcorn")),
+          "Tip the whole pan into a colander in the sink, and keep a mugful of the water back "
+          "first, because it is full of starch and it loosens a sauce that looks dry. Drain it "
+          "the moment it is al dente or just tender - it keeps cooking in its own heat - then "
+          "shake it dry and get it into the sauce or back into the warm pan, since anything left "
+          "standing in a colander goes sticky within a couple of minutes. No colander is no "
+          "problem: hold the lid on with a gap and pour slowly.",
+          # a time, a bake, a portion or a keeping question is another entry's, and a rinse is
+          # the row that owns that word: this row is the step between the pan and the sauce
+          avoid=NOT_A_TIME + ("rinse", "rinsing", "washed", "wash", "fridge", "freezer",
+                              "freeze", "leftover", "left over", "reheat", "rice", "sauce",
+                              "bake", "oven", "salad", "cheese", "tin", "tinned"),
           bias=2),
 
     # Lasagne sheets are the one pasta nobody cooks in a pan first, and "how long do i cook
