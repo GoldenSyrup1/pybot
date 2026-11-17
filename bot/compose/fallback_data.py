@@ -8469,8 +8469,12 @@ THE_PLACE_POOLS = (
       "Your own account has that, sorry - it is the only place with your numbers in it. What it "
       "says is worth reading against the last one, and I'll help you spot what moved.")),
     # An official rule, a form, a permit, a bin day: the council or the department keeps it, and
-    # it differs by where they live.
-    ((r"\bcouncil\b|\bpermit\b|\blicen[cs]e\b|\bplanning permission\b|\bbin (?:day|collection)"
+    # it differs by where they live. "off licence" and "off-licence" are a shop, not a permit, so
+    # the bare word stands down right after "off": "is there an off licence near me" was answered
+    # with the council hedge below, which names neither a shop nor a council and fits neither
+    # thing the person could have meant.
+    ((r"\bcouncil\b|\bpermit\b|(?<!off )(?<!off-)\blicen[cs]e\b|\bplanning permission\b"
+      r"|\bbin (?:day|collection)"
       r"|\brecycling\b|\bcouncil tax\b|\bparking (?:permit|zone)\b|\bblue badge\b"
       r"|\bpassport\b|\bdriving licence\b|\bDVLA\b|\bregister(?:ing)? to vote\b"),
      ("Rules like that are the council's or the department's own, sorry, and they differ by where "

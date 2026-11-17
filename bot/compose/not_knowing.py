@@ -80,9 +80,13 @@ GET_READY_ROUTES = (
 # entitlement, a notice period - and those all say so.
 RULES_FOR_THEIR_CASE = re.compile(
     r"(?<![a-z])(?:allowed|entitled|entitlement|qualify|eligible|legal|law|rules|regulation|"
-    r"statutory|allowance|benefit|benefits|tax|taxed|taxable|vat|licence|license|permit|"
+    r"statutory|allowance|benefit|benefits|tax|taxed|taxable|vat|permit|"
     r"visa|tenancy|contract|clause|notice period|policy|terms|insurance|"
-    r"pension|ni|national insurance|council tax|deadline)(?![a-z])")
+    r"pension|ni|national insurance|council tax|deadline)(?![a-z])"
+    # "off licence" and "off-licence" are a shop, not a document: same fix as fallback_data.py's
+    # THE_PLACE_POOLS, which had the identical bare-word match on "is there an off licence near
+    # me" and sent it to the same wrong kind of hedge.
+    r"|(?<![a-z])(?<!off )(?<!off-)(?:licence|license)(?![a-z])")
 HOW_MUCH_TO_PUT_IN = re.compile(
     r"how much (?:should|shall|do|can|would) i (?:be )?(?:put|putting|pay|paying|save|saving|"
     r"contribute|contributing|invest|investing|stick|stick in|set aside)\b")
